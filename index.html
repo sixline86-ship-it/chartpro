@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>차트프로 관제탑 · 2026.07.21</title>
+<meta property="og:title" content="🗼 차트프로 관제탑 2026.07.21">
+<meta property="og:description" content="관제지수로 보는 오늘의 시장 온도">
+<style>
+:root{
+  --font-sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --ink:#1a1a1a; --sub:#6b6b6b; --bg:#fff; --bg2:#f6f5f3; --line:#e2e0dc;
+  --up:#C1432B; --dn:#2E6BD6; --rmd:8px; --rlg:12px;
+  --pink:#7a2b4d; --pink2:#9c3862; --pink-line:#c86a92;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0efec;padding:24px 12px;display:flex;justify-content:center;font-family:var(--font-sans)}
+.rp{padding:1.5rem 1.75rem 2rem;background:var(--bg);max-width:780px;width:100%;border-radius:16px;box-shadow:0 2px 24px rgba(0,0,0,.06)}
+a{color:inherit;text-decoration:none}
+.top-bar{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}
+.rp-title{font-size:17px;font-weight:800}
+.badge{font-size:11px;color:var(--sub);background:var(--bg2);padding:3px 9px;border-radius:var(--rmd);border:.5px solid var(--line);height:fit-content}
+.sec-label{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.07em;text-transform:uppercase;margin:1.5rem 0 .7rem;display:flex;gap:6px}
+.sec-label::after{content:'';flex:1;height:.5px;background:var(--line);align-self:center}
+.up{color:var(--up);font-weight:600} .dn{color:var(--dn);font-weight:600} .smut{color:var(--sub)}
+
+/* ── 게이지 ── */
+.gauge-box{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1.15rem 1.25rem;color:#e8e6e2;margin-bottom:1rem}
+.gz-top{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.gz-numwrap{text-align:center;flex-shrink:0}
+.gz-num{font-size:40px;font-weight:800;color:#7fa8e8;line-height:1}
+.gz-lab{font-size:12px;font-weight:700;color:#7fa8e8;margin-top:3px}
+.gz-bodywrap{flex:1;min-width:230px}
+.gz-title{font-size:12px;font-weight:700;color:#c8ccd2;margin-bottom:9px}
+.gz-track{position:relative;height:12px;border-radius:6px;display:flex;overflow:visible}
+.gz{height:100%;width:20%}
+.z1{background:#2E6BD6;border-radius:6px 0 0 6px} .z2{background:#6b93d8} .z3{background:#8a8f98} .z4{background:#d08a6a} .z5{background:#C1432B;border-radius:0 6px 6px 0}
+.gz-needle{position:absolute;top:-5px;width:3px;height:22px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(255,255,255,.8);transform:translateX(-50%)}
+.gz-scale{display:flex;margin-top:7px}
+.gz-scale span{width:20%;text-align:center;font-size:9.5px;color:#8a909a;font-weight:600}
+.gz-toggle{margin-top:.9rem;width:100%;font-size:11px;font-weight:600;color:#c8ccd2;background:rgba(255,255,255,.06);border:.5px solid rgba(255,255,255,.14);border-radius:99px;padding:6px 0;cursor:pointer;font-family:var(--font-sans)}
+.gz-detail{margin-top:.7rem;background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.7rem .9rem}
+.gz-row{display:grid;grid-template-columns:96px 42px 62px 1fr;gap:6px;align-items:center;padding:6px 0;border-bottom:.5px solid rgba(255,255,255,.08);font-size:11px}
+.gz-row:last-of-type{border-bottom:none}
+.gz-el{font-weight:700;color:#e8e6e2}
+.gz-sc{font-weight:800;color:#7fa8e8;text-align:right}
+.gz-w{color:#9aa0a8;font-size:10px}
+.gz-ev{color:#c3c8ce;font-size:10.5px}
+.gz-note{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.6rem}
+.gz-oneline{font-size:12px;color:#e8e6e2;line-height:1.7;margin-top:.9rem;padding-top:.85rem;border-top:.5px solid rgba(255,255,255,.1)}
+.gz-oneline b{color:#7fa8e8}
+.gz-badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:.7rem}
+.gz-badge{font-size:10.5px;font-weight:600;background:rgba(255,255,255,.08);border:.5px solid rgba(255,255,255,.14);color:#dfe3e8;padding:3px 10px;border-radius:99px}
+
+/* ── 지수+수급 ── */
+.idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1rem}
+.idx-card2{background:#23262b;color:#eee;border-radius:var(--rmd);padding:.8rem .9rem}
+.ic-mkt{font-size:10px;color:#9aa0a8}
+.ic-num{font-size:19px;font-weight:800}
+.ic-chg-up{color:#ff6b4a;font-weight:700} .ic-chg-dn{color:#5b9bff;font-weight:700}
+.sup-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:9px}
+.sup{background:rgba(0,0,0,.22);border-radius:6px;padding:5px 4px;text-align:center}
+.sup-who{font-size:9px;color:#9aa0a8}
+.sup-amt{font-size:11.5px;font-weight:800}
+.sup-amt.up{color:#ff6b4a} .sup-amt.dn{color:#5b9bff} .sup-amt.smut{color:#c3c8ce}
+
+.today-market{background:#EAF3DE;border-radius:var(--rlg);padding:.85rem 1.05rem;font-size:12.5px;color:#3B6D11;line-height:1.75;margin-bottom:1rem}
+
+/* ── 섹터 지형도 (v8 스타일) ── */
+.terrain-box{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1rem 1.15rem 1.1rem;margin-bottom:1rem}
+.terrain-title{font-size:10.5px;font-weight:700;color:#c8ccd2;margin-bottom:.4rem;letter-spacing:.04em}
+.bar-chart{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.bar-col{display:flex;flex-direction:column;align-items:center}
+.bar-zone{position:relative;width:100%;height:150px}
+.bar-zone::after{content:'';position:absolute;left:6%;right:6%;top:50%;height:1px;background:rgba(255,255,255,.25)}
+.bar{position:absolute;left:50%;transform:translateX(-50%);width:55%;max-width:24px;border-radius:4px;z-index:1}
+.bar.pos{bottom:50%;background:linear-gradient(180deg,#ff8a6e,#C1432B)}
+.bar.neg{top:50%;background:linear-gradient(180deg,#2E6BD6,#7fa8e8)}
+.bar-val{position:absolute;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;white-space:nowrap;z-index:2}
+.bar-val.pos{color:#ef8a72} .bar-val.neg{color:#7fa8e8}
+.bar-name{font-size:10px;font-weight:600;color:#c8ccd2;margin-top:6px;white-space:nowrap}
+
+/* ── 주도섹터 (v8 라이트 카드) ── */
+.sector-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:.7rem}
+.sector-card{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.03)}
+.sc-head{padding:.7rem .9rem .55rem;border-bottom:.5px solid var(--line);background:linear-gradient(135deg,#FBFAF8,#F4F1EB);position:relative}
+.sc-head::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dn)}
+.sc-head.pos::before{background:var(--up)}
+.sc-name-row{display:flex;align-items:baseline;gap:6px}
+.sc-name{font-size:14px;font-weight:800;color:var(--ink)}
+.sc-sfx{font-size:10px;color:var(--sub);font-weight:600}
+.sc-chg{font-size:12px;font-weight:800;padding:2px 8px;border-radius:6px;margin-left:auto;background:rgba(46,107,214,.1);color:var(--dn)}
+.sc-chg.pos{background:rgba(193,67,43,.1);color:var(--up)}
+.sc-score{font-size:10px;color:var(--sub);margin-top:5px;font-weight:600}
+.sc-list{padding:.15rem .9rem .5rem}
+.sc-cols{display:grid;grid-template-columns:1.1fr 72px 58px 64px;font-size:9.5px;color:#a8a49c;font-weight:600;padding:6px 0 3px;border-bottom:.5px solid var(--line)}
+.sc-cols span:not(:first-child){text-align:right}
+.sc-row{display:grid;grid-template-columns:1.1fr 72px 58px 64px;align-items:center;padding:6px 0;border-bottom:.5px solid var(--line);font-size:12px}
+.sc-row:last-child{border-bottom:none}
+.sc-stock{font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-price{text-align:right;color:var(--sub);font-variant-numeric:tabular-nums}
+.sc-rate{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+.sc-rate.up{color:var(--up)} .sc-rate.dn{color:var(--dn)}
+.sc-vol{text-align:right;color:var(--up);font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}
+
+/* ── 공시 ── */
+.disc-box{background:#23262b;border-radius:var(--rlg);padding:1rem 1.15rem;margin-bottom:.6rem}
+.disc-row{display:block;padding:.85rem 0;border-bottom:.5px solid rgba(255,255,255,.08)}
+.disc-row:last-child{border-bottom:none}
+.disc-head{display:flex;align-items:center;gap:8px}
+.disc-name{font-size:13.5px;font-weight:800;color:#fff}
+.stars{font-size:12px;color:#E0A100;margin-left:auto}
+.stars .off{color:#565b64}
+.disc-note{font-size:11.5px;color:#c3c8ce;line-height:1.6}
+.disc-lnk{color:#8a909a;font-size:10px}
+
+/* ── 공용 ── */
+.pending{background:var(--bg2);border:.5px dashed var(--line);border-radius:var(--rmd);padding:.9rem 1rem;font-size:11.5px;color:var(--sub);margin-bottom:1rem;line-height:1.7;text-align:center}
+.hidden-block{display:none} .hidden-block.open{display:block}
+.more-btn{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}
+.macro-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:1rem}
+.mr-card{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .9rem}
+.mr-label{font-size:11px;color:var(--sub);margin-bottom:3px}
+.mr-val{font-size:15px;font-weight:700;color:var(--sub)}
+
+/* ── 오늘의 한 문장 (필사 코너) ── */
+.quote-box{background:linear-gradient(135deg,#1c1f24,#2c3038);border-radius:var(--rlg);padding:1.6rem 1.4rem;color:#e8e6e2;margin-bottom:1rem;text-align:center;position:relative;overflow:hidden}
+.quote-mark{font-size:52px;font-weight:800;color:rgba(127,168,232,.25);line-height:.5;height:24px}
+.quote-text{font-size:16px;font-weight:700;color:#fff;line-height:1.75;letter-spacing:-.01em;margin:.4rem 0 .8rem;word-break:keep-all}
+.quote-sub{font-size:11px;color:#9aa0a8}
+
+.foot{font-size:10px;color:#b0aca6;line-height:1.6;border-top:.5px solid var(--line);padding-top:.8rem;margin-top:1.2rem}
+
+/* ── 모바일 ── */
+@media (max-width:600px){
+  body{padding:8px 0}
+  .rp{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}
+  .top-bar{flex-direction:column;gap:6px}
+  .badge{align-self:flex-start}
+  .rp-title{font-size:16px}
+  .gz-num{font-size:34px}
+  .gz-bodywrap{min-width:100%}
+  .gz-row{grid-template-columns:84px 38px 1fr;row-gap:2px}
+  .gz-ev{grid-column:1/-1;color:#9aa0a8}
+  .idx-grid{grid-template-columns:1fr;gap:8px}
+  .bar-chart{gap:3px} .bar-zone{height:120px} .bar-val{font-size:8.5px} .bar-name{font-size:8.5px}
+  .sector-grid{grid-template-columns:1fr}
+  .sc-cols,.sc-row{grid-template-columns:1.3fr 76px 58px 60px;font-size:11.5px}
+  .macro-row{grid-template-columns:1fr}
+}
+@media (max-width:380px){
+  .sc-cols,.sc-row{grid-template-columns:1.2fr 62px 50px 52px;font-size:10.5px}
+  .bar-name{font-size:8px}
+}
+</style>
+</head>
+<body>
+<div class="rp">
+  <div class="top-bar">
+    <p class="rp-title">🗼 차트프로 관제탑</p>
+    <span class="badge">2026.07.21 마감</span>
+  </div>
+
+  
+  <div class="gauge-box">
+    <div class="gz-top">
+      <div class="gz-numwrap"><p class="gz-num">79</p><p class="gz-lab">온기 🔥</p></div>
+      <div class="gz-bodywrap">
+        <p class="gz-title">📡 관제지수 (0~100) — 오늘 시장의 온도</p>
+        <div class="gz-track">
+          <div class="gz z1"></div><div class="gz z2"></div><div class="gz z3"></div><div class="gz z4"></div><div class="gz z5"></div>
+          <div class="gz-needle" style="left:79%"></div>
+        </div>
+        <div class="gz-scale"><span>혹한</span><span>한파</span><span>보통</span><span>온기</span><span>과열</span></div>
+      </div>
+    </div>
+    <p class="gz-oneline">📝 <b>한줄평:</b> — (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)</p>
+    <div class="gz-badges"><span class="gz-badge">📈 코스피·코스닥 동반 상승</span><span class="gz-badge">🟢 시장 전반 상승 우위 (85%)</span><span class="gz-badge">💸 외인+기관 +1.67조 순매수</span></div>
+    <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
+    <div class="hidden-block" id="gzDetail">
+      <div class="gz-detail">
+      <div class="gz-row">
+        <span class="gz-el">지수 등락률</span>
+        <span class="gz-sc">75점</span>
+        <span class="gz-w">가중 43%</span>
+        <span class="gz-ev">코스피 +3.56%, 코스닥 +0.49%</span>
+      </div>
+      <div class="gz-row">
+        <span class="gz-el">등락 종목 비율</span>
+        <span class="gz-sc">85점</span>
+        <span class="gz-w">가중 36%</span>
+        <span class="gz-ev">주요 테마 평균 상승종목 85%</span>
+      </div>
+      <div class="gz-row">
+        <span class="gz-el">외국인+기관 수급</span>
+        <span class="gz-sc">78점</span>
+        <span class="gz-w">가중 21%</span>
+        <span class="gz-ev">외인+기관 +16,696억 순매수</span>
+      </div>
+        <p class="gz-note">※ 각 요소를 0~100으로 환산해 가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>
+      </div>
+    </div>
+  </div>
+
+  
+  <div class="terrain-box">
+    <p class="terrain-title">📊 오늘의 섹터 지형도 — 주도 6개 업종 등락률</p>
+    <div class="bar-chart">
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 48.04px)">+5.6%</span><div class="bar pos" style="height:45.04px"></div></div>
+        <p class="bar-name">S7(삼성…</p>
+      </div>
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 37.32px)">+4.3%</span><div class="bar pos" style="height:34.32px"></div></div>
+        <p class="bar-name">반도체 대…</p>
+      </div>
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 43.64px)">+5.1%</span><div class="bar pos" style="height:40.64px"></div></div>
+        <p class="bar-name">피지컬 A…</p>
+      </div>
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 47.64px)">+5.6%</span><div class="bar pos" style="height:44.64px"></div></div>
+        <p class="bar-name">로봇(산업…</p>
+      </div>
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 41.4px)">+4.8%</span><div class="bar pos" style="height:38.4px"></div></div>
+        <p class="bar-name">전선</p>
+      </div>
+      <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 28.92px)">+3.2%</span><div class="bar pos" style="height:25.92px"></div></div>
+        <p class="bar-name">IT 대표주</p>
+      </div></div>
+  </div>
+
+  <p class="sec-label">📊 지수 + 수급</p>
+  <div class="idx-grid">
+    <div class="idx-card2">
+      <p class="ic-mkt">KOSPI</p>
+      <p class="ic-num">6,747.95</p>
+      <p class="ic-chg-up">상승 3.56%</p>
+      <div class="sup-grid">
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt up">+2,952억</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt up">+1.37조</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt dn">−1.64조</p></div>
+      </div>
+    </div>
+    <div class="idx-card2">
+      <p class="ic-mkt">KOSDAQ</p>
+      <p class="ic-num">753.34</p>
+      <p class="ic-chg-up">상승 0.49%</p>
+      <div class="sup-grid">
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt dn">−1,360억</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt dn">−129억</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt up">+1,474억</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="today-market">💡 <b>오늘의 시장:</b> — (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)</div>
+
+  <p class="sec-label">🔥 핵심 이슈</p>
+  <div class="pending">⏳ 오늘 시장을 만든 이슈 3~4개 — 뉴스/공시 기반 자동 추출 준비중</div>
+
+  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  <div class="sector-grid">
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">S7(삼성전자/SK하이닉스 등)</span>
+          <span class="sc-chg pos">+5.63%</span></div>
+        <p class="sc-score">주도력 100.0점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">삼성물산</span>
+          <span class="sc-price">343,500</span>
+          <span class="sc-rate up">+8.19%</span>
+          <span class="sc-vol">2,128억</span></div>
+        <div class="sc-row"><span class="sc-stock">삼성전자우</span>
+          <span class="sc-price">181,000</span>
+          <span class="sc-rate up">+6.97%</span>
+          <span class="sc-vol">5,507억</span></div>
+        <div class="sc-row"><span class="sc-stock">SK스퀘어</span>
+          <span class="sc-price">1,253,000</span>
+          <span class="sc-rate up">+6.46%</span>
+          <span class="sc-vol">8,388억</span></div>
+        <div class="sc-row"><span class="sc-stock">삼성전자</span>
+          <span class="sc-price">259,000</span>
+          <span class="sc-rate up">+6.15%</span>
+          <span class="sc-vol">5.22조</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">반도체 대표주(생산)</span>
+          <span class="sc-chg pos">+4.29%</span></div>
+        <p class="sc-score">주도력 76.9점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">삼성전자</span>
+          <span class="sc-price">259,000</span>
+          <span class="sc-rate up">+6.15%</span>
+          <span class="sc-vol">5.22조</span></div>
+        <div class="sc-row"><span class="sc-stock">SK하이닉스</span>
+          <span class="sc-price">1,836,000</span>
+          <span class="sc-rate up">+4.08%</span>
+          <span class="sc-vol">8.38조</span></div>
+        <div class="sc-row"><span class="sc-stock">DB하이텍</span>
+          <span class="sc-price">104,700</span>
+          <span class="sc-rate up">+2.65%</span>
+          <span class="sc-vol">235억</span></div>
+      </div>
+    </div></div>
+  <div class="hidden-block" id="moreSectors"><div class="sector-grid">
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">피지컬 AI/휴머노이드 로봇</span>
+          <span class="sc-chg pos">+5.08%</span></div>
+        <p class="sc-score">주도력 61.7점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">이랜시스</span>
+          <span class="sc-price">4,705</span>
+          <span class="sc-rate up">+29.97%</span>
+          <span class="sc-vol">71억</span></div>
+        <div class="sc-row"><span class="sc-stock">아진엑스텍</span>
+          <span class="sc-price">5,310</span>
+          <span class="sc-rate up">+23.06%</span>
+          <span class="sc-vol">162억</span></div>
+        <div class="sc-row"><span class="sc-stock">나우로보틱스</span>
+          <span class="sc-price">13,050</span>
+          <span class="sc-rate up">+16.41%</span>
+          <span class="sc-vol">25억</span></div>
+        <div class="sc-row"><span class="sc-stock">레인보우로보틱스</span>
+          <span class="sc-price">411,500</span>
+          <span class="sc-rate up">+9.73%</span>
+          <span class="sc-vol">878억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">로봇(산업용/협동로봇 등)</span>
+          <span class="sc-chg pos">+5.58%</span></div>
+        <p class="sc-score">주도력 56.7점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">코스모로보틱스</span>
+          <span class="sc-price">13,520</span>
+          <span class="sc-rate up">+30.00%</span>
+          <span class="sc-vol">320억</span></div>
+        <div class="sc-row"><span class="sc-stock">에브리봇</span>
+          <span class="sc-price">12,610</span>
+          <span class="sc-rate up">+30.00%</span>
+          <span class="sc-vol">46억</span></div>
+        <div class="sc-row"><span class="sc-stock">이랜시스</span>
+          <span class="sc-price">4,705</span>
+          <span class="sc-rate up">+29.97%</span>
+          <span class="sc-vol">71억</span></div>
+        <div class="sc-row"><span class="sc-stock">티엑스알로보틱스</span>
+          <span class="sc-price">9,650</span>
+          <span class="sc-rate up">+23.72%</span>
+          <span class="sc-vol">42억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">전선</span>
+          <span class="sc-chg pos">+4.80%</span></div>
+        <p class="sc-score">주도력 54.6점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">대원전선</span>
+          <span class="sc-price">11,840</span>
+          <span class="sc-rate up">+8.23%</span>
+          <span class="sc-vol">1,359억</span></div>
+        <div class="sc-row"><span class="sc-stock">LS에코에너지</span>
+          <span class="sc-price">42,650</span>
+          <span class="sc-rate up">+5.57%</span>
+          <span class="sc-vol">29억</span></div>
+        <div class="sc-row"><span class="sc-stock">KBI메탈</span>
+          <span class="sc-price">4,390</span>
+          <span class="sc-rate up">+5.02%</span>
+          <span class="sc-vol">193억</span></div>
+        <div class="sc-row"><span class="sc-stock">LS마린솔루션</span>
+          <span class="sc-price">27,550</span>
+          <span class="sc-rate up">+4.75%</span>
+          <span class="sc-vol">32억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">IT 대표주</span>
+          <span class="sc-chg pos">+3.24%</span></div>
+        <p class="sc-score">주도력 52.3점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">삼성전자</span>
+          <span class="sc-price">259,000</span>
+          <span class="sc-rate up">+6.15%</span>
+          <span class="sc-vol">5.22조</span></div>
+        <div class="sc-row"><span class="sc-stock">SK하이닉스</span>
+          <span class="sc-price">1,836,000</span>
+          <span class="sc-rate up">+4.08%</span>
+          <span class="sc-vol">8.38조</span></div>
+        <div class="sc-row"><span class="sc-stock">삼성SDI</span>
+          <span class="sc-price">416,500</span>
+          <span class="sc-rate up">+3.87%</span>
+          <span class="sc-vol">1,399억</span></div>
+        <div class="sc-row"><span class="sc-stock">LG전자</span>
+          <span class="sc-price">173,200</span>
+          <span class="sc-rate up">+3.59%</span>
+          <span class="sc-vol">1,955억</span></div>
+      </div>
+    </div></div></div>
+  <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 (4개)')">▾ 주도 섹터 더보기 (4개)</button>
+
+  <p class="sec-label">📺 마감 브리핑 — 4사 관점 비교</p>
+  <div class="pending">⏳ 유튜브 자막 API 연동 준비중 (삼프로TV·한국경제TV·이데일리TV·토마토TV)</div>
+
+  <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
+  <div class="pending">⏳ 네이버 증권 인기뉴스 크롤링 준비중</div>
+
+  <p class="sec-label">📋 오늘의 공시</p>
+  <div class="disc-box">
+    
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721901391" target="_blank">
+      <div class="disc-head"><span class="disc-name">부스타</span>
+        <span class="stars">★★★★★<span class="off"></span></span></div>
+      <p class="disc-note">권리락              (무상증자) <span class="disc-lnk">↗ 상세보기</span></p>
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721001367" target="_blank">
+      <div class="disc-head"><span class="disc-name">코아스</span>
+        <span class="stars">★★★★<span class="off">★</span></span></div>
+      <p class="disc-note">[기재정정]주요사항보고서(유상증자결정) <span class="disc-lnk">↗ 상세보기</span></p>
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721001292" target="_blank">
+      <div class="disc-head"><span class="disc-name">시선AI</span>
+        <span class="stars">★★★★<span class="off">★</span></span></div>
+      <p class="disc-note">[기재정정]주요사항보고서(유상증자결정) <span class="disc-lnk">↗ 상세보기</span></p>
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721001257" target="_blank">
+      <div class="disc-head"><span class="disc-name">씨엑스아이</span>
+        <span class="stars">★★★★<span class="off">★</span></span></div>
+      <p class="disc-note">주요사항보고서(유상증자결정) <span class="disc-lnk">↗ 상세보기</span></p>
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260721001258" target="_blank">
+      <div class="disc-head"><span class="disc-name">파인테크닉스</span>
+        <span class="stars">★★★<span class="off">★★</span></span></div>
+      <p class="disc-note">주요사항보고서(자기전환사채매도결정) <span class="disc-lnk">↗ 상세보기</span></p>
+    </a>
+    <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
+  </div>
+
+  <p class="sec-label">🔍 프로의 시선</p>
+  <div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>
+
+  <p class="sec-label">🌐 환율 · 유가 · 금리</p>
+  <div class="macro-row">
+    <div class="mr-card"><p class="mr-label">원/달러 환율</p><p class="mr-val">— (준비중)</p></div>
+    <div class="mr-card"><p class="mr-label">WTI 유가</p><p class="mr-val">— (준비중)</p></div>
+    <div class="mr-card"><p class="mr-label">금리</p><p class="mr-val">— (준비중)</p></div>
+  </div>
+
+  <p class="sec-label">📚 오늘의 공부</p>
+  <div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>
+
+  <p class="sec-label">🗼 다음 거래일 관전포인트</p>
+  <div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>
+
+  <!-- 오늘의 한 문장 (필사 코너) -->
+  <p class="sec-label">✍️ 오늘의 한 문장</p>
+  <div class="quote-box">
+    <div class="quote-mark">“</div>
+    <p class="quote-text">오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)</p>
+    <p class="quote-sub">— 차트프로 관제탑, 2026.07.21</p>
+  </div>
+
+  <p class="foot">데이터: 2026.07.21 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다.</p>
+</div>
+<script>
+function toggleMore(id,btn,label){
+  var el=document.getElementById(id);
+  var open=el.classList.toggle('open');
+  btn.textContent=open?'▴ 접기':label;
+}
+</script>
+</body>
+</html>
