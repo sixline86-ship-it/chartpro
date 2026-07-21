@@ -1,0 +1,77 @@
+# ============================================================
+# .github/workflows/daily.yml
+# 차트프로 관제탑 — 매일 자동 발행 시간표
+# ------------------------------------------------------------
+#  이 파일이 하는 일:
+#   1. 정해진 시각(또는 수동 버튼)에 GitHub 서버가 깨어난다
+#   2. 파이썬 설치 → 필요한 부품 설치
+#   3. collect_data.py 실행 (숫자 수집)
+#   4. (충전 후) generate_report.py 실행 (해석글)  ← 지금은 꺼둠
+#   5. build_html.py 실행 → index.html 생성
+#   6. index.html 을 저장소에 자동 커밋 → GitHub Pages가 자동 배포
+# ============================================================
+
+name: 관제탑 일일 발행
+
+on:
+  # (1) 수동 실행 버튼 — Actions 탭에서 "Run workflow" 로 언제든 실행
+  workflow_dispatch:
+
+  # (2) 자동 실행 시간표 (UTC 기준! 한국시간 -9시간)
+  #     한국 저녁 8시 발행 목표 → 19:30 KST 실행 → UTC 10:30
+  #     ⚠️ 지금은 테스트 단계라 자동 시간표는 주석(#) 처리해둠.
+  #        수동 버튼으로 먼저 검증한 뒤, 아래 두 줄의 # 를 지우면 매일 자동 실행됨.
+  # schedule:
+  #   - cron: '30 10 * * 1-5'   # 월~금 UTC 10:30 = KST 19:30
+
+# index.html 을 저장소에 다시 써야 하므로 쓰기 권한 부여
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # ── 저장소 코드 내려받기 ──
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      # ── 파이썬 설치 ──
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── 필요한 부품 설치 ──
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      # ── ① 숫자 수집 ──
+      - name: 데이터 수집
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: python collect_data.py
+
+      # ── ② 해석글 생성 (Claude 충전 후 활성화) ──
+      #    지금은 충전 전이라 통째로 주석 처리.
+      #    충전 완료되면 아래 블록의 # 를 지우면 됨.
+      # - name: 해석글 생성
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #   run: python generate_report.py
+
+      # ── ③ HTML 생성 (오늘 날짜 → index.html 로 복사) ──
+      - name: 리포트 HTML 생성
+        run: |
+          python build_html.py
+          # 오늘 날짜 파일을 index.html 로 복사 (GitHub Pages 대문)
+          cp report_$(date +%Y%m%d).html index.html
+
+      # ── ④ 결과물 자동 커밋 (웹에 반영) ──
+      - name: 자동 커밋 & 배포
+        run: |
+          git config user.name "chartpro-bot"
+          git config user.email "bot@chartpro.local"
+          git add index.html data_*.json report_*.json report_*.html || true
+          git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
+          git push
