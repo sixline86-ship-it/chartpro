@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 import re
 import json
 import os
+import io
 import math
 from datetime import datetime
 
@@ -41,6 +42,15 @@ def to_num(x):
         return float(s)
     except ValueError:
         return None
+
+
+def read_html_safe(html_text):
+    """HTML 텍스트에서 표를 읽는다.
+    최신 pandas는 문자열을 파일 경로로 오해하므로 io.StringIO로 감싼다.
+    (구/신 pandas 양쪽에서 동작)"""
+    if isinstance(html_text, bytes):
+        html_text = html_text.decode("euc-kr", errors="replace")
+    return pd.read_html(io.StringIO(html_text))
 
 
 # ============================================================
@@ -106,7 +116,7 @@ def collect_index_and_flow():
         url = "https://finance.naver.com/sise/investorDealTrendDay.naver"
         res = requests.get(url, headers=HEADERS, params={"bizdate": DATE, "sosok": sosok, "page": "1"})
         res.encoding = "euc-kr"
-        tables = pd.read_html(res.text.encode())
+        tables = read_html_safe(res.text)
         표 = tables[0]
         표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
         오늘행 = 표[표["날짜"].astype(str).str.replace(".", "", regex=False) == DATE[2:]]
@@ -181,7 +191,7 @@ def collect_themes_and_gauge():
             링크들.append((a.get_text(strip=True), m.group(1) if m else None))
 
         try:
-            tables = pd.read_html(res.text.encode())
+            tables = read_html_safe(res.text)
             테마표 = None
             for t in tables:
                 if any("테마" in str(c) for c in t.columns):
@@ -218,7 +228,7 @@ def collect_themes_and_gauge():
         dres = requests.get(detail_url, headers=HEADERS, params={"type": "theme", "no": 번호})
         dres.encoding = "euc-kr"
         try:
-            tables = pd.read_html(dres.text.encode())
+            tables = read_html_safe(dres.text)
             종목표 = None
             for t in tables:
                 if t.shape[1] >= 9 and t.shape[0] > 1:
