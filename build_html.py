@@ -256,6 +256,59 @@ def build_disclosures(disc):
     return "".join(rows)
 
 
+# ── 핵심 이슈 ──
+def build_issues(핵심이슈):
+    if not 핵심이슈:
+        return '<div class="pending">⏳ 오늘 시장을 만든 이슈 3~4개 — 뉴스/공시 기반 자동 추출 준비중</div>'
+    rows = []
+    for it in 핵심이슈:
+        rows.append(f'''
+    <div class="iss"><span class="itag">{it.get('태그','')}</span>
+      <span class="iss-text">{it.get('내용','')}</span></div>''')
+    return f'<div class="issue-box">{"".join(rows)}</div>'
+
+
+# ── 핵심 뉴스 TOP10 (3개 노출 + 더보기) ──
+NEWS_TAG_CLASS = {"시황": "nt-market", "정책": "nt-policy", "특징주": "nt-stock", "글로벌": "nt-global"}
+
+
+def one_news_item(idx, item):
+    tag = item.get("태그", "시황")
+    cls = NEWS_TAG_CLASS.get(tag, "nt-market")
+    링크 = item.get("링크", "")
+    제목 = item.get("제목", "")
+    요약 = item.get("요약", "")
+    본문 = f'''
+      <span class="news-tag {cls}">{tag}</span>{제목}'''
+    if 링크:
+        title_html = f'<a href="{링크}" target="_blank">{본문}</a>'
+    else:
+        title_html = 본문
+    return f'''
+    <div class="news-item">
+      <span class="news-rank">{idx}</span>
+      <div class="news-body">
+        <p class="news-title">{title_html}</p>
+        <p class="news-insight">{요약}</p>
+      </div>
+    </div>'''
+
+
+def build_news(핵심뉴스):
+    if not 핵심뉴스:
+        return '<div class="pending">⏳ 네이버 증권 인기뉴스 크롤링 준비중</div>'
+    앞3 = 핵심뉴스[:3]
+    뒤 = 핵심뉴스[3:10]
+    앞HTML = "".join(one_news_item(i + 1, it) for i, it in enumerate(앞3))
+    뒤HTML = "".join(one_news_item(i + 4, it) for i, it in enumerate(뒤))
+    더보기 = ""
+    if 뒤:
+        더보기 = f'''
+  <div class="hidden-block" id="moreNews"><div class="news-wrap" style="border:none;box-shadow:none;margin:0">{뒤HTML}</div></div>
+  <button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 핵심뉴스 {len(뒤)}개 더보기')">▾ 핵심뉴스 {len(뒤)}개 더보기</button>'''
+    return f'<div class="news-wrap">{앞HTML}</div>{더보기}'
+
+
 def build_html(data, report):
     지수 = (data.get("지수수급") or {}).get("지수") or {}
     코 = 지수.get("코스피", {})
@@ -266,7 +319,21 @@ def build_html(data, report):
     오늘의시장 = 해석.get("오늘의_시장", "— (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)")
     오늘한줄평 = 해석.get("한줄평", "— (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)")
     오늘의문장 = 해석.get("오늘의_한문장", "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)")
+    침묵의지표 = 해석.get("침묵의_지표", "")
+    오늘의공부 = 해석.get("오늘의_공부", "")
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
+
+    # ── 카톡 공유 카드(OG) 문구를 오늘 데이터로 자동 생성 ──
+    관제 = data.get("관제지수") or {}
+    if 관제:
+        og_title = f"🗼 차트프로 관제탑 {날짜} — 관제지수 {관제.get('점수','')} · {관제.get('구간','')}"
+    else:
+        og_title = f"🗼 차트프로 관제탑 {날짜}"
+    # 설명: 한줄평이 있으면 그걸, 없으면 코스피 등락 요약
+    if isinstance(오늘한줄평, str) and not 오늘한줄평.startswith("—"):
+        og_desc = 오늘한줄평
+    else:
+        og_desc = f"코스피 {코.get('등락률','')}% · 오늘의 시장 온도를 관제지수로"
 
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -274,8 +341,11 @@ def build_html(data, report):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>차트프로 관제탑 · {날짜}</title>
-<meta property="og:title" content="🗼 차트프로 관제탑 {날짜}">
-<meta property="og:description" content="관제지수로 보는 오늘의 시장 온도">
+<meta property="og:title" content="{og_title}">
+<meta property="og:description" content="{og_desc}">
+<meta property="og:type" content="article">
+<!-- og:image는 자동화 단계에서 리포트 캡처 이미지 경로로 추가 예정 -->
+<meta name="twitter:card" content="summary_large_image">
 <style>
 :root{{
   --font-sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
@@ -386,6 +456,27 @@ a{{color:inherit;text-decoration:none}}
 
 /* ── 공용 ── */
 .pending{{background:var(--bg2);border:.5px dashed var(--line);border-radius:var(--rmd);padding:.9rem 1rem;font-size:11.5px;color:var(--sub);margin-bottom:1rem;line-height:1.7;text-align:center}}
+
+/* 핵심 이슈 */
+.issue-box{{background:var(--bg2);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}}
+.iss{{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid var(--line);line-height:1.65}}
+.iss:last-child{{border-bottom:none;padding-bottom:0}}
+.itag{{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:2px;background:#E6F1FB;color:#0C447C}}
+.iss-text{{font-size:12.5px;color:var(--ink)}}
+
+/* 핵심 뉴스 */
+.news-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:.6rem}}
+.news-item{{display:flex;gap:11px;padding:.75rem 1.15rem;border-bottom:.5px solid var(--line);align-items:flex-start}}
+.news-item:last-child{{border-bottom:none}}
+.news-rank{{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;flex-shrink:0;width:20px;line-height:1.5}}
+.news-body{{flex:1}}
+.news-title{{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.55;margin-bottom:3px}}
+.news-tag{{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:middle}}
+.nt-market{{background:#E6F1FB;color:#0C447C}} .nt-stock{{background:#FAECE7;color:#993C1D}}
+.nt-policy{{background:#FAEEDA;color:#854F0B}} .nt-global{{background:#EEEDFE;color:#3C3489}}
+.news-insight{{font-size:11.5px;color:var(--sub);line-height:1.6}}
+.silent-box{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#33305e;line-height:1.8}}
+.study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
 .hidden-block{{display:none}} .hidden-block.open{{display:block}}
 .more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
 .macro-row{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:1rem}}
@@ -462,7 +553,7 @@ a{{color:inherit;text-decoration:none}}
   <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
 
   <p class="sec-label">🔥 핵심 이슈</p>
-  <div class="pending">⏳ 오늘 시장을 만든 이슈 3~4개 — 뉴스/공시 기반 자동 추출 준비중</div>
+  {build_issues(해석.get('핵심이슈'))}
 
   <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
   {build_sectors(data.get('주도섹터'))}
@@ -471,7 +562,7 @@ a{{color:inherit;text-decoration:none}}
   <div class="pending">⏳ 유튜브 자막 API 연동 준비중 (삼프로TV·한국경제TV·이데일리TV·토마토TV)</div>
 
   <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
-  <div class="pending">⏳ 네이버 증권 인기뉴스 크롤링 준비중</div>
+  {build_news(해석.get('핵심뉴스'))}
 
   <p class="sec-label">📋 오늘의 공시</p>
   <div class="disc-box">
@@ -480,7 +571,7 @@ a{{color:inherit;text-decoration:none}}
   </div>
 
   <p class="sec-label">🔍 프로의 시선</p>
-  <div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>
+  {f'<div class="silent-box">🔍 {침묵의지표}</div>' if 침묵의지표 else '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'}
 
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
@@ -490,7 +581,7 @@ a{{color:inherit;text-decoration:none}}
   </div>
 
   <p class="sec-label">📚 오늘의 공부</p>
-  <div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>
+  {f'<div class="study-box">📚 {오늘의공부}</div>' if 오늘의공부 else '<div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>'}
 
   <p class="sec-label">🗼 다음 거래일 관전포인트</p>
   <div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>
