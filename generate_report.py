@@ -134,12 +134,27 @@ def ask_claude(data, 시도=1):
         + json.dumps(data, ensure_ascii=False, indent=2)
     )
 
-    response = client.messages.create(
+    kwargs = dict(
         model=MODEL,
-        max_tokens=4000,   # 생각 블록까지 여유 있게
+        max_tokens=8000,   # 핵심이슈·핵심뉴스 추가로 분량이 늘어 넉넉히 상향
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )
+    # ⭐ effort=low: 이 작업은 복잡한 추론이 아니라 "정해진 형식으로 글쓰기"라
+    #    깊게 생각할 필요가 없다. 기본값(high)은 '생각' 토큰을 많이 써서
+    #    - 답변이 max_tokens 안에서 끊길 위험을 높이고
+    #    - 비용도 불필요하게 올린다.
+    #    low로 낮추면 두 문제가 동시에 줄어든다.
+    #    (Sonnet 5/Opus 4.8 계열에서만 지원. Haiku 등 다른 모델이면 무시됨)
+    if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
+        kwargs["output_config"] = {"effort": "low"}
+
+    response = client.messages.create(**kwargs)
+
+    # ⭐ 답변이 중간에 끊겼는지(max_tokens 도달) 바로 알 수 있게 확인
+    if response.stop_reason == "max_tokens":
+        print("⚠️ 답변이 max_tokens 한도에 걸려 중간에 끊겼습니다.")
+        print(f"   (현재 max_tokens={kwargs['max_tokens']}) → 더 늘려야 할 수 있습니다.")
 
     raw = extract_text(response)
     try:
