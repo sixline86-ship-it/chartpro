@@ -394,6 +394,63 @@ def compute_gauge(지수수급, 확산도_시장):
 
 
 # ============================================================
+# ⑤ 핵심 뉴스 원본 수집 (네이버 증권 · 많이 본 뉴스)
+# ------------------------------------------------------------
+#   여기서는 "가공 없이 원본 제목+링크만" 가져온다.
+#   합치기·요약·태그 붙이기는 Claude(generate_report.py)가 한다.
+#   ⚠️ 이 URL 구조(mode=LSS2D)는 검증된 예시 자료를 근거로 했지만
+#      네이버 페이지 구조는 종종 바뀐다. 첫 실행에서 0건이 나오면
+#      diagnostic 출력을 보고 셀렉터를 조정해야 한다.
+# ============================================================
+def collect_news():
+    url = "https://finance.naver.com/news/news_list.naver"
+    # section_id=101(경제) / section_id2=258(증권) — "많이 본 뉴스"
+    params = {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}
+
+    try:
+        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        res.encoding = "euc-kr"
+        soup = BeautifulSoup(res.text, "html.parser")
+    except Exception as e:
+        print(f"⚠️ 뉴스 페이지 요청 실패: {e}")
+        return []
+
+    결과 = []
+    중복확인 = set()
+
+    # 1차 시도: dl.newsList 안의 dd.articleSubject a 태그
+    후보 = soup.select("dd.articleSubject a")
+    if not 후보:
+        # 2차 시도: 클래스명이 바뀌었을 경우 좀 더 느슨하게
+        후보 = soup.select("a[href*='news_read']")
+
+    for a in 후보:
+        제목 = a.get("title") or a.get_text(strip=True)
+        제목 = 제목.strip()
+        href = a.get("href", "")
+        if not 제목 or not href:
+            continue
+        if href.startswith("/"):
+            링크 = "https://finance.naver.com" + href
+        else:
+            링크 = href
+        if 제목 in 중복확인:
+            continue
+        중복확인.add(제목)
+        결과.append({"제목": 제목, "링크": 링크})
+
+    print(f"✅ 뉴스 원본 {len(결과)}건 수집")
+    if len(결과) == 0:
+        # 진단 정보: 페이지가 비었는지, 구조가 바뀐 건지 힌트를 남긴다
+        print("  ⚠️ 0건 — 페이지 구조가 바뀌었을 수 있음. 응답 일부:")
+        print("  " + res.text[:300].replace("\n", " "))
+    else:
+        print("  샘플:", 결과[0]["제목"][:40])
+
+    return 결과[:15]  # Claude가 합치고 추릴 수 있게 넉넉히 15개까지
+
+
+# ============================================================
 # 메인
 # ============================================================
 if __name__ == "__main__":
@@ -403,6 +460,7 @@ if __name__ == "__main__":
     지수수급 = collect_index_and_flow()
     테마결과 = collect_themes_and_gauge()
     게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
+    뉴스원본 = collect_news()
 
     전체 = {
         "날짜": DATE,
@@ -410,6 +468,7 @@ if __name__ == "__main__":
         "지수수급": 지수수급,
         "주도섹터": 테마결과.get("주도섹터", []),
         "관제지수": 게이지,
+        "뉴스원본": 뉴스원본,
     }
 
     경로 = f"data_{DATE}.json"
