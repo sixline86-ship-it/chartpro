@@ -4,8 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>차트프로 관제탑 · 2026.07.23</title>
-<meta property="og:title" content="🗼 차트프로 관제탑 2026.07.23">
-<meta property="og:description" content="관제지수로 보는 오늘의 시장 온도">
+<meta property="og:title" content="🗼 차트프로 관제탑 2026.07.23 — 관제지수 96 · 과열">
+<meta property="og:description" content="전력·에너지 테마 폭등, 개인 팔고 외인 담은 과열장">
+<meta property="og:type" content="article">
+<!-- og:image는 자동화 단계에서 리포트 캡처 이미지 경로로 추가 예정 -->
+<meta name="twitter:card" content="summary_large_image">
 <style>
 :root{
   --font-sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
@@ -116,6 +119,27 @@ a{color:inherit;text-decoration:none}
 
 /* ── 공용 ── */
 .pending{background:var(--bg2);border:.5px dashed var(--line);border-radius:var(--rmd);padding:.9rem 1rem;font-size:11.5px;color:var(--sub);margin-bottom:1rem;line-height:1.7;text-align:center}
+
+/* 핵심 이슈 */
+.issue-box{background:var(--bg2);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}
+.iss{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid var(--line);line-height:1.65}
+.iss:last-child{border-bottom:none;padding-bottom:0}
+.itag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:2px;background:#E6F1FB;color:#0C447C}
+.iss-text{font-size:12.5px;color:var(--ink)}
+
+/* 핵심 뉴스 */
+.news-wrap{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:.6rem}
+.news-item{display:flex;gap:11px;padding:.75rem 1.15rem;border-bottom:.5px solid var(--line);align-items:flex-start}
+.news-item:last-child{border-bottom:none}
+.news-rank{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;flex-shrink:0;width:20px;line-height:1.5}
+.news-body{flex:1}
+.news-title{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.55;margin-bottom:3px}
+.news-tag{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:middle}
+.nt-market{background:#E6F1FB;color:#0C447C} .nt-stock{background:#FAECE7;color:#993C1D}
+.nt-policy{background:#FAEEDA;color:#854F0B} .nt-global{background:#EEEDFE;color:#3C3489}
+.news-insight{font-size:11.5px;color:var(--sub);line-height:1.6}
+.silent-box{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#33305e;line-height:1.8}
+.study-box{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}
 .hidden-block{display:none} .hidden-block.open{display:block}
 .more-btn{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}
 .macro-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:1rem}
@@ -219,16 +243,16 @@ a{color:inherit;text-decoration:none}
         <p class="bar-name">풍력에너지</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 73px)">+11.7%</span><div class="bar pos" style="height:70px"></div></div>
-        <p class="bar-name">고체산화물…</p>
-      </div>
-      <div class="bar-col">
         <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 68.36px)">+8.2%</span><div class="bar pos" style="height:65.36px"></div></div>
         <p class="bar-name">태양광에너지</p>
       </div>
       <div class="bar-col">
+        <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 73px)">+9.5%</span><div class="bar pos" style="height:70px"></div></div>
+        <p class="bar-name">정유</p>
+      </div>
+      <div class="bar-col">
         <div class="bar-zone"><span class="bar-val pos" style="bottom:calc(50% + 73px)">+9.0%</span><div class="bar pos" style="height:70px"></div></div>
-        <p class="bar-name">전력설비</p>
+        <p class="bar-name">우주태양광…</p>
       </div></div>
   </div>
 
@@ -343,33 +367,6 @@ a{color:inherit;text-decoration:none}
     </div>
     <div class="sector-card">
       <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">고체산화물 연료전지(SOFC)</span>
-          <span class="sc-chg pos">+11.69%</span></div>
-        <p class="sc-score">주도력 52.6점</p>
-      </div>
-      <div class="sc-list">
-        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
-        
-        <div class="sc-row"><span class="sc-stock">SK이터닉스</span>
-          <span class="sc-price">80,600</span>
-          <span class="sc-rate up">+30.00%</span>
-          <span class="sc-vol">1.36조</span></div>
-        <div class="sc-row"><span class="sc-stock">서진시스템</span>
-          <span class="sc-price">42,500</span>
-          <span class="sc-rate up">+17.24%</span>
-          <span class="sc-vol">484억</span></div>
-        <div class="sc-row"><span class="sc-stock">한선엔지니어링</span>
-          <span class="sc-price">12,000</span>
-          <span class="sc-rate up">+15.61%</span>
-          <span class="sc-vol">27억</span></div>
-        <div class="sc-row"><span class="sc-stock">금양그린파워</span>
-          <span class="sc-price">7,580</span>
-          <span class="sc-rate up">+15.20%</span>
-          <span class="sc-vol">50억</span></div>
-      </div>
-    </div>
-    <div class="sector-card">
-      <div class="sc-head pos">
         <div class="sc-name-row"><span class="sc-name">태양광에너지</span>
           <span class="sc-chg pos">+8.17%</span></div>
         <p class="sc-score">주도력 50.3점</p>
@@ -397,29 +394,52 @@ a{color:inherit;text-decoration:none}
     </div>
     <div class="sector-card">
       <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">전력설비</span><span class="sc-sfx">(송배전·전력 인프라)</span>
-          <span class="sc-chg pos">+9.00%</span></div>
-        <p class="sc-score">주도력 47.3점</p>
+        <div class="sc-name-row"><span class="sc-name">정유</span>
+          <span class="sc-chg pos">+9.51%</span></div>
+        <p class="sc-score">주도력 46.4점</p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
         
-        <div class="sc-row"><span class="sc-stock">지엔씨에너지</span>
-          <span class="sc-price">45,550</span>
-          <span class="sc-rate up">+29.96%</span>
-          <span class="sc-vol">1,250억</span></div>
-        <div class="sc-row"><span class="sc-stock">LS에코에너지</span>
-          <span class="sc-price">52,700</span>
-          <span class="sc-rate up">+21.85%</span>
-          <span class="sc-vol">140억</span></div>
-        <div class="sc-row"><span class="sc-stock">LS ELECTRIC</span>
-          <span class="sc-price">223,500</span>
-          <span class="sc-rate up">+17.26%</span>
-          <span class="sc-vol">2,773억</span></div>
-        <div class="sc-row"><span class="sc-stock">대원전선</span>
-          <span class="sc-price">14,200</span>
-          <span class="sc-rate up">+16.78%</span>
-          <span class="sc-vol">3,871억</span></div>
+        <div class="sc-row"><span class="sc-stock">SK이노베이션</span>
+          <span class="sc-price">132,200</span>
+          <span class="sc-rate up">+11.66%</span>
+          <span class="sc-vol">2,151억</span></div>
+        <div class="sc-row"><span class="sc-stock">GS</span>
+          <span class="sc-price">93,600</span>
+          <span class="sc-rate up">+11.16%</span>
+          <span class="sc-vol">929억</span></div>
+        <div class="sc-row"><span class="sc-stock">S-Oil</span>
+          <span class="sc-price">149,800</span>
+          <span class="sc-rate up">+5.72%</span>
+          <span class="sc-vol">653억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">우주태양광(페로브스카이트 등)</span>
+          <span class="sc-chg pos">+8.97%</span></div>
+        <p class="sc-score">주도력 42.3점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">HD현대에너지솔루션</span>
+          <span class="sc-price">171,500</span>
+          <span class="sc-rate up">+29.73%</span>
+          <span class="sc-vol">1,626억</span></div>
+        <div class="sc-row"><span class="sc-stock">대주전자재료</span>
+          <span class="sc-price">81,200</span>
+          <span class="sc-rate up">+11.23%</span>
+          <span class="sc-vol">100억</span></div>
+        <div class="sc-row"><span class="sc-stock">한화솔루션</span>
+          <span class="sc-price">30,000</span>
+          <span class="sc-rate up">+10.50%</span>
+          <span class="sc-vol">1,299억</span></div>
+        <div class="sc-row"><span class="sc-stock">엘케이켐</span>
+          <span class="sc-price">20,250</span>
+          <span class="sc-rate up">+8.87%</span>
+          <span class="sc-vol">4억</span></div>
       </div>
     </div></div></div>
   <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 (4개)')">▾ 주도 섹터 더보기 (4개)</button>
@@ -462,7 +482,7 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <p class="sec-label">🔍 프로의 시선</p>
-  <div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>
+  <div class="silent-box">🔍 개인이 대규모로 순매도한 반면 외국인과 기관이 동시에 순매수한 점은, 개인 투자자들이 단기 차익 실현에 나섰을 가능성을 보여줍니다. 주도 테마들의 확산도가 모두 90%를 넘는다는 점은 특정 종목이 아니라 섹터 전체가 함께 움직였다는 뜻으로, 쏠림이 강했던 하루였습니다.</div>
 
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
@@ -472,7 +492,7 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <p class="sec-label">📚 오늘의 공부</p>
-  <div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>
+  <div class="study-box">📚 '확산도'는 한 테마 안에서 상승한 종목의 비율을 뜻합니다. 오늘처럼 확산도가 90% 이상이면 소수 종목의 반짝 상승이 아니라 섹터 전반에 매수세가 고르게 퍼졌다는 신호로 볼 수 있습니다. 다만 이런 쏠림은 상승 속도가 빠른 만큼, 되돌림도 함께 관찰할 필요가 있습니다.</div>
 
   <p class="sec-label">🗼 다음 거래일 관전포인트</p>
   <div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>
