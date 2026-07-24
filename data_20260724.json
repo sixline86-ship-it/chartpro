@@ -163,12 +163,14 @@
       "코스피": {
         "종가": "6,690.62",
         "등락방향": "하락",
-        "등락률": "-5.72"
+        "등락률": "-5.72",
+        "거래대금": "30,991,959백만"
       },
       "코스닥": {
         "종가": "748.22",
         "등락방향": "하락",
-        "등락률": "-5.32"
+        "등락률": "-5.32",
+        "거래대금": "5,177,049백만"
       }
     },
     "코스피_수급": {
@@ -408,6 +410,14 @@
   },
   "뉴스원본": [
     {
+      "제목": "더존비즈온 \"개발조직, 클로드 전면 도입…AI환경 구축\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005390719&office_id=008&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "우리투자증권, 상반기 순익 247억…전년비 47.1%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005390718&office_id=008&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
       "제목": "“SK하이닉스보다 낫다?” 한 달 새 무려 ‘115%’라니…SK이터닉스 급등 [종목Pick]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002674810&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     },
@@ -456,34 +466,26 @@
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644969&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     },
     {
-      "제목": "규합위,'대주주 적격성' 개선권고…두나무·네이버 '숨통'",
+      "제목": "규합위, '대주주 적격성' 개선권고…두나무·네이버 '숨통'",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016213884&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "두나무 품는 네이버 '청신호'…특금법 예외 규정 신설 권고",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014087114&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "비은행이익 3배 껑충…우리금융 2분기 순익 1조원대 회복",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000049190&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1461.52,
-      "등락률": -0.96,
+      "값": 1462.79,
+      "등락률": -0.87,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 89.75,
-      "등락률": -2.65,
+      "값": 89.42,
+      "등락률": -3.0,
       "표시명": "WTI 유가",
       "단위": "$"
     },
     "미국채10년": {
-      "값": 4.7,
-      "등락률": 0.99,
+      "값": 4.68,
+      "등락률": -0.51,
       "표시명": "미국채 10년물",
       "단위": "%"
     }
