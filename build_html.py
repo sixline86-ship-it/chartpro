@@ -359,17 +359,19 @@ def build_briefings(마감브리핑):
   </div>'''
 
 
-def build_macro_card(item):
+def build_macro_card(item, 해설=""):
     if not item:
         return '<div class="mr-card"><p class="mr-label">—</p><p class="mr-val">— (준비중)</p></div>'
     cls = "dn" if item["등락률"] < 0 else "up"
     단위 = item.get("단위", "")
     값표시 = f"{단위}{item['값']:,.2f}" if 단위 == "$" else f"{item['값']:,.2f}{단위}"
+    해설HTML = f'<p class="mr-comment">{해설}</p>' if 해설 else ''
     return f'''
     <div class="mr-card">
       <p class="mr-label">{item['표시명']}</p>
       <p class="mr-val">{값표시}</p>
-      <span class="{cls}" style="font-size:11px">{item['등락률']:+.2f}%</span>
+      <span class="{cls}" style="font-size:11px;font-weight:700">{item['등락률']:+.2f}%</span>
+      {해설HTML}
     </div>'''
 
 
@@ -551,6 +553,7 @@ a{{color:inherit;text-decoration:none}}
 .mr-card{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .9rem}}
 .mr-label{{font-size:11px;color:var(--sub);margin-bottom:3px}}
 .mr-val{{font-size:15px;font-weight:700;color:var(--sub)}}
+.mr-comment{{font-size:10.5px;color:var(--sub);margin-top:6px;line-height:1.6}}
 .watch-item{{background:#23262b;color:#e8e6e2;border-radius:var(--rmd);padding:.75rem .95rem;font-size:12.5px;line-height:1.7;margin-bottom:8px}}
 .tv-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:1rem}}
 .tv-row-wrap{{padding:.8rem 1.1rem;border-bottom:.5px solid var(--line)}}
@@ -653,9 +656,9 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
-    {build_macro_card((data.get('매크로') or {}).get('원달러환율'))}
-    {build_macro_card((data.get('매크로') or {}).get('WTI유가'))}
-    {build_macro_card((data.get('매크로') or {}).get('미국채10년'))}
+    {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
+    {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''))}
+    {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
   </div>
 
   <p class="sec-label">📚 오늘의 공부</p>
