@@ -516,7 +516,7 @@ def collect_program_and_futures():
       · 비차익거래 = 선물과 무관한 바스켓 매매 (실제 방향성 베팅)
       → 같은 '프로그램 매도 1조'라도 어느 쪽이냐에 따라 해석이 정반대다.
     """
-    결과 = {"프로그램매매": None, "선물수급": None}
+    결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
 
     # ── 프로그램매매 ──
     후보 = [
@@ -549,16 +549,18 @@ def collect_program_and_futures():
         except Exception as e:
             print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}")
 
-    # ── 선물 투자자별 수급 ──
-    선물후보 = [
-        ("https://finance.naver.com/sise/investorDealTrendDay.naver",
-         {"bizdate": DATE, "sosok": "03", "page": "1"}),   # 03=선물 가능성
-        ("https://finance.naver.com/sise/investorDealTrendDay.naver",
-         {"bizdate": DATE, "sosok": "04", "page": "1"}),
-    ]
-    for url, params in 선물후보:
+    # ── 선물·옵션 투자자별 수급 ──
+    #   sosok 코드가 문서화돼 있지 않아 여러 값을 시도하고,
+    #   먼저 잡히는 것을 선물, 그다음을 옵션으로 본다. (첫 실행 로그로 확정 필요)
+    파생후보 = [("선물수급", c) for c in ("03", "04")] + \
+              [("옵션수급", c) for c in ("05", "06")]
+    for 종류, sosok in 파생후보:
+        if 결과[종류]:
+            continue
         try:
-            r = requests.get(url, headers=HEADERS, params=params, timeout=12)
+            r = requests.get("https://finance.naver.com/sise/investorDealTrendDay.naver",
+                             headers=HEADERS,
+                             params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
             if r.status_code != 200:
                 continue
             r.encoding = "euc-kr"
@@ -571,15 +573,15 @@ def collect_program_and_futures():
             if len(실) == 0:
                 continue
             row = 실.iloc[0]
-            결과["선물수급"] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
-                            "기관계": str(row["기관계"]), "sosok": params["sosok"]}
-            print(f"✅ 선물수급 수집 (sosok={params['sosok']})")
-            break
+            결과[종류] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
+                       "기관계": str(row["기관계"]), "sosok": sosok}
+            print(f"✅ {종류} 수집 (sosok={sosok})")
         except Exception as e:
-            print(f"  ⚠️ 선물수급 sosok={params['sosok']} 실패: {type(e).__name__}")
+            print(f"  ⚠️ {종류} sosok={sosok} 실패: {type(e).__name__}")
 
-    if not 결과["프로그램매매"] and not 결과["선물수급"]:
-        print("⚠️ 프로그램매매·선물 데이터 모두 미확보 — 해당 섹션은 비워집니다.")
+    미확보 = [k for k, v in 결과.items() if not v]
+    if 미확보:
+        print(f"⚠️ 미확보: {', '.join(미확보)} — 해당 부분은 '확인 불가'로 표시됩니다.")
     return 결과
 
 
