@@ -50,12 +50,6 @@
       "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000569"
     },
     {
-      "회사명": "계양전기",
-      "공시명": "[기재정정]주요사항보고서(유상증자결정)",
-      "별점": 4,
-      "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000546"
-    },
-    {
       "회사명": "오에스피",
       "공시명": "주요사항보고서(자기전환사채만기전취득결정)",
       "별점": 3,
@@ -66,12 +60,6 @@
       "공시명": "[기재정정]주요사항보고서(전환사채권발행결정)",
       "별점": 3,
       "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000556"
-    },
-    {
-      "회사명": "엔켐",
-      "공시명": "[기재정정]주요사항보고서(자기전환사채매도결정)",
-      "별점": 3,
-      "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000552"
     },
     {
       "회사명": "강동씨앤엘",
@@ -168,12 +156,6 @@
       "공시명": "주식등의대량보유상황보고서(일반)",
       "별점": 2,
       "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000602"
-    },
-    {
-      "회사명": "한국파마",
-      "공시명": "주식등의대량보유상황보고서(일반)",
-      "별점": 2,
-      "링크": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260724000586"
     }
   ],
   "지수수급": {
@@ -426,64 +408,84 @@
   },
   "뉴스원본": [
     {
+      "제목": "물가 또 꿈틀…석유 최고가격 묶고 유류세 인하 연장",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644966&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "중동 리스크에도 석유 최고가격 동결…“휘발유 1800원대 유지”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006336579&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "[올댓차이나] 홍콩 증시, 중동정세 긴박에 반락 마감…H주 0.98%↓",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014087067&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "반년 만에 13조…증시 호황 탄 5대 금융 '최대 순익'",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001259909&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "\"개미들 서서히 말라죽는다\"…삼전닉스, 외인·기관 '돌변' 매도",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001044704&office_id=031&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "AI 호황보다 오래 간다…산업 인프라 건설 붐에 주목하라[오미주]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005390686&office_id=008&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "우리투자증권, 상반기 영업이익 294억원…전년 대비 2배",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000888599&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "감사 잘하는 중견 회계법인도 대형 상장사 맡는다…‘군 상향 특례’ 도입",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005711990&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "중동 재격화에 대체에너지 수요 기대…신재생 ETF 훨훨",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644958&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "하나금융그룹 '금융인재 양성 프로젝트' 54명 수료",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000944250&office_id=469&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "“하닉ADR 사는 서학개미? 자멸적 형태”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002806875&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "주식 미리 산 뒤 특징주 보도…93억 챙긴 회계사·기자 구속 기소",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0009077881&office_id=421&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
+      "제목": "7월15일 이후 하루 빼고 사이드카…좀처럼 잡히지 않는 롤러코스피",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644957&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
       "제목": "에코프로비엠, 유증 정정신고…규모는 1.2조 유지",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644955&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     },
     {
       "제목": "두산로보틱스, 원엑시아 인수 효과에 2분기 매출 290%↑…AI 투자에 적자 지속",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002235393&office_id=138&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "닛케이 조정·엔저 겹악재…발 빼는 일학개미",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644951&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "[단독] 범LG가 3세가 이끄는 VC 푸른인베, IPO 추진",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005711984&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "창신메모리 IPO 기대에…최근 3개월 수익률 31% [ETF 줌인]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644949&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "어시스트핏, 피트니스 플랫폼의 배민되나…고객사 급속성장",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005390678&office_id=008&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "코스피 5%대 급락…'검은 금요일'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000888580&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "'증시 호황'에 금융지주 실적 날았다…5대 금융, 상반기 13조 '역대 최대'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014087016&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "국제유가 급등에 '와르르'…코스피 하루만에 또 6천피",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005313580&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "\"급등락 현기증난다\"… 5일연속 사이드카",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005711949&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "SK, 자회사 '시그넷' 상폐후 매각…앵커EP 품에 안기나",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005711947&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "최태원 재산분할 SK그룹株 주가 영향은…\"SKT 배당확대 유력\"",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005313579&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "崔, 현금·주식대출 총동원할 듯 … 일부 지분 매각 관측도",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005711945&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "‘특허 소송 패소’ SFC, 코스피 상장 예심 청구 [시그널]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644940&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "[체크!해주] 구글, 호실적에도 7% 급락…'현금 흐름'이 발목 잡았다",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001152970&office_id=417&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     }
-  ]
+  ],
+  "매크로": {
+    "원달러환율": {
+      "값": 1462.23,
+      "등락률": -0.91,
+      "표시명": "원/달러 환율",
+      "단위": ""
+    },
+    "WTI유가": {
+      "값": 89.04,
+      "등락률": -3.42,
+      "표시명": "WTI 유가",
+      "단위": "$"
+    },
+    "미국채10년": {
+      "값": 4.7,
+      "등락률": 0.99,
+      "표시명": "미국채 10년물",
+      "단위": "%"
+    }
+  }
 }
