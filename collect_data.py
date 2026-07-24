@@ -17,6 +17,7 @@ import json
 import os
 import io
 import math
+import yfinance as yf
 from datetime import datetime
 
 DART_KEY = os.environ.get("DART_API_KEY", "")
@@ -451,6 +452,47 @@ def collect_news():
 
 
 # ============================================================
+# ⑥ 환율 · 유가 · 금리 (yfinance)
+# ------------------------------------------------------------
+#   숫자만 가져온다. 해석 문장은 build 단계나 Claude가 붙이지 않고
+#   그냥 "숫자 그대로" 보여준다 (해석이 필요 없는 단순 시세이므로).
+# ============================================================
+MACRO_TICKERS = {
+    "원달러환율": {"심볼": "KRW=X", "표시명": "원/달러 환율", "단위": ""},
+    "WTI유가": {"심볼": "CL=F", "표시명": "WTI 유가", "단위": "$"},
+    "미국채10년": {"심볼": "^TNX", "표시명": "미국채 10년물", "단위": "%"},
+}
+
+
+def collect_macro():
+    결과 = {}
+    for key, info in MACRO_TICKERS.items():
+        try:
+            t = yf.Ticker(info["심볼"])
+            hist = t.history(period="5d")
+            if hist.empty or len(hist) < 2:
+                print(f"⚠️ {info['표시명']}: 데이터 부족")
+                결과[key] = None
+                continue
+            마지막 = float(hist["Close"].iloc[-1])
+            이전 = float(hist["Close"].iloc[-2])
+            등락률 = (마지막 - 이전) / 이전 * 100
+            결과[key] = {
+                "값": round(마지막, 2),
+                "등락률": round(등락률, 2),
+                "표시명": info["표시명"],
+                "단위": info["단위"],
+            }
+        except Exception as e:
+            print(f"⚠️ {info['표시명']} 수집 실패: {e}")
+            결과[key] = None
+
+    성공 = sum(1 for v in 결과.values() if v is not None)
+    print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
+    return 결과
+
+
+# ============================================================
 # 메인
 # ============================================================
 if __name__ == "__main__":
@@ -461,6 +503,7 @@ if __name__ == "__main__":
     테마결과 = collect_themes_and_gauge()
     게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
     뉴스원본 = collect_news()
+    매크로 = collect_macro()
 
     전체 = {
         "날짜": DATE,
@@ -469,6 +512,7 @@ if __name__ == "__main__":
         "주도섹터": 테마결과.get("주도섹터", []),
         "관제지수": 게이지,
         "뉴스원본": 뉴스원본,
+        "매크로": 매크로,
     }
 
     경로 = f"data_{DATE}.json"
