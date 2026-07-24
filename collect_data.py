@@ -105,12 +105,24 @@ def collect_index_and_flow():
         url = "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ"
         res = requests.get(url, headers=HEADERS).json()
         out = {}
-        for item in res["datas"]:
+        for i, item in enumerate(res["datas"]):
+            # 거래대금 관련 필드를 폭넓게 탐색 (API 필드명이 버전마다 다름)
+            대금 = None
+            for k in ("accumulatedTradingValue", "tradingValue", "accTradeValue",
+                      "accumulatedTradingVolume"):
+                if item.get(k) not in (None, ""):
+                    대금 = item.get(k)
+                    break
             out[item["stockName"]] = {
                 "종가": item["closePrice"],
                 "등락방향": item["compareToPreviousPrice"]["text"],
                 "등락률": item["fluctuationsRatio"],
+                "거래대금": 대금,
             }
+            # ⚠️ 진단: 첫 항목의 사용 가능한 필드명을 한 번 찍어둔다.
+            #    거래대금이 안 잡히면 이 로그를 보고 정확한 키를 연결할 수 있다.
+            if i == 0 and 대금 is None:
+                print(f"  ℹ️ 지수 API 필드 목록(거래대금 탐색용): {list(item.keys())}")
         return out
 
     def 수급(sosok):
@@ -578,7 +590,14 @@ def _fetch_transcript(video_id):
                          params={"videoId": video_id, "text": "true", "lang": "ko"},
                          headers={"x-api-key": SUPADATA_KEY}, timeout=45)
         if r.status_code != 200:
-            print(f"    ⚠️ 자막 실패 HTTP {r.status_code}: {r.text[:120]}")
+            # 왜 실패했는지 바로 알 수 있게 상세 출력
+            이유 = {
+                401: "API 키가 잘못됨",
+                404: "영상 없음/비공개",
+                403: "접근 제한 영상",
+                429: "무료 크레딧 소진 또는 속도제한",
+            }.get(r.status_code, "기타 오류")
+            print(f"    ⚠️ 자막 실패 HTTP {r.status_code} ({이유}): {r.text[:150]}")
             return None
         data = r.json()
         content = data.get("content")
