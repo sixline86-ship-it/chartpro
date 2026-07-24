@@ -256,19 +256,27 @@ def build_disclosures(disc, 공시해설=None):
     공시해설 = 공시해설 or {}
     if not disc:
         return '<p class="disc-note" style="color:#8a909a">오늘 수집된 관심 유형 공시가 없습니다.</p>'
-    rows = []
-    for item in disc[:5]:
+
+    def 한줄(item):
         회사 = item['회사명']
         해설 = 공시해설.get(회사, "")
         해설HTML = f'<p class="disc-why">💡 {해설}</p>' if 해설 else ''
-        rows.append(f'''
+        return f'''
     <a class="disc-row" href="{esc_url(item['링크'])}" target="_blank">
       <div class="disc-head"><span class="disc-name">{회사}</span>
         <span class="stars">{stars_html(item['별점'])}</span></div>
       <p class="disc-note">{item['공시명']} <span class="disc-lnk">↗ 상세보기</span></p>
       {해설HTML}
-    </a>''')
-    return "".join(rows)
+    </a>'''
+
+    앞3 = "".join(한줄(i) for i in disc[:3])
+    뒤 = disc[3:8]
+    if not 뒤:
+        return 앞3
+    뒤HTML = "".join(한줄(i) for i in 뒤)
+    return f'''{앞3}
+    <div class="hidden-block" id="moreDisc">{뒤HTML}</div>
+    <button class="more-btn dark" onclick="toggleMore('moreDisc',this,'▾ 공시 {len(뒤)}개 더보기')">▾ 공시 {len(뒤)}개 더보기</button>'''
 
 
 # ── 오늘의 공부 (단계별) ──
@@ -283,13 +291,25 @@ def build_study(공부):
         f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
         for k, v in 단계 if v)
     암기 = 공부.get("한줄암기", "")
+    심화단계 = [("역사에서", 공부.get("역사에서", "")),
+              ("투자 적용", 공부.get("투자적용", "")),
+              ("더 깊이", 공부.get("더깊이", ""))]
+    심화행 = "".join(
+        f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
+        for k, v in 심화단계 if v)
+    심화HTML = ""
+    if 심화행:
+        심화HTML = f'''
+    <div class="hidden-block" id="moreStudy" style="margin-top:.6rem">{심화행}</div>
+    <button class="more-btn" onclick="toggleMore('moreStudy',this,'▾ 심화 학습 더보기 (역사·투자 적용)')">▾ 심화 학습 더보기 (역사·투자 적용)</button>'''
+
     return f'''
   <div class="study-box">
     <p class="study-no">📚 오늘의 이슈에서 출제 · {공부.get("주제","")}</p>
     <p class="study-term">{공부.get("질문","")}</p>
     {행들}
     {f'<div class="study-memo">✏️ 한 줄 암기: {암기}</div>' if 암기 else ''}
-  </div>'''
+  </div>{심화HTML}'''
 
 
 # ── 핵심 이슈 ──
@@ -480,14 +500,49 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     <div class="mf-blk"><span class="mf-blk-t">{아이콘} {라벨}</span>
       <p class="mf-blk-b">{내용}</p></div>'''
 
+    # ── 현물 · 선물 · 옵션 막대그래프 (외국인 기준) ──
+    옵션 = _to_float((파생.get("옵션수급") or {}).get("외국인"))
+    항목 = [("현물", 현물), ("선물", 선물), ("옵션", 옵션)]
+    유효값 = [abs(v) for _, v in 항목 if v is not None]
+    최대 = max(유효값) if 유효값 else 1
+    막대들 = []
+    for 이름, v in 항목:
+        if v is None:
+            막대들.append(f'''
+      <div class="fx-row"><span class="fx-lb">{이름}</span>
+        <div class="fx-zone"><span class="fx-na">확인 불가</span></div>
+        <span class="fx-amt smut">—</span></div>''')
+            continue
+        폭 = max(4, abs(v) / 최대 * 46)   # 중앙 기준 좌우 최대 46%
+        방향 = "pos" if v > 0 else "neg"
+        cls = "up" if v > 0 else "dn"
+        막대들.append(f'''
+      <div class="fx-row"><span class="fx-lb">{이름}</span>
+        <div class="fx-zone">
+          <div class="fx-bar {방향}" style="width:{폭:.0f}%"></div>
+        </div>
+        <span class="fx-amt {cls}">{fmt_flow(v)}</span></div>''')
+
+    막대HTML = f'''
+    <div class="fx-wrap">
+      <p class="mf-sub">외국인 — 현물 · 선물 · 옵션 (0선 기준, 오른쪽=순매수)</p>
+      <div class="fx-chart">{"".join(막대들)}</div>
+    </div>'''
+
+    옵션방향 = 돈의흐름.get("옵션방향", "")
     체크 = 돈의흐름.get("체크포인트", "")
+    상세 = (블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")
+            + 블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")
+            + 블록("옵션이 가리키는 쪽", 옵션방향, "🎯"))
+
     return f'''
   <div class="mf-box">
     <p class="mf-badge">{돈의흐름.get('조합이름','—')}</p>
     <p class="mf-summary">{돈의흐름.get('숨은한줄','')}</p>
+    {막대HTML}
     {분면HTML}
-    {블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")}
-    {블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")}
+    <div class="hidden-block" id="moreFlow">{상세}</div>
+    <button class="more-btn dark" onclick="toggleMore('moreFlow',this,'▾ 자세한 해석 보기')">▾ 자세한 해석 보기</button>
     {f'<p class="mf-check">👀 <b>내일 확인:</b> {체크}</p>' if 체크 else ''}
     <p class="mf-todo">※ 차익거래는 선물·현물 가격차를 노린 기계적 매매, 비차익거래는 방향성 베팅입니다. 같은 순매도라도 성격이 다릅니다.</p>
   </div>'''
@@ -756,6 +811,19 @@ a{{color:inherit;text-decoration:none}}
 .mf-amt{{font-size:11px;font-weight:800;width:64px;text-align:right;flex-shrink:0}}
 .mf-amt.up{{color:#ff8a6e}} .mf-amt.dn{{color:#7fa8e8}}
 .mf-read{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:.9rem;padding-top:.8rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.fx-wrap{{margin-top:.8rem}}
+.fx-chart{{display:flex;flex-direction:column;gap:7px}}
+.fx-row{{display:flex;align-items:center;gap:8px}}
+.fx-lb{{font-size:11px;color:#c8ccd2;width:34px;flex-shrink:0;font-weight:600}}
+.fx-zone{{flex:1;position:relative;height:16px;background:rgba(255,255,255,.06);border-radius:4px}}
+.fx-zone::after{{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.3)}}
+.fx-bar{{position:absolute;top:2px;bottom:2px;border-radius:3px}}
+.fx-bar.pos{{left:50%;background:linear-gradient(90deg,#ff8a6e,#C1432B)}}
+.fx-bar.neg{{right:50%;background:linear-gradient(270deg,#7fa8e8,#2E6BD6)}}
+.fx-amt{{font-size:11px;font-weight:800;width:66px;text-align:right;flex-shrink:0}}
+.fx-amt.up{{color:#ff8a6e}} .fx-amt.dn{{color:#7fa8e8}} .fx-amt.smut{{color:#8a909a}}
+.fx-na{{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:9.5px;color:#8a909a}}
+.more-btn.dark{{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#c8ccd2;margin-top:.6rem}}
 .mf-badge{{display:inline-block;font-size:10.5px;font-weight:800;color:#ffd9c9;background:rgba(193,67,43,.3);padding:3px 11px;border-radius:99px;margin-bottom:.6rem}}
 .mf-blk{{background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.7rem .85rem;margin-top:.65rem}}
 .mf-blk-t{{font-size:10.5px;font-weight:800;color:#c8ccd2}}
@@ -859,7 +927,7 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label">🔍 프로의 시선</p>
   {build_insight(프로의시선)}
 
-  <p class="sec-label">💸 돈의 이동경로</p>
+  <p class="sec-label">💸 돈의 흐름을 보자</p>
   {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수, data.get('파생'))}
 
   <p class="sec-label">📋 오늘의 중요 공시</p>
