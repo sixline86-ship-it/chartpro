@@ -20,6 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
+SCRIPT_VERSION = "v2026.07.24-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -628,8 +629,9 @@ BRIEF_KEYWORDS = [
 # 제외 키워드 — 마감 브리핑이 아닌 영상
 BRIEF_EXCLUDE = ["#shorts", "shorts", "ETF골든타임", "광고"]
 
-# 자막을 통째로 넣으면 비용이 커지므로 앞부분만 사용 (핵심 요약이 앞에 나옴)
-TRANSCRIPT_LIMIT = 3500
+# 자막 분량. 앞부분만 보면 인사말·시황 나열에 그쳐 '차별적 관점'이 뒤에 묻힌다.
+# 조금 넉넉히 가져와 Claude가 특징적인 대목을 찾을 수 있게 한다.
+TRANSCRIPT_LIMIT = 7000
 
 
 def _find_today_video(channel_id):
@@ -733,7 +735,7 @@ def collect_briefings():
 # 메인
 # ============================================================
 if __name__ == "__main__":
-    print(f"=== {DATE} 데이터 수집 시작 ===\n")
+    print(f"=== {DATE} 데이터 수집 시작 | collect_data {SCRIPT_VERSION} ===\n")
 
     공시 = collect_dart()
     지수수급 = collect_index_and_flow()
@@ -746,6 +748,7 @@ if __name__ == "__main__":
 
     전체 = {
         "날짜": DATE,
+        "버전_collect": SCRIPT_VERSION,
         "공시": 공시,
         "지수수급": 지수수급,
         "주도섹터": 테마결과.get("주도섹터", []),
