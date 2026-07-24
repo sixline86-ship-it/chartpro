@@ -410,6 +410,10 @@
   },
   "뉴스원본": [
     {
+      "제목": "[속보]뉴욕증시 혼조 출발…S&P 0.1%↑ 나스닥 0.1%↓",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014087198&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
+    },
+    {
       "제목": "\"실시간 돈 삭제\" 개미들 레버리지 쓸어담더니…확 달라졌다 [분석+]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005313673&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     },
@@ -464,28 +468,24 @@
     {
       "제목": "호르무즈도 홍해도 막혀…두 달 만에 100달러 넘은 국제유가",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001960291&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
-    },
-    {
-      "제목": "잡히지 않는 롤러코스피…단일종목 레버리지 과열 조기차단",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004644969&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1462.5,
-      "등락률": -0.89,
+      "값": 1462.36,
+      "등락률": -0.9,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 89.87,
-      "등락률": -2.52,
+      "값": 90.24,
+      "등락률": -2.12,
       "표시명": "WTI 유가",
       "단위": "$"
     },
     "미국채10년": {
-      "값": 4.68,
-      "등락률": -0.43,
+      "값": 4.69,
+      "등락률": -0.34,
       "표시명": "미국채 10년물",
       "단위": "%"
     }
@@ -497,7 +497,8 @@
       "외국인": "-162.0",
       "기관계": "-131.0",
       "sosok": "03"
-    }
+    },
+    "옵션수급": null
   },
   "마감브리핑": [
     {
