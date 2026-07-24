@@ -493,6 +493,131 @@ def collect_macro():
 
 
 # ============================================================
+# ⑦ 마감 브리핑 — 방송사 유튜브 자막
+# ------------------------------------------------------------
+#   1단계) 유튜브 RSS(무료·키 불필요)로 각 채널의 '오늘 마감시황' 영상 찾기
+#   2단계) Supadata API로 그 영상의 자막 가져오기
+#
+#   ⚠️ 저작권 주의: 여기서 수집한 자막은 '원문 그대로 싣기 위한 것이 아니라'
+#      각 채널의 관점을 파악해 우리 문장으로 재구성하기 위한 재료다.
+#      generate_report.py 프롬프트에서 직접 인용을 금지하고 있다.
+#   ⚠️ 라이브 방송은 자막 API가 지원하지 않는다(완결된 영상만 가능).
+# ============================================================
+SUPADATA_KEY = os.environ.get("SUPADATA_API_KEY", "")
+
+# 확인된 채널 ID (RSS로 채널명·오늘 영상 교차검증 완료)
+BRIEF_CHANNELS = {
+    "삼프로TV": "UChlv4GSd7OQl3js-jkLOnFA",
+    "한국경제TV": "UCF8AeLlUbEpKju6v1H6p8Eg",
+    "이데일리TV": "UC8Sv6O3Ux8ePVqorx8aOBMg",
+}
+
+# 마감시황 영상을 고를 때 우선순위 키워드 (앞쪽일수록 우선)
+#   실제 채널들의 오늘 영상 제목을 보고 만든 목록이다.
+BRIEF_KEYWORDS = [
+    "마감시황", "마감 시황", "파이널포인트", "오늘장 마감", "장마감", "마감",
+    "종목쇼", "넥스트시그널", "클로징",
+    "코스피", "코스닥", "증시", "시황",
+]
+
+# 제외 키워드 — 마감 브리핑이 아닌 영상
+BRIEF_EXCLUDE = ["#shorts", "shorts", "ETF골든타임", "광고"]
+
+# 자막을 통째로 넣으면 비용이 커지므로 앞부분만 사용 (핵심 요약이 앞에 나옴)
+TRANSCRIPT_LIMIT = 3500
+
+
+def _find_today_video(channel_id):
+    """RSS에서 오늘 올라온 영상 중 마감시황에 가장 가까운 것을 고른다."""
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=12)
+        if r.status_code != 200:
+            return None
+    except Exception:
+        return None
+
+    entries = re.findall(r"<entry>(.*?)</entry>", r.text, re.S)
+    오늘 = f"{DATE[:4]}-{DATE[4:6]}-{DATE[6:]}"
+    후보 = []
+    for e in entries:
+        t = re.search(r"<title>(.*?)</title>", e)
+        v = re.search(r"<yt:videoId>(.*?)</yt:videoId>", e)
+        p = re.search(r"<published>(.*?)</published>", e)
+        if not (t and v and p):
+            continue
+        if not p.group(1).startswith(오늘):
+            continue  # 오늘 영상만
+        제목 = t.group(1).replace("&quot;", '"').replace("&amp;", "&")
+        # 마감 브리핑이 아닌 영상(쇼츠·정규 코너 등) 제외
+        if any(x.lower() in 제목.lower() for x in BRIEF_EXCLUDE):
+            continue
+        후보.append({"제목": 제목, "videoId": v.group(1),
+                    "링크": f"https://www.youtube.com/watch?v={v.group(1)}"})
+
+    if not 후보:
+        return None
+
+    # 키워드 우선순위대로 탐색
+    for kw in BRIEF_KEYWORDS:
+        for c in 후보:
+            if kw in c["제목"]:
+                return c
+    # ⚠️ 키워드가 하나도 안 맞으면 '마감 브리핑이 아니다'고 판단해 건너뛴다.
+    #    아무 영상이나 가져오면 엉뚱한 콘텐츠가 리포트에 실린다.
+    return None
+
+
+def _fetch_transcript(video_id):
+    """Supadata로 자막 텍스트를 가져온다."""
+    if not SUPADATA_KEY:
+        return None
+    url = "https://api.supadata.ai/v1/youtube/transcript"
+    try:
+        r = requests.get(url,
+                         params={"videoId": video_id, "text": "true", "lang": "ko"},
+                         headers={"x-api-key": SUPADATA_KEY}, timeout=45)
+        if r.status_code != 200:
+            print(f"    ⚠️ 자막 실패 HTTP {r.status_code}: {r.text[:120]}")
+            return None
+        data = r.json()
+        content = data.get("content")
+        if isinstance(content, list):  # 타임스탬프 형식으로 온 경우
+            content = " ".join(seg.get("text", "") for seg in content)
+        return (content or "").strip()
+    except Exception as e:
+        print(f"    ⚠️ 자막 요청 오류: {type(e).__name__}")
+        return None
+
+
+def collect_briefings():
+    if not SUPADATA_KEY:
+        print("⚠️ SUPADATA_API_KEY 없음 → 마감 브리핑 건너뜀")
+        return []
+
+    import time
+    결과 = []
+    for 이름, cid in BRIEF_CHANNELS.items():
+        영상 = _find_today_video(cid)
+        if not 영상:
+            print(f"  · {이름}: 오늘 영상 없음")
+            continue
+        print(f"  · {이름}: {영상['제목'][:40]}")
+        자막 = _fetch_transcript(영상["videoId"])
+        if not 자막:
+            # 자막이 없어도 제목·링크는 남긴다 (링크 안내용)
+            결과.append({"채널": 이름, "제목": 영상["제목"], "링크": 영상["링크"], "자막": ""})
+        else:
+            결과.append({"채널": 이름, "제목": 영상["제목"], "링크": 영상["링크"],
+                        "자막": 자막[:TRANSCRIPT_LIMIT]})
+        time.sleep(2.5)  # API 속도제한(10초당 5건) 여유 있게 준수
+
+    있음 = sum(1 for b in 결과 if b["자막"])
+    print(f"✅ 마감 브리핑 {len(결과)}개 채널 (자막 확보 {있음}건)")
+    return 결과
+
+
+# ============================================================
 # 메인
 # ============================================================
 if __name__ == "__main__":
@@ -504,6 +629,7 @@ if __name__ == "__main__":
     게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
     뉴스원본 = collect_news()
     매크로 = collect_macro()
+    마감브리핑 = collect_briefings()
 
     전체 = {
         "날짜": DATE,
@@ -513,6 +639,7 @@ if __name__ == "__main__":
         "관제지수": 게이지,
         "뉴스원본": 뉴스원본,
         "매크로": 매크로,
+        "마감브리핑": 마감브리핑,
     }
 
     경로 = f"data_{DATE}.json"
