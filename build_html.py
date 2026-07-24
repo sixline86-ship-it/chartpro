@@ -6,6 +6,7 @@
 
 import json
 import os
+import html
 from datetime import datetime
 
 DATE = datetime.now().strftime("%Y%m%d")
@@ -29,6 +30,15 @@ def load_json(path):
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def esc_url(u):
+    """URL을 href에 넣기 전에 &를 &amp;로 바꾼다.
+    ⚠️ 이걸 안 하면 '&section_id'의 '&sect'를 브라우저가 § 기호로 해석해
+    링크가 깨진다(실제로 겪었던 버그)."""
+    if not u:
+        return "#"
+    return html.escape(str(u), quote=True)
 
 
 def money_class(text):
@@ -242,18 +252,44 @@ def build_sectors(주도섹터):
 
 
 # ── 공시 ─────────────────────────────────────────────────
-def build_disclosures(disc):
+def build_disclosures(disc, 공시해설=None):
+    공시해설 = 공시해설 or {}
     if not disc:
         return '<p class="disc-note" style="color:#8a909a">오늘 수집된 관심 유형 공시가 없습니다.</p>'
     rows = []
     for item in disc[:5]:
+        회사 = item['회사명']
+        해설 = 공시해설.get(회사, "")
+        해설HTML = f'<p class="disc-why">💡 {해설}</p>' if 해설 else ''
         rows.append(f'''
-    <a class="disc-row" href="{item['링크']}" target="_blank">
-      <div class="disc-head"><span class="disc-name">{item['회사명']}</span>
+    <a class="disc-row" href="{esc_url(item['링크'])}" target="_blank">
+      <div class="disc-head"><span class="disc-name">{회사}</span>
         <span class="stars">{stars_html(item['별점'])}</span></div>
       <p class="disc-note">{item['공시명']} <span class="disc-lnk">↗ 상세보기</span></p>
+      {해설HTML}
     </a>''')
     return "".join(rows)
+
+
+# ── 오늘의 공부 (단계별) ──
+def build_study(공부):
+    if not 공부:
+        return '<div class="pending">⏳ 오늘의 공부 — 생성 실패</div>'
+    if isinstance(공부, str):  # 예전 형식(문자열)도 안전하게 처리
+        return f'<div class="study-box">📚 {공부}</div>'
+    단계 = [("개념", 공부.get("개념", "")), ("원리", 공부.get("원리", "")),
+            ("오늘 연결", 공부.get("오늘연결", ""))]
+    행들 = "".join(
+        f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
+        for k, v in 단계 if v)
+    암기 = 공부.get("한줄암기", "")
+    return f'''
+  <div class="study-box">
+    <p class="study-no">📚 오늘의 이슈에서 출제 · {공부.get("주제","")}</p>
+    <p class="study-term">{공부.get("질문","")}</p>
+    {행들}
+    {f'<div class="study-memo">✏️ 한 줄 암기: {암기}</div>' if 암기 else ''}
+  </div>'''
 
 
 # ── 핵심 이슈 ──
@@ -281,7 +317,7 @@ def one_news_item(idx, item):
     본문 = f'''
       <span class="news-tag {cls}">{tag}</span>{제목}'''
     if 링크:
-        title_html = f'<a href="{링크}" target="_blank">{본문}</a>'
+        title_html = f'<a href="{esc_url(링크)}" target="_blank">{본문}</a>'
     else:
         title_html = 본문
     return f'''
@@ -338,24 +374,141 @@ def build_insight(프로의시선):
 def build_briefings(마감브리핑):
     if not 마감브리핑:
         return '<div class="pending">⏳ 오늘 마감 브리핑 영상을 찾지 못했습니다</div>'
-    rows = []
-    for b in 마감브리핑:
-        요약 = b.get("summary", "")
-        앵글 = b.get("angle", "")
-        본문 = f'<p class="tv-sum">{요약}</p>' if 요약 else '<p class="tv-sum" style="color:#a8a49c">요약 없음 — 원본 영상에서 확인하세요</p>'
-        rows.append(f'''
-    <div class="tv-row-wrap">
-      <div class="tv-row">
-        <span class="tv-ch">{b.get('채널','')}</span>
-        {f'<span class="tv-angle">{앵글}</span>' if 앵글 else ''}
-        <a class="tv-see" href="{b.get('링크','#')}" target="_blank">영상 보기 ↗</a>
-      </div>
-      <p class="tv-title">{b.get('제목','')}</p>
-      {본문}
-    </div>''')
+
+    # 요약이 있는 것을 대표로 우선 선택
+    요약있음 = [b for b in 마감브리핑 if b.get("summary")]
+    대표 = 요약있음[0] if 요약있음 else 마감브리핑[0]
+    나머지 = [b for b in 마감브리핑 if b is not 대표]
+
+    대표HTML = f'''
+    <div class="tv-lead">
+      <span class="tv-lead-badge">⭐ 오늘의 대표 · {대표.get('채널','')}</span>
+      <p class="tv-lead-ch"><span class="tv-dot"></span>{대표.get('채널','')}
+        {f"· {대표.get('angle')}" if 대표.get('angle') else ''}</p>
+      <p class="tv-title">{대표.get('제목','')}</p>
+      <p class="tv-lead-body">{대표.get('summary','') or '요약 없음 — 원본 영상에서 확인하세요'}</p>
+      <a class="tv-see" href="{esc_url(대표.get('링크'))}" target="_blank">영상 보기 ↗</a>
+    </div>'''
+
+    행들 = []
+    for i, b in enumerate(나머지):
+        요약 = b.get("summary", "") or "요약 없음 — 원본 영상에서 확인하세요"
+        행들.append(f'''
+      <div class="tv-row-wrap">
+        <div class="tv-row tv-clickable" onclick="toggleTV('tvbody{i}',this)">
+          <span class="tv-ch">{b.get('채널','')}</span>
+          {f'<span class="tv-angle">{b.get("angle")}</span>' if b.get('angle') else ''}
+          <span class="tv-see-sm">보기 ▾</span>
+        </div>
+        <div class="tv-body-hidden" id="tvbody{i}">
+          <p class="tv-title">{b.get('제목','')}</p>
+          <p class="tv-sum">{요약}</p>
+          <a class="tv-link-sm" href="{esc_url(b.get('링크'))}" target="_blank">영상 보기 ↗</a>
+        </div>
+      </div>''')
+
+    나머지HTML = f'<div class="tv-others">{"".join(행들)}</div>' if 행들 else ''
+
     return f'''
-  <div class="tv-wrap">{"".join(rows)}
+  <div class="tv-wrap">{대표HTML}{나머지HTML}
     <p class="tv-note">📡 각 채널의 관점을 요약한 것으로, 원문을 그대로 옮기지 않았습니다. 자세한 내용은 각 영상 링크에서 확인하세요.</p>
+  </div>'''
+
+
+# ── 어제의 채점표 ──
+def build_scorecard(채점표, 어제날짜=""):
+    if not 채점표:
+        return ""  # 첫 발행이면 아예 섹션을 숨긴다
+    rows = []
+    for it in 채점표:
+        결과 = it.get("결과", "△")
+        cls = {"○": "sc-o", "×": "sc-x"}.get(결과, "sc-t")
+        rows.append(f'''
+    <div class="score-row">
+      <span class="score-mark {cls}">{결과}</span>
+      <div class="score-body">
+        <p class="score-item">{it.get('항목','')}</p>
+        <p class="score-why">{it.get('근거','')}</p>
+      </div>
+    </div>''')
+    맞은수 = sum(1 for it in 채점표 if it.get("결과") == "○")
+    return f'''
+  <div class="score-box">
+    <p class="score-head">📋 어제 예고한 관전포인트를 오늘 결과로 채점했습니다
+      <span class="score-tally">{맞은수} / {len(채점표)} 적중</span></p>
+    {"".join(rows)}
+    <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
+  </div>'''
+
+
+# ── 돈의 이동경로 ──
+def build_moneyflow(돈의흐름, 지수, 코수, 닥수):
+    if not 돈의흐름:
+        return '<div class="pending">⏳ 돈의 이동경로 — 생성 실패</div>'
+
+    # ① 시장 거래대금 + ② 코스닥 비중 (데이터 있을 때만)
+    코대금 = _to_float((지수.get("코스피") or {}).get("거래대금"))
+    닥대금 = _to_float((지수.get("코스닥") or {}).get("거래대금"))
+    비중HTML = ""
+    if 코대금 and 닥대금 and (코대금 + 닥대금) > 0:
+        닥비중 = 닥대금 / (코대금 + 닥대금) * 100
+        비중HTML = f'''
+    <div class="mf-bar-wrap">
+      <p class="mf-sub">시장 거래대금 배분 — 코스닥 비중 {닥비중:.0f}%</p>
+      <div class="mf-bar">
+        <div class="mf-seg mf-kospi" style="width:{100-닥비중:.0f}%">코스피 {100-닥비중:.0f}%</div>
+        <div class="mf-seg mf-kosdaq" style="width:{닥비중:.0f}%">코스닥 {닥비중:.0f}%</div>
+      </div>
+      <p class="mf-hint">코스닥 비중이 높을수록 자금이 중소형 성장주로 쏠렸다는 뜻입니다.</p>
+    </div>'''
+
+    # ③ 투자자별 순매수 시각화
+    def 수급바(라벨, 값):
+        v = _to_float(값)
+        if v is None:
+            return ""
+        cls = "up" if v > 0 else "dn"
+        폭 = min(100, abs(v) / 300)  # 3조=100%
+        return f'''
+      <div class="mf-flow-row">
+        <span class="mf-who">{라벨}</span>
+        <div class="mf-track"><div class="mf-fill {cls}" style="width:{max(3,폭):.0f}%"></div></div>
+        <span class="mf-amt {cls}">{fmt_flow(값)}</span>
+      </div>'''
+
+    수급HTML = f'''
+    <div class="mf-flows">
+      <p class="mf-sub">누가 샀고 누가 팔았나 (코스피)</p>
+      {수급바("외국인", 코수.get("외국인"))}
+      {수급바("기관", 코수.get("기관계"))}
+      {수급바("개인", 코수.get("개인"))}
+    </div>'''
+
+    def 칩들(목록, cls):
+        if not 목록:
+            return '<span class="mf-none">—</span>'
+        return "".join(
+            f'<span class="mf-chip {cls}" title="{i.get("설명","")}">{i.get("이름","")}</span>'
+            for i in 목록)
+
+    return f'''
+  <div class="mf-box">
+    <p class="mf-summary">💸 {돈의흐름.get('요약','')}</p>
+    <div class="mf-move">
+      <div class="mf-side">
+        <p class="mf-side-t out">빠져나간 곳</p>
+        <div class="mf-chips">{칩들(돈의흐름.get('유출'), 'out')}</div>
+      </div>
+      <div class="mf-arrow">→</div>
+      <div class="mf-side">
+        <p class="mf-side-t in">들어온 곳</p>
+        <div class="mf-chips">{칩들(돈의흐름.get('유입'), 'in')}</div>
+      </div>
+    </div>
+    {비중HTML}
+    {수급HTML}
+    <p class="mf-read">🔍 {돈의흐름.get('해석','')}</p>
+    <p class="mf-todo">※ 선물 수급·예탁금·신용융자 지표는 데이터 소스 연결 후 추가됩니다.</p>
   </div>'''
 
 
@@ -507,7 +660,7 @@ a{{color:inherit;text-decoration:none}}
 .sc-price{{text-align:right;color:var(--sub);font-variant-numeric:tabular-nums}}
 .sc-rate{{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}}
 .sc-rate.up{{color:var(--up)}} .sc-rate.dn{{color:var(--dn)}}
-.sc-vol{{text-align:right;color:var(--up);font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}}
+.sc-vol{{text-align:right;color:#8a6d3b;font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}}
 
 /* ── 공시 ── */
 .disc-box{{background:#23262b;border-radius:var(--rlg);padding:1rem 1.15rem;margin-bottom:.6rem}}
@@ -564,6 +717,65 @@ a{{color:inherit;text-decoration:none}}
 .tv-title{{font-size:11.5px;color:var(--sub);line-height:1.5;margin-bottom:4px}}
 .tv-sum{{font-size:12.5px;color:var(--ink);line-height:1.75}}
 .tv-note{{font-size:10px;color:var(--sub);line-height:1.6;padding:.7rem 1.1rem;background:var(--bg2)}}
+.tv-lead{{padding:1rem 1.15rem .95rem;background:linear-gradient(135deg,#F7F3EC,#FBF9F5);border-bottom:.5px solid var(--line)}}
+.tv-lead-badge{{display:inline-block;font-size:10.5px;font-weight:800;color:#8a5a1f;background:#F3E4C8;padding:3px 10px;border-radius:99px;margin-bottom:.55rem}}
+.tv-lead-ch{{font-size:14px;font-weight:800;color:var(--ink);margin-bottom:.45rem;display:flex;align-items:center;gap:7px}}
+.tv-dot{{width:7px;height:7px;border-radius:50%;background:var(--up);flex-shrink:0}}
+.tv-lead-body{{font-size:12.5px;color:var(--ink);line-height:1.85;margin-bottom:.6rem}}
+.tv-others{{padding:.15rem 1.15rem}}
+.tv-clickable{{cursor:pointer}}
+.tv-see-sm{{margin-left:auto;font-size:10.5px;font-weight:700;color:#fff;background:#23262b;padding:3px 12px;border-radius:99px;white-space:nowrap}}
+.tv-body-hidden{{max-height:0;overflow:hidden;transition:max-height .28s ease}}
+.tv-body-hidden.open{{max-height:500px;padding-bottom:11px}}
+.tv-link-sm{{display:inline-block;font-size:10.5px;font-weight:700;color:var(--dn);margin-top:5px}}
+.disc-why{{font-size:11px;color:#9fb4cc;line-height:1.6;margin-top:6px;padding-left:2px}}
+.study-no{{font-size:10px;font-weight:700;color:#3B6D11;letter-spacing:.06em}}
+.study-term{{font-size:15px;font-weight:800;color:#2c520c;margin:4px 0 10px;line-height:1.4}}
+.study-step{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #d5e3c2;font-size:12.5px;line-height:1.75;color:#3B6D11}}
+.study-step:last-of-type{{border-bottom:none}}
+.study-k{{font-size:10px;font-weight:800;background:#d9e8c4;color:#2c520c;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.study-memo{{background:#2c520c;color:#eef5e2;border-radius:var(--rmd);padding:.6rem .9rem;font-size:12px;font-weight:600;margin-top:.7rem;line-height:1.6}}
+
+/* ── 어제의 채점표 ── */
+.score-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
+.score-head{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.7rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.score-tally{{font-size:10.5px;font-weight:700;color:#8a5a1f;background:#F3E4C8;padding:2px 9px;border-radius:99px}}
+.score-row{{display:flex;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.score-row:last-of-type{{border-bottom:none}}
+.score-mark{{font-size:15px;font-weight:800;width:22px;text-align:center;flex-shrink:0;line-height:1.5}}
+.sc-o{{color:var(--up)}} .sc-x{{color:var(--dn)}} .sc-t{{color:#a8a49c}}
+.score-item{{font-size:12px;color:var(--ink);line-height:1.6;font-weight:600}}
+.score-why{{font-size:11px;color:var(--sub);line-height:1.6;margin-top:3px}}
+.score-foot{{font-size:9.5px;color:var(--sub);margin-top:.6rem;line-height:1.5}}
+
+/* ── 돈의 이동경로 ── */
+.mf-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1.05rem 1.15rem;color:#e8e6e2;margin-bottom:1rem}}
+.mf-summary{{font-size:13px;font-weight:700;color:#fff;line-height:1.7;margin-bottom:.9rem}}
+.mf-move{{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.75rem .85rem}}
+.mf-side{{flex:1;min-width:0}}
+.mf-side-t{{font-size:10px;font-weight:700;margin-bottom:6px}}
+.mf-side-t.out{{color:#7fa8e8}} .mf-side-t.in{{color:#ff8a6e}}
+.mf-chips{{display:flex;flex-wrap:wrap;gap:4px}}
+.mf-chip{{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap}}
+.mf-chip.out{{background:rgba(46,107,214,.25);color:#bcd2f5}}
+.mf-chip.in{{background:rgba(193,67,43,.28);color:#ffd0c0}}
+.mf-none{{font-size:10.5px;color:#8a909a}}
+.mf-arrow{{font-size:18px;color:#8a909a;flex-shrink:0}}
+.mf-sub{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:.9rem 0 .45rem}}
+.mf-bar{{display:flex;height:22px;border-radius:6px;overflow:hidden}}
+.mf-seg{{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff}}
+.mf-kospi{{background:#4a6fa5}} .mf-kosdaq{{background:#b5652f}}
+.mf-hint{{font-size:9.5px;color:#8a909a;margin-top:5px;line-height:1.5}}
+.mf-flow-row{{display:flex;align-items:center;gap:8px;margin-bottom:6px}}
+.mf-who{{font-size:11px;color:#c8ccd2;width:42px;flex-shrink:0}}
+.mf-track{{flex:1;height:9px;background:rgba(255,255,255,.08);border-radius:5px;overflow:hidden}}
+.mf-fill{{height:100%;border-radius:5px}}
+.mf-fill.up{{background:linear-gradient(90deg,#ff8a6e,#C1432B)}}
+.mf-fill.dn{{background:linear-gradient(90deg,#7fa8e8,#2E6BD6)}}
+.mf-amt{{font-size:11px;font-weight:800;width:64px;text-align:right;flex-shrink:0}}
+.mf-amt.up{{color:#ff8a6e}} .mf-amt.dn{{color:#7fa8e8}}
+.mf-read{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:.9rem;padding-top:.8rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.mf-todo{{font-size:9.5px;color:#8a909a;margin-top:.6rem;line-height:1.5}}
 
 /* ── 오늘의 한 문장 (필사 코너) ── */
 .quote-box{{background:linear-gradient(135deg,#1c1f24,#2c3038);border-radius:var(--rlg);padding:1.6rem 1.4rem;color:#e8e6e2;margin-bottom:1rem;text-align:center;position:relative;overflow:hidden}}
@@ -636,24 +848,6 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label">🔥 핵심 이슈</p>
   {build_issues(해석.get('핵심이슈'))}
 
-  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
-  {build_sectors(data.get('주도섹터'))}
-
-  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
-  {build_briefings(해석.get('마감브리핑'))}
-
-  <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
-  {build_news(해석.get('핵심뉴스'))}
-
-  <p class="sec-label">📋 오늘의 공시</p>
-  <div class="disc-box">
-    {build_disclosures(data.get('공시'))}
-    <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
-  </div>
-
-  <p class="sec-label">🔍 프로의 시선</p>
-  {build_insight(프로의시선)}
-
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
     {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
@@ -661,11 +855,34 @@ a{{color:inherit;text-decoration:none}}
     {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
   </div>
 
-  <p class="sec-label">📚 오늘의 공부</p>
-  {f'<div class="study-box">📚 {오늘의공부}</div>' if 오늘의공부 else '<div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>'}
+  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  {build_sectors(data.get('주도섹터'))}
 
-  <p class="sec-label">🗼 다음 거래일 관전포인트</p>
+  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  {build_briefings(해석.get('마감브리핑'))}
+
+  <p class="sec-label">🔍 프로의 시선</p>
+  {build_insight(프로의시선)}
+
+  <p class="sec-label">💸 돈의 이동경로</p>
+  {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수)}
+
+  <p class="sec-label">📋 오늘의 중요 공시</p>
+  <div class="disc-box">
+    {build_disclosures(data.get('공시'), 해석.get('공시해설'))}
+    <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
+  </div>
+
+  <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
+  {build_news(해석.get('핵심뉴스'))}
+
+  {f'<p class="sec-label">✅ 어제의 채점표</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
+
+  <p class="sec-label">🗼 내일의 관전 포인트</p>
   {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
+
+  <p class="sec-label">📚 오늘의 공부</p>
+  {build_study(오늘의공부)}
 
   <!-- 오늘의 한 문장 (필사 코너) -->
   <p class="sec-label">✍️ 오늘의 한 문장</p>
@@ -682,6 +899,12 @@ function toggleMore(id,btn,label){{
   var el=document.getElementById(id);
   var open=el.classList.toggle('open');
   btn.textContent=open?'▴ 접기':label;
+}}
+function toggleTV(id,el){{
+  var body=document.getElementById(id);
+  var open=body.classList.toggle('open');
+  var see=el.querySelector('.tv-see-sm');
+  if(see) see.textContent = open ? '접기 ▴' : '보기 ▾';
 }}
 </script>
 </body>
