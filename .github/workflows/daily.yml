@@ -48,6 +48,7 @@ jobs:
       - name: 데이터 수집
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         run: python collect_data.py
 
       # ── ② 해석글 생성 ──
