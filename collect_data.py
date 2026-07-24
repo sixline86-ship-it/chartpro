@@ -504,6 +504,85 @@ def collect_macro():
     return 결과
 
 
+def collect_program_and_futures():
+    """프로그램매매(차익/비차익)와 선물 수급을 수집한다.
+
+    ⚠️ 네이버 페이지 구조를 이 환경에서 검증할 수 없어, 여러 후보 URL을 순서대로
+       시도하고 실패하면 어떤 표가 있었는지 로그로 남긴다.
+       첫 실행 로그를 보고 정확한 위치를 확정하면 된다.
+
+    왜 중요한가:
+      · 차익거래 = 선물-현물 가격차를 노린 기계적 매매 (방향성 아님)
+      · 비차익거래 = 선물과 무관한 바스켓 매매 (실제 방향성 베팅)
+      → 같은 '프로그램 매도 1조'라도 어느 쪽이냐에 따라 해석이 정반대다.
+    """
+    결과 = {"프로그램매매": None, "선물수급": None}
+
+    # ── 프로그램매매 ──
+    후보 = [
+        "https://finance.naver.com/sise/programDeal.naver",
+        "https://finance.naver.com/sise/sise_program_deal.naver",
+    ]
+    for url in 후보:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12)
+            if r.status_code != 200:
+                continue
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+            찾음 = None
+            for t in tables:
+                cols = " ".join(str(c) for c in t.columns)
+                if "차익" in cols or "비차익" in cols:
+                    찾음 = t
+                    break
+            if 찾음 is not None:
+                # 첫 데이터 행을 오늘치로 사용
+                행 = 찾음.dropna(how="all").iloc[0].to_dict()
+                결과["프로그램매매"] = {str(k): str(v) for k, v in 행.items()}
+                print(f"✅ 프로그램매매 수집 ({url.split('/')[-1]})")
+                break
+            else:
+                print(f"  ℹ️ 프로그램매매 표 못 찾음. 표 {len(tables)}개의 컬럼:")
+                for i, t in enumerate(tables[:4]):
+                    print(f"     표{i}: {list(t.columns)[:8]}")
+        except Exception as e:
+            print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}")
+
+    # ── 선물 투자자별 수급 ──
+    선물후보 = [
+        ("https://finance.naver.com/sise/investorDealTrendDay.naver",
+         {"bizdate": DATE, "sosok": "03", "page": "1"}),   # 03=선물 가능성
+        ("https://finance.naver.com/sise/investorDealTrendDay.naver",
+         {"bizdate": DATE, "sosok": "04", "page": "1"}),
+    ]
+    for url, params in 선물후보:
+        try:
+            r = requests.get(url, headers=HEADERS, params=params, timeout=12)
+            if r.status_code != 200:
+                continue
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+            if not tables or tables[0].shape[0] < 2:
+                continue
+            표 = tables[0]
+            표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
+            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
+            if len(실) == 0:
+                continue
+            row = 실.iloc[0]
+            결과["선물수급"] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
+                            "기관계": str(row["기관계"]), "sosok": params["sosok"]}
+            print(f"✅ 선물수급 수집 (sosok={params['sosok']})")
+            break
+        except Exception as e:
+            print(f"  ⚠️ 선물수급 sosok={params['sosok']} 실패: {type(e).__name__}")
+
+    if not 결과["프로그램매매"] and not 결과["선물수급"]:
+        print("⚠️ 프로그램매매·선물 데이터 모두 미확보 — 해당 섹션은 비워집니다.")
+    return 결과
+
+
 # ============================================================
 # ⑦ 마감 브리핑 — 방송사 유튜브 자막
 # ------------------------------------------------------------
@@ -648,6 +727,7 @@ if __name__ == "__main__":
     게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
     뉴스원본 = collect_news()
     매크로 = collect_macro()
+    파생 = collect_program_and_futures()
     마감브리핑 = collect_briefings()
 
     전체 = {
@@ -658,6 +738,7 @@ if __name__ == "__main__":
         "관제지수": 게이지,
         "뉴스원본": 뉴스원본,
         "매크로": 매크로,
+        "파생": 파생,
         "마감브리핑": 마감브리핑,
     }
 
