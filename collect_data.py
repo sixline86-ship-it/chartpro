@@ -519,35 +519,47 @@ def collect_program_and_futures():
     결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
 
     # ── 프로그램매매 ──
+    #   ✅ 실제 확인된 주소를 최우선으로 사용
     후보 = [
+        "https://finance.naver.com/sise/sise_program.naver",
         "https://finance.naver.com/sise/programDeal.naver",
-        "https://finance.naver.com/sise/sise_program_deal.naver",
     ]
     for url in 후보:
         try:
             r = requests.get(url, headers=HEADERS, timeout=12)
             if r.status_code != 200:
+                print(f"  ℹ️ {url.split('/')[-1]} → HTTP {r.status_code}")
                 continue
             r.encoding = "euc-kr"
             tables = read_html_safe(r.text)
+
             찾음 = None
             for t in tables:
-                cols = " ".join(str(c) for c in t.columns)
-                if "차익" in cols or "비차익" in cols:
+                # 네이버 표는 헤더가 2단(MultiIndex)인 경우가 많아 평탄화해서 검사
+                컬럼문자열 = " ".join(
+                    " ".join(str(x) for x in c) if isinstance(c, tuple) else str(c)
+                    for c in t.columns)
+                본문문자열 = " ".join(str(v) for v in t.head(3).values.ravel())
+                if ("차익" in 컬럼문자열 or "차익" in 본문문자열):
                     찾음 = t
                     break
+
             if 찾음 is not None:
-                # 첫 데이터 행을 오늘치로 사용
+                # MultiIndex면 컬럼명을 '상위_하위' 형태로 평탄화
+                if isinstance(찾음.columns, pd.MultiIndex):
+                    찾음.columns = ["_".join(str(x) for x in c).strip()
+                                   for c in 찾음.columns]
                 행 = 찾음.dropna(how="all").iloc[0].to_dict()
                 결과["프로그램매매"] = {str(k): str(v) for k, v in 행.items()}
                 print(f"✅ 프로그램매매 수집 ({url.split('/')[-1]})")
+                print(f"   항목: {list(결과['프로그램매매'].keys())[:8]}")
                 break
             else:
-                print(f"  ℹ️ 프로그램매매 표 못 찾음. 표 {len(tables)}개의 컬럼:")
-                for i, t in enumerate(tables[:4]):
-                    print(f"     표{i}: {list(t.columns)[:8]}")
+                print(f"  ℹ️ '차익' 항목을 못 찾음. 표 {len(tables)}개의 컬럼:")
+                for i, t in enumerate(tables[:5]):
+                    print(f"     표{i} {t.shape}: {list(t.columns)[:6]}")
         except Exception as e:
-            print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}")
+            print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}: {e}")
 
     # ── 선물·옵션 투자자별 수급 ──
     #   sosok 코드가 문서화돼 있지 않아 여러 값을 시도하고,
