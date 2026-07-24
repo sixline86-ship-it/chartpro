@@ -442,73 +442,54 @@ def build_scorecard(채점표, 어제날짜=""):
 
 
 # ── 돈의 이동경로 ──
-def build_moneyflow(돈의흐름, 지수, 코수, 닥수):
+def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     if not 돈의흐름:
         return '<div class="pending">⏳ 돈의 이동경로 — 생성 실패</div>'
+    파생 = 파생 or {}
 
-    # ① 시장 거래대금 + ② 코스닥 비중 (데이터 있을 때만)
-    코대금 = _to_float((지수.get("코스피") or {}).get("거래대금"))
-    닥대금 = _to_float((지수.get("코스닥") or {}).get("거래대금"))
-    비중HTML = ""
-    if 코대금 and 닥대금 and (코대금 + 닥대금) > 0:
-        닥비중 = 닥대금 / (코대금 + 닥대금) * 100
-        비중HTML = f'''
-    <div class="mf-bar-wrap">
-      <p class="mf-sub">시장 거래대금 배분 — 코스닥 비중 {닥비중:.0f}%</p>
-      <div class="mf-bar">
-        <div class="mf-seg mf-kospi" style="width:{100-닥비중:.0f}%">코스피 {100-닥비중:.0f}%</div>
-        <div class="mf-seg mf-kosdaq" style="width:{닥비중:.0f}%">코스닥 {닥비중:.0f}%</div>
+    # ── 현물 × 선물 4분면 위치 계산 ──
+    현물 = _to_float(코수.get("외국인"))
+    선물 = _to_float((파생.get("선물수급") or {}).get("외국인"))
+    분면HTML = ""
+    if 현물 is not None and 선물 is not None:
+        현부호 = "매수" if 현물 > 0 else "매도"
+        선부호 = "매수" if 선물 > 0 else "매도"
+        칸 = [("현물 매수", "선물 매수"), ("현물 매수", "선물 매도"),
+              ("현물 매도", "선물 매수"), ("현물 매도", "선물 매도")]
+        현재칸 = (f"현물 {현부호}", f"선물 {선부호}")
+        셀 = "".join(
+            f'<div class="q-cell {"on" if c == 현재칸 else ""}">'
+            f'<span class="q-t">{c[0]}</span><span class="q-t">{c[1]}</span></div>'
+            for c in 칸)
+        분면HTML = f'''
+    <div class="q-wrap">
+      <p class="mf-sub">외국인 현물 × 선물 조합</p>
+      <div class="q-grid">{셀}</div>
+      <div class="q-nums">
+        <span>현물 <b class="{'up' if 현물>0 else 'dn'}">{fmt_flow(현물)}</b></span>
+        <span>선물 <b class="{'up' if 선물>0 else 'dn'}">{fmt_flow(선물)}</b></span>
       </div>
-      <p class="mf-hint">코스닥 비중이 높을수록 자금이 중소형 성장주로 쏠렸다는 뜻입니다.</p>
     </div>'''
+    else:
+        분면HTML = '<p class="mf-na">※ 선물 수급 데이터 미확보 — 조합 분석은 다음 발행부터 제공됩니다.</p>'
 
-    # ③ 투자자별 순매수 시각화
-    def 수급바(라벨, 값):
-        v = _to_float(값)
-        if v is None:
+    def 블록(라벨, 내용, 아이콘):
+        if not 내용:
             return ""
-        cls = "up" if v > 0 else "dn"
-        폭 = min(100, abs(v) / 300)  # 3조=100%
         return f'''
-      <div class="mf-flow-row">
-        <span class="mf-who">{라벨}</span>
-        <div class="mf-track"><div class="mf-fill {cls}" style="width:{max(3,폭):.0f}%"></div></div>
-        <span class="mf-amt {cls}">{fmt_flow(값)}</span>
-      </div>'''
+    <div class="mf-blk"><span class="mf-blk-t">{아이콘} {라벨}</span>
+      <p class="mf-blk-b">{내용}</p></div>'''
 
-    수급HTML = f'''
-    <div class="mf-flows">
-      <p class="mf-sub">누가 샀고 누가 팔았나 (코스피)</p>
-      {수급바("외국인", 코수.get("외국인"))}
-      {수급바("기관", 코수.get("기관계"))}
-      {수급바("개인", 코수.get("개인"))}
-    </div>'''
-
-    def 칩들(목록, cls):
-        if not 목록:
-            return '<span class="mf-none">—</span>'
-        return "".join(
-            f'<span class="mf-chip {cls}" title="{i.get("설명","")}">{i.get("이름","")}</span>'
-            for i in 목록)
-
+    체크 = 돈의흐름.get("체크포인트", "")
     return f'''
   <div class="mf-box">
-    <p class="mf-summary">💸 {돈의흐름.get('요약','')}</p>
-    <div class="mf-move">
-      <div class="mf-side">
-        <p class="mf-side-t out">빠져나간 곳</p>
-        <div class="mf-chips">{칩들(돈의흐름.get('유출'), 'out')}</div>
-      </div>
-      <div class="mf-arrow">→</div>
-      <div class="mf-side">
-        <p class="mf-side-t in">들어온 곳</p>
-        <div class="mf-chips">{칩들(돈의흐름.get('유입'), 'in')}</div>
-      </div>
-    </div>
-    {비중HTML}
-    {수급HTML}
-    <p class="mf-read">🔍 {돈의흐름.get('해석','')}</p>
-    <p class="mf-todo">※ 선물 수급·예탁금·신용융자 지표는 데이터 소스 연결 후 추가됩니다.</p>
+    <p class="mf-badge">{돈의흐름.get('조합이름','—')}</p>
+    <p class="mf-summary">{돈의흐름.get('숨은한줄','')}</p>
+    {분면HTML}
+    {블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")}
+    {블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")}
+    {f'<p class="mf-check">👀 <b>내일 확인:</b> {체크}</p>' if 체크 else ''}
+    <p class="mf-todo">※ 차익거래는 선물·현물 가격차를 노린 기계적 매매, 비차익거래는 방향성 베팅입니다. 같은 순매도라도 성격이 다릅니다.</p>
   </div>'''
 
 
@@ -775,6 +756,20 @@ a{{color:inherit;text-decoration:none}}
 .mf-amt{{font-size:11px;font-weight:800;width:64px;text-align:right;flex-shrink:0}}
 .mf-amt.up{{color:#ff8a6e}} .mf-amt.dn{{color:#7fa8e8}}
 .mf-read{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:.9rem;padding-top:.8rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.mf-badge{{display:inline-block;font-size:10.5px;font-weight:800;color:#ffd9c9;background:rgba(193,67,43,.3);padding:3px 11px;border-radius:99px;margin-bottom:.6rem}}
+.mf-blk{{background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.7rem .85rem;margin-top:.65rem}}
+.mf-blk-t{{font-size:10.5px;font-weight:800;color:#c8ccd2}}
+.mf-blk-b{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:5px}}
+.mf-check{{font-size:12px;color:#ffd9c9;line-height:1.7;margin-top:.8rem;padding-top:.75rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.mf-na{{font-size:11px;color:#8a909a;line-height:1.6;margin:.7rem 0}}
+.q-wrap{{margin-top:.8rem}}
+.q-grid{{display:grid;grid-template-columns:1fr 1fr;gap:5px}}
+.q-cell{{background:rgba(255,255,255,.05);border:.5px solid rgba(255,255,255,.1);border-radius:6px;padding:.55rem .4rem;text-align:center;display:flex;flex-direction:column;gap:2px}}
+.q-cell.on{{background:rgba(193,67,43,.32);border-color:#ff8a6e}}
+.q-t{{font-size:10px;color:#c8ccd2;font-weight:600}}
+.q-cell.on .q-t{{color:#fff;font-weight:800}}
+.q-nums{{display:flex;gap:14px;justify-content:center;margin-top:8px;font-size:11px;color:#c8ccd2}}
+.q-nums .up{{color:#ff8a6e}} .q-nums .dn{{color:#7fa8e8}}
 .mf-todo{{font-size:9.5px;color:#8a909a;margin-top:.6rem;line-height:1.5}}
 
 /* ── 오늘의 한 문장 (필사 코너) ── */
@@ -865,7 +860,7 @@ a{{color:inherit;text-decoration:none}}
   {build_insight(프로의시선)}
 
   <p class="sec-label">💸 돈의 이동경로</p>
-  {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수)}
+  {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수, data.get('파생'))}
 
   <p class="sec-label">📋 오늘의 중요 공시</p>
   <div class="disc-box">
