@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>차트프로 관제탑 · 2026.07.24</title>
 <meta property="og:title" content="🗼 차트프로 관제탑 2026.07.24 — 관제지수 4 · 혹한">
-<meta property="og:description" content="유가발 쇼크, 코스피·코스닥 동반 5%대 급락">
+<meta property="og:description" content="지수는 혹한, 제습기·손보만 홀로 봄날">
 <meta property="og:type" content="article">
 <!-- og:image는 자동화 단계에서 리포트 캡처 이미지 경로로 추가 예정 -->
 <meta name="twitter:card" content="summary_large_image">
@@ -138,7 +138,11 @@ a{color:inherit;text-decoration:none}
 .nt-market{background:#E6F1FB;color:#0C447C} .nt-stock{background:#FAECE7;color:#993C1D}
 .nt-policy{background:#FAEEDA;color:#854F0B} .nt-global{background:#EEEDFE;color:#3C3489}
 .news-insight{font-size:11.5px;color:var(--sub);line-height:1.6}
-.silent-box{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#33305e;line-height:1.8}
+.silent-wrap{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}
+.silent-head{font-size:12.5px;font-weight:800;color:#3C3489;margin-bottom:.6rem}
+.si-item{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #e0dcf0;font-size:12.5px;line-height:1.75;color:#33305e}
+.si-item:last-child{border-bottom:none;padding-bottom:0}
+.si-lens{font-size:10px;font-weight:700;background:#E3DFF5;color:#3C3489;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}
 .study-box{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}
 .hidden-block{display:none} .hidden-block.open{display:block}
 .more-btn{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}
@@ -147,6 +151,15 @@ a{color:inherit;text-decoration:none}
 .mr-label{font-size:11px;color:var(--sub);margin-bottom:3px}
 .mr-val{font-size:15px;font-weight:700;color:var(--sub)}
 .watch-item{background:#23262b;color:#e8e6e2;border-radius:var(--rmd);padding:.75rem .95rem;font-size:12.5px;line-height:1.7;margin-bottom:8px}
+.tv-wrap{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:1rem}
+.tv-row-wrap{padding:.8rem 1.1rem;border-bottom:.5px solid var(--line)}
+.tv-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}
+.tv-ch{font-size:12.5px;font-weight:800;color:var(--ink)}
+.tv-angle{font-size:10px;color:var(--sub);background:var(--bg2);padding:2px 7px;border-radius:4px;white-space:nowrap}
+.tv-see{margin-left:auto;font-size:10.5px;font-weight:700;color:#fff;background:#23262b;padding:3px 11px;border-radius:99px;white-space:nowrap}
+.tv-title{font-size:11.5px;color:var(--sub);line-height:1.5;margin-bottom:4px}
+.tv-sum{font-size:12.5px;color:var(--ink);line-height:1.75}
+.tv-note{font-size:10px;color:var(--sub);line-height:1.6;padding:.7rem 1.1rem;background:var(--bg2)}
 
 /* ── 오늘의 한 문장 (필사 코너) ── */
 .quote-box{background:linear-gradient(135deg,#1c1f24,#2c3038);border-radius:var(--rlg);padding:1.6rem 1.4rem;color:#e8e6e2;margin-bottom:1rem;text-align:center;position:relative;overflow:hidden}
@@ -199,7 +212,7 @@ a{color:inherit;text-decoration:none}
         <div class="gz-scale"><span>혹한</span><span>한파</span><span>보통</span><span>온기</span><span>과열</span></div>
       </div>
     </div>
-    <p class="gz-oneline">📝 <b>한줄평:</b> 유가발 쇼크, 코스피·코스닥 동반 5%대 급락</p>
+    <p class="gz-oneline">📝 <b>한줄평:</b> 지수는 혹한, 제습기·손보만 홀로 봄날</p>
     <div class="gz-badges"><span class="gz-badge">📉 코스피·코스닥 동반 하락</span><span class="gz-badge">🔵 시장 전반 하락 우위 (10%)</span><span class="gz-badge">💸 외인+기관 -5.22조 순매도</span></div>
     <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
     <div class="hidden-block" id="gzDetail">
@@ -281,18 +294,18 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 
-  <div class="today-market">💡 <b>오늘의 시장:</b> 코스피가 -5.72%, 코스닥이 -5.32% 급락하며 양대 시장 모두 무너졌습니다. 외국인과 기관이 코스피에서 각각 32,683백만원, 19,514백만원을 순매도했고 코스닥에서도 동반 매도하면서 수급이 완전히 얼어붙었습니다. 제습기·손해보험·조선기자재 등 일부 테마만 개별 재료로 상승했을 뿐, 시장 전반은 하락 우위(상승종목 비율 10%)로 마감했습니다.</div>
+  <div class="today-market">💡 <b>오늘의 시장:</b> 코스피는 -5.72%로 6,690.62, 코스닥은 -5.32%로 748.22에 마감하며 양대 지수가 동반 급락했습니다. 외국인과 기관이 코스피에서 각각 32,683억원, 19,514억원을 순매도했고 코스닥에서도 동반 매도를 보이며 개인이 코스피 51,782억원, 코스닥 4,881억원을 순매수로 받아냈습니다. 이런 하락장 속에서도 제습기(+2.37%), 손해보험(+2.11%) 등 일부 테마는 오히려 상승하며 지수와 반대로 움직였습니다.</div>
 
   <p class="sec-label">🔥 핵심 이슈</p>
   <div class="issue-box">
+    <div class="iss"><span class="itag">수급</span>
+      <span class="iss-text">이번 주 내내 매수·매도 사이드카가 반복되며 코스피·코스닥 모두 급락했습니다. 외국인이 4거래일 연속 순매수 후 오늘 대량 순매도로 전환한 점이 변동성을 키웠습니다.</span></div>
     <div class="iss"><span class="itag">글로벌</span>
-      <span class="iss-text">중동發 리스크로 WTI 유가가 90.05달러까지 오르며 국제유가 부담이 커졌고, 이는 코스피·코스닥 급락의 배경으로 지목됩니다.</span></div>
+      <span class="iss-text">호르무즈·홍해 리스크로 WTI 유가가 100달러를 넘나들며 급등해 국내 증시에 부담을 줬습니다. 대만·홍콩 등 아시아 증시도 동반 약세를 보였습니다.</span></div>
     <div class="iss"><span class="itag">정책</span>
-      <span class="iss-text">단일종목 레버리지 과열을 막기 위한 예탁금 상향 등 대책이 다음 주로 예정보다 앞당겨 시행됩니다.</span></div>
+      <span class="iss-text">단일종목 레버리지 상품 과열에 대한 예탁금 상향 등 대책이 다음 주로 조기 시행될 예정입니다. 대통령의 '신속 보완' 지시로 정책 시행 시점이 앞당겨졌습니다.</span></div>
     <div class="iss"><span class="itag">정책</span>
-      <span class="iss-text">정부가 물가 부담을 고려해 유류세 인하를 연장하고 석유 최고가격을 동결하기로 했습니다.</span></div>
-    <div class="iss"><span class="itag">글로벌</span>
-      <span class="iss-text">대만·홍콩 등 아시아 증시도 동반 약세를 보이며 한국 증시와 비슷한 흐름을 나타냈습니다.</span></div></div>
+      <span class="iss-text">규제합리화위원회가 대주주 적격성 개선을 권고하며 두나무·네이버 관련 이슈에 숨통이 트일 전망입니다.</span></div></div>
 
   <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
   <div class="sector-grid">
@@ -457,69 +470,115 @@ a{color:inherit;text-decoration:none}
     </div></div></div>
   <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 (4개)')">▾ 주도 섹터 더보기 (4개)</button>
 
-  <p class="sec-label">📺 마감 브리핑 — 4사 관점 비교</p>
-  <div class="pending">⏳ 유튜브 자막 API 연동 준비중 (삼프로TV·한국경제TV·이데일리TV·토마토TV)</div>
+  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  
+  <div class="tv-wrap">
+    <div class="tv-row-wrap">
+      <div class="tv-row">
+        <span class="tv-ch">삼프로TV</span>
+        <span class="tv-angle">실전 대응</span>
+        <a class="tv-see" href="https://www.youtube.com/watch?v=LCEM274bgm0" target="_blank">영상 보기 ↗</a>
+      </div>
+      <p class="tv-title">[7월 24일 마감시황] 오르면 사고 빠지면 팔고 이러면 계속 당합니다</p>
+      <p class="tv-sum">출연진은 이번 주 내내 반복된 사이드카 발동을 지적하며 시장의 방향성 부재를 우려했습니다. 코스피 120일선 부근에서의 공방과 윗꼬리가 긴 주봉을 근거로, 심리적으로 매도 압력이 여전히 우세하다고 평가했습니다. 반도체 대형주의 하락 전환이 전체 시장을 끌어내린 점도 짚었습니다.</p>
+    </div>
+    <div class="tv-row-wrap">
+      <div class="tv-row">
+        <span class="tv-ch">한국경제TV</span>
+        <span class="tv-angle">수급 중심</span>
+        <a class="tv-see" href="https://www.youtube.com/watch?v=7EC0Ed8WNfA" target="_blank">영상 보기 ↗</a>
+      </div>
+      <p class="tv-title">유가 급등에 코스피·코스닥 '비명'…지금은 기다리는게 정답?</p>
+      <p class="tv-sum">패널들은 외국인 선물 매매가 당일 매수·당일 청산 패턴을 반복하며 방향성을 예측하기 어렵다고 지적했습니다. 특정 인버스 상품의 거래대금 쏠림과 기관의 ETF 투매가 코스닥 급락을 키운 구조적 요인으로 꼽혔습니다. 레버리지 관련 정책 시행 시점과 실효성에 대한 우려도 강하게 제기됐습니다.</p>
+    </div>
+    <div class="tv-row-wrap">
+      <div class="tv-row">
+        <span class="tv-ch">이데일리TV</span>
+        
+        <a class="tv-see" href="https://www.youtube.com/watch?v=uxOQzpLblA0" target="_blank">영상 보기 ↗</a>
+      </div>
+      <p class="tv-title">[파이널포인트] 오늘장 마감, 꼭 알아야 할 3가지! 매도 사이드카 / 유가 급등 / 제약·바이오</p>
+      <p class="tv-sum" style="color:#a8a49c">요약 없음 — 원본 영상에서 확인하세요</p>
+    </div>
+    <p class="tv-note">📡 각 채널의 관점을 요약한 것으로, 원문을 그대로 옮기지 않았습니다. 자세한 내용은 각 영상 링크에서 확인하세요.</p>
+  </div>
 
   <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
   <div class="news-wrap">
     <div class="news-item">
       <span class="news-rank">1</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0001960292&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-market">시황</span>유가 급등에 코스피 5% 급락, 레버리지 대책 조기 시행</a></p>
-        <p class="news-insight">국제유가 급등이 겹치며 코스피가 5%대 급락했습니다. 정부는 삼전닉스 등 단일종목 레버리지 과열을 막기 위한 예탁금 상향 조치를 다음 주로 앞당겨 시행하기로 했습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0005712008&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-market">시황</span>이번 주 내내 사이드카, 국장 하락세 지속</a></p>
+        <p class="news-insight">코스피·코스닥 양시장에서 매도 사이드카가 이번 주 내내 발동됐습니다. 저점 매수에 나섰던 투자자들도 추가 하락에 어려움을 겪고 있는 것으로 전해집니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">2</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0001960291&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-global">글로벌</span>국제유가 두 달 만에 100달러 돌파 시도</a></p>
-        <p class="news-insight">호르무즈해협과 홍해 등 주요 항로가 막히며 국제유가가 두 달 만에 최고 수준으로 올랐습니다. WTI는 90.05달러로 -2.32% 등락률을 보였습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0002806881&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-global">글로벌</span>中매체 “레버리지 기반 한국증시 축제 막내려”</a></p>
+        <p class="news-insight">중국 매체가 한국 증시의 레버리지 기반 상승세가 끝났다고 평가했습니다. 국내 레버리지 상품 이슈가 해외에서도 주목받고 있습니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">3</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0002806881&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-global">글로벌</span>中매체 "레버리지 기반 한국증시 축제 막내려"</a></p>
-        <p class="news-insight">중국 매체가 레버리지에 기댄 한국 증시 상승세가 끝났다는 평가를 내놨습니다. 대만·홍콩 증시도 동반 약세를 보였습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0014087147&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-global">글로벌</span>아시아 증시 동반 약세, 대만·홍콩도 하락</a></p>
+        <p class="news-insight">대만 증시가 한일 증시 약세 여파로 나흘 만에 2.67% 급락했고, 홍콩 증시도 중동 정세 긴박에 H주가 0.98% 하락했습니다.</p>
       </div>
     </div></div>
   <div class="hidden-block" id="moreNews"><div class="news-wrap" style="border:none;box-shadow:none;margin:0">
     <div class="news-item">
       <span class="news-rank">4</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0004644966&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-policy">정책</span>물가 부담에 유류세 인하 연장, 석유 최고가격 동결</a></p>
-        <p class="news-insight">중동 리스크로 유가가 오르는 가운데, 정부는 물가 부담을 고려해 유류세 인하를 연장하고 석유 최고가격을 동결해 휘발유 1800원대를 유지하기로 했습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0001960292&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-global">글로벌</span>유가 급등에 코스피 5% 급락, 레버리지 대책 조기 시행</a></p>
+        <p class="news-insight">호르무즈·홍해 리스크로 WTI 유가가 두 달 만에 100달러를 넘어서며 국내 증시에 충격을 줬습니다. 이에 삼전닉스 레버리지 상품 대책이 다음 주로 앞당겨 시행될 예정입니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">5</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0016213884&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-policy">정책</span>두나무·네이버 규제 숨통, 대주주 적격성 개선 권고</a></p>
-        <p class="news-insight">규제합리화위원회가 특금법상 대주주 적격성 규정에 예외를 신설하도록 권고하면서 두나무를 품으려는 네이버에 청신호가 켜졌습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0004644969&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-policy">정책</span>레버리지 과열 조기차단, 예탁금 상향 앞당겨</a></p>
+        <p class="news-insight">단일종목 레버리지 상품 과열을 막기 위한 예탁금 상향 조치가 대통령의 신속 보완 지시로 조기 시행됩니다. 롤러코스터 장세를 잡기 위한 정책적 대응이 이어지고 있습니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">6</span>
       <div class="news-body">
-        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0001259909&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>5대 금융 반년 만에 13조 최대 순익</a></p>
-        <p class="news-insight">증시 호황을 타고 5대 금융지주가 반년 만에 13조원의 최대 순익을 냈습니다. 우리금융은 비은행 이익이 3배 늘며 2분기 순익 1조원대를 회복했습니다.</p>
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0016213884&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-policy">정책</span>대주주 적격성 개선 권고, 두나무·네이버 숨통</a></p>
+        <p class="news-insight">규제합리화위원회가 대주주 적격성 관련 개선을 권고하며 두나무를 품으려는 네이버에 청신호가 켜졌습니다. 특금법 예외 규정 신설도 함께 권고됐습니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">7</span>
       <div class="news-body">
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0000049190&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-stock">특징주</span>우리금융 2분기 순익 1조원대 회복</a></p>
+        <p class="news-insight">비은행 이익이 3배 가까이 늘어나며 우리금융의 2분기 순이익이 1조원대로 회복했습니다.</p>
+      </div>
+    </div>
+    <div class="news-item">
+      <span class="news-rank">8</span>
+      <div class="news-body">
+        <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0004644966&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
+      <span class="news-tag nt-policy">정책</span>물가 부담에 유류세 인하 연장, 석유 최고가격 동결</a></p>
+        <p class="news-insight">중동 리스크로 유가가 뛰자 정부가 석유 최고가격을 동결하고 유류세 인하를 연장했습니다. 휘발유 1800원대 유지를 목표로 하고 있습니다.</p>
+      </div>
+    </div>
+    <div class="news-item">
+      <span class="news-rank">9</span>
+      <div class="news-body">
         <p class="news-title"><a href="https://finance.naver.com/news/news_read.naver?article_id=0005794384&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260724&page=1" target="_blank">
       <span class="news-tag nt-market">시황</span>특징주 기사로 선행매매, 회계사·기자 구속기소</a></p>
-        <p class="news-insight">특징주 기사를 이용해 선행매매를 한 회계사와 현직 기자가 구속기소됐습니다. 시장 정보 유통 과정에서의 불공정 거래 우려가 다시 부각됐습니다.</p>
+        <p class="news-insight">특징주 기사를 이용한 선행매매 혐의로 회계사와 현직 기자가 구속기소됐습니다. 시장 신뢰를 흔드는 사건으로 지목되고 있습니다.</p>
       </div>
     </div></div></div>
-  <button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 핵심뉴스 4개 더보기')">▾ 핵심뉴스 4개 더보기</button>
+  <button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 핵심뉴스 6개 더보기')">▾ 핵심뉴스 6개 더보기</button>
 
   <p class="sec-label">📋 오늘의 공시</p>
   <div class="disc-box">
@@ -553,21 +612,28 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <p class="sec-label">🔍 프로의 시선</p>
-  <div class="silent-box">🔍 외국인과 기관이 코스피에서 5조 넘게 동반 매도한 반면 개인은 51,782백만원을 순매수하며 하락을 떠받쳤습니다. 이는 개인이 저가 매수에 나선 것인지, 반대매매 압박 속 손절 물량이 뒤섞인 것인지 다음 거래일 수급으로 확인이 필요합니다. 주도섹터 확산도가 대부분 50~70% 선에 머물러 있어, 오늘 오른 테마들도 시장 전체의 신뢰를 얻었다기보다는 개별 재료성 순환매에 가깝습니다.</div>
+  
+  <div class="silent-wrap">
+    <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
+    
+    <div class="si-item"><span class="si-lens">조용한 강세</span><span>코스피·코스닥이 5%대씩 급락한 날, 제습기 테마는 오히려 +2.37% 상승하고 위닉스는 +29.93%, 파세코는 +15.23%까지 올랐습니다. 손해보험 테마도 확산도 100%로 전 종목이 상승하며 지수 급락과 무관하게 움직였습니다. 이는 오늘의 급락이 시장 전체가 아니라 특정 대형주·레버리지 상품에 집중된 사건임을 시사합니다.</span></div>
+    <div class="si-item"><span class="si-lens">짖지 않은 개</span><span>코스피·코스닥이 5%대 급락했다면 원/달러 환율이 급등해야 정상이지만, 오늘 환율은 오히려 -1.03% 하락한 1460.46원을 기록했습니다. 진짜 외국인 자본 이탈에 따른 위기라면 환율이 뛰었을 텐데 조용했다는 점은, 오늘의 매도가 매크로 공포보다는 특정 레버리지 상품·수급 구조의 기술적 문제에 가깝다는 신호로 볼 수 있습니다.</span></div>
+    <div class="si-item"><span class="si-lens">다음 시나리오</span><span>만약 다음 거래일에도 삼성전자·SK하이닉스 등 반도체 대형주가 오전 강세 후 오후 낙폭을 키우는 패턴이 반복된다면, 과거 패턴상 이는 개별 종목 레버리지 상품發 수급 쏠림이 재현되는 신호로 번질 수 있습니다. 반대로 제습기·손해보험 같은 실적·계절 테마가 다음날에도 상승세를 유지한다면, 이는 지수 급락과 무관한 개별 순환매가 지속되고 있다는 뜻입니다.</span></div>
+  </div>
 
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
     
     <div class="mr-card">
       <p class="mr-label">원/달러 환율</p>
-      <p class="mr-val">1,460.64</p>
-      <span class="dn" style="font-size:11px">-1.02%</span>
+      <p class="mr-val">1,460.46</p>
+      <span class="dn" style="font-size:11px">-1.03%</span>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">WTI 유가</p>
-      <p class="mr-val">$90.05</p>
-      <span class="dn" style="font-size:11px">-2.32%</span>
+      <p class="mr-val">$89.94</p>
+      <span class="dn" style="font-size:11px">-2.44%</span>
     </div>
     
     <div class="mr-card">
@@ -578,16 +644,16 @@ a{color:inherit;text-decoration:none}
   </div>
 
   <p class="sec-label">📚 오늘의 공부</p>
-  <div class="study-box">📚 오늘처럼 지수가 급락할 때 등장하는 개념이 '레버리지 청산'입니다. 신용거래나 레버리지 상품은 주가가 일정 수준 이상 떨어지면 반대매매(강제 매도)가 발생해 하락을 더 키울 수 있습니다. 뉴스에서 언급된 '삼전닉스 레버리지 대책 조기 시행'도 이런 과열·쏠림을 막기 위한 조치로 볼 수 있습니다.</div>
+  <div class="pending">⏳ 오늘 이슈에서 출제하는 경제교실 — Claude 해석 연동 후 자동 생성</div>
 
   <p class="sec-label">🗼 다음 거래일 관전포인트</p>
-  <div class="watch-item"><span>①오늘 급락의 핵심 배경인 국제유가가 다음 거래일에도 90달러대 이상을 유지한다면, 물가·수급 부담이 더 길어질 가능성이 있습니다.</span></div><div class="watch-item"><span>②레버리지 예탁금 상향 조치가 다음 주 조기 시행되는 만큼, 관련 종목의 거래대금과 변동성이 시행 전후로 어떻게 바뀌는지 확인할 필요가 있습니다.</span></div><div class="watch-item"><span>③오늘 개인이 코스피에서 순매수한 반면 외국인·기관은 순매도한 만큼, 다음 거래일에도 이 수급 구도가 이어진다면 개인 주도 반등인지 추가 하락인지 가늠할 신호가 될 수 있습니다.</span></div>
+  <div class="watch-item"><span>①만약 다음 거래일에도 삼성전자·SK하이닉스가 오전 강세 후 오후 낙폭을 키운다면, 오늘과 같은 레버리지發 수급 쏠림이 재현되는 신호일 수 있습니다.</span></div><div class="watch-item"><span>②만약 제습기·손해보험 테마가 다음날에도 상승세와 확산도를 유지한다면, 지수와 무관한 실적·계절 기반 순환매가 이어지고 있다는 뜻입니다.</span></div><div class="watch-item"><span>③만약 원/달러 환율이 계속 안정세를 보이는 가운데 외국인 순매도가 재차 확대된다면, 이는 매크로 위기보다 특정 상품 구조 문제에 가깝다는 해석에 무게가 실립니다.</span></div>
 
   <!-- 오늘의 한 문장 (필사 코너) -->
   <p class="sec-label">✍️ 오늘의 한 문장</p>
   <div class="quote-box">
     <div class="quote-mark">“</div>
-    <p class="quote-text">지수가 무너질 때, 남는 건 몇 안 되는 테마와 사라진 수급이다.</p>
+    <p class="quote-text">시장이 무너질 때, 무너지지 않은 곳이 다음 이야기를 만든다.</p>
     <p class="quote-sub">— 차트프로 관제탑, 2026.07.24</p>
   </div>
 
