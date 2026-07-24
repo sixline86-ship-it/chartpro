@@ -529,6 +529,41 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
       <div class="fx-chart">{"".join(막대들)}</div>
     </div>'''
 
+    # ── 프로그램매매 차익 / 비차익 ──
+    프로 = 파생.get("프로그램매매") or {}
+    def 찾기(키워드):
+        for k, v in 프로.items():
+            if 키워드 in k and "순매수" in k:
+                return _to_float(v)
+        return None
+    차익 = 찾기("차익거래")
+    비차익 = 찾기("비차익")
+    # '차익거래'는 '비차익거래'에도 포함되므로 분리 보정
+    if 차익 is not None and 비차익 is not None and 차익 == 비차익:
+        차익 = None
+    프로HTML = ""
+    if 차익 is not None or 비차익 is not None:
+        def 프로바(이름, v, 설명):
+            if v is None:
+                return ""
+            최 = max(abs(x) for x in (차익, 비차익) if x is not None) or 1
+            폭 = max(4, abs(v) / 최 * 46)
+            방향 = "pos" if v > 0 else "neg"
+            cls = "up" if v > 0 else "dn"
+            return f'''
+      <div class="fx-row"><span class="fx-lb2">{이름}</span>
+        <div class="fx-zone"><div class="fx-bar {방향}" style="width:{폭:.0f}%"></div></div>
+        <span class="fx-amt {cls}">{fmt_flow(v)}</span></div>
+      <p class="fx-desc">{설명}</p>'''
+        프로HTML = f'''
+    <div class="fx-wrap">
+      <p class="mf-sub">프로그램매매 — 기계적 매매 vs 방향성 베팅</p>
+      <div class="fx-chart">
+        {프로바("차익", 차익, "선물·현물 가격차를 노린 기계적 매매 — 방향성 의미 적음")}
+        {프로바("비차익", 비차익, "선물과 무관한 바스켓 매매 — 실제 방향성 베팅")}
+      </div>
+    </div>'''
+
     옵션방향 = 돈의흐름.get("옵션방향", "")
     체크 = 돈의흐름.get("체크포인트", "")
     상세 = (블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")
@@ -540,6 +575,7 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     <p class="mf-badge">{돈의흐름.get('조합이름','—')}</p>
     <p class="mf-summary">{돈의흐름.get('숨은한줄','')}</p>
     {막대HTML}
+    {프로HTML}
     {분면HTML}
     <div class="hidden-block" id="moreFlow">{상세}</div>
     <button class="more-btn dark" onclick="toggleMore('moreFlow',this,'▾ 자세한 해석 보기')">▾ 자세한 해석 보기</button>
@@ -820,6 +856,8 @@ a{{color:inherit;text-decoration:none}}
 .fx-bar{{position:absolute;top:2px;bottom:2px;border-radius:3px}}
 .fx-bar.pos{{left:50%;background:linear-gradient(90deg,#ff8a6e,#C1432B)}}
 .fx-bar.neg{{right:50%;background:linear-gradient(270deg,#7fa8e8,#2E6BD6)}}
+.fx-lb2{{font-size:11px;color:#c8ccd2;width:44px;flex-shrink:0;font-weight:600}}
+.fx-desc{{font-size:9.5px;color:#8a909a;margin:1px 0 6px 52px;line-height:1.5}}
 .fx-amt{{font-size:11px;font-weight:800;width:66px;text-align:right;flex-shrink:0}}
 .fx-amt.up{{color:#ff8a6e}} .fx-amt.dn{{color:#7fa8e8}} .fx-amt.smut{{color:#8a909a}}
 .fx-na{{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:9.5px;color:#8a909a}}
