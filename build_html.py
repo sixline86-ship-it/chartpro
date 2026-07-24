@@ -9,6 +9,7 @@ import os
 import html
 from datetime import datetime
 
+SCRIPT_VERSION = "v2026.07.24-f"   # ⬅ 버전 표시
 DATE = datetime.now().strftime("%Y%m%d")
 DATA_PATH = f"data_{DATE}.json"
 REPORT_PATH = f"report_{DATE}.json"
@@ -993,7 +994,7 @@ a{{color:inherit;text-decoration:none}}
     <p class="quote-sub">— 차트프로 관제탑, {날짜}</p>
   </div>
 
-  <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다.</p>
+  <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[{SCRIPT_VERSION}]</span></p>
 </div>
 <script>
 function toggleMore(id,btn,label){{
@@ -1023,4 +1024,4 @@ if __name__ == "__main__":
     html = build_html(data, report)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"🎉 완료! → {OUT_PATH}")
+    print(f"🎉 완료! → {OUT_PATH}  (build_html {SCRIPT_VERSION})")
