@@ -310,6 +310,55 @@ def build_news(핵심뉴스):
 
 
 # ── 환율·유가·금리 카드 ──
+# ── 프로의 시선 (3개 렌즈) ──
+def build_insight(프로의시선):
+    if not 프로의시선:
+        return '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'
+    렌즈들 = [
+        ("조용한 강세", 프로의시선.get("조용한_강세", "")),
+        ("짖지 않은 개", 프로의시선.get("짖지_않은_개", "")),
+        ("다음 시나리오", 프로의시선.get("다음_시나리오", "")),
+    ]
+    rows = []
+    for 이름, 내용 in 렌즈들:
+        if not 내용:
+            continue
+        rows.append(f'''
+    <div class="si-item"><span class="si-lens">{이름}</span><span>{내용}</span></div>''')
+    if not rows:
+        return '<div class="pending">⏳ 프로의 시선 — 데이터 부족</div>'
+    return f'''
+  <div class="silent-wrap">
+    <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
+    {"".join(rows)}
+  </div>'''
+
+
+# ── 마감 브리핑 (방송사별) ──
+def build_briefings(마감브리핑):
+    if not 마감브리핑:
+        return '<div class="pending">⏳ 오늘 마감 브리핑 영상을 찾지 못했습니다</div>'
+    rows = []
+    for b in 마감브리핑:
+        요약 = b.get("summary", "")
+        앵글 = b.get("angle", "")
+        본문 = f'<p class="tv-sum">{요약}</p>' if 요약 else '<p class="tv-sum" style="color:#a8a49c">요약 없음 — 원본 영상에서 확인하세요</p>'
+        rows.append(f'''
+    <div class="tv-row-wrap">
+      <div class="tv-row">
+        <span class="tv-ch">{b.get('채널','')}</span>
+        {f'<span class="tv-angle">{앵글}</span>' if 앵글 else ''}
+        <a class="tv-see" href="{b.get('링크','#')}" target="_blank">영상 보기 ↗</a>
+      </div>
+      <p class="tv-title">{b.get('제목','')}</p>
+      {본문}
+    </div>''')
+    return f'''
+  <div class="tv-wrap">{"".join(rows)}
+    <p class="tv-note">📡 각 채널의 관점을 요약한 것으로, 원문을 그대로 옮기지 않았습니다. 자세한 내용은 각 영상 링크에서 확인하세요.</p>
+  </div>'''
+
+
 def build_macro_card(item):
     if not item:
         return '<div class="mr-card"><p class="mr-label">—</p><p class="mr-val">— (준비중)</p></div>'
@@ -334,7 +383,7 @@ def build_html(data, report):
     오늘의시장 = 해석.get("오늘의_시장", "— (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)")
     오늘한줄평 = 해석.get("한줄평", "— (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)")
     오늘의문장 = 해석.get("오늘의_한문장", "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)")
-    침묵의지표 = 해석.get("침묵의_지표", "")
+    프로의시선 = 해석.get("프로의시선") or {}
     오늘의공부 = 해석.get("오늘의_공부", "")
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
 
@@ -490,7 +539,11 @@ a{{color:inherit;text-decoration:none}}
 .nt-market{{background:#E6F1FB;color:#0C447C}} .nt-stock{{background:#FAECE7;color:#993C1D}}
 .nt-policy{{background:#FAEEDA;color:#854F0B}} .nt-global{{background:#EEEDFE;color:#3C3489}}
 .news-insight{{font-size:11.5px;color:var(--sub);line-height:1.6}}
-.silent-box{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#33305e;line-height:1.8}}
+.silent-wrap{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}}
+.silent-head{{font-size:12.5px;font-weight:800;color:#3C3489;margin-bottom:.6rem}}
+.si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #e0dcf0;font-size:12.5px;line-height:1.75;color:#33305e}}
+.si-item:last-child{{border-bottom:none;padding-bottom:0}}
+.si-lens{{font-size:10px;font-weight:700;background:#E3DFF5;color:#3C3489;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
 .study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
 .hidden-block{{display:none}} .hidden-block.open{{display:block}}
 .more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
@@ -499,6 +552,15 @@ a{{color:inherit;text-decoration:none}}
 .mr-label{{font-size:11px;color:var(--sub);margin-bottom:3px}}
 .mr-val{{font-size:15px;font-weight:700;color:var(--sub)}}
 .watch-item{{background:#23262b;color:#e8e6e2;border-radius:var(--rmd);padding:.75rem .95rem;font-size:12.5px;line-height:1.7;margin-bottom:8px}}
+.tv-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:1rem}}
+.tv-row-wrap{{padding:.8rem 1.1rem;border-bottom:.5px solid var(--line)}}
+.tv-row{{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}}
+.tv-ch{{font-size:12.5px;font-weight:800;color:var(--ink)}}
+.tv-angle{{font-size:10px;color:var(--sub);background:var(--bg2);padding:2px 7px;border-radius:4px;white-space:nowrap}}
+.tv-see{{margin-left:auto;font-size:10.5px;font-weight:700;color:#fff;background:#23262b;padding:3px 11px;border-radius:99px;white-space:nowrap}}
+.tv-title{{font-size:11.5px;color:var(--sub);line-height:1.5;margin-bottom:4px}}
+.tv-sum{{font-size:12.5px;color:var(--ink);line-height:1.75}}
+.tv-note{{font-size:10px;color:var(--sub);line-height:1.6;padding:.7rem 1.1rem;background:var(--bg2)}}
 
 /* ── 오늘의 한 문장 (필사 코너) ── */
 .quote-box{{background:linear-gradient(135deg,#1c1f24,#2c3038);border-radius:var(--rlg);padding:1.6rem 1.4rem;color:#e8e6e2;margin-bottom:1rem;text-align:center;position:relative;overflow:hidden}}
@@ -574,8 +636,8 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
   {build_sectors(data.get('주도섹터'))}
 
-  <p class="sec-label">📺 마감 브리핑 — 4사 관점 비교</p>
-  <div class="pending">⏳ 유튜브 자막 API 연동 준비중 (삼프로TV·한국경제TV·이데일리TV·토마토TV)</div>
+  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  {build_briefings(해석.get('마감브리핑'))}
 
   <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
   {build_news(해석.get('핵심뉴스'))}
@@ -587,7 +649,7 @@ a{{color:inherit;text-decoration:none}}
   </div>
 
   <p class="sec-label">🔍 프로의 시선</p>
-  {f'<div class="silent-box">🔍 {침묵의지표}</div>' if 침묵의지표 else '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'}
+  {build_insight(프로의시선)}
 
   <p class="sec-label">🌐 환율 · 유가 · 금리</p>
   <div class="macro-row">
