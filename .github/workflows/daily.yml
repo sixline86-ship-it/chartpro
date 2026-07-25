@@ -74,3 +74,13 @@ jobs:
           git add index.html data_*.json report_*.json report_*.html || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git push
+
+      # ── ⑤ 텔레그램 알림 ──
+      #   리포트가 배포된 뒤, 완성 알림을 폰으로 보낸다.
+      #   continue-on-error: 알림 실패해도 발행 자체는 성공으로 둔다.
+      - name: 텔레그램 알림 전송
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python notify_telegram.py
