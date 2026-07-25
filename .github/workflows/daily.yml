@@ -17,8 +17,8 @@ on:
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 -9시간)
   #     한국 저녁 8시 발행 목표 → 19:30 KST 실행 → UTC 10:30
   #     ⚠️ 수동 버튼으로 몇 번 검증한 뒤, 아래 두 줄의 # 를 지우면 매일 자동 실행됨.
-  # schedule:
-  #   - cron: '30 10 * * 1-5'   # 월~금 UTC 10:30 = KST 19:30
+schedule:
+    - cron: '30 10 * * 1-5'   # 월~금 UTC 10:30 = KST 19:30
 
 permissions:
   contents: write
