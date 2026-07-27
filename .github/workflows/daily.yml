@@ -1,13 +1,13 @@
 # ============================================================
-# .github/workflows/daily.yml   (v2 — 해석글 생성 연결)
+# .github/workflows/daily.yml   (v3 — 텔레그램 알림 + 자동 스케줄)
 # 차트프로 관제탑 — 매일 자동 발행 시간표
 # ------------------------------------------------------------
 #   ① collect_data.py    숫자 수집 (DART·네이버)
 #   ② generate_report.py 해석글 생성 (Claude)
 #   ③ build_html.py      리포트 HTML 생성
 #   ④ 자동 커밋          → GitHub Pages 자동 배포
+#   ⑤ notify_telegram.py 텔레그램 알림 전송
 # ============================================================
-
 name: 관제탑 일일 발행
 
 on:
@@ -16,16 +16,13 @@ on:
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 -9시간)
   #     한국 저녁 8시 발행 목표 → 19:30 KST 실행 → UTC 10:30
-  #     ⚠️ 수동 버튼으로 몇 번 검증한 뒤, 아래 두 줄의 # 를 지우면 매일 자동 실행됨.
-schedule:
+  schedule:
     - cron: '30 10 * * 1-5'   # 월~금 UTC 10:30 = KST 19:30
 
 permissions:
   contents: write
 
-# ⭐ 중요: GitHub 서버는 기본이 UTC(영국 시간)라 한국보다 9시간 느리다.
-#    이걸 안 맞추면 밤·새벽 실행 시 "어제 날짜" 파일을 찾아 헤맨다.
-#    아래 한 줄로 이 작업 전체가 한국 시간 기준으로 돌아간다.
+# ⭐ GitHub 서버는 기본 UTC라 한국보다 9시간 느리다. 한국시간으로 맞춘다.
 env:
   TZ: Asia/Seoul
 
@@ -51,9 +48,7 @@ jobs:
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         run: python collect_data.py
 
-      # ── ② 해석글 생성 ──
-      #   continue-on-error: 여기서 실패해도(잔액 부족 등)
-      #   리포트는 해석글 없이라도 만들어지도록 다음 단계로 넘어간다.
+      # ── ② 해석글 생성 (실패해도 다음 단계로) ──
       - name: 해석글 생성 (Claude)
         continue-on-error: true
         env:
@@ -76,8 +71,6 @@ jobs:
           git push
 
       # ── ⑤ 텔레그램 알림 ──
-      #   리포트가 배포된 뒤, 완성 알림을 폰으로 보낸다.
-      #   continue-on-error: 알림 실패해도 발행 자체는 성공으로 둔다.
       - name: 텔레그램 알림 전송
         continue-on-error: true
         env:
