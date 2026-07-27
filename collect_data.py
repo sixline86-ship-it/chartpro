@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.24-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.07.27-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -598,6 +598,422 @@ def collect_program_and_futures():
     return 결과
 
 
+def _fetch_prev_volume(code):
+    """전일 거래량(주식 수)을 구한다.
+    네이버 일별시세 표에 거래량이 그대로 있어 근사 없이 실측값을 쓸 수 있다.
+    (거래대금은 이 표에 없어서 예전엔 '거래량×종가'로 추정해야 했다.)
+    반환: 주식 수 float 또는 None
+    """
+    url = "https://finance.naver.com/item/sise_day.naver"
+    try:
+        r = requests.get(url, headers=HEADERS, params={"code": code, "page": "1"}, timeout=10)
+        r.encoding = "euc-kr"
+        tables = read_html_safe(r.text)
+    except Exception:
+        return None
+
+    for t in tables:
+        cols = " ".join(str(c) for c in t.columns)
+        if "거래량" in cols and "날짜" in cols:
+            df = t.dropna(subset=["날짜"])
+            if len(df) < 2:
+                return None
+            # 0번째 = 최근일(오늘), 1번째 = 그 전날
+            return to_num(df.iloc[1].get("거래량"))
+    return None
+
+
+TRACK_DAYS = 5          # 포착 후 추적 기간(거래일)
+
+# ── 강세 레이더 설정 (여기 숫자만 바꾸면 리포트 설명도 자동으로 따라간다) ──
+STR_MIN_시총 = 5000       # 억원
+STR_MIN_거래대금 = 500    # 억원
+STR_배수_하한 = 2.0       # 전일 대비 거래량 (하드 필터)
+STR_배수_가점 = 3.0       # 이 이상이면 가점
+STR_가점 = 15
+STR_W_회전, STR_W_상승 = 0.5, 0.5
+
+# ── 5일 매집 레이더 설정 ──
+ACC_DAYS = 5            # 관찰 기간(거래일)
+ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
+ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
+ACC_UNIVERSE = {"코스피": 60, "코스닥": 40}   # 시총 상위 몇 종목까지 스캔할지
+
+
+def _fetch_investor_flow(code, days=ACC_DAYS):
+    """종목별 외국인·기관 일별 순매매를 가져온다.
+    네이버 '외국인·기관' 탭 표에는 순매매'량'(주식 수)이 있으므로
+    종가를 곱해 금액(억원)으로 환산한다.
+    반환: {"외국인": [일별 억원...], "기관": [...], "종가": 최근종가}
+    """
+    url = "https://finance.naver.com/item/frgn.naver"
+    try:
+        r = requests.get(url, headers=HEADERS,
+                         params={"code": code, "page": "1"}, timeout=10)
+        r.encoding = "euc-kr"
+        tables = read_html_safe(r.text)
+    except Exception:
+        return None
+
+    표 = None
+    for t in tables:
+        cols = " ".join(str(c) for c in t.columns)
+        if "외국인" in cols and "기관" in cols and "날짜" in cols:
+            표 = t
+            break
+    if 표 is None:
+        return None
+
+    # 2단 헤더면 평탄화
+    if isinstance(표.columns, pd.MultiIndex):
+        표.columns = ["_".join(str(x) for x in c).strip() for c in 표.columns]
+
+    def 열찾기(*키워드):
+        for c in 표.columns:
+            s = str(c)
+            if all(k in s for k in 키워드):
+                return c
+        return None
+
+    날짜열 = 열찾기("날짜")
+    종가열 = 열찾기("종가")
+    기관열 = 열찾기("기관", "순매매")
+    외인열 = 열찾기("외국인", "순매매")
+    if not (날짜열 and 종가열 and 기관열 and 외인열):
+        return None
+
+    df = 표.dropna(subset=[날짜열]).head(days)
+    if len(df) < days:
+        return None
+
+    외 , 기 = [], []
+    for _, row in df.iterrows():
+        종가 = to_num(row.get(종가열))
+        외량 = to_num(row.get(외인열))
+        기량 = to_num(row.get(기관열))
+        if 종가 is None:
+            continue
+        외.append((외량 or 0) * 종가 / 100_000_000)   # 원 → 억원
+        기.append((기량 or 0) * 종가 / 100_000_000)
+    if not 외:
+        return None
+    return {"외국인": 외, "기관": 기,
+            "종가": to_num(df.iloc[0].get(종가열))}
+
+
+def collect_accumulation_radar():
+    """5일 매집 레이더 — 조용히 쌓이는 돈을 잡아낸다.
+
+    강세 레이더가 '오늘 터진 것(폭발)'을 본다면, 여기는 '아직 안 터졌지만 쌓이는 것(매집)'.
+    서로 반대편을 보므로 두 코너가 겹치지 않는다.
+
+    ── 조건 설계 ──
+      🤝 쌍끌이 : 외국인·기관이 **둘 다** 5일 중 3일 이상 순매수 + 각자 누적 플러스
+                  → 둘이 동시에 사는 건 우연으로 잘 안 나온다. 그 자체가 강한 조건이라
+                     일수는 3일로 두어도 신호가 충분하다.
+      💼 단독   : 한쪽만 매집. 조건이 하나뿐이므로 **4일 이상**으로 엄격히 건다.
+                  쌍끌이가 5종목 미만인 날에만 보충용으로 채운다.
+                  (그래야 "오늘은 해당 종목이 없습니다"로 코너가 비는 일이 없다)
+
+    ── 두 랭킹 ──
+      금액 순위  : "큰돈이 어디로 갔나"      (대형주가 상위)
+      시총대비   : "그 회사엔 얼마나 큰 돈인가" (중소형주가 상위)
+      같은 종목 풀인데 순서가 완전히 달라진다 — 그 대비를 나란히 보여준다.
+    """
+    유니버스 = []
+    for 시장, sosok in (("코스피", "0"), ("코스닥", "1")):
+        상한 = ACC_UNIVERSE[시장]
+        모은수 = 0
+        for page in range(1, 4):
+            if 모은수 >= 상한:
+                break
+            try:
+                r = requests.get("https://finance.naver.com/sise/sise_market_sum.naver",
+                                 headers=HEADERS,
+                                 params={"sosok": sosok, "page": str(page)}, timeout=12)
+                r.encoding = "euc-kr"
+                soup = BeautifulSoup(r.text, "html.parser")
+                tables = read_html_safe(r.text)
+            except Exception:
+                break
+            코드맵 = {}
+            for a in soup.select("a[href*='code=']"):
+                m = re.search(r"code=(\d{6})", a.get("href", ""))
+                if m:
+                    코드맵[clean_name(a.get_text(strip=True))] = m.group(1)
+            표 = None
+            for t in tables:
+                if "종목명" in " ".join(str(c) for c in t.columns):
+                    표 = t
+                    break
+            if 표 is None:
+                break
+            for _, row in 표.dropna(subset=["종목명"]).iterrows():
+                이름 = clean_name(row.get("종목명", ""))
+                시총 = to_num(row.get("시가총액"))
+                코드 = 코드맵.get(이름)
+                if not 이름 or not 코드 or 시총 is None:
+                    continue
+                유니버스.append((이름, 코드, 시장, 시총))
+                모은수 += 1
+                if 모은수 >= 상한:
+                    break
+
+    print(f"📥 매집 레이더 스캔 대상 {len(유니버스)}종목 (시총 상위)")
+
+    쌍끌이, 단독 = [], []
+    실패 = 0
+    for 이름, 코드, 시장, 시총 in 유니버스:
+        flow = _fetch_investor_flow(코드)
+        if not flow:
+            실패 += 1
+            continue
+        외, 기 = flow["외국인"], flow["기관"]
+        외일수 = sum(1 for v in 외 if v > 0)
+        기일수 = sum(1 for v in 기 if v > 0)
+        외누적, 기누적 = sum(외), sum(기)
+
+        기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
+               "외인일수": 외일수, "기관일수": 기일수,
+               "외국인": round(외누적, 1), "기관": round(기누적, 1)}
+
+        # 🤝 쌍끌이 — 둘 다 3일 이상 & 각자 누적 플러스
+        if (외일수 >= ACC_BOTH_DAYS and 기일수 >= ACC_BOTH_DAYS
+                and 외누적 > 0 and 기누적 > 0):
+            합산 = 외누적 + 기누적
+            쌍끌이.append({**기본, "유형": "쌍끌이", "합산": round(합산, 1),
+                         "시총대비": round(합산 / 시총 * 100, 3)})
+            continue
+
+        # 💼 단독 — 한쪽만, 4일 이상
+        if 외일수 >= ACC_SOLO_DAYS and 외누적 > 0:
+            단독.append({**기본, "유형": "외국인 단독", "합산": round(외누적, 1),
+                       "시총대비": round(외누적 / 시총 * 100, 3)})
+        elif 기일수 >= ACC_SOLO_DAYS and 기누적 > 0:
+            단독.append({**기본, "유형": "기관 단독", "합산": round(기누적, 1),
+                       "시총대비": round(기누적 / 시총 * 100, 3)})
+
+    if 실패:
+        print(f"  ℹ️ {실패}종목은 수급 데이터 미확보(신규상장·데이터 부족 등)")
+
+    쌍끌이.sort(key=lambda x: x["합산"], reverse=True)
+    단독.sort(key=lambda x: x["합산"], reverse=True)
+
+    # 쌍끌이 우선, 5종목 미만이면 단독으로 보충
+    종목 = 쌍끌이[:10]
+    if len(종목) < 5:
+        종목 += 단독[: (5 - len(종목))]
+
+    print(f"✅ 매집 레이더 — 쌍끌이 {len(쌍끌이)}종목"
+          f"{f', 단독 보충 {len(종목)-len(쌍끌이[:10])}종목' if len(종목) > len(쌍끌이[:10]) else ''}")
+    for s in 종목[:3]:
+        print(f"   [{s['유형']}] {s['종목명']} {s['합산']:,.0f}억 "
+              f"(외{s['외인일수']}일/기{s['기관일수']}일, 시총대비 {s['시총대비']}%)")
+
+    return {"종목": 종목, "기간": ACC_DAYS,
+            "쌍끌이최소": ACC_BOTH_DAYS, "단독최소": ACC_SOLO_DAYS,
+            "쌍끌이수": len(쌍끌이)}
+
+
+
+def collect_strength_radar():
+    """실제 강세 레이더 — 2단 구조.
+
+    ── 1단: 오늘 새로 포착 ──
+      1차 필터 : 시총 ≥ 5,000억 AND 거래대금 ≥ 500억 AND 상승 종목만
+      2차 필터 : 전일 대비 거래량 2배 이상  (평소와 다른 날만)
+                 ※ 거래대금은 주가 상승분이 섞여 부풀려진다. 순수 손바뀜은 거래량이 정확.
+      점수     : 회전율점수 × 0.5 + 상승률점수 × 0.5  (각각 0~100 정규화)
+                 + 거래량 3배 이상이면 +15점
+      ⚠️ 정규화 이유: 회전율(1~15%)과 상승률(0~30%)은 단위가 달라 그냥 더하면
+         숫자가 큰 상승률이 늘 이긴다. 0~100으로 환산해야 비중이 뜻대로 작동한다.
+
+    ── 2단: 포착 이후 추적 ──
+      한 번 포착된 종목은 신규 목록에서 빠지고 추적표로 이동한다.
+      "며칠째 같은 조건 충족"은 새 정보가 아니지만,
+      "포착 후 실제로 올랐는가"는 지표가 맞는지 검증해주는 정보이기 때문.
+      추적 중 다시 조건을 만족하면 '재점화'로 보고 신규에 다시 올리며 차수를 올린다.
+    """
+    MIN_시총 = STR_MIN_시총
+    MIN_거래대금 = STR_MIN_거래대금
+    배수_하한 = STR_배수_하한
+    배수_가점 = STR_배수_가점
+    가점 = STR_가점
+    W_회전, W_상승 = STR_W_회전, STR_W_상승
+
+    신규 = {"코스피": [], "코스닥": []}
+    가격맵 = {}          # 종목명 → {"현재가": float, "등락률": float}  (추적 갱신용)
+    시장맵 = {"코스피": "0", "코스닥": "1"}
+
+    for 시장, sosok in 시장맵.items():
+        종목들 = []
+        for page in range(1, 6):
+            url = "https://finance.naver.com/sise/sise_market_sum.naver"
+            try:
+                r = requests.get(url, headers=HEADERS,
+                                 params={"sosok": sosok, "page": str(page)}, timeout=12)
+                r.encoding = "euc-kr"
+                soup = BeautifulSoup(r.text, "html.parser")
+                tables = read_html_safe(r.text)
+            except Exception as e:
+                print(f"  ⚠️ {시장} p{page} 요청 실패: {type(e).__name__}")
+                break
+
+            코드맵 = {}
+            for a in soup.select("a[href*='code=']"):
+                m = re.search(r"code=(\d{6})", a.get("href", ""))
+                if m:
+                    코드맵[clean_name(a.get_text(strip=True))] = m.group(1)
+
+            표 = None
+            for t in tables:
+                cols = " ".join(str(c) for c in t.columns)
+                if "종목명" in cols and ("거래대금" in cols or "거래량" in cols):
+                    표 = t
+                    break
+            if 표 is None:
+                if page == 1:
+                    print(f"  ℹ️ {시장} 시총 표 못 찾음. 표 컬럼들:")
+                    for i, t in enumerate(tables[:5]):
+                        print(f"     표{i} {t.shape}: {list(t.columns)[:9]}")
+                break
+
+            표 = 표.dropna(subset=["종목명"])
+            for _, row in 표.iterrows():
+                이름 = clean_name(row.get("종목명", ""))
+                시총 = to_num(row.get("시가총액"))
+                등락률 = to_num(row.get("등락률"))
+                거래량 = to_num(row.get("거래량"))
+                현재가num = to_num(row.get("현재가"))
+                대금 = to_num(row.get("거래대금"))
+                if 대금 is None and 거래량 is not None and 현재가num is not None:
+                    대금 = 거래량 * 현재가num / 100_000_000
+                if not 이름:
+                    continue
+                if 현재가num is not None:
+                    가격맵[이름] = {"현재가": 현재가num, "등락률": 등락률}
+                if 시총 is None or 대금 is None or 등락률 is None:
+                    continue
+                종목들.append({
+                    "종목명": 이름, "코드": 코드맵.get(이름), "시장": 시장,
+                    "시총": 시총, "거래대금": 대금, "거래량": 거래량,
+                    "현재가": 현재가num, "등락률": 등락률,
+                })
+
+        후보 = [s for s in 종목들
+                if s["시총"] >= MIN_시총 and s["거래대금"] >= MIN_거래대금 and s["등락률"] > 0]
+        print(f"📡 {시장}: 수집 {len(종목들)} → 1차 필터 통과 {len(후보)}")
+
+        통과 = []
+        for s in 후보[:80]:
+            if not s.get("코드") or not s.get("거래량"):
+                continue
+            전일량 = _fetch_prev_volume(s["코드"])
+            if not 전일량 or 전일량 <= 0:
+                continue
+            배수 = s["거래량"] / 전일량
+            if 배수 < 배수_하한:
+                continue
+            s["전일거래량"] = int(전일량)
+            s["배수"] = round(배수, 1)
+            통과.append(s)
+        print(f"   2차 필터(전일 대비 거래량 {배수_하한}배↑) 통과 {len(통과)}")
+
+        if not 통과:
+            continue
+
+        def 정규화(vals):
+            lo, hi = min(vals), max(vals)
+            if hi == lo:
+                return [50.0] * len(vals)
+            return [(v - lo) / (hi - lo) * 100 for v in vals]
+
+        for s in 통과:
+            s["회전율"] = round(s["거래대금"] / s["시총"] * 100, 1)
+        회전점수 = 정규화([s["회전율"] for s in 통과])
+        상승점수 = 정규화([s["등락률"] for s in 통과])
+        for i, s in enumerate(통과):
+            점수 = 회전점수[i] * W_회전 + 상승점수[i] * W_상승
+            if s["배수"] >= 배수_가점:
+                점수 += 가점
+                s["폭발"] = True
+            s["강세점수"] = round(min(100, 점수), 1)
+
+        통과.sort(key=lambda x: x["강세점수"], reverse=True)
+        신규[시장] = 통과[:10]
+        if 신규[시장]:
+            t = 신규[시장][0]
+            print(f"   1위 {t['종목명']} 점수 {t['강세점수']} "
+                  f"(회전율 {t['회전율']}%, {t['등락률']:+.2f}%, 거래량 {t['배수']}배)")
+
+    추적 = _update_tracking(신규, 가격맵)
+    return {"신규": 신규, "추적": 추적}
+
+
+def _load_prev_tracking():
+    """직전 발행분에서 추적 목록을 불러온다."""
+    import glob
+    files = sorted(glob.glob("data_*.json"))
+    files = [f for f in files if DATE not in f]
+    if not files:
+        return []
+    try:
+        with open(files[-1], "r", encoding="utf-8") as f:
+            prev = json.load(f)
+        return (prev.get("강세레이더") or {}).get("추적") or []
+    except Exception:
+        return []
+
+
+def _update_tracking(신규, 가격맵):
+    """포착 이후 추적표를 갱신한다.
+
+    · 기존 추적 종목: 경과일 +1, 현재가 갱신 → 포착 이후 등락률 계산
+    · 오늘 새로 포착: 추적표에 추가 (차수 1)
+    · 추적 중 재점화: 차수 +1, 포착일·포착가를 오늘로 리셋 → 신규에도 다시 노출
+    · TRACK_DAYS 초과: 졸업 처리(목록에서 제외)
+    """
+    추적 = _load_prev_tracking()
+    맵 = {t["종목명"]: t for t in 추적}
+
+    # 1) 기존 추적 갱신
+    for t in 추적:
+        t["경과"] = t.get("경과", 0) + 1
+        현재 = 가격맵.get(t["종목명"])
+        if 현재 and t.get("포착가"):
+            t["현재가"] = 현재["현재가"]
+            t["이후등락"] = round((현재["현재가"] - t["포착가"]) / t["포착가"] * 100, 2)
+
+    # 2) 오늘 포착 종목 반영
+    for 시장, 목록 in 신규.items():
+        for s in 목록:
+            기존 = 맵.get(s["종목명"])
+            if 기존:
+                # 재점화 — 차수를 올리고 기준을 오늘로 리셋
+                차수 = 기존.get("차수", 1) + 1
+                기존.update({"차수": 차수, "경과": 0,
+                            "포착일": DATE, "포착가": s["현재가"],
+                            "현재가": s["현재가"], "이후등락": 0.0})
+                s["재점화"] = 차수
+                print(f"   🔄 {s['종목명']} 재점화 → {차수}차 포착")
+            else:
+                새 = {"종목명": s["종목명"], "시장": 시장, "코드": s.get("코드"),
+                     "포착일": DATE, "포착가": s["현재가"], "현재가": s["현재가"],
+                     "이후등락": 0.0, "경과": 0, "차수": 1}
+                추적.append(새)
+                맵[s["종목명"]] = 새
+
+    # 3) 졸업 처리
+    남김 = [t for t in 추적 if t.get("경과", 0) <= TRACK_DAYS]
+    졸업 = len(추적) - len(남김)
+    if 졸업:
+        print(f"   🎓 추적 종료 {졸업}종목 (포착 후 {TRACK_DAYS}거래일 경과)")
+
+    # 포착 후 등락률 높은 순 정렬 (실패도 그대로 노출 — 지표 검증이 목적)
+    남김.sort(key=lambda x: x.get("이후등락", 0), reverse=True)
+    print(f"📋 추적 중 {len(남김)}종목")
+    return 남김
+
 # ============================================================
 # ⑦ 마감 브리핑 — 방송사 유튜브 자막
 # ------------------------------------------------------------
@@ -744,6 +1160,8 @@ if __name__ == "__main__":
     뉴스원본 = collect_news()
     매크로 = collect_macro()
     파생 = collect_program_and_futures()
+    강세레이더 = collect_strength_radar()
+    매집레이더 = collect_accumulation_radar()
     마감브리핑 = collect_briefings()
 
     전체 = {
@@ -756,6 +1174,18 @@ if __name__ == "__main__":
         "뉴스원본": 뉴스원본,
         "매크로": 매크로,
         "파생": 파생,
+        "강세레이더": 강세레이더,
+        "매집레이더": 매집레이더,
+        "설정": {
+            "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
+                   "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
+                   "가점": STR_가점, "회전비중": STR_W_회전, "상승비중": STR_W_상승,
+                   "추적일": TRACK_DAYS},
+            "매집": {"기간": ACC_DAYS, "쌍끌이일수": ACC_BOTH_DAYS,
+                   "단독일수": ACC_SOLO_DAYS, "스캔범위": ACC_UNIVERSE},
+            "주도섹터": {"1차후보": 20, "선정수": 6, "중복제외기준": 2,
+                     "가중치": "강도40 + 거래대금35 + 확산도25"},
+        },
         "마감브리핑": 마감브리핑,
     }
 
