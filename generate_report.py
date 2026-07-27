@@ -25,7 +25,7 @@ REPORT_PATH = f"report_{DATE}.json"
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.07.24-f"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.07.27-e"   # ⬅ 버전 표시
 MODEL = "claude-sonnet-5"      # $2/$10 도입가 · 속도·지능 균형 (추천 기본값)
 # MODEL = "claude-opus-4-8"    # $5/$25 · 복잡한 작업용 (약 2.5배 비용)
 # MODEL = "claude-fable-5"     # $10/$50 · 최상위 (약 5배 비용)
@@ -46,6 +46,13 @@ SYSTEM_PROMPT = """\
 4. 문장은 친절하고 담백하게, 초보 투자자도 이해할 수 있게 쓴다.
    과장·신파·상투어는 피한다.
 5. 반드시 아래 JSON 형식으로만 답한다. 그 외 설명이나 인사말은 절대 넣지 않는다.
+6. ⚠️ 숫자 단위 표기 규칙 — 한국어 금액 표기를 반드시 지킨다.
+   · 10,000억 = 1조 이다. 만억·천억억 같은 표기는 절대 쓰지 않는다.
+   · 10,000억 이상이면 반드시 '조' 단위로 바꿔 쓴다.
+     (예: 30,000억 → "3조",  32,683억 → "3.27조",  51,782억 → "5.18조")
+   · 10,000억 미만이면 '억' 단위로 쓴다. (예: 8,500억)
+   · 입력 데이터의 수급 숫자는 '억원' 단위이므로, 위 규칙에 따라 변환해서 쓴다.
+   · 이 규칙은 채점표·프로의시선·돈의흐름 등 모든 항목에 동일하게 적용된다.
 
 각 항목 작성 지침:
 - 한줄평: 오늘 시장의 특징을 한 문장(공백 포함 40자 이내)으로 압축. 관제지수 옆에 붙는 짧은 총평.
@@ -389,6 +396,35 @@ def _article_key(url):
     return url.strip()
 
 
+def fix_units(obj):
+    """Claude가 '3만억'처럼 잘못 쓴 금액 표기를 '3조'로 자동 교정한다.
+    프롬프트로 지시해도 가끔 틀리므로 코드에서 한 번 더 잡는다.
+    (10,000억 = 1조)"""
+    def 고치기(t):
+        # "3만억", "3만 억", "3.2만억" → 조 단위
+        def repl(m):
+            v = float(m.group(1))
+            return f"{v:g}조"
+        t = re.sub(r"(\d+(?:\.\d+)?)\s*만\s*억", repl, t)
+        # "32,683억" 처럼 1만 이상인 억 표기 → 조
+        def repl2(m):
+            num = float(m.group(1).replace(",", ""))
+            if num >= 10000:
+                조 = num / 10000
+                return f"{조:.2f}조".replace(".00조", "조")
+            return m.group(0)
+        t = re.sub(r"([\d,]+(?:\.\d+)?)\s*억", repl2, t)
+        return t
+
+    if isinstance(obj, str):
+        return 고치기(obj)
+    if isinstance(obj, list):
+        return [fix_units(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: fix_units(v) for k, v in obj.items()}
+    return obj
+
+
 def verify_news_links(글, data_원본):
     """Claude가 만든 링크를 원본과 대조한다.
     ⚠️ 예전엔 '문자열 완전일치'로 비교해서, 링크가 한 글자만 달라도
@@ -443,6 +479,7 @@ if __name__ == "__main__":
         글 = ask_claude(data)
         빠짐 = check_fields(글)
         글 = fill_missing(글, data, 빠짐)
+        글 = fix_units(글)
         글 = verify_news_links(글, data)
     except Exception as e:
         # 실패해도 파이프라인 전체가 죽지 않도록 명확히 알리고 종료.
