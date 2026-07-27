@@ -9,7 +9,10 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.24-f"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.07.27-e"   # ⬅ 버전 표시
+# ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
+SHOW_CRITERIA = True
+
 DATE = datetime.now().strftime("%Y%m%d")
 DATA_PATH = f"data_{DATE}.json"
 REPORT_PATH = f"report_{DATE}.json"
@@ -31,6 +34,14 @@ def load_json(path):
         return None
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+
+def dev_note(text):
+    """개발용 조건 표시. SHOW_CRITERIA=False면 아무것도 출력하지 않는다."""
+    if not SHOW_CRITERIA:
+        return ""
+    return f'<p class="devnote">⚙️ <b>적용 조건</b> · {text}</p>'
 
 
 def esc_url(u):
@@ -237,7 +248,7 @@ def build_terrain(주도섹터):
   </div>'''
 
 
-def build_sectors(주도섹터):
+def build_sectors(주도섹터, 설정=None):
     if not 주도섹터:
         return '<p class="smut">오늘 수집된 주도 섹터 데이터가 없습니다.</p>'
     앞2 = 주도섹터[:2]
@@ -392,6 +403,199 @@ def build_insight(프로의시선):
 
 
 # ── 마감 브리핑 (방송사별) ──
+# ── 실제 강세 레이더 (2단: 오늘 신규 + 포착 후 추적) ──
+def build_radar(강세레이더, 설정=None):
+    if not 강세레이더:
+        return '<div class="pending">⏳ 실제 강세 레이더 — 데이터 수집 준비중</div>'
+    설정 = (설정 or {}).get("강세", {})
+    조건 = dev_note(
+        f"시총 ≥ {설정.get('최소시총','?'):,}억 · 거래대금 ≥ {설정.get('최소거래대금','?'):,}억 · "
+        f"상승 종목만 · 전일 대비 거래량 ≥ {설정.get('거래량배수','?')}배 │ "
+        f"점수 = 회전율×{설정.get('회전비중','?')} + 상승률×{설정.get('상승비중','?')} "
+        f"(각각 0~100 정규화) + 거래량 {설정.get('가점배수','?')}배↑ 시 +{설정.get('가점','?')}점 │ "
+        f"추적 {설정.get('추적일','?')}거래일"
+    ) if 설정 else ""
+    신규 = 강세레이더.get("신규") or {}
+    추적 = 강세레이더.get("추적") or []
+
+    # ── 1단: 오늘 새로 포착 ──
+    def 시장블록(시장, 목록):
+        if not 목록:
+            return f'<p class="rd-empty">{시장} — 오늘 새로 포착된 종목이 없습니다.</p>'
+
+        def 행(rank, s):
+            등락 = s.get("등락률") or 0
+            폭발 = '<span class="rd-tag rd-boom">🔥 거래량 폭발</span>' if s.get("폭발") else ''
+            재 = s.get("재점화")
+            재HTML = f'<span class="rd-tag rd-re">🔄 {재}차 포착</span>' if 재 else ''
+            return f"""
+      <div class="rd-row">
+        <span class="rd-rank">{rank}</span>
+        <div class="rd-info">
+          <p class="rd-name">{s['종목명']}{재HTML}{폭발}</p>
+          <p class="rd-meta">회전율 {s.get('회전율','—')}% · 거래량 전일 <b>{s.get('배수','—')}배</b>
+            · 거래대금 {_fmt_eok(s.get('거래대금'))} · 시총 {_fmt_eok(s.get('시총'))}</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">{s.get('강세점수','—')}</span>
+          <span class="rd-chg up">+{등락:.2f}%</span>
+        </div>
+      </div>"""
+
+        앞5 = "".join(행(i+1, s) for i, s in enumerate(목록[:5]))
+        뒤 = 목록[5:10]
+        더보기 = ""
+        if 뒤:
+            gid = f"radar{시장}"
+            뒤HTML = "".join(행(i+6, s) for i, s in enumerate(뒤))
+            더보기 = f"""
+    <div class="hidden-block" id="{gid}">{뒤HTML}</div>
+    <button class="more-btn" onclick="toggleMore('{gid}',this,'▾ {시장} 6~{5+len(뒤)}위 더보기')">▾ {시장} 6~{5+len(뒤)}위 더보기</button>"""
+        return f"""
+    <div class="rd-market">
+      <p class="rd-mkt-name">📡 {시장}</p>
+      {앞5}{더보기}
+    </div>"""
+
+    신규HTML = 시장블록("코스피", 신규.get("코스피", [])) + 시장블록("코스닥", 신규.get("코스닥", []))
+
+    # ── 2단: 포착 이후 추적 ──
+    추적HTML = ""
+    if 추적:
+        def 추적행(t):
+            경과 = t.get("경과", 0)
+            차수 = t.get("차수", 1)
+            # 1차는 그냥 '포착', 2차부터만 차수를 붙인다
+            차표기 = "포착" if 차수 <= 1 else f"{차수}차 포착"
+            표기 = f"오늘 {차표기}" if 경과 == 0 else f"{경과}일 전 {차표기}"
+            등락 = t.get("이후등락", 0) or 0
+            cls = "up" if 등락 > 0 else ("dn" if 등락 < 0 else "smut")
+            뱃지 = "🔥 상승 지속" if 등락 >= 10 else ("💧 되돌림" if 등락 <= -5 else "→ 관망")
+            return f"""
+      <div class="tk-row">
+        <div class="tk-info">
+          <p class="tk-name">{t['종목명']} <span class="tk-when">{표기}</span></p>
+          <p class="tk-meta">{t.get('시장','')} · 포착 후 {경과}거래일 경과</p>
+        </div>
+        <div class="tk-nums">
+          <span class="tk-chg {cls}">{등락:+.2f}%</span>
+          <span class="tk-badge">{뱃지}</span>
+        </div>
+      </div>"""
+        앞 = "".join(추적행(t) for t in 추적[:5])
+        뒤 = 추적[5:]
+        더 = ""
+        if 뒤:
+            더HTML = "".join(추적행(t) for t in 뒤)
+            더 = f"""
+    <div class="hidden-block" id="trackMore">{더HTML}</div>
+    <button class="more-btn" onclick="toggleMore('trackMore',this,'▾ 추적 {len(뒤)}종목 더보기')">▾ 추적 {len(뒤)}종목 더보기</button>"""
+        평균 = sum(t.get("이후등락", 0) or 0 for t in 추적) / len(추적)
+        추적HTML = f"""
+  <div class="tk-box">
+    <p class="tk-head">📋 포착 이후 추적
+      <span class="tk-avg">전체 평균 {평균:+.2f}%</span></p>
+    <p class="tk-lead">레이더가 잡은 종목이 그 후 실제로 어떻게 됐는지 기록합니다.
+      <b>오른 것도 내린 것도 그대로 남깁니다</b> — 추천 성과가 아니라 지표가 맞는지 검증하는 기록입니다.</p>
+    {앞}{더}
+    <p class="tk-foot">포착 후 {5}거래일이 지나면 추적을 종료합니다. 추적 중 다시 조건을 만족하면 재점화로 보고 차수를 올립니다.</p>
+  </div>"""
+
+    return f"""
+  <div class="rd-box">
+    <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
+      시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 거래량 2배 이상</b> 종목 중에서,
+      회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
+    {조건}
+    {신규HTML}
+    <p class="rd-foot">🔥 폭발 = 전일 대비 거래량 3배 이상 · 🔄 N차 포착 = 추적 중이던 종목의 재점화.
+      점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
+  </div>{추적HTML}"""
+
+
+
+
+# ── 5일 매집 레이더 (쌍끌이 우선 + 두 랭킹 나란히) ──
+def build_accumulation(매집, 설정=None):
+    if not 매집:
+        return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
+    종목 = 매집.get("종목") or []
+    if not 종목:
+        return '<div class="pending">오늘은 조건을 만족한 매집 종목이 없습니다.</div>'
+    기간 = 매집.get("기간", 5)
+    쌍최소 = 매집.get("쌍끌이최소", 3)
+    단최소 = 매집.get("단독최소", 4)
+    쌍수 = 매집.get("쌍끌이수", 0)
+    cfg = (설정 or {}).get("매집", {})
+    스캔 = cfg.get("스캔범위") or {}
+    조건 = dev_note(
+        f"스캔 범위 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 │ "
+        f"관찰 {cfg.get('기간','?')}거래일 │ "
+        f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + │ "
+        f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑ (쌍끌이 5종목 미만일 때만 보충)"
+    ) if cfg else ""
+
+    def 유형뱃지(t):
+        if t == "쌍끌이":
+            return '<span class="ac-tag ac-both">🤝 쌍끌이</span>'
+        return f'<span class="ac-tag ac-solo">💼 {t}</span>'
+
+    def 랭킹(제목, 부제, 정렬키, 값표시):
+        정렬 = sorted(종목, key=lambda x: x.get(정렬키, 0), reverse=True)[:5]
+        행 = []
+        for i, s in enumerate(정렬, 1):
+            행.append(f"""
+        <div class="ac-row">
+          <span class="ac-rank">{i}</span>
+          <div class="ac-info">
+            <p class="ac-name">{s['종목명']}{유형뱃지(s.get('유형',''))}</p>
+            <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일
+              · 시총 {_fmt_eok(s.get('시총'))}</p>
+          </div>
+          <span class="ac-val">{값표시(s)}</span>
+        </div>""")
+        return f"""
+      <div class="ac-col">
+        <p class="ac-col-t">{제목}</p>
+        <p class="ac-col-s">{부제}</p>
+        {"".join(행)}
+      </div>"""
+
+    금액 = 랭킹("💰 누적 금액", "큰돈이 어디로 갔나", "합산",
+              lambda s: f"+{_fmt_eok(s.get('합산'))}")
+    비율 = 랭킹("📊 시총 대비", "그 회사엔 얼마나 큰 돈인가", "시총대비",
+              lambda s: f"{s.get('시총대비','—')}%")
+
+    보충 = ""
+    if 쌍수 < 5:
+        보충 = f'<p class="ac-note">※ 오늘 쌍끌이 종목이 {쌍수}개뿐이라 단독 매집 종목으로 보충했습니다.</p>'
+
+    return f"""
+  <div class="rd-box">
+    <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
+      아직 크게 오르지 않았지만 조용히 돈이 쌓이는 종목을 찾습니다.
+      (강세 레이더가 '터진 것'을 본다면, 여기는 '쌓이는 것'을 봅니다)<br>
+      🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
+      💼 단독 = 한쪽만, {단최소}일 이상</p>
+    {조건}
+    <div class="ac-two">{금액}{비율}</div>
+    {보충}
+    <p class="rd-foot">💡 <b>같은 종목인데 두 순위가 다릅니다.</b> 금액이 커도 대형주면 비율은 작고,
+      금액이 작아도 소형주면 비율은 큽니다. 어느 쪽이 중요한지는 보는 관점에 따라 다릅니다.
+      관찰 참고용이며 매수 신호가 아닙니다.</p>
+  </div>"""
+
+
+def _fmt_eok(억):
+    """억원 숫자를 조/억으로 표기."""
+    v = _to_float(억)
+    if v is None:
+        return "—"
+    if abs(v) >= 10000:
+        return f"{v/10000:.1f}조"
+    return f"{v:,.0f}억"
+
+
 def build_briefings(마감브리핑):
     if not 마감브리핑:
         return '<div class="pending">⏳ 오늘 마감 브리핑 영상을 찾지 못했습니다</div>'
@@ -809,6 +1013,65 @@ a{{color:inherit;text-decoration:none}}
 .study-k{{font-size:10px;font-weight:800;background:#d9e8c4;color:#2c520c;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
 .study-memo{{background:#2c520c;color:#eef5e2;border-radius:var(--rmd);padding:.6rem .9rem;font-size:12px;font-weight:600;margin-top:.7rem;line-height:1.6}}
 
+/* ── 회전율 레이더 ── */
+.rd-box{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);padding:1rem 1.1rem;margin-bottom:1rem}}
+.devnote{{background:#FFF8E6;border:.5px dashed #E0C060;border-radius:var(--rmd);padding:.55rem .8rem;font-size:10px;color:#7a5a10;line-height:1.7;margin-bottom:.8rem}}
+.devnote b{{color:#5a4208}}
+.rd-lead{{font-size:11.5px;color:var(--sub);line-height:1.7;margin-bottom:.9rem;background:var(--bg2);padding:.7rem .85rem;border-radius:var(--rmd)}}
+.rd-market{{margin-bottom:.8rem}}
+.rd-mkt-name{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.5rem}}
+.rd-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.rd-row:last-child{{border-bottom:none}}
+.rd-rank{{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;width:20px;flex-shrink:0;text-align:center}}
+.rd-info{{flex:1;min-width:0}}
+.rd-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.rd-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
+.rd-new{{background:#FAECE7;color:#993C1D}} .rd-stay{{background:#FAEEDA;color:#854F0B}}
+.rd-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
+.rd-nums{{text-align:right;flex-shrink:0}}
+.rd-score{{display:block;font-size:15px;font-weight:800;color:#8a5a1f}}\n.rd-boom{{background:#FAECE7;color:#C1432B}}
+.rd-chg{{font-size:11px;font-weight:700}}
+.ac-two{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.ac-col{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .8rem}}
+.ac-col-t{{font-size:12px;font-weight:800;color:var(--ink)}}
+.ac-col-s{{font-size:9.5px;color:var(--sub);margin:2px 0 .5rem}}
+.ac-rank{{font-size:11px;font-weight:800;color:#c9c1b0;font-style:italic;width:14px;flex-shrink:0}}
+.ac-info{{flex:1;min-width:0}}
+.ac-name{{font-size:11.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:4px;flex-wrap:wrap}}
+.ac-meta{{font-size:9.5px;color:var(--sub);margin-top:1px}}
+.ac-val{{font-size:11.5px;font-weight:800;color:var(--up);flex-shrink:0;text-align:right}}
+.ac-solo{{background:var(--bg);color:var(--sub);border:.5px solid var(--line)}}
+.ac-note{{font-size:10px;color:var(--sub);margin-top:.6rem}}
+@media (max-width:600px){{ .ac-two{{grid-template-columns:1fr}} }}
+.ac-group{{margin-bottom:.8rem}}
+.ac-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.ac-row:last-child{{border-bottom:none}}
+.ac-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
+.ac-days{{background:var(--bg2);color:var(--sub)}}
+.ac-both{{background:#FAECE7;color:#C1432B}}
+.ac-money{{display:block;font-size:14px;font-weight:800}}
+.ac-ratio{{font-size:10px;color:var(--sub)}}
+.sort-tabs{{display:flex;border:.5px solid var(--line);border-radius:99px;overflow:hidden;width:fit-content;margin-bottom:.8rem}}
+.sort-tab{{font-size:11px;font-weight:600;padding:5px 16px;background:var(--bg);color:var(--sub);border:none;cursor:pointer;font-family:var(--font-sans)}}
+.sort-tab.active{{background:#23262b;color:#fff}}
+.rd-re{{background:#EEEDFE;color:#3C3489}}
+.tk-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
+.tk-head{{font-size:12.5px;font-weight:800;color:var(--ink);margin-bottom:.5rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.tk-avg{{font-size:10.5px;font-weight:700;color:#8a5a1f;background:#F3E4C8;padding:2px 9px;border-radius:99px}}
+.tk-lead{{font-size:11px;color:var(--sub);line-height:1.7;margin-bottom:.7rem}}
+.tk-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.tk-row:last-of-type{{border-bottom:none}}
+.tk-info{{flex:1;min-width:0}}
+.tk-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.tk-when{{font-size:9.5px;font-weight:700;background:var(--bg2);color:var(--sub);padding:1px 7px;border-radius:4px;white-space:nowrap}}
+.tk-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
+.tk-nums{{text-align:right;flex-shrink:0}}
+.tk-chg{{display:block;font-size:14px;font-weight:800}}
+.tk-badge{{font-size:9.5px;color:var(--sub)}}
+.tk-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.6rem;padding-top:.6rem;border-top:.5px solid var(--line)}}
+.rd-empty{{font-size:11.5px;color:var(--sub);padding:.5rem 0}}
+.rd-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}}
+
 /* ── 어제의 채점표 ── */
 .score-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
 .score-head{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.7rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
@@ -958,7 +1221,17 @@ a{{color:inherit;text-decoration:none}}
   </div>
 
   <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
+            f"{(data.get('설정') or {}).get('주도섹터',{}).get('가중치','?')} 점수로 재정렬 → "
+            f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
+            f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
+
+  <p class="sec-label">📡 실제 강세 레이더 — 오늘 새로 포착 + 이후 추적</p>
+  {build_radar(data.get('강세레이더'), data.get('설정'))}
+
+  <p class="sec-label">🐢 5일 매집 레이더 — 조용히 쌓이는 돈</p>
+  {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
   <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
   {build_briefings(해석.get('마감브리핑'))}
@@ -1001,6 +1274,22 @@ function toggleMore(id,btn,label){{
   var el=document.getElementById(id);
   var open=el.classList.toggle('open');
   btn.textContent=open?'▴ 접기':label;
+}}
+function sortAcc(key,btn){{
+  document.querySelectorAll('.sort-tab').forEach(function(t){{t.classList.remove('active')}});
+  btn.classList.add('active');
+  var attr = (key==='money') ? 'money' : 'ratio';
+  document.querySelectorAll('[data-acclist]').forEach(function(list){{
+    var rows = Array.prototype.slice.call(list.querySelectorAll('.ac-row'));
+    rows.sort(function(a,b){{
+      return (parseFloat(b.dataset[attr])||0) - (parseFloat(a.dataset[attr])||0);
+    }});
+    rows.forEach(function(r,i){{
+      var n = r.querySelector('.rd-rank');
+      if(n) n.textContent = i+1;
+      list.appendChild(r);
+    }});
+  }});
 }}
 function toggleTV(id,el){{
   var body=document.getElementById(id);
