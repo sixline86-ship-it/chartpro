@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.28-b"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.07.28-d"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
