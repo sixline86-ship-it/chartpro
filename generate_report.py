@@ -25,7 +25,11 @@ REPORT_PATH = f"report_{DATE}.json"
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.07.28-b"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.07.28-d"
+
+# 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
+MAX_TOKENS_START = 16000
+MAX_TOKENS_CAP = 64000   # ⬅ 버전 표시
 MODEL = "claude-sonnet-5"      # $2/$10 도입가 · 속도·지능 균형 (추천 기본값)
 # MODEL = "claude-opus-4-8"    # $5/$25 · 복잡한 작업용 (약 2.5배 비용)
 # MODEL = "claude-fable-5"     # $10/$50 · 최상위 (약 5배 비용)
@@ -265,6 +269,49 @@ def load_previous_watchpoints():
         return None
 
 
+def slim_data(data):
+    """Claude에게 보낼 데이터를 줄인다.
+
+    코너가 늘면서 data json이 비대해졌다(매집 레이더만 69종목 등).
+    화면에는 상위 몇 개만 쓰는데 전부 보내면
+      · 입력 토큰이 커져 비용이 오르고
+      · 모델이 핵심을 놓치기 쉬우며
+      · 출력이 max_tokens에 걸려 잘릴 위험이 커진다.
+    해석에 필요한 만큼만 잘라서 보낸다.
+    """
+    d = json.loads(json.dumps(data, ensure_ascii=False))   # 원본 보호
+
+    # 주도섹터: 종목은 3개씩이면 해석에 충분
+    for s in d.get("주도섹터", []) or []:
+        if isinstance(s.get("종목"), list):
+            s["종목"] = s["종목"][:3]
+
+    # 강세 레이더: 신규 각 5개, 추적 5개
+    강 = d.get("강세레이더") or {}
+    for k, v in (강.get("신규") or {}).items():
+        강["신규"][k] = v[:5]
+    if isinstance(강.get("추적"), list):
+        강["추적"] = 강["추적"][:5]
+
+    # 매집 레이더: 두 랭킹에 실제로 쓰이는 상위만 (69종목 → 최대 10종목)
+    매 = d.get("매집레이더") or {}
+    종목 = 매.get("종목") or []
+    if 종목:
+        상위금액 = sorted(종목, key=lambda x: x.get("시총대비", 0), reverse=True)[:5]
+        상위갭 = sorted([s for s in 종목 if s.get("매집갭") is not None],
+                      key=lambda x: x["매집갭"], reverse=True)[:5]
+        본 = {id(s): s for s in 상위금액 + 상위갭}
+        매["종목"] = list(본.values())
+        매["전체종목수"] = len(종목)
+
+    # 공시: 상위 8건이면 해설을 붙이기에 충분
+    if isinstance(d.get("공시"), list):
+        d["공시"] = d["공시"][:8]
+
+    # 뉴스 원본은 그대로 (핵심뉴스 생성에 전부 필요)
+    return d
+
+
 def load_data():
     if not os.path.exists(DATA_PATH):
         print(f"❌ {DATA_PATH} 파일이 없습니다. collect_data.py를 먼저 실행하세요.")
@@ -298,15 +345,18 @@ def parse_json(raw_text):
     return json.loads(t)
 
 
-def ask_claude(data, 시도=1):
-    user_message = (
-        "오늘 수집된 시장 데이터는 다음과 같다:\n\n"
-        + json.dumps(data, ensure_ascii=False, indent=2)
-    )
+def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
+    슬림 = slim_data(data)
+    본문 = json.dumps(슬림, ensure_ascii=False, indent=2)
+    if 시도 == 1:
+        원본크기 = len(json.dumps(data, ensure_ascii=False))
+        print(f"📦 입력 크기: 원본 {원본크기:,}자 → 슬림 {len(본문):,}자 "
+              f"({100 - len(본문)*100//max(1,원본크기)}% 감소)")
+    user_message = "오늘 수집된 시장 데이터는 다음과 같다:\n\n" + 본문
 
     kwargs = dict(
         model=MODEL,
-        max_tokens=8000,   # 핵심이슈·핵심뉴스 추가로 분량이 늘어 넉넉히 상향
+        max_tokens=max_tok,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -315,27 +365,33 @@ def ask_claude(data, 시도=1):
     #    - 답변이 max_tokens 안에서 끊길 위험을 높이고
     #    - 비용도 불필요하게 올린다.
     #    low로 낮추면 두 문제가 동시에 줄어든다.
-    #    (Sonnet 5/Opus 4.8 계열에서만 지원. Haiku 등 다른 모델이면 무시됨)
     if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
         kwargs["output_config"] = {"effort": "low"}
 
     response = client.messages.create(**kwargs)
 
-    # ⭐ 답변이 중간에 끊겼는지(max_tokens 도달) 바로 알 수 있게 확인
+    # ⚠️ 답변이 중간에 끊겼으면 한도를 올려 다시 시도한다.
+    #    (예전엔 같은 한도로 재시도해서 똑같이 실패했다 — 무의미한 재시도)
     if response.stop_reason == "max_tokens":
-        print("⚠️ 답변이 max_tokens 한도에 걸려 중간에 끊겼습니다.")
-        print(f"   (현재 max_tokens={kwargs['max_tokens']}) → 더 늘려야 할 수 있습니다.")
+        if 시도 < 3 and max_tok < MAX_TOKENS_CAP:
+            새한도 = min(max_tok * 2, MAX_TOKENS_CAP)
+            print(f"⚠️ 답변이 max_tokens({max_tok:,})에 걸려 잘렸습니다 "
+                  f"→ {새한도:,}로 올려 재시도합니다 ({시도}/2)")
+            time.sleep(1)
+            return ask_claude(data, 시도 + 1, 새한도)
+        print(f"❌ max_tokens {max_tok:,}로도 답변이 잘립니다. "
+              f"SYSTEM_PROMPT의 항목 수나 분량을 줄여야 합니다.")
 
     raw = extract_text(response)
     try:
         return parse_json(raw)
     except json.JSONDecodeError:
-        if 시도 < 2:
+        if 시도 < 3:
             print("⚠️ JSON 형식이 아니어서 한 번 더 시도합니다...")
             time.sleep(2)
-            return ask_claude(data, 시도 + 1)
-        print("❌ JSON 파싱 실패. 받은 응답:")
-        print(raw[:500])
+            return ask_claude(data, 시도 + 1, min(max_tok * 2, MAX_TOKENS_CAP))
+        print("❌ JSON 파싱 실패. 받은 응답 끝부분:")
+        print("   ..." + raw[-300:])
         raise
 
 
@@ -486,7 +542,22 @@ if __name__ == "__main__":
         # (build_html.py 는 해석글 없이도 리포트를 만들 수 있다)
         print("\n❌ 해석 글 생성 실패")
         print(f"   원인: {type(e).__name__}: {e}")
-        print("   → 리포트는 해석글 없이 생성됩니다. 잔액/키/모델명을 확인하세요.")
+        이름 = type(e).__name__
+        메시지 = str(e).lower()
+        if "authentication" in 메시지 or "api_key" in 메시지:
+            print("   👉 ANTHROPIC_API_KEY 시크릿이 없거나 잘못됐습니다.")
+        elif "credit" in 메시지 or "billing" in 메시지 or "quota" in 메시지:
+            print("   👉 Claude API 잔액이 부족합니다. 콘솔에서 충전하세요.")
+        elif "not_found" in 메시지 or "model" in 메시지:
+            print(f"   👉 모델명({MODEL})이 잘못됐을 수 있습니다.")
+        elif 이름 == "JSONDecodeError":
+            print("   👉 응답이 JSON이 아니거나 중간에 잘렸습니다. max_tokens를 더 올리거나")
+            print("      SYSTEM_PROMPT의 항목 수를 줄여야 할 수 있습니다.")
+        elif "overloaded" in 메시지 or "rate" in 메시지:
+            print("   👉 API가 일시적으로 혼잡합니다. 잠시 후 재실행하세요.")
+        else:
+            print("   👉 위 원인 메시지를 그대로 알려주시면 진단할 수 있습니다.")
+        print("   → 리포트는 해석글 없이 생성됩니다.")
         sys.exit(1)
 
     최종 = {**data, "해석글": 글}
