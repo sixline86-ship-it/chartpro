@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.27-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.07.28-b"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -639,7 +639,11 @@ ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것
 ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
 ACC_DROP_LINE = -5.0    # 5일 등락률이 이 아래면 '하락 중 매집'(⚠️ 물타기 가능성)
 ACC_FLAT_LINE = 5.0     # 이 이하면 '횡보 중 매집'(😴 전형적 매집 패턴)
-ACC_UNIVERSE = {"코스피": 60, "코스닥": 40}   # 시총 상위 몇 종목까지 스캔할지
+ACC_POOL = None         # 후보 풀 상한. None = 상한 없음(조건 통과한 종목 전부)
+                        #   화면엔 각 랭킹 TOP5만 나오지만, 뽑는 범위가 좁으면
+                        #   두 랭킹이 같은 종목만 반복하게 된다(풀 5개면 겹침 100%).
+                        #   그래서 상한을 두지 않고 통과 종목 전부를 풀에 담는다.
+ACC_UNIVERSE = {"코스피": 100, "코스닥": 40}  # 시총 상위 몇 종목까지 스캔할지
 
 
 def _fetch_investor_flow(code, days=ACC_DAYS):
@@ -811,15 +815,18 @@ def collect_accumulation_radar():
     쌍끌이.sort(key=lambda x: x["합산"], reverse=True)
     단독.sort(key=lambda x: x["합산"], reverse=True)
 
-    # 쌍끌이 우선, 5종목 미만이면 단독으로 보충
-    종목 = 쌍끌이[:10]
-    if len(종목) < 5:
-        종목 += 단독[: (5 - len(종목))]
+    # 조건을 통과한 종목을 전부 풀에 담는다(쌍끌이 먼저, 그다음 단독).
+    # ⚠️ 예전엔 여기서 5~10개로 잘라버려서 두 랭킹이 같은 종목만 반복됐다.
+    #    두 랭킹 모두 이 전체 풀에서 각자 TOP5를 뽑는다.
+    종목 = 쌍끌이 + 단독
+    if ACC_POOL:
+        종목 = 종목[:ACC_POOL]
 
     _score_accumulation(종목)
 
-    print(f"✅ 매집 레이더 — 쌍끌이 {len(쌍끌이)}종목"
-          f"{f', 단독 보충 {len(종목)-len(쌍끌이[:10])}종목' if len(종목) > len(쌍끌이[:10]) else ''}")
+    쌍끌이수 = sum(1 for s in 종목 if s.get("유형") == "쌍끌이")
+    print(f"✅ 매집 레이더 — 스캔 {len(유니버스)}종목 → 후보 풀 {len(종목)}종목 "
+          f"(🤝쌍끌이 {쌍끌이수} + 💼단독 {len(종목)-쌍끌이수}) → 각 랭킹 TOP5 노출")
     for s in 종목[:3]:
         print(f"   [{s['유형']}] {s['종목명']} {s['합산']:,.0f}억 "
               f"(외{s['외인일수']}일/기{s['기관일수']}일, 시총대비 {s['시총대비']}%)")
@@ -1245,7 +1252,8 @@ if __name__ == "__main__":
                    "추적일": TRACK_DAYS},
             "매집": {"기간": ACC_DAYS, "쌍끌이일수": ACC_BOTH_DAYS,
                    "단독일수": ACC_SOLO_DAYS, "스캔범위": ACC_UNIVERSE,
-                   "하락선": ACC_DROP_LINE, "횡보선": ACC_FLAT_LINE},
+                   "하락선": ACC_DROP_LINE, "횡보선": ACC_FLAT_LINE,
+                   "풀크기": ACC_POOL or "제한없음"},
             "주도섹터": {"1차후보": 20, "선정수": 6, "중복제외기준": 2,
                      "가중치": "강도40 + 거래대금35 + 확산도25"},
         },
