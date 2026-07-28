@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.27-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.07.27-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -637,6 +637,8 @@ STR_W_회전, STR_W_상승 = 0.5, 0.5
 ACC_DAYS = 5            # 관찰 기간(거래일)
 ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
 ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
+ACC_DROP_LINE = -5.0    # 5일 등락률이 이 아래면 '하락 중 매집'(⚠️ 물타기 가능성)
+ACC_FLAT_LINE = 5.0     # 이 이하면 '횡보 중 매집'(😴 전형적 매집 패턴)
 ACC_UNIVERSE = {"코스피": 60, "코스닥": 40}   # 시총 상위 몇 종목까지 스캔할지
 
 
@@ -687,18 +689,27 @@ def _fetch_investor_flow(code, days=ACC_DAYS):
         return None
 
     외 , 기 = [], []
+    종가들 = []
     for _, row in df.iterrows():
         종가 = to_num(row.get(종가열))
         외량 = to_num(row.get(외인열))
         기량 = to_num(row.get(기관열))
         if 종가 is None:
             continue
+        종가들.append(종가)
         외.append((외량 or 0) * 종가 / 100_000_000)   # 원 → 억원
         기.append((기량 or 0) * 종가 / 100_000_000)
-    if not 외:
+    if not 외 or len(종가들) < 2:
         return None
+
+    # 5일 등락률 — 이미 받아온 종가로 계산하므로 추가 요청이 없다.
+    # (표는 최신일이 0번째, 가장 오래된 날이 마지막)
+    최근, 시작 = 종가들[0], 종가들[-1]
+    등락 = (최근 - 시작) / 시작 * 100 if 시작 else None
+
     return {"외국인": 외, "기관": 기,
-            "종가": to_num(df.iloc[0].get(종가열))}
+            "종가": 최근, "시작종가": 시작,
+            "5일등락률": round(등락, 2) if 등락 is not None else None}
 
 
 def collect_accumulation_radar():
@@ -775,7 +786,8 @@ def collect_accumulation_radar():
 
         기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
                "외인일수": 외일수, "기관일수": 기일수,
-               "외국인": round(외누적, 1), "기관": round(기누적, 1)}
+               "외국인": round(외누적, 1), "기관": round(기누적, 1),
+               "5일등락률": flow.get("5일등락률")}
 
         # 🤝 쌍끌이 — 둘 다 3일 이상 & 각자 누적 플러스
         if (외일수 >= ACC_BOTH_DAYS and 기일수 >= ACC_BOTH_DAYS
@@ -804,6 +816,8 @@ def collect_accumulation_radar():
     if len(종목) < 5:
         종목 += 단독[: (5 - len(종목))]
 
+    _score_accumulation(종목)
+
     print(f"✅ 매집 레이더 — 쌍끌이 {len(쌍끌이)}종목"
           f"{f', 단독 보충 {len(종목)-len(쌍끌이[:10])}종목' if len(종목) > len(쌍끌이[:10]) else ''}")
     for s in 종목[:3]:
@@ -814,6 +828,54 @@ def collect_accumulation_radar():
             "쌍끌이최소": ACC_BOTH_DAYS, "단독최소": ACC_SOLO_DAYS,
             "쌍끌이수": len(쌍끌이)}
 
+
+
+def _score_accumulation(종목):
+    """매집갭을 계산한다.
+
+    ── 왜 '갭'인가 ──
+      왼쪽 랭킹(시총 대비)은 "얼마나 큰 돈이 들어왔나"를 본다.
+      오른쪽은 질문이 달라야 겹치지 않는다 → "그 돈이 아직 가격에 반영 안 된 곳".
+
+    ── 계산 ──
+      매집점수   = 시총대비 매집비율을 후보군 안에서 0~100으로 정규화
+      반응점수   = 5일 등락률을 후보군 안에서 0~100으로 정규화
+      매집갭     = 매집점수 − 반응점수     (범위 −100 ~ +100)
+
+    ⚠️ 정규화하는 이유: 시총대비(0.04~1.6%)와 등락률(−10~+20%)은 단위가 달라
+       그냥 빼면 숫자가 큰 등락률이 지배한다. 둘 다 0~100으로 맞춰야 공평하다.
+    ⚠️ 나눗셈이 아니라 뺄셈인 이유: 등락률이 0에 가까우면 나눗셈은 값이 무한대로 튄다.
+    """
+    if not 종목:
+        return
+    유효 = [s for s in 종목 if s.get("5일등락률") is not None]
+    if not 유효:
+        return
+
+    def 정규화(vals):
+        lo, hi = min(vals), max(vals)
+        if hi == lo:
+            return [50.0] * len(vals)
+        return [(v - lo) / (hi - lo) * 100 for v in vals]
+
+    매집점수 = 정규화([s["시총대비"] for s in 유효])
+    반응점수 = 정규화([s["5일등락률"] for s in 유효])
+
+    for i, s in enumerate(유효):
+        s["매집점수"] = round(매집점수[i])
+        s["반응점수"] = round(반응점수[i])
+        s["매집갭"] = round(매집점수[i] - 반응점수[i])
+        # 성격 구분 — '안 올랐다'에는 횡보와 하락이 섞여 있어 반드시 나눠 표시한다
+        등락 = s["5일등락률"]
+        if 등락 < ACC_DROP_LINE:
+            s["성격"] = "하락 중"
+            s["성격아이콘"] = "⚠️"
+        elif 등락 <= ACC_FLAT_LINE:
+            s["성격"] = "횡보"
+            s["성격아이콘"] = "😴"
+        else:
+            s["성격"] = "상승 중"
+            s["성격아이콘"] = "🌱"
 
 
 def collect_strength_radar():
@@ -1182,7 +1244,8 @@ if __name__ == "__main__":
                    "가점": STR_가점, "회전비중": STR_W_회전, "상승비중": STR_W_상승,
                    "추적일": TRACK_DAYS},
             "매집": {"기간": ACC_DAYS, "쌍끌이일수": ACC_BOTH_DAYS,
-                   "단독일수": ACC_SOLO_DAYS, "스캔범위": ACC_UNIVERSE},
+                   "단독일수": ACC_SOLO_DAYS, "스캔범위": ACC_UNIVERSE,
+                   "하락선": ACC_DROP_LINE, "횡보선": ACC_FLAT_LINE},
             "주도섹터": {"1차후보": 20, "선정수": 6, "중복제외기준": 2,
                      "가중치": "강도40 + 거래대금35 + 확산도25"},
         },
