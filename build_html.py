@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.27-e"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.07.27-f"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -515,7 +515,7 @@ def build_radar(강세레이더, 설정=None):
 
 
 
-# ── 5일 매집 레이더 (쌍끌이 우선 + 두 랭킹 나란히) ──
+# ── 5일 매집 레이더 (시총대비 + 아직 안 오른 매집) ──
 def build_accumulation(매집, 설정=None):
     if not 매집:
         return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
@@ -526,13 +526,19 @@ def build_accumulation(매집, 설정=None):
     쌍최소 = 매집.get("쌍끌이최소", 3)
     단최소 = 매집.get("단독최소", 4)
     쌍수 = 매집.get("쌍끌이수", 0)
+
     cfg = (설정 or {}).get("매집", {})
     스캔 = cfg.get("스캔범위") or {}
     조건 = dev_note(
-        f"스캔 범위 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 │ "
+        f"스캔 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 · "
         f"관찰 {cfg.get('기간','?')}거래일 │ "
-        f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + │ "
-        f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑ (쌍끌이 5종목 미만일 때만 보충)"
+        f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
+        f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑ (쌍끌이 5종목 미만일 때 보충)<br>"
+        f"<b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100<br>"
+        f"<b>매집갭</b> = 매집점수 − 반응점수 "
+        f"(매집점수 = 시총대비를 후보군 안에서 0~100 정규화, 반응점수 = 5일 등락률을 같은 방식으로 정규화)<br>"
+        f"성격 구분: 5일 등락률 {cfg.get('하락선','?')}% 미만 = ⚠️하락 중 · "
+        f"{cfg.get('횡보선','?')}% 이하 = 😴횡보 · 초과 = 🌱상승 중"
     ) if cfg else ""
 
     def 유형뱃지(t):
@@ -540,31 +546,37 @@ def build_accumulation(매집, 설정=None):
             return '<span class="ac-tag ac-both">🤝 쌍끌이</span>'
         return f'<span class="ac-tag ac-solo">💼 {t}</span>'
 
-    def 랭킹(제목, 부제, 정렬키, 값표시):
-        정렬 = sorted(종목, key=lambda x: x.get(정렬키, 0), reverse=True)[:5]
-        행 = []
-        for i, s in enumerate(정렬, 1):
-            행.append(f"""
+    def 행(i, s, 값HTML, 부가=""):
+        return f"""
         <div class="ac-row">
           <span class="ac-rank">{i}</span>
           <div class="ac-info">
             <p class="ac-name">{s['종목명']}{유형뱃지(s.get('유형',''))}</p>
             <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일
-              · 시총 {_fmt_eok(s.get('시총'))}</p>
+              · 시총 {_fmt_eok(s.get('시총'))}{부가}</p>
           </div>
-          <span class="ac-val">{값표시(s)}</span>
-        </div>""")
-        return f"""
-      <div class="ac-col">
-        <p class="ac-col-t">{제목}</p>
-        <p class="ac-col-s">{부제}</p>
-        {"".join(행)}
-      </div>"""
+          {값HTML}
+        </div>"""
 
-    금액 = 랭킹("💰 누적 금액", "큰돈이 어디로 갔나", "합산",
-              lambda s: f"+{_fmt_eok(s.get('합산'))}")
-    비율 = 랭킹("📊 시총 대비", "그 회사엔 얼마나 큰 돈인가", "시총대비",
-              lambda s: f"{s.get('시총대비','—')}%")
+    # 왼쪽 — 시총 대비
+    왼목록 = sorted(종목, key=lambda x: x.get("시총대비", 0), reverse=True)[:5]
+    왼행 = "".join(
+        행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+          f' · 누적 +{_fmt_eok(s.get("합산"))}')
+        for i, s in enumerate(왼목록, 1))
+
+    # 오른쪽 — 아직 안 오른 매집 (매집갭)
+    갭목록 = [s for s in 종목 if s.get("매집갭") is not None]
+    갭목록 = sorted(갭목록, key=lambda x: x["매집갭"], reverse=True)[:5]
+    if 갭목록:
+        오른행 = "".join(
+            행(i, s,
+              f'<span class="ac-gap"><b>{s.get("매집갭"):+d}</b>'
+              f'<span class="ac-char">{s.get("성격아이콘","")} {s.get("성격","")}'
+              f' {s.get("5일등락률",0):+.1f}%</span></span>')
+            for i, s in enumerate(갭목록, 1))
+    else:
+        오른행 = '<p class="rd-empty">5일 등락률 데이터를 확보하지 못했습니다.</p>'
 
     보충 = ""
     if 쌍수 < 5:
@@ -576,13 +588,26 @@ def build_accumulation(매집, 설정=None):
       아직 크게 오르지 않았지만 조용히 돈이 쌓이는 종목을 찾습니다.
       (강세 레이더가 '터진 것'을 본다면, 여기는 '쌓이는 것'을 봅니다)<br>
       🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
-      💼 단독 = 한쪽만, {단최소}일 이상</p>
+      💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
-    <div class="ac-two">{금액}{비율}</div>
+    <div class="ac-two">
+      <div class="ac-col">
+        <p class="ac-col-t">📊 시총 대비</p>
+        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+        {왼행}
+      </div>
+      <div class="ac-col">
+        <p class="ac-col-t">🐢 아직 안 오른 매집</p>
+        <p class="ac-col-s">돈은 들어왔는데 가격은 아직</p>
+        {오른행}
+      </div>
+    </div>
     {보충}
-    <p class="rd-foot">💡 <b>같은 종목인데 두 순위가 다릅니다.</b> 금액이 커도 대형주면 비율은 작고,
-      금액이 작아도 소형주면 비율은 큽니다. 어느 쪽이 중요한지는 보는 관점에 따라 다릅니다.
-      관찰 참고용이며 매수 신호가 아닙니다.</p>
+    <p class="rd-foot">💡 <b>오른쪽은 "곧 오른다"는 뜻이 아닙니다.</b> 돈이 들어왔는데 주가가 반응하지 않은
+      상태일 뿐이며, 이유는 개별 확인이 필요합니다. 특히 ⚠️<b>하락 중</b>은 매수 주체가 떨어지는 주식을
+      받아주는 중일 수 있습니다.<br>
+      ※ '기관'은 <b>기관계 합산</b>입니다. 증권사 자기매매(선물·ELS 헤지 등 방향성이 아닌 물량)가
+      포함될 수 있습니다. 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>"""
 
 
@@ -1031,6 +1056,9 @@ a{{color:inherit;text-decoration:none}}
 .rd-nums{{text-align:right;flex-shrink:0}}
 .rd-score{{display:block;font-size:15px;font-weight:800;color:#8a5a1f}}\n.rd-boom{{background:#FAECE7;color:#C1432B}}
 .rd-chg{{font-size:11px;font-weight:700}}
+.ac-gap{{text-align:right;flex-shrink:0}}
+.ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
+.ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
 .ac-two{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
 .ac-col{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .8rem}}
 .ac-col-t{{font-size:12px;font-weight:800;color:var(--ink)}}
@@ -1042,7 +1070,10 @@ a{{color:inherit;text-decoration:none}}
 .ac-val{{font-size:11.5px;font-weight:800;color:var(--up);flex-shrink:0;text-align:right}}
 .ac-solo{{background:var(--bg);color:var(--sub);border:.5px solid var(--line)}}
 .ac-note{{font-size:10px;color:var(--sub);margin-top:.6rem}}
-@media (max-width:600px){{ .ac-two{{grid-template-columns:1fr}} }}
+@media (max-width:600px){{ .ac-gap{{text-align:right;flex-shrink:0}}
+.ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
+.ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
+.ac-two{{grid-template-columns:1fr}} }}
 .ac-group{{margin-bottom:.8rem}}
 .ac-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
 .ac-row:last-child{{border-bottom:none}}
