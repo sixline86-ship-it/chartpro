@@ -381,6 +381,22 @@
   },
   "뉴스원본": [
     {
+      "제목": "단일종목 레버리지 ‘총량 규제’ 도입…과다거래 비용도 높인다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004646643&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
+    },
+    {
+      "제목": "“SK하이닉스 470만원 간다”던 노무라…“코스피 급락, 진짜 이유는 따로 있다”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004646640&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
+    },
+    {
+      "제목": "“4% 떨어진 건 일도 아냐” 밥 먹듯 사이드카…역대 15번 뿐인 서킷브레이커도 올해만 9번 [투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002677037&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
+    },
+    {
+      "제목": "‘7월에만 30% 넘게 폭락’ 왜 하필 코스피 투자를…폭락엔 다 이유가 있다 [투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002677036&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
+    },
+    {
       "제목": "‘하이닉스 470만원 간다’던 노무라증권 “코스피 급락은 수급불균형 때문”",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002807877&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
     },
@@ -423,40 +439,24 @@
     {
       "제목": "[올댓차이나] 대만 증시, 반도체주 급락에 나흘째 3.76%↓…\"4만선 겨우 방어\"",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014096647&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
-    },
-    {
-      "제목": "\"레버리지로 56조 손실 추정\" 개미 '패닉셀'…근조화환 국회 앞 뒤덮었다",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001260453&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
-    },
-    {
-      "제목": "증시 흔드는 레버리지…금융당국 \"추가로 필요한 사항 모두 테이블로\"",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006339478&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
-    },
-    {
-      "제목": "구윤철 “가상자산 과세, 추가 유예 없이 내년 시행”",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0003116268&office_id=119&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
-    },
-    {
-      "제목": "한양증권, 단일종목 레버리지 ETF 투자 유의사항 콘텐츠 공개",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004646624&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260729&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1452.08,
-      "등락률": -0.84,
+      "값": 1452.86,
+      "등락률": -0.79,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 82.99,
-      "등락률": 4.71,
+      "값": 84.24,
+      "등락률": 6.28,
       "표시명": "WTI 유가",
       "단위": "$"
     },
     "미국채10년": {
-      "값": 4.64,
-      "등락률": -1.32,
+      "값": 4.6,
+      "등락률": -0.8,
       "표시명": "미국채 10년물",
       "단위": "%"
     }
