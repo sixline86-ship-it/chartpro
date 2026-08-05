@@ -297,6 +297,18 @@
   },
   "뉴스원본": [
     {
+      "제목": "장 마감 동시호가에 널뛰는 주가...‘종가급변’ 투자주의종목 1년새 7배 폭증",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005717238&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
+      "제목": "'美 눈독' 기업들 붙잡을까…英, 상장 절차 확 줄인다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001261307&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
+      "제목": "“이날이 올 줄 알았다” 배터리주 다시 뛰나…여기저기서 호재 만발 [투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002680072&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
       "제목": "“엔저 못 막는다”…中, 美日 환율공조에 회의적인 배경은 [김혜란의 FX]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004648957&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
     },
@@ -351,26 +363,18 @@
     {
       "제목": "“강제로 장투할 판” 깜짝 실적에도 주가 8% 급락…스페이스X 서학개미 울상 [투자360]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002680056&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "채권 순매수 41% 급감… 기업성 자금, 채권시장 '단비'로",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005557776&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "블룸버그 \"한국, 투자 부적합\"…금융위 \"경제 견고\" 반박",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000892749&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1423.55,
-      "등락률": -0.35,
+      "값": 1422.98,
+      "등락률": -0.39,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 76.03,
-      "등락률": 0.34,
+      "값": 75.89,
+      "등락률": 0.16,
       "표시명": "WTI 유가",
       "단위": "$"
     },
