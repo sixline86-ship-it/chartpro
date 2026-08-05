@@ -1,6 +1,6 @@
 {
   "날짜": "20260805",
-  "버전_collect": "v2026.08.05-d",
+  "버전_collect": "v2026.08.05-e",
   "공시": [
     {
       "회사명": "옵티코어",
@@ -297,6 +297,22 @@
   },
   "뉴스원본": [
     {
+      "제목": "“엔저 못 막는다”…中, 美日 환율공조에 회의적인 배경은 [김혜란의 FX]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004648957&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
+      "제목": "'과징금 6천억 고스란히' 쿠팡, 상반기 적자만 1조…화재 손실도 3500억",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962229&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
+      "제목": "[올댓차이나] 대만 증시, 美 반도체주 강세에 급반등 마감…2.88%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014110818&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
+      "제목": "금값 30% '뚝'…한은도 13년 만에 산다는데 이참에 나도?",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962228&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
+    },
+    {
       "제목": "금감원, SK디앤디 1367억원 유상증자에 정정요구",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005557842&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
     },
@@ -343,38 +359,18 @@
     {
       "제목": "블룸버그 \"한국, 투자 부적합\"…금융위 \"경제 견고\" 반박",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000892749&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "코스피, 3.76% 급등 마감…코스닥, 나흘째 랠리",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000892748&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "금감원, SK디앤디 1367억원 규모 유상증자에 정정 요구",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014110757&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "삼전닉스 레버리지, 거래대금 1조 아래 ‘뚝’…상장 이후 처음",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006345345&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "\"모범생 벌 주나\"…사모펀드 규제 역차별 논란",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005317776&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
-    },
-    {
-      "제목": "한앤코, SK디앤디 상폐 실패 뒤 ‘꼼수 유증’ 논란…금감원 급제동",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002236745&office_id=138&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260805&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1424.67,
-      "등락률": -0.27,
+      "값": 1423.55,
+      "등락률": -0.35,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 76.27,
-      "등락률": 0.66,
+      "값": 76.03,
+      "등락률": 0.34,
       "표시명": "WTI 유가",
       "단위": "$"
     },
