@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.07.28-d"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.05-c"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -303,6 +303,7 @@ def build_study(공부):
         f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
         for k, v in 단계 if v)
     암기 = 공부.get("한줄암기", "")
+    근거 = 공부.get("출제근거", "")
     심화단계 = [("역사에서", 공부.get("역사에서", "")),
               ("투자 적용", 공부.get("투자적용", "")),
               ("더 깊이", 공부.get("더깊이", ""))]
@@ -317,11 +318,66 @@ def build_study(공부):
 
     return f'''
   <div class="study-box">
-    <p class="study-no">📚 오늘의 이슈에서 출제 · {공부.get("주제","")}</p>
+    <p class="study-no">📚 오늘 리포트에서 출제 · {공부.get("주제","")}</p>
+    {f'<p class="study-src">📍 출처: {근거}</p>' if 근거 else ''}
     <p class="study-term">{공부.get("질문","")}</p>
     {행들}
     {f'<div class="study-memo">✏️ 한 줄 암기: {암기}</div>' if 암기 else ''}
   </div>{심화HTML}'''
+
+
+# ── 지난 리포트 아카이브 (report_YYYYMMDD.html 자동 스캔) ──
+ARCHIVE_MAX = 14          # 최근 몇 개까지 보여줄지
+ARCHIVE_FOLD = 7          # 이 개수까지만 펼쳐 두고 나머지는 '더보기'
+_WD = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def find_past_reports():
+    """같은 폴더의 report_YYYYMMDD.html 을 모아 최신순으로 돌려준다."""
+    목록 = []
+    try:
+        파일들 = os.listdir(".")
+    except Exception:
+        return 목록
+    for f in 파일들:
+        if not (f.startswith("report_") and f.endswith(".html")):
+            continue
+        ymd = f[7:-5]
+        if len(ymd) != 8 or not ymd.isdigit():
+            continue
+        if ymd == DATE:          # 오늘 리포트는 목록에서 제외
+            continue
+        try:
+            d = datetime.strptime(ymd, "%Y%m%d")
+        except ValueError:
+            continue
+        목록.append((ymd, d, f))
+    목록.sort(key=lambda x: x[0], reverse=True)
+    return 목록[:ARCHIVE_MAX]
+
+
+def build_archive():
+    목록 = find_past_reports()
+    if not 목록:
+        return ('<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트</p>'
+                '<p class="arch-empty">아직 쌓인 리포트가 없습니다. 내일부터 이 자리에 목록이 쌓입니다.</p></div>')
+
+    def 칩(item):
+        ymd, d, f = item
+        return f'<a class="arch-link" href="{f}">{d.month}/{d.day}({_WD[d.weekday()]})</a>'
+
+    앞 = "".join(칩(x) for x in 목록[:ARCHIVE_FOLD])
+    뒤목록 = 목록[ARCHIVE_FOLD:]
+    뒤HTML = ""
+    if 뒤목록:
+        뒤칩 = "".join(칩(x) for x in 뒤목록)
+        뒤HTML = (f'<div class="hidden-block" id="moreArch" style="margin-top:6px">'
+                  f'<div class="arch-grid">{뒤칩}</div></div>'
+                  f'<button class="more-btn" style="margin-top:8px;margin-bottom:0" '
+                  f'onclick="toggleMore(\'moreArch\',this,\'▾ 이전 리포트 {len(뒤목록)}개 더보기\')">'
+                  f'▾ 이전 리포트 {len(뒤목록)}개 더보기</button>')
+    return (f'<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p>'
+            f'<div class="arch-grid">{앞}</div>{뒤HTML}</div>')
 
 
 # ── 핵심 이슈 ──
@@ -347,9 +403,9 @@ def one_news_item(idx, item):
     제목 = item.get("제목", "")
     요약 = item.get("요약", "")
     본문 = f'''
-      <span class="news-tag {cls}">{tag}</span>{제목}'''
+      <span class="news-tag {cls}">{tag}</span>{제목}<span class="news-go">↗</span>'''
     if 링크:
-        title_html = f'<a href="{esc_url(링크)}" target="_blank">{본문}</a>'
+        title_html = f'<a class="news-a" href="{esc_url(링크)}" target="_blank">{본문}</a>'
     else:
         title_html = 본문
     return f'''
@@ -362,19 +418,31 @@ def one_news_item(idx, item):
     </div>'''
 
 
+def news_title(핵심뉴스):
+    """섹션 제목. 개수가 매일 5~8개로 달라지므로 제목도 따라 움직인다."""
+    n = len(핵심뉴스 or [])
+    return f"인기 뉴스 TOP {n}" if n else "인기 뉴스"
+
+
 def build_news(핵심뉴스):
+    """인기 뉴스 — 3개만 펼치고 나머지는 더보기.
+    개수는 generate 단계에서 매일 5~8개 사이로 정해져 넘어온다.
+    리포트 본문에서 이미 다룬 사안은 제외하고 고른 것들이다."""
     if not 핵심뉴스:
-        return '<div class="pending">⏳ 네이버 증권 인기뉴스 크롤링 준비중</div>'
+        return '<div class="pending">⏳ 네이버 증권 인기뉴스 수집 준비중</div>'
     앞3 = 핵심뉴스[:3]
-    뒤 = 핵심뉴스[3:10]
+    뒤 = 핵심뉴스[3:]
     앞HTML = "".join(one_news_item(i + 1, it) for i, it in enumerate(앞3))
-    뒤HTML = "".join(one_news_item(i + 4, it) for i, it in enumerate(뒤))
     더보기 = ""
     if 뒤:
-        더보기 = f'''
-  <div class="hidden-block" id="moreNews"><div class="news-wrap" style="border:none;box-shadow:none;margin:0">{뒤HTML}</div></div>
-  <button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 핵심뉴스 {len(뒤)}개 더보기')">▾ 핵심뉴스 {len(뒤)}개 더보기</button>'''
-    return f'<div class="news-wrap">{앞HTML}</div>{더보기}'
+        뒤HTML = "".join(one_news_item(i + 4, it) for i, it in enumerate(뒤))
+        더보기 = (f'<div class="hidden-block" id="moreNews">'
+                f'<div class="news-wrap" style="border:none;box-shadow:none;margin:0">{뒤HTML}</div></div>'
+                f'<button class="more-btn" onclick="toggleMore(\'moreNews\',this,\'▾ 뉴스 {len(뒤)}개 더보기\')">'
+                f'▾ 뉴스 {len(뒤)}개 더보기</button>')
+    return (f'<div class="news-wrap">{앞HTML}</div>{더보기}'
+            '<p class="news-foot">※ 제목을 누르면 해당 기사 원문으로 이동합니다. '
+            '위 코너에서 이미 다룬 사안은 제외하고 골랐습니다.</p>')
 
 
 # ── 환율·유가·금리 카드 ──
@@ -403,7 +471,7 @@ def build_insight(프로의시선):
 
 
 # ── 마감 브리핑 (방송사별) ──
-# ── 실제 강세 레이더 (2단: 오늘 신규 + 포착 후 추적) ──
+# ── 실제 강세 레이더 (오늘 신규 포착만 표시) ──
 def build_radar(강세레이더, 설정=None):
     if not 강세레이더:
         return '<div class="pending">⏳ 실제 강세 레이더 — 데이터 수집 준비중</div>'
@@ -459,47 +527,9 @@ def build_radar(강세레이더, 설정=None):
 
     신규HTML = 시장블록("코스피", 신규.get("코스피", [])) + 시장블록("코스닥", 신규.get("코스닥", []))
 
-    # ── 2단: 포착 이후 추적 ──
-    추적HTML = ""
-    if 추적:
-        def 추적행(t):
-            경과 = t.get("경과", 0)
-            차수 = t.get("차수", 1)
-            # 1차는 그냥 '포착', 2차부터만 차수를 붙인다
-            차표기 = "포착" if 차수 <= 1 else f"{차수}차 포착"
-            표기 = f"오늘 {차표기}" if 경과 == 0 else f"{경과}일 전 {차표기}"
-            등락 = t.get("이후등락", 0) or 0
-            cls = "up" if 등락 > 0 else ("dn" if 등락 < 0 else "smut")
-            뱃지 = "🔥 상승 지속" if 등락 >= 10 else ("💧 되돌림" if 등락 <= -5 else "→ 관망")
-            return f"""
-      <div class="tk-row">
-        <div class="tk-info">
-          <p class="tk-name">{t['종목명']} <span class="tk-when">{표기}</span></p>
-          <p class="tk-meta">{t.get('시장','')} · 포착 후 {경과}거래일 경과</p>
-        </div>
-        <div class="tk-nums">
-          <span class="tk-chg {cls}">{등락:+.2f}%</span>
-          <span class="tk-badge">{뱃지}</span>
-        </div>
-      </div>"""
-        앞 = "".join(추적행(t) for t in 추적[:5])
-        뒤 = 추적[5:]
-        더 = ""
-        if 뒤:
-            더HTML = "".join(추적행(t) for t in 뒤)
-            더 = f"""
-    <div class="hidden-block" id="trackMore">{더HTML}</div>
-    <button class="more-btn" onclick="toggleMore('trackMore',this,'▾ 추적 {len(뒤)}종목 더보기')">▾ 추적 {len(뒤)}종목 더보기</button>"""
-        평균 = sum(t.get("이후등락", 0) or 0 for t in 추적) / len(추적)
-        추적HTML = f"""
-  <div class="tk-box">
-    <p class="tk-head">📋 포착 이후 추적
-      <span class="tk-avg">전체 평균 {평균:+.2f}%</span></p>
-    <p class="tk-lead">레이더가 잡은 종목이 그 후 실제로 어떻게 됐는지 기록합니다.
-      <b>오른 것도 내린 것도 그대로 남깁니다</b> — 추천 성과가 아니라 지표가 맞는지 검증하는 기록입니다.</p>
-    {앞}{더}
-    <p class="tk-foot">포착 후 {5}거래일이 지나면 추적을 종료합니다. 추적 중 다시 조건을 만족하면 재점화로 보고 차수를 올립니다.</p>
-  </div>"""
+    # ── (2단 '포착 이후 추적'은 화면에서 제거했다) ──
+    #   collect_data.py는 계속 추적 데이터를 쌓는다. 화면에 안 보일 뿐,
+    #   '🔄 N차 포착' 재점화 뱃지가 그 기록 위에서 돌아가기 때문이다.
 
     return f"""
   <div class="rd-box">
@@ -510,7 +540,7 @@ def build_radar(강세레이더, 설정=None):
     {신규HTML}
     <p class="rd-foot">🔥 폭발 = 전일 대비 거래량 3배 이상 · 🔄 N차 포착 = 추적 중이던 종목의 재점화.
       점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
-  </div>{추적HTML}"""
+  </div>"""
 
 
 
@@ -534,13 +564,8 @@ def build_accumulation(매집, 설정=None):
         f"관찰 {cfg.get('기간','?')}거래일 │ "
         f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
         f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑<br>"
-        f"조건 통과 종목 <b>전부</b>를 후보 풀에 담고, <b>두 랭킹 모두 이 전체 풀에서</b> 각자 TOP5를 뽑음 "
-        f"(풀이 좁으면 두 랭킹이 같은 종목만 반복되므로 상한을 두지 않음)<br>"
-        f"<b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100<br>"
-        f"<b>매집갭</b> = 매집점수 − 반응점수 "
-        f"(매집점수 = 시총대비를 후보군 안에서 0~100 정규화, 반응점수 = 5일 등락률을 같은 방식으로 정규화)<br>"
-        f"성격 구분: 5일 등락률 {cfg.get('하락선','?')}% 미만 = ⚠️하락 중 · "
-        f"{cfg.get('횡보선','?')}% 이하 = 😴횡보 · 초과 = 🌱상승 중"
+        f"조건 통과 종목 전부를 후보 풀에 담은 뒤 <b>코스피·코스닥으로 나눠</b> 각 시장에서 TOP5<br>"
+        f"<b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100 (내림차순 정렬)"
     ) if cfg else ""
 
     def 유형뱃지(t):
@@ -560,52 +585,52 @@ def build_accumulation(매집, 설정=None):
           {값HTML}
         </div>"""
 
-    # 왼쪽 — 시총 대비
-    왼목록 = sorted(종목, key=lambda x: x.get("시총대비", 0), reverse=True)[:5]
-    왼행 = "".join(
-        행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
-          f' · 누적 +{_fmt_eok(s.get("합산"))}')
-        for i, s in enumerate(왼목록, 1))
+    # ── 시장별 시총 대비 TOP5 ──
+    #   예전엔 '시총대비 / 매집갭' 두 랭킹이었는데, 매집갭은 해석 부담이 커서 뺐다.
+    #   대신 같은 기준(시총대비)을 코스피·코스닥으로 나눠 비교 가능성을 높였다.
+    def 시장랭킹(시장):
+        목록 = [x for x in 종목 if x.get("시장") == 시장]
+        목록 = sorted(목록, key=lambda x: x.get("시총대비", 0) or 0, reverse=True)[:5]
+        if not 목록:
+            return 0, f'<p class="rd-empty">{시장} — 오늘 조건을 만족한 종목이 없습니다.</p>'
+        전체 = len([x for x in 종목 if x.get("시장") == 시장])
+        행들 = "".join(
+            행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+              f' · 누적 +{_fmt_eok(s.get("합산"))}')
+            for i, s in enumerate(목록, 1))
+        return 전체, 행들
 
-    # 오른쪽 — 아직 안 오른 매집 (매집갭)
-    갭목록 = [s for s in 종목 if s.get("매집갭") is not None]
-    갭목록 = sorted(갭목록, key=lambda x: x["매집갭"], reverse=True)[:5]
-    if 갭목록:
-        오른행 = "".join(
-            행(i, s,
-              f'<span class="ac-gap"><b>{s.get("매집갭"):+d}</b>'
-              f'<span class="ac-char">{s.get("성격아이콘","")} {s.get("성격","")}'
-              f' {s.get("5일등락률",0):+.1f}%</span></span>')
-            for i, s in enumerate(갭목록, 1))
-    else:
-        오른행 = '<p class="rd-empty">5일 등락률 데이터를 확보하지 못했습니다.</p>'
+    코스피수, 코스피행 = 시장랭킹("코스피")
+    코스닥수, 코스닥행 = 시장랭킹("코스닥")
 
-    보충 = f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 (🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}). 각 랭킹은 이 중 상위 5개입니다.</p>'
+    보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
+          f'(🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}) — '
+          f'코스피 {코스피수} · 코스닥 {코스닥수}. 각 시장에서 시총 대비 상위 5개입니다.</p>')
 
     return f"""
   <div class="rd-box">
     <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
-      아직 크게 오르지 않았지만 조용히 돈이 쌓이는 종목을 찾습니다.
+      조용히 돈이 쌓이는 종목을 코스피·코스닥에서 각각 찾습니다.
       (강세 레이더가 '터진 것'을 본다면, 여기는 '쌓이는 것'을 봅니다)<br>
       🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
       💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
     <div class="ac-two">
       <div class="ac-col">
-        <p class="ac-col-t">📊 시총 대비</p>
+        <p class="ac-col-t">📊 코스피 · 시총 대비</p>
         <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
-        {왼행}
+        {코스피행}
       </div>
       <div class="ac-col">
-        <p class="ac-col-t">🐢 아직 안 오른 매집</p>
-        <p class="ac-col-s">돈은 들어왔는데 가격은 아직</p>
-        {오른행}
+        <p class="ac-col-t">📊 코스닥 · 시총 대비</p>
+        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+        {코스닥행}
       </div>
     </div>
     {보충}
-    <p class="rd-foot">💡 <b>오른쪽은 "곧 오른다"는 뜻이 아닙니다.</b> 돈이 들어왔는데 주가가 반응하지 않은
-      상태일 뿐이며, 이유는 개별 확인이 필요합니다. 특히 ⚠️<b>하락 중</b>은 매수 주체가 떨어지는 주식을
-      받아주는 중일 수 있습니다.<br>
+    <p class="rd-foot">💡 <b>순위가 높다고 "곧 오른다"는 뜻이 아닙니다.</b> 그 회사 규모에 비해 들어온 돈이
+      컸다는 사실만 보여줄 뿐이며, 이유는 개별 확인이 필요합니다.
+      시장을 나눈 이유는 시총 규모가 다른 코스피·코스닥을 한 줄로 세우면 늘 소형주만 올라오기 때문입니다.<br>
       ※ '기관'은 <b>기관계 합산</b>입니다. 증권사 자기매매(선물·ELS 헤지 등 방향성이 아닌 물량)가
       포함될 수 있습니다. 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>"""
@@ -730,9 +755,10 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     <div class="mf-blk"><span class="mf-blk-t">{아이콘} {라벨}</span>
       <p class="mf-blk-b">{내용}</p></div>'''
 
-    # ── 현물 · 선물 · 옵션 막대그래프 (외국인 기준) ──
-    옵션 = _to_float((파생.get("옵션수급") or {}).get("외국인"))
-    항목 = [("현물", 현물), ("선물", 선물), ("옵션", 옵션)]
+    # ── 현물 · 선물 막대그래프 (외국인 기준) ──
+    #   옵션은 안정적으로 얻을 경로가 없어 코너에서 제외했다.
+    #   ('확인 불가'만 고정으로 나가는 칸은 유료 리포트에서 오히려 손해)
+    항목 = [("현물", 현물), ("선물", 선물)]
     유효값 = [abs(v) for _, v in 항목 if v is not None]
     최대 = max(유효값) if 유효값 else 1
     막대들 = []
@@ -755,7 +781,7 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
 
     막대HTML = f'''
     <div class="fx-wrap">
-      <p class="mf-sub">외국인 — 현물 · 선물 · 옵션 (0선 기준, 오른쪽=순매수)</p>
+      <p class="mf-sub">외국인 — 현물 · 선물 (0선 기준, 오른쪽=순매수)</p>
       <div class="fx-chart">{"".join(막대들)}</div>
     </div>'''
 
@@ -794,11 +820,11 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
       </div>
     </div>'''
 
-    옵션방향 = 돈의흐름.get("옵션방향", "")
     체크 = 돈의흐름.get("체크포인트", "")
-    상세 = (블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")
-            + 블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")
-            + 블록("옵션이 가리키는 쪽", 옵션방향, "🎯"))
+    상세 = 블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")
+    # 프로그램매매 해설은 실제 숫자가 들어온 날에만 붙인다
+    if 프로HTML:
+        상세 += 블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")
 
     return f'''
   <div class="mf-box">
@@ -810,7 +836,7 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     <div class="hidden-block" id="moreFlow">{상세}</div>
     <button class="more-btn dark" onclick="toggleMore('moreFlow',this,'▾ 자세한 해석 보기')">▾ 자세한 해석 보기</button>
     {f'<p class="mf-check">👀 <b>내일 확인:</b> {체크}</p>' if 체크 else ''}
-    <p class="mf-todo">※ 차익거래는 선물·현물 가격차를 노린 기계적 매매, 비차익거래는 방향성 베팅입니다. 같은 순매도라도 성격이 다릅니다.</p>
+    {'<p class="mf-todo">※ 차익거래는 선물·현물 가격차를 노린 기계적 매매, 비차익거래는 방향성 베팅입니다. 같은 순매도라도 성격이 다릅니다.</p>' if 프로HTML else ''}
   </div>'''
 
 
@@ -996,11 +1022,25 @@ a{{color:inherit;text-decoration:none}}
 .nt-market{{background:#E6F1FB;color:#0C447C}} .nt-stock{{background:#FAECE7;color:#993C1D}}
 .nt-policy{{background:#FAEEDA;color:#854F0B}} .nt-global{{background:#EEEDFE;color:#3C3489}}
 .news-insight{{font-size:11.5px;color:var(--sub);line-height:1.6}}
+.news-a{{text-decoration:none;color:inherit}}
+.news-a:hover .news-tag{{filter:brightness(.94)}}
+.news-item:hover{{background:#FBFAF8}}
+.news-go{{font-size:10px;color:#b0aca6;margin-left:4px;vertical-align:middle}}
+.news-a:hover{{text-decoration:underline;text-underline-offset:3px}}
+.news-foot{{font-size:10px;color:var(--sub);line-height:1.6;margin:-.2rem 0 1rem;padding:0 .2rem}}
+/* 지난 리포트 아카이브 */
+.arch-wrap{{background:var(--bg2);border:.5px solid var(--line);border-radius:var(--rlg);padding:.85rem 1rem;margin:1.4rem 0 .4rem}}
+.arch-head{{font-size:11.5px;font-weight:800;color:var(--ink);margin-bottom:.6rem;letter-spacing:-.01em}}
+.arch-grid{{display:flex;flex-wrap:wrap;gap:6px}}
+.arch-link{{font-size:11.5px;font-weight:600;color:var(--ink);background:var(--bg);border:.5px solid var(--line);border-radius:99px;padding:5px 12px;text-decoration:none;font-variant-numeric:tabular-nums;white-space:nowrap}}
+.arch-link:hover{{background:#23262b;color:#fff;border-color:#23262b}}
+.arch-empty{{font-size:11px;color:var(--sub)}}
 .silent-wrap{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}}
 .silent-head{{font-size:12.5px;font-weight:800;color:#3C3489;margin-bottom:.6rem}}
 .si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #e0dcf0;font-size:12.5px;line-height:1.75;color:#33305e}}
 .si-item:last-child{{border-bottom:none;padding-bottom:0}}
 .si-lens{{font-size:10px;font-weight:700;background:#E3DFF5;color:#3C3489;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.study-src{{font-size:10.5px;font-weight:600;color:#5b8a2a;background:#dcebc8;display:inline-block;padding:2px 9px;border-radius:99px;margin:2px 0 6px}}
 .study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
 .hidden-block{{display:none}} .hidden-block.open{{display:block}}
 .more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
@@ -1086,20 +1126,6 @@ a{{color:inherit;text-decoration:none}}
 .sort-tab{{font-size:11px;font-weight:600;padding:5px 16px;background:var(--bg);color:var(--sub);border:none;cursor:pointer;font-family:var(--font-sans)}}
 .sort-tab.active{{background:#23262b;color:#fff}}
 .rd-re{{background:#EEEDFE;color:#3C3489}}
-.tk-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
-.tk-head{{font-size:12.5px;font-weight:800;color:var(--ink);margin-bottom:.5rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
-.tk-avg{{font-size:10.5px;font-weight:700;color:#8a5a1f;background:#F3E4C8;padding:2px 9px;border-radius:99px}}
-.tk-lead{{font-size:11px;color:var(--sub);line-height:1.7;margin-bottom:.7rem}}
-.tk-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
-.tk-row:last-of-type{{border-bottom:none}}
-.tk-info{{flex:1;min-width:0}}
-.tk-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
-.tk-when{{font-size:9.5px;font-weight:700;background:var(--bg2);color:var(--sub);padding:1px 7px;border-radius:4px;white-space:nowrap}}
-.tk-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
-.tk-nums{{text-align:right;flex-shrink:0}}
-.tk-chg{{display:block;font-size:14px;font-weight:800}}
-.tk-badge{{font-size:9.5px;color:var(--sub)}}
-.tk-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.6rem;padding-top:.6rem;border-top:.5px solid var(--line)}}
 .rd-empty{{font-size:11.5px;color:var(--sub);padding:.5rem 0}}
 .rd-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}}
 
@@ -1258,7 +1284,7 @@ a{{color:inherit;text-decoration:none}}
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
 
-  <p class="sec-label">📡 실제 강세 레이더 — 오늘 새로 포착 + 이후 추적</p>
+  <p class="sec-label">📡 실제 강세 레이더 — 오늘 새로 포착</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
   <p class="sec-label">🐢 5일 매집 레이더 — 조용히 쌓이는 돈</p>
@@ -1279,7 +1305,7 @@ a{{color:inherit;text-decoration:none}}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🔥 핵심 뉴스 TOP 10 요약</p>
+  <p class="sec-label">🔥 {news_title(해석.get('핵심뉴스'))}</p>
   {build_news(해석.get('핵심뉴스'))}
 
   {f'<p class="sec-label">✅ 어제의 채점표</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
@@ -1297,6 +1323,8 @@ a{{color:inherit;text-decoration:none}}
     <p class="quote-text">{오늘의문장}</p>
     <p class="quote-sub">— 차트프로 관제탑, {날짜}</p>
   </div>
+
+  {build_archive()}
 
   <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[{SCRIPT_VERSION}]</span></p>
 </div>
