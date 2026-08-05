@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.05-c"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.05-e"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -216,29 +216,62 @@ def one_sector_card(a):
     </div>'''
 
 
-# ── 섹터 지형도 (v8 스타일: 0선 기준 세로 막대) ──
+# ── 섹터 지형도 (0선 기준 세로 막대, 데이터에 맞춰 자동 스케일) ──
 def build_terrain(주도섹터):
-    """주도섹터 6개의 테마 등락률로 0선 기준 막대 차트를 그린다."""
+    """주도섹터 6개의 테마 등락률로 막대 차트를 그린다.
+
+    ⚠️ 예전 방식의 두 가지 문제를 고쳤다.
+      ① 0선을 항상 한가운데(50%)에 고정 → 오늘처럼 6개가 전부 상승이면
+         아래 절반이 통째로 빈 공간이 됐다.
+      ② 막대 높이를 '등락률 × 8px'로 고정 → 등락률이 크면 막대가 영역을
+         뚫고 올라가 숫자가 제목과 겹쳤다.
+
+    새 방식: 0선 위치와 막대 높이를 **오늘 데이터에 맞춰 비율로 계산**한다.
+      · 전부 상승이면 0선을 바닥으로 내려 위쪽을 다 쓴다 (빈 공간 없음)
+      · 전부 하락이면 0선을 천장으로 올린다
+      · 섞여 있으면 양수·음수 최대치 비율대로 0선을 배치한다
+      · 가장 큰 막대가 그리는 영역을 꽉 채우되, 숫자가 앉을 자리(라벨 밴드)를
+        위아래에 미리 비워둬서 절대 겹치지 않는다
+      · 모든 값이 %라서 모바일에서 영역 높이가 줄어도 그대로 맞는다
+    """
     if not 주도섹터:
         return ""
-    cols = []
+    항목 = []
     for a in 주도섹터[:6]:
         et = a.get("테마등락")
-        v = et if isinstance(et, (int, float)) else 0
-        # 막대 높이: |등락률| × 배율 (최대 70px 근처), 최소 3px
-        h = min(70, max(3, abs(v) * 8))
+        v = float(et) if isinstance(et, (int, float)) else 0.0
+        항목.append((a.get("테마명", ""), v))
+    if not 항목:
+        return ""
+
+    최대양 = max([v for _, v in 항목 if v > 0], default=0.0)
+    최대음 = max([-v for _, v in 항목 if v < 0], default=0.0)
+    합 = 최대양 + 최대음
+    if 합 <= 0:                      # 전부 0인 예외 상황
+        최대양, 합 = 1.0, 1.0
+
+    # 숫자가 앉을 자리를 위아래에 확보 (해당 방향에 막대가 있을 때만)
+    위여백 = 15.0 if 최대양 > 0 else 3.0
+    아래여백 = 15.0 if 최대음 > 0 else 3.0
+    그림영역 = 100.0 - 위여백 - 아래여백
+    영점 = 위여백 + (최대양 / 합) * 그림영역      # 위에서부터 % — 0선 위치
+
+    cols = []
+    for name, v in 항목:
+        h = max(1.5, abs(v) / 합 * 그림영역)      # 막대 높이(%)
         if v >= 0:
-            bar = f'<div class="bar pos" style="height:{h}px"></div>'
-            val = f'<span class="bar-val pos" style="bottom:calc(50% + {h+3}px)">{v:+.1f}%</span>'
+            바닥 = 100.0 - 영점
+            bar = f'<div class="bar pos" style="bottom:{바닥:.1f}%;height:{h:.1f}%"></div>'
+            val = (f'<span class="bar-val pos" '
+                   f'style="bottom:calc({바닥 + h:.1f}% + 2px)">{v:+.1f}%</span>')
         else:
-            bar = f'<div class="bar neg" style="height:{h}px"></div>'
-            val = f'<span class="bar-val neg" style="top:calc(50% + {h+3}px)">{v:+.1f}%</span>'
-        name = a["테마명"]
-        # 이름이 길면 자르기
+            bar = f'<div class="bar neg" style="top:{영점:.1f}%;height:{h:.1f}%"></div>'
+            val = (f'<span class="bar-val neg" '
+                   f'style="top:calc({영점 + h:.1f}% + 2px)">{v:+.1f}%</span>')
         disp = name if len(name) <= 6 else name[:5] + "…"
         cols.append(f'''
       <div class="bar-col">
-        <div class="bar-zone">{val}{bar}</div>
+        <div class="bar-zone" style="--zero:{영점:.1f}%">{val}{bar}</div>
         <p class="bar-name">{disp}</p>
       </div>''')
     return f'''
@@ -955,14 +988,14 @@ a{{color:inherit;text-decoration:none}}
 
 /* ── 섹터 지형도 (v8 스타일) ── */
 .terrain-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1rem 1.15rem 1.1rem;margin-bottom:1rem}}
-.terrain-title{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin-bottom:.4rem;letter-spacing:.04em}}
+.terrain-title{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin-bottom:.55rem;letter-spacing:.04em}}
 .bar-chart{{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}}
 .bar-col{{display:flex;flex-direction:column;align-items:center}}
-.bar-zone{{position:relative;width:100%;height:150px}}
-.bar-zone::after{{content:'';position:absolute;left:6%;right:6%;top:50%;height:1px;background:rgba(255,255,255,.25)}}
+.bar-zone{{position:relative;width:100%;height:132px}}
+.bar-zone::after{{content:'';position:absolute;left:6%;right:6%;top:var(--zero,50%);height:1px;background:rgba(255,255,255,.25)}}
 .bar{{position:absolute;left:50%;transform:translateX(-50%);width:55%;max-width:24px;border-radius:4px;z-index:1}}
-.bar.pos{{bottom:50%;background:linear-gradient(180deg,#ff8a6e,#C1432B)}}
-.bar.neg{{top:50%;background:linear-gradient(180deg,#2E6BD6,#7fa8e8)}}
+.bar.pos{{background:linear-gradient(180deg,#ff8a6e,#C1432B)}}
+.bar.neg{{background:linear-gradient(180deg,#2E6BD6,#7fa8e8)}}
 .bar-val{{position:absolute;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;white-space:nowrap;z-index:2}}
 .bar-val.pos{{color:#ef8a72}} .bar-val.neg{{color:#7fa8e8}}
 .bar-name{{font-size:10px;font-weight:600;color:#c8ccd2;margin-top:6px;white-space:nowrap}}
@@ -1219,7 +1252,7 @@ a{{color:inherit;text-decoration:none}}
   .gz-row{{grid-template-columns:84px 38px 1fr;row-gap:2px}}
   .gz-ev{{grid-column:1/-1;color:#9aa0a8}}
   .idx-grid{{grid-template-columns:1fr;gap:8px}}
-  .bar-chart{{gap:3px}} .bar-zone{{height:120px}} .bar-val{{font-size:8.5px}} .bar-name{{font-size:8.5px}}
+  .bar-chart{{gap:3px}} .bar-zone{{height:112px}} .bar-val{{font-size:8.5px}} .bar-name{{font-size:8.5px}}
   .sector-grid{{grid-template-columns:1fr}}
   .sc-cols,.sc-row{{grid-template-columns:1.3fr 76px 58px 60px;font-size:11.5px}}
   .macro-row{{grid-template-columns:1fr}}
