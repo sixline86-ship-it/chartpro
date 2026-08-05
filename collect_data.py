@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.05-d"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.05-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -749,127 +749,6 @@ def collect_program_and_futures():
     미확보 = [k for k in ("프로그램매매", "선물수급") if not 결과[k]]
     if 미확보:
         print(f"⚠️ 미확보: {', '.join(미확보)} — 해당 부분은 리포트에서 숨겨집니다.")
-    return 결과
-
-
-def collect_macro():
-    결과 = {}
-    for key, info in MACRO_TICKERS.items():
-        try:
-            t = yf.Ticker(info["심볼"])
-            hist = t.history(period="5d")
-            if hist.empty or len(hist) < 2:
-                print(f"⚠️ {info['표시명']}: 데이터 부족")
-                결과[key] = None
-                continue
-            마지막 = float(hist["Close"].iloc[-1])
-            이전 = float(hist["Close"].iloc[-2])
-            등락률 = (마지막 - 이전) / 이전 * 100
-            결과[key] = {
-                "값": round(마지막, 2),
-                "등락률": round(등락률, 2),
-                "표시명": info["표시명"],
-                "단위": info["단위"],
-            }
-        except Exception as e:
-            print(f"⚠️ {info['표시명']} 수집 실패: {e}")
-            결과[key] = None
-
-    성공 = sum(1 for v in 결과.values() if v is not None)
-    print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
-    return 결과
-
-
-def collect_program_and_futures():
-    """프로그램매매(차익/비차익)와 선물 수급을 수집한다.
-
-    ⚠️ 네이버 페이지 구조를 이 환경에서 검증할 수 없어, 여러 후보 URL을 순서대로
-       시도하고 실패하면 어떤 표가 있었는지 로그로 남긴다.
-       첫 실행 로그를 보고 정확한 위치를 확정하면 된다.
-
-    왜 중요한가:
-      · 차익거래 = 선물-현물 가격차를 노린 기계적 매매 (방향성 아님)
-      · 비차익거래 = 선물과 무관한 바스켓 매매 (실제 방향성 베팅)
-      → 같은 '프로그램 매도 1조'라도 어느 쪽이냐에 따라 해석이 정반대다.
-    """
-    결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
-
-    # ── 프로그램매매 ──
-    #   ✅ 실제 확인된 주소를 최우선으로 사용
-    후보 = [
-        "https://finance.naver.com/sise/sise_program.naver",
-        "https://finance.naver.com/sise/programDeal.naver",
-    ]
-    for url in 후보:
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=12)
-            if r.status_code != 200:
-                print(f"  ℹ️ {url.split('/')[-1]} → HTTP {r.status_code}")
-                continue
-            r.encoding = "euc-kr"
-            tables = read_html_safe(r.text)
-
-            찾음 = None
-            for t in tables:
-                # 네이버 표는 헤더가 2단(MultiIndex)인 경우가 많아 평탄화해서 검사
-                컬럼문자열 = " ".join(
-                    " ".join(str(x) for x in c) if isinstance(c, tuple) else str(c)
-                    for c in t.columns)
-                본문문자열 = " ".join(str(v) for v in t.head(3).values.ravel())
-                if ("차익" in 컬럼문자열 or "차익" in 본문문자열):
-                    찾음 = t
-                    break
-
-            if 찾음 is not None:
-                # MultiIndex면 컬럼명을 '상위_하위' 형태로 평탄화
-                if isinstance(찾음.columns, pd.MultiIndex):
-                    찾음.columns = ["_".join(str(x) for x in c).strip()
-                                   for c in 찾음.columns]
-                행 = 찾음.dropna(how="all").iloc[0].to_dict()
-                결과["프로그램매매"] = {str(k): str(v) for k, v in 행.items()}
-                print(f"✅ 프로그램매매 수집 ({url.split('/')[-1]})")
-                print(f"   항목: {list(결과['프로그램매매'].keys())[:8]}")
-                break
-            else:
-                print(f"  ℹ️ '차익' 항목을 못 찾음. 표 {len(tables)}개의 컬럼:")
-                for i, t in enumerate(tables[:5]):
-                    print(f"     표{i} {t.shape}: {list(t.columns)[:6]}")
-        except Exception as e:
-            print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}: {e}")
-
-    # ── 선물·옵션 투자자별 수급 ──
-    #   sosok 코드가 문서화돼 있지 않아 여러 값을 시도하고,
-    #   먼저 잡히는 것을 선물, 그다음을 옵션으로 본다. (첫 실행 로그로 확정 필요)
-    파생후보 = [("선물수급", c) for c in ("03", "04")] + \
-              [("옵션수급", c) for c in ("05", "06")]
-    for 종류, sosok in 파생후보:
-        if 결과[종류]:
-            continue
-        try:
-            r = requests.get("https://finance.naver.com/sise/investorDealTrendDay.naver",
-                             headers=HEADERS,
-                             params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
-            if r.status_code != 200:
-                continue
-            r.encoding = "euc-kr"
-            tables = read_html_safe(r.text)
-            if not tables or tables[0].shape[0] < 2:
-                continue
-            표 = tables[0]
-            표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
-            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
-            if len(실) == 0:
-                continue
-            row = 실.iloc[0]
-            결과[종류] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
-                       "기관계": str(row["기관계"]), "sosok": sosok}
-            print(f"✅ {종류} 수집 (sosok={sosok})")
-        except Exception as e:
-            print(f"  ⚠️ {종류} sosok={sosok} 실패: {type(e).__name__}")
-
-    미확보 = [k for k, v in 결과.items() if not v]
-    if 미확보:
-        print(f"⚠️ 미확보: {', '.join(미확보)} — 해당 부분은 '확인 불가'로 표시됩니다.")
     return 결과
 
 
