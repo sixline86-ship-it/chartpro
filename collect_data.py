@@ -1,600 +1,1541 @@
 # ============================================================
-# generate_report.py  (v2)
+# collect_data.py  (v2 — 주도섹터 점수제 + 관제지수)
 # ------------------------------------------------------------
-# 목적: collect_data.py 가 만든 data_YYYYMMDD.json 을 읽어서
-#       Claude API에게 해석 글을 써 달라고 요청한다.
-# 결과: report_YYYYMMDD.json  (숫자 + 해석글)
-#
-# 만드는 글 5가지:
-#   한줄평 / 오늘의_시장 / 오늘의_한문장 / 프로의시선(3부) / 오늘의_공부
-#   + 핵심이슈 / 핵심뉴스 / 관전포인트
+# 하는 일:
+#   ① DART 공시 수집 + 별점
+#   ② 코스피/코스닥 지수 + 투자자별 수급
+#   ③ 주도 섹터 6개  ← 2단계 선별 (강도40 + 거래대금35 + 확산도25)
+#   ④ 관제지수(0~100) ← 요소별 가중합산 + 요소별 근거
+#   → 전부 모아서 data_YYYYMMDD.json 으로 저장
 # ============================================================
 
+import requests
+import pandas as pd
+from bs4 import BeautifulSoup
+import re
 import json
 import os
-import re
-import sys
-import random
-import time
+import io
+import math
+import yfinance as yf
 from datetime import datetime
-import anthropic  # pip install anthropic
 
+SCRIPT_VERSION = "v2026.08.05-d"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
-DATA_PATH = f"data_{DATE}.json"
-REPORT_PATH = f"report_{DATE}.json"
-
-# ── 사용할 모델 선택 ────────────────────────────────────
-# 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
-# (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.05-c"
-
-# 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
-MAX_TOKENS_START = 16000
-MAX_TOKENS_CAP = 64000   # ⬅ 버전 표시
-MODEL = "claude-sonnet-5"      # $2/$10 도입가 · 속도·지능 균형 (추천 기본값)
-# MODEL = "claude-opus-4-8"    # $5/$25 · 복잡한 작업용 (약 2.5배 비용)
-# MODEL = "claude-fable-5"     # $10/$50 · 최상위 (약 5배 비용)
-# MODEL = "claude-haiku-4-5"   # $1/$5  · 가장 저렴·빠름 (품질 테스트용)
-
-# API 키는 환경변수 ANTHROPIC_API_KEY 에서 자동으로 읽힌다
-client = anthropic.Anthropic()
+HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
-SYSTEM_PROMPT = """\
-너는 주식 시황 리포트 "차트프로 관제탑"의 해설 작가다.
-아래 규칙을 반드시 지켜라.
+# ============================================================
+# 공통 도구
+# ============================================================
+def clean_name(name):
+    """종목명 옆의 표시기호(*)와 공백 제거."""
+    return str(name).strip().rstrip("*").strip()
 
-1. 숫자는 절대 지어내지 않는다. 입력으로 주어진 JSON 데이터에 있는 숫자만 사용한다.
-2. 데이터에 없는 값은 "확인 필요"라고 쓰고 임의로 채우지 않는다.
-3. 확정적인 투자 권유("반드시 오른다", "사야 한다" 등)는 쓰지 않는다.
-   전망이 필요하면 조건문(If-Then)으로 쓴다.
-4. 문장은 친절하고 담백하게, 초보 투자자도 이해할 수 있게 쓴다.
-   과장·신파·상투어는 피한다.
-5. 반드시 아래 JSON 형식으로만 답한다. 그 외 설명이나 인사말은 절대 넣지 않는다.
-6. ⚠️ 숫자 단위 표기 규칙 — 한국어 금액 표기를 반드시 지킨다.
-   · 10,000억 = 1조 이다. 만억·천억억 같은 표기는 절대 쓰지 않는다.
-   · 10,000억 이상이면 반드시 '조' 단위로 바꿔 쓴다.
-     (예: 30,000억 → "3조",  32,683억 → "3.27조",  51,782억 → "5.18조")
-   · 10,000억 미만이면 '억' 단위로 쓴다. (예: 8,500억)
-   · 입력 데이터의 수급 숫자는 '억원' 단위이므로, 위 규칙에 따라 변환해서 쓴다.
-   · 이 규칙은 채점표·프로의시선·돈의흐름 등 모든 항목에 동일하게 적용된다.
 
-각 항목 작성 지침:
-- 한줄평: 오늘 시장의 특징을 한 문장(공백 포함 40자 이내)으로 압축. 관제지수 옆에 붙는 짧은 총평.
-- 오늘의_시장: 지수·수급·주도섹터 숫자를 근거로 한 2~3문장 총평.
-- 오늘의_한문장: 오늘 시장이 준 '교훈'을 격언처럼 한 문장으로. 오래 기억에 남을 만큼
-  담백하고 묵직하게. 수치·종목명 없이 통찰만.
-- 프로의시선: 남들이 안 보는 3가지를 각각 짚는다. 반드시 아래 3개 키를 모두 채운다.
-  각 항목은 **4~5문장**으로 충분히 깊게 쓴다. 숫자 근거를 반드시 포함하고,
-  "그래서 이게 무슨 의미인지"까지 해석해준다. 짧게 끊지 말 것.
-  · 조용한_강세: 지수가 크게 움직인 날, 오히려 거의 안 움직였거나 반대로 간 곳을 짚는다.
-    종목·테마 이름과 등락률을 구체적으로 들고, 왜 그곳만 달랐는지 추론한다.
-  · 짖지_않은_개: 진짜 큰 변화라면 반응했어야 할 지표가 조용했던 점을 짚는다.
-    (환율·금리·특정 수급 주체 등) 무엇이 조용했고, 그 침묵이 무엇을 배제해주는지 설명한다.
-  · 다음_시나리오: 반드시 조건문(If-Then)으로. 관찰 대상을 종목·지표 이름으로 구체 지목하고,
-    과거에 비슷한 패턴이 어떻게 전개됐는지 한 문장 곁들인다. 예언이 아님을 명시.
-- 오늘의_공부: 주제를 **반드시 오늘 이 리포트 안에 실제로 실린 재료에서** 뽑는다.
-  ⚠️ 주제 선정 규칙 (가장 중요):
-    1) 아래 후보군에서만 고른다 — 오늘 입력 데이터에 실제로 존재하는 것만.
-       · 핵심뉴스·핵심이슈에 나온 사건 (정책·규제·기업 이슈)
-       · 오늘 수집된 공시의 종류 (유상증자·전환사채·자사주·대량보유 등)
-       · 매크로 수치 (환율·유가·금리) 중 오늘 눈에 띄게 움직인 것
-       · 오늘의 시황 현상 (사이드카·급등테마·수급 쏠림·거래대금 변화)
-       · 파생/프로그램 매매 데이터에 나타난 현상
-    2) 그중에서도 **초보 투자자가 오늘 이 리포트를 읽다가 "이게 뭐지?"** 하고
-       걸려 넘어질 만한 것을 우선한다. 이미 다 아는 상식적 용어는 피한다.
-    3) 오늘 데이터에 근거가 없는 개념은 절대 고르지 않는다.
-    4) "출제근거"에 그 재료가 리포트의 어느 코너에서 나왔는지 한 구로 적는다.
-       (예: "오늘의 공시 — OO의 전환사채 발행", "매크로 — 원/달러 1,4xx원 돌파")
-  아래 키를 모두 채운다. 초보자가 읽어도 이해되게, 생활 비유를 적극 활용한다.
-  · 출제근거: 이 주제를 오늘 리포트의 어디에서 뽑았는지 (25자 이내 한 구)
-  · 주제: 개념 이름 (예: "사이드카")
-  · 질문: 호기심을 자극하는 제목형 질문 (예: "왜 시장이 갑자기 5분간 멈출까?")
-  · 개념: 이게 무엇인지 2~3문장. 생활 비유 포함.
-  · 원리: 왜 그렇게 작동하는지 3~4문장. ①②③ 처럼 나눠 써도 좋다.
-  · 오늘연결: 오늘 데이터의 어느 지점과 연결되는지 2~3문장. 실제 숫자 인용.
-  · 한줄암기: 기억에 남을 한 문장 요약.
-  · 역사에서: 과거 비슷한 국면에서 이 개념이 어떻게 작동했는지 3~4문장.
-    구체적 시기(예: 2022년 금리 인상기)를 들되, 확실치 않은 수치는 쓰지 않는다.
-  · 투자적용: 이 개념을 실제 투자에 어떻게 쓰는지 점검 항목 3가지를 ①②③으로.
-    종목 추천이 아니라 '무엇을 확인할지'로 쓴다.
-  · 더깊이: 한 단계 더 들어간 내용 3~4문장. 혼동하기 쉬운 개념과의 차이를 짚어주면 좋다.
-    (예: 기준금리와 채권금리의 차이)
-- 매크로해설: 환율·유가·금리 각각에 대해 **초보자도 이해할 한 줄 해설**을 쓴다.
-  · 입력 데이터의 '매크로' 값(수치·등락률)만 근거로 쓴다. 없는 숫자를 지어내지 않는다.
-  · 각 1~2문장. "이 숫자가 오늘 우리 시장에 뭘 의미하는지"를 쉬운 말로.
-  · 어려운 용어를 쓰면 괄호로 풀어준다. 생활 비유를 써도 좋다.
-  · 오늘 지수·수급 흐름과 연결지으면 더 좋다.
-  (예시 톤 — 환율: "원화가 오히려 강세였습니다. 지수는 무너졌지만 외국인이 한국에서
-   돈을 빼간 건 아니라는 신호로 읽을 수 있습니다.")
-  (예시 톤 — 유가: "기름값이 뛰면 기업의 원가 부담이 커집니다. 물가를 자극해
-   금리 인하를 늦출 수 있다는 점이 부담입니다.")
-- 핵심이슈: 입력된 '뉴스원본' 제목들을 보고, 오늘 시장을 움직인 굵직한 이슈 3~4개를 뽑아
-  각각 태그(반도체/정책/수급/글로벌 등 적절히)와 1~2문장 설명으로 정리.
-- 핵심뉴스: 입력된 '뉴스원본' 중에서 **최대 8개**를 골라 정리한다. (많을수록 좋은 게 아니다)
-  ⚠️ 반드시 **중요한 순서대로** 배열한다. 1번이 가장 중요하고 뒤로 갈수록 덜 중요하다.
-     (뒤쪽 몇 개는 그날 상황에 따라 잘려나갈 수 있으므로, 순서가 곧 우선순위다)
-  ⚠️ 선정 기준 — 이 순서로 판단한다:
-    (가) **중복 배제 최우선**: 이 리포트의 다른 코너에서 이미 다룬 사안은 제외한다.
-         구체적으로 '오늘의_시장'·'핵심이슈'·'마감브리핑'·'공시해설'에 쓴 내용과
-         같은 사건을 다루는 뉴스는 뽑지 않는다. 같은 얘기를 두 번 읽게 하면 안 된다.
-    (나) 그러고 남은 것 중에서, 구독자가 **"이건 몰랐네"** 할 만한 것을 우선한다.
-         개별 기업 이슈, 정책·제도 변화, 해외 동향, 업종 구조 변화 등이 좋다.
-    (다) 지수가 몇 % 올랐다·내렸다 같은 시황 반복 기사는 최하 순위다.
-    (라) 8개를 못 채울 정도로 재료가 없으면 억지로 늘리지 말고 있는 만큼만 낸다.
-  ⚠️ 매우 중요 — 절대 규칙:
-    1) 제목이 겹치거나 같은 사안을 다루면 하나로 합친다.
-    2) 각 항목에 태그를 붙인다: 시황 / 정책 / 특징주 / 글로벌 중 하나.
-    3) 2~3문장으로 요약하되 직접 브리핑하듯 자연스럽게 쓴다("~했습니다" 체).
-    4) "링크"는 입력된 '뉴스원본'의 링크를 글자 하나 틀리지 않고 그대로 복사한다.
-       링크를 새로 만들거나 추측하거나 변형하는 것은 절대 금지.
-       합쳐진 여러 기사 중에서는 대표로 하나의 원본 링크만 사용한다.
-    5) '뉴스원본'이 비어 있으면 핵심이슈·핵심뉴스는 빈 배열 [] 로 둔다. 지어내지 않는다.
-    6) 제목은 원본 제목을 그대로 쓰지 말고, 무슨 일인지 바로 알 수 있게 다듬어 쓴다.
-- 마감브리핑: 입력된 '마감브리핑'(방송사별 자막)에서 **그 채널에서만 나온 관점**을 잡아낸다.
-  ⚠️⚠️ 가장 중요 — 뻔한 요약을 절대 쓰지 마라:
-    금지: "코스피가 급락했다", "사이드카가 발동됐다", "외국인이 팔았다",
-          "변동성이 크다", "방향성이 불투명하다" 같은 **뉴스에 이미 다 있는 사실**.
-          이런 문장은 '핵심이슈'·'핵심뉴스'와 중복되어 코너의 가치를 없앤다.
-    필수: 자막을 끝까지 읽고 **아래 중 하나 이상**을 찾아낸다.
-      · 구체적 기술적 레벨 (예: "120일선", "6,700선 지지", "윗꼬리 긴 주봉")
-      · 이름이 거론된 특정 종목·업종과 그 이유
-      · 남들과 다른 반대 의견이나 반박
-      · 인상적인 비유·표현
-      · 구체적 숫자로 제시된 기준 (예: "3거래일 안에", "거래대금 5조 넘으면")
-      · 실전 대응법 (분할 매수, 손절 라인 등 구체적 방법)
-    "이 방송을 본 사람만 아는 것"이 무엇인지 자문하고 그것을 써라.
-    정말 특별한 게 없다면 summary에 "오늘은 일반적인 시황 정리 위주였습니다"라고
-    솔직히 쓴다. 억지로 있는 척 포장하지 않는다.
-  ⚠️ 저작권 관련 절대 규칙 — 반드시 지켜라:
-    1) 자막 문장을 그대로 옮기는 것을 절대 금지한다. 한 문장도 복사하지 않는다.
-       반드시 내용을 이해한 뒤 완전히 다른 문장으로 다시 쓴다.
-    2) 따옴표를 사용한 직접 인용을 하지 않는다.
-    3) 각 채널당 2~3문장으로 압축한다. 방송 전체를 대체할 만큼 길게 쓰지 않는다.
-    4) angle에는 그 채널이 오늘 집중한 지점을 짧은 구로 넣는다.
-       ⚠️ "심층 분석", "수급 중심" 같은 뻔한 라벨 말고, 오늘 내용에 맞춘 구체적 표현으로.
-       (예: "120일선 공방", "선물 당일청산 패턴", "인버스 쏠림 경고")
-    5) "링크"는 입력된 링크를 그대로 복사한다. 변형 금지.
-    6) 자막이 비어 있는 채널은 summary를 빈 문자열로 둔다.
-    7) '마감브리핑' 입력이 비어 있으면 빈 배열 [] 로 둔다.
-- 관전포인트: 내일 확인할 관전 포인트 3개(①②③).
-  ⚠️ '프로의시선'과 반드시 성격이 달라야 한다. 겹치면 안 된다.
-    · 프로의시선 = 오늘 벌어진 일의 **해석**(왜 그랬나)
-    · 관전포인트 = 내일 **눈으로 확인할 체크리스트**(무엇을 보면 되나)
-  ⚠️ 반드시 **다음날 ○/× 로 채점 가능한 형태**로 써야 한다. 그래야 다음 리포트에서
-     '어제의 채점표'로 회수할 수 있다. 각 항목은 아래를 포함한다:
-    · 구체적 기준선(숫자) — 지수 레벨, 수급 금액, 거래대금, 등락률 중 하나 이상
-    · "무엇이 나오면 좋은 신호이고, 무엇이 나오면 나쁜 신호인지"를 함께 제시
-    예: "코스피가 6,700선을 회복하고 외국인 순매수가 5,000억 이상이면 반등 시도로,
-         6,600선이 깨지면 추가 하락 국면으로 봅니다."
-  해석·전망 서술이 아니라 **관찰 지시문**으로 쓴다. 2문장 이내.
-- 채점표: 입력 데이터에 '어제관전포인트'가 있으면, 각 항목을 오늘 실제 데이터로 채점한다.
-  · 결과는 "○"(맞음) / "×"(틀림) / "△"(부분 충족) 중 하나.
-  · 근거에는 **오늘의 실제 숫자**를 반드시 넣는다. (예: "코스피 6,690.62로 6,700선 미회복")
-  · 냉정하게 채점한다. 틀렸으면 틀렸다고 쓴다. 좋게 포장하지 않는다.
-  · '어제관전포인트'가 없으면 빈 배열 [] 로 둔다.
-- 돈의흐름: ⚠️ 위쪽 '지수+수급'에 이미 나온 숫자를 되풀이하지 마라.
-  여기서는 **선물과 프로그램매매**를 통해 "겉으로 안 보이는 돈의 성격"을 밝힌다.
-  · 현물선물조합: 외국인의 현물 순매수와 선물 순매수 **부호 조합**을 해석한다.
-    (입력 데이터의 '지수수급.코스피_수급.외국인'과 '파생.선물수급.외국인' 비교)
-      - 현물 매수 + 선물 매수 → 방향성 있는 진짜 매수. 확신이 실린 자금.
-      - 현물 매수 + 선물 매도 → 헤지를 깔고 산 것. 확신이 약하다는 뜻.
-      - 현물 매도 + 선물 매수 → 현물은 정리하되 반등에 대비. 바닥 신호일 수 있음.
-      - 현물 매도 + 선물 매도 → 방향성 있는 이탈. 가장 위험한 조합.
-    조합 이름을 짧게 붙이고(예: "헤지 동반 매수"), 무슨 뜻인지 2~3문장으로 설명한다.
-    ⚠️ 선물 데이터가 없으면 "확인 불가"로 쓰고 지어내지 않는다.
-  · 프로그램해석: 프로그램매매의 차익거래와 비차익거래를 구분해 설명한다.
-    입력의 '파생.프로그램매매'는 "차익거래_순매수", "비차익거래_순매수",
-    "전체_순매수" 같은 키를 가진다(단위: 억원). 이 숫자를 그대로 인용한다.
-      - 차익거래 = 선물과 현물의 가격차를 노린 **기계적 매매**. 방향성 의미 없음.
-      - 비차익거래 = 선물과 무관한 바스켓 매매. **실제 방향성 베팅**.
-    둘 중 어느 쪽이 컸는지 밝히고, 그에 따라 해석이 어떻게 달라지는지 짚는다.
-    2~3문장. ⚠️ 입력에 '파생.프로그램매매'가 없거나 null이면 이 항목은 **빈 문자열 ""**로 둔다.
-    ("확인 불가" 같은 문장을 쓰지 않는다 — 데이터가 없으면 리포트에서 코너 자체가 사라진다)
-  · 숨은한줄: 위 두 가지를 종합해, 표면 수급만 봐서는 알 수 없는 결론을 한 문장으로.
-    (예: "외국인은 팔았지만 선물은 사들였습니다 — 완전한 이탈로 보긴 이릅니다")
+def to_num(x):
+    """'+3.66%', '−1.38', '1,234' 같은 문자열을 숫자로. 실패하면 None."""
+    if x is None:
+        return None
+    s = str(x).replace(",", "").replace("%", "").replace("+", "")
+    s = s.replace("−", "-")  # 유니코드 마이너스 → 일반 마이너스
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
-  · 체크포인트: 이 관점에서 내일 확인할 것 1가지를 짧게.
-- 공시해설: 입력 데이터의 '공시' 목록 중 **상위 5건 각각**에 대해 한 줄 해설을 단다.
-  · 회사명을 키로, 한 줄 설명을 값으로 하는 객체를 만든다.
-  · 그 공시가 왜 눈여겨볼 만한지 초보자도 알게 1문장으로. 공시명을 그대로 반복하지 말 것.
-  · 방향 예측(오른다/내린다)은 금지. "변동 가능성이 있다" 수준의 관찰 표현만.
-  · 예: {"두산지오솔루션": "새 주식을 발행해 자금을 조달합니다. 기존 주주 지분이 희석될 수 있어 규모와 목적을 함께 봐야 합니다."}
 
-── 톤 예시 (이 결을 따를 것. 그대로 베끼지는 말 것) ──
+def read_html_safe(html_text):
+    """HTML 텍스트에서 표를 읽는다.
+    최신 pandas는 문자열을 파일 경로로 오해하므로 io.StringIO로 감싼다.
+    (구/신 pandas 양쪽에서 동작)"""
+    if isinstance(html_text, bytes):
+        html_text = html_text.decode("euc-kr", errors="replace")
+    return pd.read_html(io.StringIO(html_text))
 
-[한줄평 예시]
-- "반도체발 수급 사고, 양대 시장 사이드카"
-- "지수는 올랐지만, 오른 종목은 적었다"
-- "외국인이 돌아온 하루, 다만 조용하게"
 
-[오늘의_한문장 예시]
-- "급등도 급락도, 결국 같은 수급 쏠림의 양면이다."
-- "지수가 오른 날과 내 계좌가 오른 날은 다르다."
-- "시장이 조용할 때 움직이는 돈이, 시끄러울 때 값을 매긴다."
+# ============================================================
+# ① DART 공시
+# ============================================================
+def collect_dart():
+    if not DART_KEY:
+        print("⚠️ DART_API_KEY 없음 → 공시 수집 건너뜀")
+        return []
 
-위 예시처럼 — 짧고, 대구를 이루고, 여운이 남게. 감탄사·수식어·상투어는 빼고
-명사와 동사만으로 승부한다. "~하는 것이 중요합니다" 같은 훈계조는 쓰지 않는다.
+    url = "https://opendart.fss.or.kr/api/list.json"
+    params = {"crtfc_key": DART_KEY, "bgn_de": DATE, "end_de": DATE,
+              "page_no": "1", "page_count": "100"}
+    data = requests.get(url, params=params).json()
 
-⚠️⚠️ 가장 중요한 규칙: 아래 형식의 12개 항목을 **하나도 빠짐없이 전부** 출력하라.
-항목이 많다고 중간에 생략하면 안 된다. 특히 "오늘의_공부"를 자주 빠뜨리는데,
-반드시 포함해야 한다. 데이터가 부족한 항목도 빈 값으로라도 키는 반드시 넣는다.
+    별점룰북 = [
+        (5, ["무상증자", "자기주식소각"]),
+        (4, ["유상증자결정"]),
+        (3, ["전환사채", "신주인수권부사채"]),
+        (2, ["대량보유상황보고서", "자기주식취득", "자기주식처분"]),
+        (1, ["기재정정"]),
+    ]
 
-출력 형식(JSON만):
-{
-  "한줄평": "...",
-  "오늘의_시장": "...",
-  "오늘의_한문장": "...",
-  "프로의시선": {
-    "조용한_강세": "...",
-    "짖지_않은_개": "...",
-    "다음_시나리오": "..."
-  },
-  "오늘의_공부": {
-    "출제근거": "오늘 리포트의 어느 코너에서 뽑았는지",
-    "주제": "...", "질문": "...", "개념": "...",
-    "원리": "...", "오늘연결": "...", "한줄암기": "...",
-    "역사에서": "...", "투자적용": "...", "더깊이": "..."
-  },
-  "공시해설": {"회사명": "한 줄 해설"},
-  "매크로해설": {
-    "환율": "...",
-    "유가": "...",
-    "금리": "..."
-  },
-  "핵심이슈": [
-    {"태그": "반도체", "내용": "..."}
-  ],
-  "핵심뉴스": [
-    {"태그": "시황", "제목": "...", "요약": "...", "링크": "입력 데이터의 원본 링크 그대로"}
-  ],
-  "마감브리핑": [
-    {"채널": "...", "angle": "수급 중심", "제목": "...", "summary": "재구성한 2~3문장", "링크": "원본 링크 그대로"}
-  ],
-  "관전포인트": ["①...", "②...", "③..."],
-  "채점표": [
-    {"항목": "어제 관전포인트 원문", "결과": "○", "근거": "오늘 실제 숫자로"}
-  ],
-  "돈의흐름": {
-    "조합이름": "예: 헤지 동반 매수 / 방향성 이탈 / 확인 불가",
-    "현물선물조합": "...",
-    "프로그램해석": "...",
-    "숨은한줄": "...",
-    "체크포인트": "..."
-  }
+    def 별점(공시명):
+        for 점수, 키워드들 in 별점룰북:
+            if any(k in 공시명 for k in 키워드들):
+                return 점수
+        return 2
+
+    관심유형 = ["대량보유", "유상증자", "무상증자", "공급계약", "자기주식", "전환사채"]
+    결과 = []
+    for item in data.get("list", []):
+        nm = item.get("report_nm", "")
+        if any(k in nm for k in 관심유형):
+            결과.append({
+                "회사명": item.get("corp_name"),
+                "공시명": nm,
+                "별점": 별점(nm),
+                "링크": f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={item.get('rcept_no')}",
+            })
+    결과.sort(key=lambda x: x["별점"], reverse=True)
+    print(f"✅ 공시 {len(결과)}건")
+    return 결과
+
+
+# ============================================================
+# ② 지수 + 수급
+# ============================================================
+def collect_index_and_flow():
+    def 지수():
+        url = "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ"
+        res = requests.get(url, headers=HEADERS).json()
+        out = {}
+        for i, item in enumerate(res["datas"]):
+            # 거래대금 관련 필드를 폭넓게 탐색 (API 필드명이 버전마다 다름)
+            대금 = None
+            for k in ("accumulatedTradingValue", "tradingValue", "accTradeValue",
+                      "accumulatedTradingVolume"):
+                if item.get(k) not in (None, ""):
+                    대금 = item.get(k)
+                    break
+            out[item["stockName"]] = {
+                "종가": item["closePrice"],
+                "등락방향": item["compareToPreviousPrice"]["text"],
+                "등락률": item["fluctuationsRatio"],
+                "거래대금": 대금,
+            }
+            # ⚠️ 진단: 첫 항목의 사용 가능한 필드명을 한 번 찍어둔다.
+            #    거래대금이 안 잡히면 이 로그를 보고 정확한 키를 연결할 수 있다.
+            if i == 0 and 대금 is None:
+                print(f"  ℹ️ 지수 API 필드 목록(거래대금 탐색용): {list(item.keys())}")
+        return out
+
+    def 수급(sosok):
+        url = "https://finance.naver.com/sise/investorDealTrendDay.naver"
+        res = requests.get(url, headers=HEADERS, params={"bizdate": DATE, "sosok": sosok, "page": "1"})
+        res.encoding = "euc-kr"
+        tables = read_html_safe(res.text)
+        표 = tables[0]
+        표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
+        오늘행 = 표[표["날짜"].astype(str).str.replace(".", "", regex=False) == DATE[2:]]
+        if len(오늘행) == 0:
+            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
+            if len(실) == 0:
+                return None
+            오늘행 = 실.iloc[[0]]
+        r = 오늘행.iloc[0]
+        return {"개인": str(r["개인"]), "외국인": str(r["외국인"]), "기관계": str(r["기관계"])}
+
+    out = {"지수": 지수(), "코스피_수급": 수급("01"), "코스닥_수급": 수급("02")}
+    print("✅ 지수/수급")
+    return out
+
+
+# ============================================================
+# 테마명 사전 (어려운 이름 → 쉬운 설명)
+#   여기 없는 테마는 generate 단계에서 Claude가 보조 설명을 붙인다.
+#   자주 나오는 애매한 테마명을 계속 여기에 추가하면 정확도가 올라감.
+# ============================================================
+THEME_DICT = {
+    "S7": "반도체 소부장 그룹",
+    "자원개발": "해외 광물·에너지 자원",
+    "LNG": "액화천연가스",
+    "MLCC": "적층세라믹콘덴서(전자부품)",
+    "OLED": "유기발광 디스플레이",
+    "면역항암제": "암 치료 신약",
+    "CXL": "차세대 메모리 연결기술",
+    "HBM": "고대역폭 메모리",
+    "전력설비": "송배전·전력 인프라",
+    "마이크로 LED": "차세대 디스플레이",
+    "PCB": "인쇄회로기판",
+    "리튬": "2차전지 핵심 원료",
+    "희토류": "첨단산업 필수 광물",
+    "탄소나노튜브": "차세대 소재",
 }
-"""
+
+# 이름 옆에 항상 붙일 부가설명 (요청: 로봇)
+THEME_SUFFIX = {
+    "로봇": "(산업용/협동로봇)",
+    "지능형로봇/인공지능(AI)": "(산업용/협동로봇)",
+}
 
 
-def load_previous_watchpoints():
-    """가장 최근 발행분(어제 등)의 관전포인트를 불러온다.
-    저장소에 report_YYYYMMDD.json 이 쌓이므로 그중 오늘 것을 뺀 최신 파일을 쓴다."""
+# ============================================================
+# ③+④ 테마 데이터 → 주도섹터 6개 선정 + 관제지수 재료(확산도)
+# ============================================================
+def collect_themes_and_gauge():
+    """
+    2단계 선별:
+      1차) 테마 목록에서 '등락률' 상위 20개 후보 추림
+      2차) 각 후보 상세를 열어 거래대금·확산도 계산
+           → 강도40 + 거래대금35 + 확산도25 점수로 재정렬 → 상위 6개
+    부산물: 주요 테마 평균 확산도(관제지수 ③ 재료)도 함께 수집
+    """
+    url_list = "https://finance.naver.com/sise/theme.naver"
+    후보 = []       # (테마명, 번호, 테마등락률)
+    중복 = set()
+
+    for page in range(1, 8):
+        res = requests.get(url_list, headers=HEADERS, params={"page": page})
+        res.encoding = "euc-kr"
+        soup = BeautifulSoup(res.text, "html.parser")
+        links = soup.select("table.type_1 a[href*='sise_group_detail']")
+        if not links:
+            break
+
+        링크들 = []
+        for a in links:
+            m = re.search(r"no=(\d+)", a.get("href", ""))
+            링크들.append((a.get_text(strip=True), m.group(1) if m else None))
+
+        try:
+            tables = read_html_safe(res.text)
+            테마표 = None
+            for t in tables:
+                if any("테마" in str(c) for c in t.columns):
+                    테마표 = t
+                    break
+        except Exception:
+            테마표 = None
+        if 테마표 is None:
+            continue
+
+        이름컬 = next((c for c in 테마표.columns if "테마" in str(c)), 테마표.columns[0])
+        등락컬 = next((c for c in 테마표.columns if "전일대비" in str(c) or "등락" in str(c)), None)
+
+        for _, row in 테마표.iterrows():
+            이름 = str(row[이름컬]).strip()
+            if not 이름 or 이름 == "nan":
+                continue
+            등락 = to_num(row[등락컬]) if 등락컬 is not None else None
+            번호 = next((no for nm, no in 링크들 if nm == 이름), None)
+            if 이름 and 번호 and 번호 not in 중복:
+                후보.append((이름, 번호, 등락))
+                중복.add(번호)
+
+    # ── 1차 필터: 등락률 상위 20개 ──
+    유효 = [c for c in 후보 if c[2] is not None and not math.isnan(c[2])]
+    유효.sort(key=lambda x: x[2], reverse=True)
+    후보20 = 유효[:20]
+    print(f"📊 1차 후보(등락률 상위) {len(후보20)}개 → 상세 분석 중...")
+
+    # ── 2차: 각 후보 상세에서 거래대금·확산도 계산 ──
+    분석 = []
+    for 테마명, 번호, 테마등락 in 후보20:
+        detail_url = "https://finance.naver.com/sise/sise_group_detail.naver"
+        dres = requests.get(detail_url, headers=HEADERS, params={"type": "theme", "no": 번호})
+        dres.encoding = "euc-kr"
+        try:
+            tables = read_html_safe(dres.text)
+            종목표 = None
+            for t in tables:
+                if t.shape[1] >= 9 and t.shape[0] > 1:
+                    종목표 = t
+                    break
+            if 종목표 is None:
+                continue
+
+            종목표 = 종목표.iloc[:, [0, 2, 4, 8]]
+            종목표.columns = ["종목명", "현재가", "등락률", "거래대금"]
+            종목표 = 종목표.dropna(subset=["종목명"])
+            종목표 = 종목표[종목표["종목명"] != ""]
+            종목표["종목명"] = 종목표["종목명"].apply(clean_name)
+            종목표["등락_num"] = 종목표["등락률"].apply(to_num)
+            종목표["대금_num"] = 종목표["거래대금"].apply(to_num)
+
+            총 = len(종목표)
+            오른 = int((종목표["등락_num"] > 0).sum())
+            확산도 = (오른 / 총 * 100) if 총 else 0
+            거래대금합 = float(종목표["대금_num"].fillna(0).sum())
+
+            상위종목 = 종목표.sort_values("등락_num", ascending=False).head(4)
+            분석.append({
+                "테마명": 테마명,
+                "테마등락": 테마등락,
+                "거래대금합": 거래대금합,
+                "확산도": float(확산도),
+                "종목": 상위종목[["종목명", "현재가", "등락률", "거래대금"]].to_dict(orient="records"),
+            })
+        except Exception as e:
+            print(f"  ⚠️ [{테마명}] 상세 실패: {e}")
+
+    if not 분석:
+        print("❌ 테마 상세를 하나도 못 가져옴")
+        return {"주도섹터": [], "확산도_시장평균": None}
+
+    # ── 점수화: 각 항목을 0~100 순위점수로 환산 후 가중합 ──
+    def 순위점수(값리스트):
+        vals = [v if v is not None else 0 for v in 값리스트]
+        lo, hi = min(vals), max(vals)
+        if hi == lo:
+            return [50.0] * len(vals)
+        return [(v - lo) / (hi - lo) * 100 for v in vals]
+
+    강도 = 순위점수([a["테마등락"] for a in 분석])
+    거래 = 순위점수([a["거래대금합"] for a in 분석])
+    폭 = 순위점수([a["확산도"] for a in 분석])
+
+    for i, a in enumerate(분석):
+        a["주도력점수"] = round(강도[i] * 0.40 + 거래[i] * 0.35 + 폭[i] * 0.25, 1)
+
+    분석.sort(key=lambda x: x["주도력점수"], reverse=True)
+
+    # ── 종목 중복 제거: 이미 뽑힌 카드와 종목이 2개 이상 겹치면 건너뛴다 ──
+    # (그렇지 않으면 "에너지 관련 테마 5개, 사실 종목은 같은 애들" 이 됨)
+    주도6 = []
+    이미쓴종목 = set()
+    for a in 분석:
+        이번종목 = {s["종목명"] for s in a.get("종목", [])}
+        겹침 = len(이번종목 & 이미쓴종목)
+        if 겹침 >= 2:
+            print(f"  ⏭️  [{a['테마명']}] 건너뜀 — 이미 선택된 섹터와 종목 {겹침}개 중복")
+            continue
+        주도6.append(a)
+        이미쓴종목 |= 이번종목
+        if len(주도6) == 6:
+            break
+
+    print("🏆 주도 섹터 6개 (주도력점수 순, 중복 제거 적용):")
+    for a in 주도6:
+        et = a["테마등락"]
+        et_s = f"{et:+.2f}%" if et is not None else "—"
+        print(f"   {a['테마명']} — 점수 {a['주도력점수']} (등락 {et_s}, 확산도 {a['확산도']:.0f}%)")
+
+    # ── 시장 전반 확산도: 상위 20개가 아니라 '전체 유효 테마' 기준으로 계산 ──
+    #    (상위 20개만 보면 항상 90%대로 나와 매일 '과열'처럼 보이는 편향이 생김)
+    상승테마 = sum(1 for c in 유효 if c[2] is not None and c[2] > 0)
+    시장확산 = (상승테마 / len(유효) * 100) if 유효 else 50.0
+
+    return {"주도섹터": 주도6, "확산도_시장평균": round(시장확산, 1)}
+
+
+# ============================================================
+# ④ 관제지수 계산
+# ============================================================
+def compute_gauge(지수수급, 확산도_시장):
+    요소 = []  # (이름, 점수0~100, 가중치, 근거문구)
+
+    지수 = 지수수급.get("지수", {})
+    코 = to_num(지수.get("코스피", {}).get("등락률"))
+    닥 = to_num(지수.get("코스닥", {}).get("등락률"))
+
+    # ① 지수 등락률: ±4% → 0~100, 0% → 50
+    if 코 is not None and 닥 is not None:
+        평균 = (코 + 닥) / 2
+        점1 = max(0, min(100, 50 + 평균 * 12.5))
+        요소.append(("지수 등락률", round(점1), 0.30, f"코스피 {코:+.2f}%, 코스닥 {닥:+.2f}%"))
+
+    # ③ 등락 종목 비율(확산도)
+    if 확산도_시장 is not None:
+        점3 = max(0, min(100, 확산도_시장))
+        요소.append(("등락 종목 비율", round(점3), 0.25, f"주요 테마 평균 상승종목 {확산도_시장:.0f}%"))
+
+    # ④ 외국인+기관 수급: ±3조(30000억) → 0~100
+    코수 = 지수수급.get("코스피_수급", {}) or {}
+    외 = to_num(코수.get("외국인"))
+    기 = to_num(코수.get("기관계"))
+    if 외 is not None and 기 is not None:
+        합 = 외 + 기
+        점4 = max(0, min(100, 50 + 합 / 30000 * 50))
+        방향 = "순매수" if 합 > 0 else "순매도"
+        요소.append(("외국인+기관 수급", round(점4), 0.15, f"외인+기관 {합:+,.0f}억 {방향}"))
+
+    # ② 거래대금 / ⑤ 극단심리 → 데이터 확보 전 정직하게 생략 (TODO)
+
+    if not 요소:
+        return None
+
+    총가중 = sum(w for _, _, w, _ in 요소)
+    최종 = 0
+    상세 = []
+    for 이름, 점, w, 근거 in 요소:
+        재w = w / 총가중
+        최종 += 점 * 재w
+        상세.append({"요소": 이름, "점수": 점, "가중치": round(재w * 100), "근거": 근거})
+    최종 = round(최종)
+
+    def 구간(v):
+        if v < 20: return ("혹한", "🥶")
+        if v < 40: return ("한파", "❄️")
+        if v < 60: return ("보통", "🌤️")
+        if v < 80: return ("온기", "🔥")
+        return ("과열", "🌋")
+
+    이름, 이모지 = 구간(최종)
+
+    # ── 근거 배지 자동 생성 (첨부 이미지 스타일: 아이콘 + 짧은 문구) ──
+    배지 = []
+    if 코 is not None and 닥 is not None:
+        if 코 < 0 and 닥 < 0:
+            배지.append("📉 코스피·코스닥 동반 하락")
+        elif 코 > 0 and 닥 > 0:
+            배지.append("📈 코스피·코스닥 동반 상승")
+        else:
+            배지.append("↔️ 코스피·코스닥 혼조")
+    if 확산도_시장 is not None:
+        if 확산도_시장 >= 55:
+            배지.append(f"🟢 시장 전반 상승 우위 ({확산도_시장:.0f}%)")
+        elif 확산도_시장 <= 45:
+            배지.append(f"🔵 시장 전반 하락 우위 ({확산도_시장:.0f}%)")
+        else:
+            배지.append(f"⚪ 상승·하락 팽팽 ({확산도_시장:.0f}%)")
+    외 = to_num((지수수급.get("코스피_수급", {}) or {}).get("외국인"))
+    기 = to_num((지수수급.get("코스피_수급", {}) or {}).get("기관계"))
+    if 외 is not None and 기 is not None:
+        합 = 외 + 기
+        조 = 합 / 10000
+        방향 = "순매수" if 합 > 0 else "순매도"
+        배지.append(f"💸 외인+기관 {조:+.2f}조 {방향}")
+
+    print(f"📡 관제지수 = {최종} ({이름} {이모지})")
+    return {"점수": 최종, "구간": 이름, "이모지": 이모지, "상세": 상세, "배지": 배지}
+
+
+# ============================================================
+# ⑤ 핵심 뉴스 원본 수집 (네이버 증권 · 많이 본 뉴스)
+# ------------------------------------------------------------
+#   여기서는 "가공 없이 원본 제목+링크만" 가져온다.
+#   합치기·요약·태그 붙이기는 Claude(generate_report.py)가 한다.
+#   ⚠️ 이 URL 구조(mode=LSS2D)는 검증된 예시 자료를 근거로 했지만
+#      네이버 페이지 구조는 종종 바뀐다. 첫 실행에서 0건이 나오면
+#      diagnostic 출력을 보고 셀렉터를 조정해야 한다.
+# ============================================================
+def collect_news():
+    url = "https://finance.naver.com/news/news_list.naver"
+    # section_id=101(경제) / section_id2=258(증권) — "많이 본 뉴스"
+    params = {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}
+
+    try:
+        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        res.encoding = "euc-kr"
+        soup = BeautifulSoup(res.text, "html.parser")
+    except Exception as e:
+        print(f"⚠️ 뉴스 페이지 요청 실패: {e}")
+        return []
+
+    결과 = []
+    중복확인 = set()
+
+    # 1차 시도: dl.newsList 안의 dd.articleSubject a 태그
+    후보 = soup.select("dd.articleSubject a")
+    if not 후보:
+        # 2차 시도: 클래스명이 바뀌었을 경우 좀 더 느슨하게
+        후보 = soup.select("a[href*='news_read']")
+
+    for a in 후보:
+        제목 = a.get("title") or a.get_text(strip=True)
+        제목 = 제목.strip()
+        href = a.get("href", "")
+        if not 제목 or not href:
+            continue
+        if href.startswith("/"):
+            링크 = "https://finance.naver.com" + href
+        else:
+            링크 = href
+        if 제목 in 중복확인:
+            continue
+        중복확인.add(제목)
+        결과.append({"제목": 제목, "링크": 링크})
+
+    print(f"✅ 뉴스 원본 {len(결과)}건 수집")
+    if len(결과) == 0:
+        # 진단 정보: 페이지가 비었는지, 구조가 바뀐 건지 힌트를 남긴다
+        print("  ⚠️ 0건 — 페이지 구조가 바뀌었을 수 있음. 응답 일부:")
+        print("  " + res.text[:300].replace("\n", " "))
+    else:
+        print("  샘플:", 결과[0]["제목"][:40])
+
+    return 결과[:30]  # TOP5만 쓰지만, 리포트와 안 겹치는 걸 고를 수 있게 후보는 넉넉히
+
+
+# ============================================================
+# ⑥ 환율 · 유가 · 금리 (yfinance)
+# ------------------------------------------------------------
+#   숫자만 가져온다. 해석 문장은 build 단계나 Claude가 붙이지 않고
+#   그냥 "숫자 그대로" 보여준다 (해석이 필요 없는 단순 시세이므로).
+# ============================================================
+MACRO_TICKERS = {
+    "원달러환율": {"심볼": "KRW=X", "표시명": "원/달러 환율", "단위": ""},
+    "WTI유가": {"심볼": "CL=F", "표시명": "WTI 유가", "단위": "$"},
+    "미국채10년": {"심볼": "^TNX", "표시명": "미국채 10년물", "단위": "%"},
+}
+
+
+def collect_macro():
+    결과 = {}
+    for key, info in MACRO_TICKERS.items():
+        try:
+            t = yf.Ticker(info["심볼"])
+            hist = t.history(period="5d")
+            if hist.empty or len(hist) < 2:
+                print(f"⚠️ {info['표시명']}: 데이터 부족")
+                결과[key] = None
+                continue
+            마지막 = float(hist["Close"].iloc[-1])
+            이전 = float(hist["Close"].iloc[-2])
+            등락률 = (마지막 - 이전) / 이전 * 100
+            결과[key] = {
+                "값": round(마지막, 2),
+                "등락률": round(등락률, 2),
+                "표시명": info["표시명"],
+                "단위": info["단위"],
+            }
+        except Exception as e:
+            print(f"⚠️ {info['표시명']} 수집 실패: {e}")
+            결과[key] = None
+
+    성공 = sum(1 for v in 결과.values() if v is not None)
+    print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
+    return 결과
+
+
+def _flatten_cols(t):
+    """네이버 표는 헤더가 2단(MultiIndex)인 경우가 많다. '상위_하위'로 평탄화한다."""
+    if isinstance(t.columns, pd.MultiIndex):
+        t.columns = ["_".join(str(x) for x in col).strip() for col in t.columns]
+    else:
+        t.columns = [str(x) for x in t.columns]
+    return t
+
+
+def _num(v):
+    """'-1,234' / '1,234억' 같은 문자열에서 숫자만 뽑는다."""
+    if v is None:
+        return None
+    txt = str(v).replace(",", "").replace("+", "").strip()
+    m = re.search(r"-?\d+(?:\.\d+)?", txt)
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except ValueError:
+        return None
+
+
+def _extract_program(t):
+    """표 하나에서 차익거래·비차익거래 순매수를 뽑아낸다.
+
+    네이버 표가 가로형인지 세로형인지 알 수 없어 두 방식을 모두 시도한다.
+      · 컬럼형: 컬럼명이 '차익거래_순매수' 처럼 생긴 경우
+      · 행형  : 첫 칸이 '차익거래'이고 그 행 안에 순매수 값이 있는 경우
+    '순매수' 칸이 없으면 매수 − 매도로 직접 계산한다.
+    """
+    t = _flatten_cols(t.copy())
+    결과 = {}
+
+    def 담기(이름, 값):
+        if 값 is not None and 이름 not in 결과:
+            결과[이름] = 값
+
+    # ── ① 컬럼형 ──
+    for 라벨, 조건 in (("차익거래", lambda s: "차익" in s and "비차익" not in s),
+                     ("비차익거래", lambda s: "비차익" in s)):
+        순 = 매수 = 매도 = None
+        for col in t.columns:
+            if not 조건(col):
+                continue
+            v = _num(t[col].iloc[0]) if len(t) else None
+            if "순매수" in col:
+                순 = v
+            elif "매수" in col:
+                매수 = v
+            elif "매도" in col:
+                매도 = v
+        if 순 is None and 매수 is not None and 매도 is not None:
+            순 = 매수 - 매도
+        담기(f"{라벨}_순매수", 순)
+
+    # ── ② 행형 ──
+    if len(결과) < 2:
+        for _, row in t.iterrows():
+            셀 = [str(x) for x in row.tolist()]
+            첫 = " ".join(셀[:2])
+            숫자 = [_num(x) for x in 셀]
+            숫자 = [x for x in 숫자 if x is not None]
+            if not 숫자:
+                continue
+            # '순매수' 컬럼이 있으면 그 위치를, 없으면 마지막 숫자를 순매수로 본다
+            순 = None
+            for i, col in enumerate(t.columns):
+                if "순매수" in str(col) and i < len(셀):
+                    순 = _num(셀[i])
+                    break
+            if 순 is None:
+                순 = 숫자[-1]
+            if "비차익" in 첫:
+                담기("비차익거래_순매수", 순)
+            elif "차익" in 첫:
+                담기("차익거래_순매수", 순)
+    return 결과
+
+
+def naver_get(url, referer=None):
+    """네이버 페이지를 가져오되 **인코딩을 자동 판별**한다.
+
+    ⚠️ 이게 왜 필요한가:
+       기존 코드는 모든 네이버 페이지에 euc-kr을 강제했다. 그런데 네이버는
+       페이지마다 인코딩이 다르고 일부는 UTF-8이다. 인코딩이 틀리면 한글이
+       전부 깨져서, 페이지가 정상적으로 열려도 '차익'을 찾을 수 없다.
+       → 세 가지로 디코딩해보고 한글이 가장 멀쩡한 것을 고른다.
+    """
+    h = dict(HEADERS)
+    if referer:
+        h["Referer"] = referer
+    r = requests.get(url, headers=h, timeout=12)
+    if r.status_code != 200:
+        return r.status_code, "", None
+    raw = r.content
+    최고, 최고점, 최고이름 = "", -1, None
+    for enc in ("euc-kr", "cp949", "utf-8"):
+        try:
+            t = raw.decode(enc, errors="replace")
+        except Exception:
+            continue
+        # 한글 글자 수 − 깨짐 문자 수 로 점수를 매긴다
+        한글 = sum(1 for ch in t if "\uac00" <= ch <= "\ud7a3")
+        깨짐 = t.count("\ufffd")
+        점수 = 한글 - 깨짐 * 3
+        if 점수 > 최고점:
+            최고, 최고점, 최고이름 = t, 점수, enc
+    return 200, 최고, 최고이름
+
+
+def collect_program_trading():
+    """프로그램매매(차익/비차익)를 수집한다.
+
+    진단 이력:
+      · 2026-08-04 로그: sise_program.naver 는 HTTP 200 인데 표가 1개(5행 4열)뿐이고
+        그 안에 '차익'이 없었다. 사용자는 브라우저에서 차익거래 표를 확인했다.
+      → 남은 가능성 3가지를 이번 판에서 한꺼번에 검사한다.
+        ① 인코딩 불일치로 한글이 깨져 '차익'을 못 찾은 것   → naver_get 으로 해결
+        ② 본문이 <iframe> 안에 있는 것                    → iframe 추적
+        ③ 표가 탭/하위 페이지에 있는 것                    → program 관련 <a> 추적
+      셋 다 실패하면 페이지 조각을 로그에 남겨 다음에 정확히 판단한다.
+    """
+    BASE = "https://finance.naver.com"
+    시작 = f"{BASE}/sise/sise_program.naver"
+    대기, 방문, 깊이 = [시작], set(), {시작: 0}
+    본문보관 = {}
+
+    def 절대(src):
+        if src.startswith("//"):
+            return "https:" + src
+        if src.startswith("/"):
+            return BASE + src
+        if src.startswith("http"):
+            return src
+        return f"{BASE}/sise/" + src.lstrip("./")
+
+    while 대기:
+        url = 대기.pop(0)
+        if url in 방문:
+            continue
+        방문.add(url)
+        d = 깊이.get(url, 0)
+        try:
+            code, 본문, enc = naver_get(url, referer=시작)
+        except Exception as ex:
+            print(f"  ⚠️ {url} 요청 실패: {type(ex).__name__}")
+            continue
+        if code != 200:
+            print(f"  ℹ️ {url.split('/')[-1]} → HTTP {code}")
+            continue
+        본문보관[url] = 본문
+        차익있음 = "차익" in 본문
+        print(f"  🔎 {url.split('/')[-1]} (깊이 {d}, {enc}) → '차익' {'있음' if 차익있음 else '없음'}")
+
+        if 차익있음:
+            표들 = read_html_safe(본문)
+            print(f"     표 {len(표들)}개 스캔")
+            for t in 표들:
+                if t.empty:
+                    continue
+                전체 = " ".join(str(x) for x in t.columns) + " " + \
+                      " ".join(str(v) for v in t.values.ravel())
+                if "차익" not in 전체:
+                    continue
+                print(f"     📋 '차익' 표 {t.shape} — 컬럼: {list(t.columns)[:10]}")
+                print(f"     📋 첫 3행: {t.head(3).values.tolist()}")
+                값 = _extract_program(t)
+                if len(값) >= 1:
+                    print(f"✅ 프로그램매매 수집: {값}")
+                    return 값
+                print("     ⚠️ 표는 찾았으나 숫자 매핑 실패 — 위 두 줄로 다음에 보정")
+            # 표에는 없는데 글자에는 있다 = JS나 특이 마크업. 주변을 잘라 남긴다.
+            i = 본문.find("차익")
+            print("     🧩 표에 없음. '차익' 주변 원문:")
+            print("     " + 본문[max(0, i - 250):i + 450].replace("\n", " ")[:700])
+
+        if d < 2:
+            # ① iframe 추적
+            for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', 본문, re.I):
+                nxt = 절대(m.group(1))
+                if "finance.naver.com" in nxt and nxt not in 방문:
+                    깊이[nxt] = d + 1
+                    대기.append(nxt)
+            # ② program 관련 링크 추적 (탭·하위 페이지)
+            for m in re.finditer(r'<a[^>]+href=["\']([^"\']*[Pp]rogram[^"\']*)["\']', 본문):
+                nxt = 절대(m.group(1))
+                if "finance.naver.com" in nxt and nxt not in 방문:
+                    깊이[nxt] = d + 1
+                    대기.append(nxt)
+
+    print(f"⚠️ 프로그램매매 미확보 (방문 {len(방문)}곳). 방문 목록:")
+    for u in 방문:
+        print(f"     - {u}")
+    첫 = 본문보관.get(시작, "")
+    if 첫:
+        아이프레임 = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', 첫, re.I)
+        print(f"     시작 페이지 iframe {len(아이프레임)}개: {아이프레임[:6]}")
+    return None
+
+
+def collect_program_and_futures():
+    """프로그램매매 + 선물 수급.
+
+    ⚠️ 옵션 수급은 뺐다. 네이버에서 투자자별 옵션 수급을 안정적으로 얻을 경로를
+       확인하지 못했고, 리포트에 '확인 불가'만 고정으로 나가는 게 손해라고 판단했다.
+
+    왜 프로그램매매가 중요한가:
+      · 차익거래 = 선물-현물 가격차를 노린 기계적 매매 (방향성 아님)
+      · 비차익거래 = 선물과 무관한 바스켓 매매 (실제 방향성 베팅)
+      → 같은 '프로그램 매도 1조'라도 어느 쪽이냐에 따라 해석이 정반대다.
+    """
+    결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
+    결과["프로그램매매"] = collect_program_trading()
+
+    # ── 선물 투자자별 수급 ──
+    for sosok in ("03", "04"):
+        if 결과["선물수급"]:
+            break
+        try:
+            r = requests.get("https://finance.naver.com/sise/investorDealTrendDay.naver",
+                             headers=HEADERS,
+                             params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
+            if r.status_code != 200:
+                continue
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+            if not tables or tables[0].shape[0] < 2:
+                continue
+            표 = tables[0]
+            표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
+            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
+            if len(실) == 0:
+                continue
+            row = 실.iloc[0]
+            결과["선물수급"] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
+                            "기관계": str(row["기관계"]), "sosok": sosok}
+            print(f"✅ 선물수급 수집 (sosok={sosok})")
+        except Exception as e:
+            print(f"  ⚠️ 선물수급 sosok={sosok} 실패: {type(e).__name__}")
+
+    미확보 = [k for k in ("프로그램매매", "선물수급") if not 결과[k]]
+    if 미확보:
+        print(f"⚠️ 미확보: {', '.join(미확보)} — 해당 부분은 리포트에서 숨겨집니다.")
+    return 결과
+
+
+def collect_macro():
+    결과 = {}
+    for key, info in MACRO_TICKERS.items():
+        try:
+            t = yf.Ticker(info["심볼"])
+            hist = t.history(period="5d")
+            if hist.empty or len(hist) < 2:
+                print(f"⚠️ {info['표시명']}: 데이터 부족")
+                결과[key] = None
+                continue
+            마지막 = float(hist["Close"].iloc[-1])
+            이전 = float(hist["Close"].iloc[-2])
+            등락률 = (마지막 - 이전) / 이전 * 100
+            결과[key] = {
+                "값": round(마지막, 2),
+                "등락률": round(등락률, 2),
+                "표시명": info["표시명"],
+                "단위": info["단위"],
+            }
+        except Exception as e:
+            print(f"⚠️ {info['표시명']} 수집 실패: {e}")
+            결과[key] = None
+
+    성공 = sum(1 for v in 결과.values() if v is not None)
+    print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
+    return 결과
+
+
+def collect_program_and_futures():
+    """프로그램매매(차익/비차익)와 선물 수급을 수집한다.
+
+    ⚠️ 네이버 페이지 구조를 이 환경에서 검증할 수 없어, 여러 후보 URL을 순서대로
+       시도하고 실패하면 어떤 표가 있었는지 로그로 남긴다.
+       첫 실행 로그를 보고 정확한 위치를 확정하면 된다.
+
+    왜 중요한가:
+      · 차익거래 = 선물-현물 가격차를 노린 기계적 매매 (방향성 아님)
+      · 비차익거래 = 선물과 무관한 바스켓 매매 (실제 방향성 베팅)
+      → 같은 '프로그램 매도 1조'라도 어느 쪽이냐에 따라 해석이 정반대다.
+    """
+    결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
+
+    # ── 프로그램매매 ──
+    #   ✅ 실제 확인된 주소를 최우선으로 사용
+    후보 = [
+        "https://finance.naver.com/sise/sise_program.naver",
+        "https://finance.naver.com/sise/programDeal.naver",
+    ]
+    for url in 후보:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12)
+            if r.status_code != 200:
+                print(f"  ℹ️ {url.split('/')[-1]} → HTTP {r.status_code}")
+                continue
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+
+            찾음 = None
+            for t in tables:
+                # 네이버 표는 헤더가 2단(MultiIndex)인 경우가 많아 평탄화해서 검사
+                컬럼문자열 = " ".join(
+                    " ".join(str(x) for x in c) if isinstance(c, tuple) else str(c)
+                    for c in t.columns)
+                본문문자열 = " ".join(str(v) for v in t.head(3).values.ravel())
+                if ("차익" in 컬럼문자열 or "차익" in 본문문자열):
+                    찾음 = t
+                    break
+
+            if 찾음 is not None:
+                # MultiIndex면 컬럼명을 '상위_하위' 형태로 평탄화
+                if isinstance(찾음.columns, pd.MultiIndex):
+                    찾음.columns = ["_".join(str(x) for x in c).strip()
+                                   for c in 찾음.columns]
+                행 = 찾음.dropna(how="all").iloc[0].to_dict()
+                결과["프로그램매매"] = {str(k): str(v) for k, v in 행.items()}
+                print(f"✅ 프로그램매매 수집 ({url.split('/')[-1]})")
+                print(f"   항목: {list(결과['프로그램매매'].keys())[:8]}")
+                break
+            else:
+                print(f"  ℹ️ '차익' 항목을 못 찾음. 표 {len(tables)}개의 컬럼:")
+                for i, t in enumerate(tables[:5]):
+                    print(f"     표{i} {t.shape}: {list(t.columns)[:6]}")
+        except Exception as e:
+            print(f"  ⚠️ 프로그램매매 {url.split('/')[-1]} 실패: {type(e).__name__}: {e}")
+
+    # ── 선물·옵션 투자자별 수급 ──
+    #   sosok 코드가 문서화돼 있지 않아 여러 값을 시도하고,
+    #   먼저 잡히는 것을 선물, 그다음을 옵션으로 본다. (첫 실행 로그로 확정 필요)
+    파생후보 = [("선물수급", c) for c in ("03", "04")] + \
+              [("옵션수급", c) for c in ("05", "06")]
+    for 종류, sosok in 파생후보:
+        if 결과[종류]:
+            continue
+        try:
+            r = requests.get("https://finance.naver.com/sise/investorDealTrendDay.naver",
+                             headers=HEADERS,
+                             params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
+            if r.status_code != 200:
+                continue
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+            if not tables or tables[0].shape[0] < 2:
+                continue
+            표 = tables[0]
+            표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
+            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
+            if len(실) == 0:
+                continue
+            row = 실.iloc[0]
+            결과[종류] = {"개인": str(row["개인"]), "외국인": str(row["외국인"]),
+                       "기관계": str(row["기관계"]), "sosok": sosok}
+            print(f"✅ {종류} 수집 (sosok={sosok})")
+        except Exception as e:
+            print(f"  ⚠️ {종류} sosok={sosok} 실패: {type(e).__name__}")
+
+    미확보 = [k for k, v in 결과.items() if not v]
+    if 미확보:
+        print(f"⚠️ 미확보: {', '.join(미확보)} — 해당 부분은 '확인 불가'로 표시됩니다.")
+    return 결과
+
+
+def _fetch_prev_volume(code):
+    """전일 거래량(주식 수)을 구한다.
+    네이버 일별시세 표에 거래량이 그대로 있어 근사 없이 실측값을 쓸 수 있다.
+    (거래대금은 이 표에 없어서 예전엔 '거래량×종가'로 추정해야 했다.)
+    반환: 주식 수 float 또는 None
+    """
+    url = "https://finance.naver.com/item/sise_day.naver"
+    try:
+        r = requests.get(url, headers=HEADERS, params={"code": code, "page": "1"}, timeout=10)
+        r.encoding = "euc-kr"
+        tables = read_html_safe(r.text)
+    except Exception:
+        return None
+
+    for t in tables:
+        cols = " ".join(str(c) for c in t.columns)
+        if "거래량" in cols and "날짜" in cols:
+            df = t.dropna(subset=["날짜"])
+            if len(df) < 2:
+                return None
+            # 0번째 = 최근일(오늘), 1번째 = 그 전날
+            return to_num(df.iloc[1].get("거래량"))
+    return None
+
+
+TRACK_DAYS = 5          # 포착 후 추적 기간(거래일)
+
+# ── 강세 레이더 설정 (여기 숫자만 바꾸면 리포트 설명도 자동으로 따라간다) ──
+STR_MIN_시총 = 5000       # 억원
+STR_MIN_거래대금 = 500    # 억원
+STR_배수_하한 = 2.0       # 전일 대비 거래량 (하드 필터)
+STR_배수_가점 = 3.0       # 이 이상이면 가점
+STR_가점 = 15
+STR_W_회전, STR_W_상승 = 0.5, 0.5
+
+# ── 5일 매집 레이더 설정 ──
+ACC_DAYS = 5            # 관찰 기간(거래일)
+ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
+ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
+ACC_DROP_LINE = -5.0    # 5일 등락률이 이 아래면 '하락 중 매집'(⚠️ 물타기 가능성)
+ACC_FLAT_LINE = 5.0     # 이 이하면 '횡보 중 매집'(😴 전형적 매집 패턴)
+ACC_POOL = None         # 후보 풀 상한. None = 상한 없음(조건 통과한 종목 전부)
+                        #   화면엔 각 랭킹 TOP5만 나오지만, 뽑는 범위가 좁으면
+                        #   두 랭킹이 같은 종목만 반복하게 된다(풀 5개면 겹침 100%).
+                        #   그래서 상한을 두지 않고 통과 종목 전부를 풀에 담는다.
+ACC_UNIVERSE = {"코스피": 100, "코스닥": 40}  # 시총 상위 몇 종목까지 스캔할지
+
+
+def _fetch_investor_flow(code, days=ACC_DAYS):
+    """종목별 외국인·기관 일별 순매매를 가져온다.
+    네이버 '외국인·기관' 탭 표에는 순매매'량'(주식 수)이 있으므로
+    종가를 곱해 금액(억원)으로 환산한다.
+    반환: {"외국인": [일별 억원...], "기관": [...], "종가": 최근종가}
+    """
+    url = "https://finance.naver.com/item/frgn.naver"
+    try:
+        r = requests.get(url, headers=HEADERS,
+                         params={"code": code, "page": "1"}, timeout=10)
+        r.encoding = "euc-kr"
+        tables = read_html_safe(r.text)
+    except Exception:
+        return None
+
+    표 = None
+    for t in tables:
+        cols = " ".join(str(c) for c in t.columns)
+        if "외국인" in cols and "기관" in cols and "날짜" in cols:
+            표 = t
+            break
+    if 표 is None:
+        return None
+
+    # 2단 헤더면 평탄화
+    if isinstance(표.columns, pd.MultiIndex):
+        표.columns = ["_".join(str(x) for x in c).strip() for c in 표.columns]
+
+    def 열찾기(*키워드):
+        for c in 표.columns:
+            s = str(c)
+            if all(k in s for k in 키워드):
+                return c
+        return None
+
+    날짜열 = 열찾기("날짜")
+    종가열 = 열찾기("종가")
+    기관열 = 열찾기("기관", "순매매")
+    외인열 = 열찾기("외국인", "순매매")
+    if not (날짜열 and 종가열 and 기관열 and 외인열):
+        return None
+
+    df = 표.dropna(subset=[날짜열]).head(days)
+    if len(df) < days:
+        return None
+
+    외 , 기 = [], []
+    종가들 = []
+    for _, row in df.iterrows():
+        종가 = to_num(row.get(종가열))
+        외량 = to_num(row.get(외인열))
+        기량 = to_num(row.get(기관열))
+        if 종가 is None:
+            continue
+        종가들.append(종가)
+        외.append((외량 or 0) * 종가 / 100_000_000)   # 원 → 억원
+        기.append((기량 or 0) * 종가 / 100_000_000)
+    if not 외 or len(종가들) < 2:
+        return None
+
+    # 5일 등락률 — 이미 받아온 종가로 계산하므로 추가 요청이 없다.
+    # (표는 최신일이 0번째, 가장 오래된 날이 마지막)
+    최근, 시작 = 종가들[0], 종가들[-1]
+    등락 = (최근 - 시작) / 시작 * 100 if 시작 else None
+
+    return {"외국인": 외, "기관": 기,
+            "종가": 최근, "시작종가": 시작,
+            "5일등락률": round(등락, 2) if 등락 is not None else None}
+
+
+def collect_accumulation_radar():
+    """5일 매집 레이더 — 조용히 쌓이는 돈을 잡아낸다.
+
+    강세 레이더가 '오늘 터진 것(폭발)'을 본다면, 여기는 '아직 안 터졌지만 쌓이는 것(매집)'.
+    서로 반대편을 보므로 두 코너가 겹치지 않는다.
+
+    ── 조건 설계 ──
+      🤝 쌍끌이 : 외국인·기관이 **둘 다** 5일 중 3일 이상 순매수 + 각자 누적 플러스
+                  → 둘이 동시에 사는 건 우연으로 잘 안 나온다. 그 자체가 강한 조건이라
+                     일수는 3일로 두어도 신호가 충분하다.
+      💼 단독   : 한쪽만 매집. 조건이 하나뿐이므로 **4일 이상**으로 엄격히 건다.
+                  쌍끌이가 5종목 미만인 날에만 보충용으로 채운다.
+                  (그래야 "오늘은 해당 종목이 없습니다"로 코너가 비는 일이 없다)
+
+    ── 두 랭킹 ──
+      금액 순위  : "큰돈이 어디로 갔나"      (대형주가 상위)
+      시총대비   : "그 회사엔 얼마나 큰 돈인가" (중소형주가 상위)
+      같은 종목 풀인데 순서가 완전히 달라진다 — 그 대비를 나란히 보여준다.
+    """
+    유니버스 = []
+    for 시장, sosok in (("코스피", "0"), ("코스닥", "1")):
+        상한 = ACC_UNIVERSE[시장]
+        모은수 = 0
+        for page in range(1, 4):
+            if 모은수 >= 상한:
+                break
+            try:
+                r = requests.get("https://finance.naver.com/sise/sise_market_sum.naver",
+                                 headers=HEADERS,
+                                 params={"sosok": sosok, "page": str(page)}, timeout=12)
+                r.encoding = "euc-kr"
+                soup = BeautifulSoup(r.text, "html.parser")
+                tables = read_html_safe(r.text)
+            except Exception:
+                break
+            코드맵 = {}
+            for a in soup.select("a[href*='code=']"):
+                m = re.search(r"code=(\d{6})", a.get("href", ""))
+                if m:
+                    코드맵[clean_name(a.get_text(strip=True))] = m.group(1)
+            표 = None
+            for t in tables:
+                if "종목명" in " ".join(str(c) for c in t.columns):
+                    표 = t
+                    break
+            if 표 is None:
+                break
+            for _, row in 표.dropna(subset=["종목명"]).iterrows():
+                이름 = clean_name(row.get("종목명", ""))
+                시총 = to_num(row.get("시가총액"))
+                코드 = 코드맵.get(이름)
+                if not 이름 or not 코드 or 시총 is None:
+                    continue
+                유니버스.append((이름, 코드, 시장, 시총))
+                모은수 += 1
+                if 모은수 >= 상한:
+                    break
+
+    print(f"📥 매집 레이더 스캔 대상 {len(유니버스)}종목 (시총 상위)")
+
+    쌍끌이, 단독 = [], []
+    실패 = 0
+    for 이름, 코드, 시장, 시총 in 유니버스:
+        flow = _fetch_investor_flow(코드)
+        if not flow:
+            실패 += 1
+            continue
+        외, 기 = flow["외국인"], flow["기관"]
+        외일수 = sum(1 for v in 외 if v > 0)
+        기일수 = sum(1 for v in 기 if v > 0)
+        외누적, 기누적 = sum(외), sum(기)
+
+        기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
+               "외인일수": 외일수, "기관일수": 기일수,
+               "외국인": round(외누적, 1), "기관": round(기누적, 1),
+               "5일등락률": flow.get("5일등락률")}
+
+        # 🤝 쌍끌이 — 둘 다 3일 이상 & 각자 누적 플러스
+        if (외일수 >= ACC_BOTH_DAYS and 기일수 >= ACC_BOTH_DAYS
+                and 외누적 > 0 and 기누적 > 0):
+            합산 = 외누적 + 기누적
+            쌍끌이.append({**기본, "유형": "쌍끌이", "합산": round(합산, 1),
+                         "시총대비": round(합산 / 시총 * 100, 3)})
+            continue
+
+        # 💼 단독 — 한쪽만, 4일 이상
+        if 외일수 >= ACC_SOLO_DAYS and 외누적 > 0:
+            단독.append({**기본, "유형": "외국인 단독", "합산": round(외누적, 1),
+                       "시총대비": round(외누적 / 시총 * 100, 3)})
+        elif 기일수 >= ACC_SOLO_DAYS and 기누적 > 0:
+            단독.append({**기본, "유형": "기관 단독", "합산": round(기누적, 1),
+                       "시총대비": round(기누적 / 시총 * 100, 3)})
+
+    if 실패:
+        print(f"  ℹ️ {실패}종목은 수급 데이터 미확보(신규상장·데이터 부족 등)")
+
+    쌍끌이.sort(key=lambda x: x["합산"], reverse=True)
+    단독.sort(key=lambda x: x["합산"], reverse=True)
+
+    # 조건을 통과한 종목을 전부 풀에 담는다(쌍끌이 먼저, 그다음 단독).
+    # ⚠️ 예전엔 여기서 5~10개로 잘라버려서 두 랭킹이 같은 종목만 반복됐다.
+    #    두 랭킹 모두 이 전체 풀에서 각자 TOP5를 뽑는다.
+    종목 = 쌍끌이 + 단독
+    if ACC_POOL:
+        종목 = 종목[:ACC_POOL]
+
+    _score_accumulation(종목)
+
+    쌍끌이수 = sum(1 for s in 종목 if s.get("유형") == "쌍끌이")
+    print(f"✅ 매집 레이더 — 스캔 {len(유니버스)}종목 → 후보 풀 {len(종목)}종목 "
+          f"(🤝쌍끌이 {쌍끌이수} + 💼단독 {len(종목)-쌍끌이수}) → 각 랭킹 TOP5 노출")
+    for s in 종목[:3]:
+        print(f"   [{s['유형']}] {s['종목명']} {s['합산']:,.0f}억 "
+              f"(외{s['외인일수']}일/기{s['기관일수']}일, 시총대비 {s['시총대비']}%)")
+
+    return {"종목": 종목, "기간": ACC_DAYS,
+            "쌍끌이최소": ACC_BOTH_DAYS, "단독최소": ACC_SOLO_DAYS,
+            "쌍끌이수": len(쌍끌이)}
+
+
+
+def _score_accumulation(종목):
+    """매집갭을 계산한다.
+
+    ── 왜 '갭'인가 ──
+      왼쪽 랭킹(시총 대비)은 "얼마나 큰 돈이 들어왔나"를 본다.
+      오른쪽은 질문이 달라야 겹치지 않는다 → "그 돈이 아직 가격에 반영 안 된 곳".
+
+    ── 계산 ──
+      매집점수   = 시총대비 매집비율을 후보군 안에서 0~100으로 정규화
+      반응점수   = 5일 등락률을 후보군 안에서 0~100으로 정규화
+      매집갭     = 매집점수 − 반응점수     (범위 −100 ~ +100)
+
+    ⚠️ 정규화하는 이유: 시총대비(0.04~1.6%)와 등락률(−10~+20%)은 단위가 달라
+       그냥 빼면 숫자가 큰 등락률이 지배한다. 둘 다 0~100으로 맞춰야 공평하다.
+    ⚠️ 나눗셈이 아니라 뺄셈인 이유: 등락률이 0에 가까우면 나눗셈은 값이 무한대로 튄다.
+    """
+    if not 종목:
+        return
+    유효 = [s for s in 종목 if s.get("5일등락률") is not None]
+    if not 유효:
+        return
+
+    def 정규화(vals):
+        lo, hi = min(vals), max(vals)
+        if hi == lo:
+            return [50.0] * len(vals)
+        return [(v - lo) / (hi - lo) * 100 for v in vals]
+
+    매집점수 = 정규화([s["시총대비"] for s in 유효])
+    반응점수 = 정규화([s["5일등락률"] for s in 유효])
+
+    for i, s in enumerate(유효):
+        s["매집점수"] = round(매집점수[i])
+        s["반응점수"] = round(반응점수[i])
+        s["매집갭"] = round(매집점수[i] - 반응점수[i])
+        # 성격 구분 — '안 올랐다'에는 횡보와 하락이 섞여 있어 반드시 나눠 표시한다
+        등락 = s["5일등락률"]
+        if 등락 < ACC_DROP_LINE:
+            s["성격"] = "하락 중"
+            s["성격아이콘"] = "⚠️"
+        elif 등락 <= ACC_FLAT_LINE:
+            s["성격"] = "횡보"
+            s["성격아이콘"] = "😴"
+        else:
+            s["성격"] = "상승 중"
+            s["성격아이콘"] = "🌱"
+
+
+def collect_strength_radar():
+    """실제 강세 레이더 — 2단 구조.
+
+    ── 1단: 오늘 새로 포착 ──
+      1차 필터 : 시총 ≥ 5,000억 AND 거래대금 ≥ 500억 AND 상승 종목만
+      2차 필터 : 전일 대비 거래량 2배 이상  (평소와 다른 날만)
+                 ※ 거래대금은 주가 상승분이 섞여 부풀려진다. 순수 손바뀜은 거래량이 정확.
+      점수     : 회전율점수 × 0.5 + 상승률점수 × 0.5  (각각 0~100 정규화)
+                 + 거래량 3배 이상이면 +15점
+      ⚠️ 정규화 이유: 회전율(1~15%)과 상승률(0~30%)은 단위가 달라 그냥 더하면
+         숫자가 큰 상승률이 늘 이긴다. 0~100으로 환산해야 비중이 뜻대로 작동한다.
+
+    ── 2단: 포착 이후 추적 ──
+      한 번 포착된 종목은 신규 목록에서 빠지고 추적표로 이동한다.
+      "며칠째 같은 조건 충족"은 새 정보가 아니지만,
+      "포착 후 실제로 올랐는가"는 지표가 맞는지 검증해주는 정보이기 때문.
+      추적 중 다시 조건을 만족하면 '재점화'로 보고 신규에 다시 올리며 차수를 올린다.
+    """
+    MIN_시총 = STR_MIN_시총
+    MIN_거래대금 = STR_MIN_거래대금
+    배수_하한 = STR_배수_하한
+    배수_가점 = STR_배수_가점
+    가점 = STR_가점
+    W_회전, W_상승 = STR_W_회전, STR_W_상승
+
+    신규 = {"코스피": [], "코스닥": []}
+    가격맵 = {}          # 종목명 → {"현재가": float, "등락률": float}  (추적 갱신용)
+    시장맵 = {"코스피": "0", "코스닥": "1"}
+
+    for 시장, sosok in 시장맵.items():
+        종목들 = []
+        for page in range(1, 6):
+            url = "https://finance.naver.com/sise/sise_market_sum.naver"
+            try:
+                r = requests.get(url, headers=HEADERS,
+                                 params={"sosok": sosok, "page": str(page)}, timeout=12)
+                r.encoding = "euc-kr"
+                soup = BeautifulSoup(r.text, "html.parser")
+                tables = read_html_safe(r.text)
+            except Exception as e:
+                print(f"  ⚠️ {시장} p{page} 요청 실패: {type(e).__name__}")
+                break
+
+            코드맵 = {}
+            for a in soup.select("a[href*='code=']"):
+                m = re.search(r"code=(\d{6})", a.get("href", ""))
+                if m:
+                    코드맵[clean_name(a.get_text(strip=True))] = m.group(1)
+
+            표 = None
+            for t in tables:
+                cols = " ".join(str(c) for c in t.columns)
+                if "종목명" in cols and ("거래대금" in cols or "거래량" in cols):
+                    표 = t
+                    break
+            if 표 is None:
+                if page == 1:
+                    print(f"  ℹ️ {시장} 시총 표 못 찾음. 표 컬럼들:")
+                    for i, t in enumerate(tables[:5]):
+                        print(f"     표{i} {t.shape}: {list(t.columns)[:9]}")
+                break
+
+            표 = 표.dropna(subset=["종목명"])
+            for _, row in 표.iterrows():
+                이름 = clean_name(row.get("종목명", ""))
+                시총 = to_num(row.get("시가총액"))
+                등락률 = to_num(row.get("등락률"))
+                거래량 = to_num(row.get("거래량"))
+                현재가num = to_num(row.get("현재가"))
+                대금 = to_num(row.get("거래대금"))
+                if 대금 is None and 거래량 is not None and 현재가num is not None:
+                    대금 = 거래량 * 현재가num / 100_000_000
+                if not 이름:
+                    continue
+                if 현재가num is not None:
+                    가격맵[이름] = {"현재가": 현재가num, "등락률": 등락률}
+                if 시총 is None or 대금 is None or 등락률 is None:
+                    continue
+                종목들.append({
+                    "종목명": 이름, "코드": 코드맵.get(이름), "시장": 시장,
+                    "시총": 시총, "거래대금": 대금, "거래량": 거래량,
+                    "현재가": 현재가num, "등락률": 등락률,
+                })
+
+        후보 = [s for s in 종목들
+                if s["시총"] >= MIN_시총 and s["거래대금"] >= MIN_거래대금 and s["등락률"] > 0]
+        print(f"📡 {시장}: 수집 {len(종목들)} → 1차 필터 통과 {len(후보)}")
+
+        통과 = []
+        for s in 후보[:80]:
+            if not s.get("코드") or not s.get("거래량"):
+                continue
+            전일량 = _fetch_prev_volume(s["코드"])
+            if not 전일량 or 전일량 <= 0:
+                continue
+            배수 = s["거래량"] / 전일량
+            if 배수 < 배수_하한:
+                continue
+            s["전일거래량"] = int(전일량)
+            s["배수"] = round(배수, 1)
+            통과.append(s)
+        print(f"   2차 필터(전일 대비 거래량 {배수_하한}배↑) 통과 {len(통과)}")
+
+        if not 통과:
+            continue
+
+        def 정규화(vals):
+            lo, hi = min(vals), max(vals)
+            if hi == lo:
+                return [50.0] * len(vals)
+            return [(v - lo) / (hi - lo) * 100 for v in vals]
+
+        for s in 통과:
+            s["회전율"] = round(s["거래대금"] / s["시총"] * 100, 1)
+        회전점수 = 정규화([s["회전율"] for s in 통과])
+        상승점수 = 정규화([s["등락률"] for s in 통과])
+        for i, s in enumerate(통과):
+            점수 = 회전점수[i] * W_회전 + 상승점수[i] * W_상승
+            if s["배수"] >= 배수_가점:
+                점수 += 가점
+                s["폭발"] = True
+            s["강세점수"] = round(min(100, 점수), 1)
+
+        통과.sort(key=lambda x: x["강세점수"], reverse=True)
+        신규[시장] = 통과[:10]
+        if 신규[시장]:
+            t = 신규[시장][0]
+            print(f"   1위 {t['종목명']} 점수 {t['강세점수']} "
+                  f"(회전율 {t['회전율']}%, {t['등락률']:+.2f}%, 거래량 {t['배수']}배)")
+
+    추적 = _update_tracking(신규, 가격맵)
+    return {"신규": 신규, "추적": 추적}
+
+
+def _load_prev_tracking():
+    """직전 발행분에서 추적 목록을 불러온다."""
     import glob
-    files = sorted(glob.glob("report_*.json"))
+    files = sorted(glob.glob("data_*.json"))
     files = [f for f in files if DATE not in f]
     if not files:
-        print("ℹ️ 이전 발행분이 없어 '어제의 채점표'는 생략됩니다.")
-        return None
-    prev = files[-1]
+        return []
     try:
-        with open(prev, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        포인트 = (d.get("해석글") or {}).get("관전포인트")
-        if not 포인트:
+        with open(files[-1], "r", encoding="utf-8") as f:
+            prev = json.load(f)
+        return (prev.get("강세레이더") or {}).get("추적") or []
+    except Exception:
+        return []
+
+
+def _update_tracking(신규, 가격맵):
+    """포착 이후 추적표를 갱신한다.
+
+    · 기존 추적 종목: 경과일 +1, 현재가 갱신 → 포착 이후 등락률 계산
+    · 오늘 새로 포착: 추적표에 추가 (차수 1)
+    · 추적 중 재점화: 차수 +1, 포착일·포착가를 오늘로 리셋 → 신규에도 다시 노출
+    · TRACK_DAYS 초과: 졸업 처리(목록에서 제외)
+    """
+    추적 = _load_prev_tracking()
+    맵 = {t["종목명"]: t for t in 추적}
+
+    # 1) 기존 추적 갱신
+    for t in 추적:
+        t["경과"] = t.get("경과", 0) + 1
+        현재 = 가격맵.get(t["종목명"])
+        if 현재 and t.get("포착가"):
+            t["현재가"] = 현재["현재가"]
+            t["이후등락"] = round((현재["현재가"] - t["포착가"]) / t["포착가"] * 100, 2)
+
+    # 2) 오늘 포착 종목 반영
+    for 시장, 목록 in 신규.items():
+        for s in 목록:
+            기존 = 맵.get(s["종목명"])
+            if 기존:
+                # 재점화 — 차수를 올리고 기준을 오늘로 리셋
+                차수 = 기존.get("차수", 1) + 1
+                기존.update({"차수": 차수, "경과": 0,
+                            "포착일": DATE, "포착가": s["현재가"],
+                            "현재가": s["현재가"], "이후등락": 0.0})
+                s["재점화"] = 차수
+                print(f"   🔄 {s['종목명']} 재점화 → {차수}차 포착")
+            else:
+                새 = {"종목명": s["종목명"], "시장": 시장, "코드": s.get("코드"),
+                     "포착일": DATE, "포착가": s["현재가"], "현재가": s["현재가"],
+                     "이후등락": 0.0, "경과": 0, "차수": 1}
+                추적.append(새)
+                맵[s["종목명"]] = 새
+
+    # 3) 졸업 처리
+    남김 = [t for t in 추적 if t.get("경과", 0) <= TRACK_DAYS]
+    졸업 = len(추적) - len(남김)
+    if 졸업:
+        print(f"   🎓 추적 종료 {졸업}종목 (포착 후 {TRACK_DAYS}거래일 경과)")
+
+    # 포착 후 등락률 높은 순 정렬 (실패도 그대로 노출 — 지표 검증이 목적)
+    남김.sort(key=lambda x: x.get("이후등락", 0), reverse=True)
+    print(f"📋 추적 중 {len(남김)}종목")
+    return 남김
+
+# ============================================================
+# ⑦ 마감 브리핑 — 방송사 유튜브 자막
+# ------------------------------------------------------------
+#   1단계) 유튜브 RSS(무료·키 불필요)로 각 채널의 '오늘 마감시황' 영상 찾기
+#   2단계) Supadata API로 그 영상의 자막 가져오기
+#
+#   ⚠️ 저작권 주의: 여기서 수집한 자막은 '원문 그대로 싣기 위한 것이 아니라'
+#      각 채널의 관점을 파악해 우리 문장으로 재구성하기 위한 재료다.
+#      generate_report.py 프롬프트에서 직접 인용을 금지하고 있다.
+#   ⚠️ 라이브 방송은 자막 API가 지원하지 않는다(완결된 영상만 가능).
+# ============================================================
+SUPADATA_KEY = os.environ.get("SUPADATA_API_KEY", "")
+
+# 확인된 채널 ID (RSS로 채널명·오늘 영상 교차검증 완료)
+BRIEF_CHANNELS = {
+    "삼프로TV": "UChlv4GSd7OQl3js-jkLOnFA",
+    "한국경제TV": "UCF8AeLlUbEpKju6v1H6p8Eg",
+    "이데일리TV": "UC8Sv6O3Ux8ePVqorx8aOBMg",
+}
+
+# 마감시황 영상을 고를 때 우선순위 키워드 (앞쪽일수록 우선)
+#   실제 채널들의 오늘 영상 제목을 보고 만든 목록이다.
+BRIEF_KEYWORDS = [
+    "마감시황", "마감 시황", "파이널포인트", "오늘장 마감", "장마감", "마감",
+    "종목쇼", "넥스트시그널", "클로징",
+    "코스피", "코스닥", "증시", "시황",
+]
+
+# 제외 키워드 — 마감 브리핑이 아닌 영상
+BRIEF_EXCLUDE = ["#shorts", "shorts", "ETF골든타임", "광고"]
+
+# 자막 분량. 앞부분만 보면 인사말·시황 나열에 그쳐 '차별적 관점'이 뒤에 묻힌다.
+# 조금 넉넉히 가져와 Claude가 특징적인 대목을 찾을 수 있게 한다.
+TRANSCRIPT_LIMIT = 7000
+
+
+def _find_today_video(channel_id):
+    """RSS에서 오늘 올라온 영상 중 마감시황에 가장 가까운 것을 고른다."""
+    url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=12)
+        if r.status_code != 200:
             return None
-        날짜 = d.get("날짜", "")
-        표기 = f"{날짜[:4]}.{날짜[4:6]}.{날짜[6:]}" if len(날짜) == 8 else 날짜
-        print(f"📋 이전 발행({표기}) 관전포인트 {len(포인트)}개 불러옴 → 채점 대상")
-        return {"날짜": 표기, "관전포인트": 포인트}
+    except Exception:
+        return None
+
+    entries = re.findall(r"<entry>(.*?)</entry>", r.text, re.S)
+    오늘 = f"{DATE[:4]}-{DATE[4:6]}-{DATE[6:]}"
+    후보 = []
+    for e in entries:
+        t = re.search(r"<title>(.*?)</title>", e)
+        v = re.search(r"<yt:videoId>(.*?)</yt:videoId>", e)
+        p = re.search(r"<published>(.*?)</published>", e)
+        if not (t and v and p):
+            continue
+        if not p.group(1).startswith(오늘):
+            continue  # 오늘 영상만
+        제목 = t.group(1).replace("&quot;", '"').replace("&amp;", "&")
+        # 마감 브리핑이 아닌 영상(쇼츠·정규 코너 등) 제외
+        if any(x.lower() in 제목.lower() for x in BRIEF_EXCLUDE):
+            continue
+        후보.append({"제목": 제목, "videoId": v.group(1),
+                    "링크": f"https://www.youtube.com/watch?v={v.group(1)}"})
+
+    if not 후보:
+        return None
+
+    # 키워드 우선순위대로 탐색
+    for kw in BRIEF_KEYWORDS:
+        for c in 후보:
+            if kw in c["제목"]:
+                return c
+    # ⚠️ 키워드가 하나도 안 맞으면 '마감 브리핑이 아니다'고 판단해 건너뛴다.
+    #    아무 영상이나 가져오면 엉뚱한 콘텐츠가 리포트에 실린다.
+    return None
+
+
+def _fetch_transcript(video_id):
+    """Supadata로 자막 텍스트를 가져온다."""
+    if not SUPADATA_KEY:
+        return None
+    url = "https://api.supadata.ai/v1/youtube/transcript"
+    try:
+        r = requests.get(url,
+                         params={"videoId": video_id, "text": "true", "lang": "ko"},
+                         headers={"x-api-key": SUPADATA_KEY}, timeout=45)
+        if r.status_code != 200:
+            # 왜 실패했는지 바로 알 수 있게 상세 출력
+            이유 = {
+                401: "API 키가 잘못됨",
+                404: "영상 없음/비공개",
+                403: "접근 제한 영상",
+                429: "무료 크레딧 소진 또는 속도제한",
+            }.get(r.status_code, "기타 오류")
+            print(f"    ⚠️ 자막 실패 HTTP {r.status_code} ({이유}): {r.text[:150]}")
+            return None
+        data = r.json()
+        content = data.get("content")
+        if isinstance(content, list):  # 타임스탬프 형식으로 온 경우
+            content = " ".join(seg.get("text", "") for seg in content)
+        return (content or "").strip()
     except Exception as e:
-        print(f"⚠️ 이전 발행분 읽기 실패: {type(e).__name__}")
+        print(f"    ⚠️ 자막 요청 오류: {type(e).__name__}")
         return None
 
 
-def slim_data(data):
-    """Claude에게 보낼 데이터를 줄인다.
+def collect_briefings():
+    if not SUPADATA_KEY:
+        print("⚠️ SUPADATA_API_KEY 없음 → 마감 브리핑 건너뜀")
+        return []
 
-    코너가 늘면서 data json이 비대해졌다(매집 레이더만 69종목 등).
-    화면에는 상위 몇 개만 쓰는데 전부 보내면
-      · 입력 토큰이 커져 비용이 오르고
-      · 모델이 핵심을 놓치기 쉬우며
-      · 출력이 max_tokens에 걸려 잘릴 위험이 커진다.
-    해석에 필요한 만큼만 잘라서 보낸다.
-    """
-    d = json.loads(json.dumps(data, ensure_ascii=False))   # 원본 보호
-
-    # 주도섹터: 종목은 3개씩이면 해석에 충분
-    for s in d.get("주도섹터", []) or []:
-        if isinstance(s.get("종목"), list):
-            s["종목"] = s["종목"][:3]
-
-    # 강세 레이더: 신규 각 5개, 추적 5개
-    강 = d.get("강세레이더") or {}
-    for k, v in (강.get("신규") or {}).items():
-        강["신규"][k] = v[:5]
-    if isinstance(강.get("추적"), list):
-        강["추적"] = 강["추적"][:5]
-
-    # 매집 레이더: 두 랭킹에 실제로 쓰이는 상위만 (69종목 → 최대 10종목)
-    매 = d.get("매집레이더") or {}
-    종목 = 매.get("종목") or []
-    if 종목:
-        상위금액 = sorted(종목, key=lambda x: x.get("시총대비", 0), reverse=True)[:5]
-        상위갭 = sorted([s for s in 종목 if s.get("매집갭") is not None],
-                      key=lambda x: x["매집갭"], reverse=True)[:5]
-        본 = {id(s): s for s in 상위금액 + 상위갭}
-        매["종목"] = list(본.values())
-        매["전체종목수"] = len(종목)
-
-    # 공시: 상위 8건이면 해설을 붙이기에 충분
-    if isinstance(d.get("공시"), list):
-        d["공시"] = d["공시"][:8]
-
-    # 뉴스 원본은 그대로 (핵심뉴스 생성에 전부 필요)
-    return d
-
-
-def load_data():
-    if not os.path.exists(DATA_PATH):
-        print(f"❌ {DATA_PATH} 파일이 없습니다. collect_data.py를 먼저 실행하세요.")
-        sys.exit(1)
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def extract_text(response):
-    """응답에서 '진짜 글'만 뽑아낸다.
-
-    ⚠️ 중요: 최신 모델은 생각(thinking) 블록을 함께 돌려줄 수 있다.
-    그래서 content[0] 을 그냥 집으면 생각 블록을 집을 위험이 있다.
-    반드시 type == 'text' 인 블록만 골라야 한다.
-    """
-    조각들 = []
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            조각들.append(block.text)
-    return "\n".join(조각들).strip()
-
-
-def parse_json(raw_text):
-    """```json 감싸기 등을 벗겨내고 JSON으로 변환."""
-    t = raw_text.replace("```json", "").replace("```", "").strip()
-    # 혹시 앞뒤에 잡소리가 붙었으면 첫 { 부터 마지막 } 까지만 취한다
-    시작 = t.find("{")
-    끝 = t.rfind("}")
-    if 시작 != -1 and 끝 != -1:
-        t = t[시작:끝 + 1]
-    return json.loads(t)
-
-
-def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
-    슬림 = slim_data(data)
-    본문 = json.dumps(슬림, ensure_ascii=False, indent=2)
-    if 시도 == 1:
-        원본크기 = len(json.dumps(data, ensure_ascii=False))
-        print(f"📦 입력 크기: 원본 {원본크기:,}자 → 슬림 {len(본문):,}자 "
-              f"({100 - len(본문)*100//max(1,원본크기)}% 감소)")
-    user_message = "오늘 수집된 시장 데이터는 다음과 같다:\n\n" + 본문
-
-    kwargs = dict(
-        model=MODEL,
-        max_tokens=max_tok,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    # ⭐ effort=low: 이 작업은 복잡한 추론이 아니라 "정해진 형식으로 글쓰기"라
-    #    깊게 생각할 필요가 없다. 기본값(high)은 '생각' 토큰을 많이 써서
-    #    - 답변이 max_tokens 안에서 끊길 위험을 높이고
-    #    - 비용도 불필요하게 올린다.
-    #    low로 낮추면 두 문제가 동시에 줄어든다.
-    if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
-        kwargs["output_config"] = {"effort": "low"}
-
-    response = client.messages.create(**kwargs)
-
-    # ⚠️ 답변이 중간에 끊겼으면 한도를 올려 다시 시도한다.
-    #    (예전엔 같은 한도로 재시도해서 똑같이 실패했다 — 무의미한 재시도)
-    if response.stop_reason == "max_tokens":
-        if 시도 < 3 and max_tok < MAX_TOKENS_CAP:
-            새한도 = min(max_tok * 2, MAX_TOKENS_CAP)
-            print(f"⚠️ 답변이 max_tokens({max_tok:,})에 걸려 잘렸습니다 "
-                  f"→ {새한도:,}로 올려 재시도합니다 ({시도}/2)")
-            time.sleep(1)
-            return ask_claude(data, 시도 + 1, 새한도)
-        print(f"❌ max_tokens {max_tok:,}로도 답변이 잘립니다. "
-              f"SYSTEM_PROMPT의 항목 수나 분량을 줄여야 합니다.")
-
-    raw = extract_text(response)
-    try:
-        return parse_json(raw)
-    except json.JSONDecodeError:
-        if 시도 < 3:
-            print("⚠️ JSON 형식이 아니어서 한 번 더 시도합니다...")
-            time.sleep(2)
-            return ask_claude(data, 시도 + 1, min(max_tok * 2, MAX_TOKENS_CAP))
-        print("❌ JSON 파싱 실패. 받은 응답 끝부분:")
-        print("   ..." + raw[-300:])
-        raise
-
-
-REQUIRED_FIELDS = ["한줄평", "오늘의_시장", "오늘의_한문장", "프로의시선",
-                   "오늘의_공부", "공시해설", "매크로해설", "핵심이슈",
-                   "핵심뉴스", "마감브리핑", "관전포인트", "돈의흐름"]
-
-
-def check_fields(글):
-    """Claude가 항목을 빠뜨렸는지 검사한다.
-    항목이 많아지면 가끔 하나씩 누락되는데, 조용히 넘어가면
-    리포트에 '준비중'이 뜬 채로 발행돼 버린다."""
-    빠짐 = [f for f in REQUIRED_FIELDS if not 글.get(f)]
-    if 빠짐:
-        print(f"⚠️ 다음 항목이 비어 있습니다: {', '.join(빠짐)}")
-    else:
-        print("✅ 모든 항목 정상 생성됨")
-    return 빠짐
-
-
-def fill_missing(글, data, 빠짐):
-    """비어 있는 항목만 골라 한 번 더 요청해 채운다.
-    전체를 재생성하는 것보다 비용이 훨씬 적고, 이미 잘 나온 항목은 그대로 둔다."""
-    if not 빠짐:
-        return 글
-    print(f"🔄 빠진 항목 {len(빠짐)}개를 보충 요청합니다...")
-    요청 = (
-        "아래 시장 데이터를 보고, 다음 항목만 작성해서 JSON으로만 답하라.\n"
-        f"작성할 항목: {', '.join(빠짐)}\n\n"
-        "형식·톤 규칙은 시스템 프롬프트와 동일하다. 다른 항목은 넣지 마라.\n\n"
-        + json.dumps(data, ensure_ascii=False, indent=2)
-    )
-    try:
-        kwargs = dict(model=MODEL, max_tokens=4000, system=SYSTEM_PROMPT,
-                      messages=[{"role": "user", "content": 요청}])
-        if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
-            kwargs["output_config"] = {"effort": "low"}
-        resp = client.messages.create(**kwargs)
-        보충 = parse_json(extract_text(resp))
-        for k in 빠짐:
-            if 보충.get(k):
-                글[k] = 보충[k]
-                print(f"   ✅ {k} 보충 완료")
-    except Exception as e:
-        print(f"   ⚠️ 보충 실패({type(e).__name__}) — 해당 항목은 비어 있는 채로 발행됩니다.")
-    return 글
-
-
-def _article_key(url):
-    """뉴스 URL에서 기사 식별자만 뽑는다. (article_id + office_id)
-    Claude가 링크를 미세하게 다르게 복사해도 같은 기사로 인식하기 위함."""
-    if not url:
-        return None
-    a = re.search(r"article_id=(\d+)", url)
-    o = re.search(r"office_id=(\d+)", url)
-    if a and o:
-        return f"{o.group(1)}:{a.group(1)}"
-    return url.strip()
-
-
-def fix_units(obj):
-    """Claude가 '3만억'처럼 잘못 쓴 금액 표기를 '3조'로 자동 교정한다.
-    프롬프트로 지시해도 가끔 틀리므로 코드에서 한 번 더 잡는다.
-    (10,000억 = 1조)"""
-    def 고치기(t):
-        # "3만억", "3만 억", "3.2만억" → 조 단위
-        def repl(m):
-            v = float(m.group(1))
-            return f"{v:g}조"
-        t = re.sub(r"(\d+(?:\.\d+)?)\s*만\s*억", repl, t)
-        # "32,683억" 처럼 1만 이상인 억 표기 → 조
-        def repl2(m):
-            num = float(m.group(1).replace(",", ""))
-            if num >= 10000:
-                조 = num / 10000
-                return f"{조:.2f}조".replace(".00조", "조")
-            return m.group(0)
-        t = re.sub(r"([\d,]+(?:\.\d+)?)\s*억", repl2, t)
-        return t
-
-    if isinstance(obj, str):
-        return 고치기(obj)
-    if isinstance(obj, list):
-        return [fix_units(x) for x in obj]
-    if isinstance(obj, dict):
-        return {k: fix_units(v) for k, v in obj.items()}
-    return obj
-
-
-def verify_news_links(글, data_원본):
-    """Claude가 만든 링크를 원본과 대조한다.
-    ⚠️ 예전엔 '문자열 완전일치'로 비교해서, 링크가 한 글자만 달라도
-    뉴스가 통째로 사라졌다. 이제는 기사 ID로 매칭하고,
-    매칭되면 링크를 '원본 그대로'로 교체해 항상 정확한 주소가 나가게 한다."""
-    원본목록 = data_원본.get("뉴스원본") or []
-    원본맵 = {_article_key(item["링크"]): item["링크"] for item in 원본목록}
-
-    핵심뉴스 = 글.get("핵심뉴스", [])
-    검증됨, 걸러짐 = [], 0
-    for item in 핵심뉴스:
-        key = _article_key(item.get("링크"))
-        if key in 원본맵:
-            item["링크"] = 원본맵[key]   # 원본 링크로 복구
-            검증됨.append(item)
+    import time
+    결과 = []
+    for 이름, cid in BRIEF_CHANNELS.items():
+        영상 = _find_today_video(cid)
+        if not 영상:
+            print(f"  · {이름}: 오늘 영상 없음")
+            continue
+        print(f"  · {이름}: {영상['제목'][:40]}")
+        자막 = _fetch_transcript(영상["videoId"])
+        if not 자막:
+            # 자막이 없어도 제목·링크는 남긴다 (링크 안내용)
+            결과.append({"채널": 이름, "제목": 영상["제목"], "링크": 영상["링크"], "자막": ""})
         else:
-            걸러짐 += 1
-    if 걸러짐:
-        print(f"⚠️ 핵심뉴스 {걸러짐}건은 원본에 없는 링크라 제외했습니다.")
-    # ── 노출 개수를 매일 5~8개 사이에서 다르게 정한다 ──
-    #   같은 형식이 매일 똑같이 반복되면 리포트가 지루해지므로 길이에 변주를 준다.
-    #   Claude가 중요도 순으로 정렬해 보내므로, 뒤에서부터 자른다.
-    목표 = random.randint(5, 8)
-    if len(검증됨) > 목표:
-        print(f"   🎲 오늘 노출 개수 {목표}개 (확보 {len(검증됨)}건 중 상위만)")
-        검증됨 = 검증됨[:목표]
-    print(f"   핵심뉴스 {len(검증됨)}건 확정")
-    글["핵심뉴스"] = 검증됨
+            결과.append({"채널": 이름, "제목": 영상["제목"], "링크": 영상["링크"],
+                        "자막": 자막[:TRANSCRIPT_LIMIT]})
+        time.sleep(2.5)  # API 속도제한(10초당 5건) 여유 있게 준수
 
-    # 마감브리핑 링크도 동일하게 대조 (유튜브는 videoId로)
-    원본브리핑 = {}
-    for b in (data_원본.get("마감브리핑") or []):
-        vid = re.search(r"v=([\w-]+)", b["링크"])
-        원본브리핑[vid.group(1) if vid else b["링크"]] = b["링크"]
-    브리핑 = 글.get("마감브리핑", [])
-    if 원본브리핑:
-        통과 = []
-        for b in 브리핑:
-            vid = re.search(r"v=([\w-]+)", b.get("링크", "") or "")
-            k = vid.group(1) if vid else b.get("링크")
-            if k in 원본브리핑:
-                b["링크"] = 원본브리핑[k]
-                통과.append(b)
-        if len(통과) != len(브리핑):
-            print(f"⚠️ 마감브리핑 {len(브리핑)-len(통과)}건 제외됨(링크 불일치)")
-        글["마감브리핑"] = 통과
-    return 글
+    있음 = sum(1 for b in 결과 if b["자막"])
+    print(f"✅ 마감 브리핑 {len(결과)}개 채널 (자막 확보 {있음}건)")
+    return 결과
 
 
+# ============================================================
+# 메인
+# ============================================================
 if __name__ == "__main__":
-    print(f"=== {DATE} 해석 글 생성 | generate_report {SCRIPT_VERSION} | 모델 {MODEL} ===\n")
+    print(f"=== {DATE} 데이터 수집 시작 | collect_data {SCRIPT_VERSION} ===\n")
 
-    data = load_data()
-    어제 = load_previous_watchpoints()
-    if 어제:
-        data["어제관전포인트"] = 어제
+    공시 = collect_dart()
+    지수수급 = collect_index_and_flow()
+    테마결과 = collect_themes_and_gauge()
+    게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
+    뉴스원본 = collect_news()
+    매크로 = collect_macro()
+    파생 = collect_program_and_futures()
+    강세레이더 = collect_strength_radar()
+    매집레이더 = collect_accumulation_radar()
+    마감브리핑 = collect_briefings()
 
-    try:
-        글 = ask_claude(data)
-        빠짐 = check_fields(글)
-        글 = fill_missing(글, data, 빠짐)
-        글 = fix_units(글)
-        글 = verify_news_links(글, data)
-    except Exception as e:
-        # 실패해도 파이프라인 전체가 죽지 않도록 명확히 알리고 종료.
-        # (build_html.py 는 해석글 없이도 리포트를 만들 수 있다)
-        print("\n❌ 해석 글 생성 실패")
-        print(f"   원인: {type(e).__name__}: {e}")
-        이름 = type(e).__name__
-        메시지 = str(e).lower()
-        if "authentication" in 메시지 or "api_key" in 메시지:
-            print("   👉 ANTHROPIC_API_KEY 시크릿이 없거나 잘못됐습니다.")
-        elif "credit" in 메시지 or "billing" in 메시지 or "quota" in 메시지:
-            print("   👉 Claude API 잔액이 부족합니다. 콘솔에서 충전하세요.")
-        elif "not_found" in 메시지 or "model" in 메시지:
-            print(f"   👉 모델명({MODEL})이 잘못됐을 수 있습니다.")
-        elif 이름 == "JSONDecodeError":
-            print("   👉 응답이 JSON이 아니거나 중간에 잘렸습니다. max_tokens를 더 올리거나")
-            print("      SYSTEM_PROMPT의 항목 수를 줄여야 할 수 있습니다.")
-        elif "overloaded" in 메시지 or "rate" in 메시지:
-            print("   👉 API가 일시적으로 혼잡합니다. 잠시 후 재실행하세요.")
-        else:
-            print("   👉 위 원인 메시지를 그대로 알려주시면 진단할 수 있습니다.")
-        print("   → 리포트는 해석글 없이 생성됩니다.")
-        sys.exit(1)
+    전체 = {
+        "날짜": DATE,
+        "버전_collect": SCRIPT_VERSION,
+        "공시": 공시,
+        "지수수급": 지수수급,
+        "주도섹터": 테마결과.get("주도섹터", []),
+        "관제지수": 게이지,
+        "뉴스원본": 뉴스원본,
+        "매크로": 매크로,
+        "파생": 파생,
+        "강세레이더": 강세레이더,
+        "매집레이더": 매집레이더,
+        "설정": {
+            "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
+                   "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
+                   "가점": STR_가점, "회전비중": STR_W_회전, "상승비중": STR_W_상승,
+                   "추적일": TRACK_DAYS},
+            "매집": {"기간": ACC_DAYS, "쌍끌이일수": ACC_BOTH_DAYS,
+                   "단독일수": ACC_SOLO_DAYS, "스캔범위": ACC_UNIVERSE,
+                   "하락선": ACC_DROP_LINE, "횡보선": ACC_FLAT_LINE,
+                   "풀크기": ACC_POOL or "제한없음"},
+            "주도섹터": {"1차후보": 20, "선정수": 6, "중복제외기준": 2,
+                     "가중치": "강도40 + 거래대금35 + 확산도25"},
+        },
+        "마감브리핑": 마감브리핑,
+    }
 
-    최종 = {**data, "해석글": 글}
-    with open(REPORT_PATH, "w", encoding="utf-8") as f:
-        json.dump(최종, f, ensure_ascii=False, indent=2)
-
-    print("✅ 생성된 해석 글:\n")
-    for key, value in 글.items():
-        print(f"[{key}]\n{value}\n")
-
-    print(f"🎉 완료! → {REPORT_PATH}")
+    경로 = f"data_{DATE}.json"
+    with open(경로, "w", encoding="utf-8") as f:
+        json.dump(전체, f, ensure_ascii=False, indent=2)
+    print(f"\n🎉 완료! → {경로}")
