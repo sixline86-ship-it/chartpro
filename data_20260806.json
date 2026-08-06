@@ -1,6 +1,6 @@
 {
   "날짜": "20260806",
-  "버전_collect": "v2026.08.06-d",
+  "버전_collect": "v2026.08.06-e",
   "공시": [
     {
       "회사명": "핑거",
@@ -393,6 +393,18 @@
   },
   "뉴스원본": [
     {
+      "제목": "\"한국 따라 출렁인다\"…AI 훈풍에도 日 투자자들 매수 '주저'",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014113340&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "한국투자증권, 상반기 '2조 클럽' 조기 달성…영업익 전년比 89.1%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0009101555&office_id=421&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "“레버리지·수급 충격 일단락…반도체 실적 장세 본격화”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002809734&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
       "제목": "코스피 안정될까…단일 레버리지 거래 첫 1조 아래로 '뚝' [분석+]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005318262&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     },
@@ -459,18 +471,6 @@
     {
       "제목": "판매량 7% 늘 때 이익 46% 뛰었다…KT&G 해외담배의 힘",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001154606&office_id=417&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "쿠팡, 과징금에 탈팡 여파로 주가 40% 밀려…반전 카드는 [종목+]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005318246&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "포스코퓨처엠, LFP 시장 뚫었다…양극재 19만톤 장기공급",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004649343&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "포스코퓨처엠, LFP 양극재 벽 넘었다…대규모 장기 공급 체결",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000049605&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     }
   ],
   "매크로": {
