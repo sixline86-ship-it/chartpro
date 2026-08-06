@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.05-e"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.06-a"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -749,6 +749,239 @@ def build_scorecard(채점표, 어제날짜=""):
   </div>'''
 
 
+# ── 수급 관제신호 (실탄·3질문·누적 그래프) ──
+FLOW_강한배수 = 1.4      # 평소 대비 이 배수 이상이면 "강한"
+FLOW_바스켓선 = 0.45     # 바스켓 비중 이 이상이면 "폭넓은 매수"
+FLOW_선물유의 = 0.5      # 선물이 평소의 이 배수 이상일 때만 반대 신호로 인정
+
+
+def _flow_amt(v):
+    """억원 → '+1.17조' / '−2,672억' 표기"""
+    if v is None:
+        return "—"
+    a, s = abs(v), ("+" if v > 0 else "−")
+    if a >= 10000:
+        t = f"{a/10000:.2f}".rstrip("0").rstrip(".")
+        return f"{s}{t}조"
+    return f"{s}{a:,.0f}억"
+
+
+def build_flow_signal(파생, 지수수급):
+    """수급 관제신호: 오늘 실탄 판정 + 3질문 체크 + 20거래일 누적 그래프.
+
+    해석 문장까지 전부 규칙 기반(코드 생성)이다 — 숫자 코너에 AI 창작이 끼면
+    할루시네이션 위험이 있어서, 이 코너만큼은 기계가 끝까지 책임진다.
+    원료는 collect_data.py가 쌓는 flow_history.json.
+    """
+    이력 = load_json("flow_history.json") or []
+    if not isinstance(이력, list):
+        이력 = []
+    이력 = [x for x in 이력 if x.get("실탄") is not None]
+    if not 이력:
+        return '<div class="pending">⏳ 수급 관제신호 — 내일 발행부터 데이터가 쌓입니다</div>'
+
+    오늘 = 이력[-1]
+    실탄 = 오늘["실탄"]
+    외선 = 오늘.get("외선")
+    비차익 = 오늘.get("비차익")
+    N = len(이력)
+
+    # ── 평소 규모(있는 만큼의 평균, 오늘 제외해 자기참조 완화) ──
+    기준들 = 이력[:-1] if N >= 6 else 이력
+    평소실탄 = sum(abs(x["실탄"]) for x in 기준들) / max(1, len(기준들))
+    평소선물 = None
+    선물있는 = [abs(x["외선"]) for x in 기준들 if x.get("외선") is not None]
+    if 선물있는:
+        평소선물 = sum(선물있는) / len(선물있는)
+
+    배수 = (abs(실탄) / 평소실탄) if 평소실탄 else None
+    방향양 = 실탄 >= 0
+    상태 = ("매수 우위" if 방향양 else "매도 우위")
+    if 배수 and 배수 >= FLOW_강한배수:
+        상태 = ("강한 매수" if 방향양 else "강한 매도")
+    배수문 = f" · 평소의 {배수:.1f}배" if (배수 and N >= 6) else ""
+    vc = "pos" if 방향양 else "neg"
+
+    # ── 체크②: 선물 동의 ──
+    선물동의 = None
+    if 외선 is not None:
+        선물동의 = (외선 >= 0) == 방향양
+        선물유의 = (평소선물 and abs(외선) / 평소선물 >= FLOW_선물유의) or abs(외선) >= 1000
+
+    # ── 체크③: 바스켓 비중 ──
+    비중 = None
+    if 비차익 is not None and 실탄 and 방향양 == (비차익 >= 0) and abs(실탄) > 0:
+        비중 = max(0.0, min(1.5, 비차익 / 실탄)) if 실탄 != 0 else None
+
+    # ── 칩 ──
+    칩 = []
+    if 비중 is not None and 비중 >= FLOW_바스켓선:
+        칩.append(("good", f"🧺 폭넓은 {'매수' if 방향양 else '매도'} — 바스켓 {비중*100:.0f}%"))
+    elif 비중 is not None:
+        칩.append(("info", f"🎯 종목 선별형 — 바스켓 {비중*100:.0f}%"))
+    if 선물동의 is False and 선물유의:
+        칩.append(("warn", "⚠️ 선물은 반대 (헤지 동반)"))
+    elif 선물동의 is True and 선물유의:
+        칩.append(("good", "🤝 선물도 같은 방향"))
+    칩HTML = "".join(f'<span class="fs-chip {c}">{t}</span>' for c, t in 칩)
+
+    # ── 3단 체크 행 ──
+    def 체크행(아이콘, 질문, 부제, 답, 값, 값클래스, 꼬리):
+        return f'''
+      <div class="fs-ck">
+        <div class="fs-ck-ico {아이콘[0]}">{아이콘[1]}</div>
+        <p class="fs-ck-q">{질문}<small>{부제}</small></p>
+        <p class="fs-ck-a">{답}</p>
+        <p class="fs-ck-v {값클래스}">{값}<small>{꼬리}</small></p>
+      </div>'''
+
+    행들 = []
+    답1 = (f"들어왔습니다. 평소({평소실탄:,.0f}억/일)의 <b>{배수:.1f}배</b> 규모입니다."
+          if (방향양 and 배수 and N >= 6) else
+          ("들어왔습니다." if 방향양 else
+           (f"빠져나갔습니다. 평소의 <b>{배수:.1f}배</b> 규모입니다." if (배수 and N >= 6) else "빠져나갔습니다.")))
+    행들.append(체크행(("y" if 방향양 else "n", "✓" if 방향양 else "✗"),
+                    "돈이 들어왔나?", "실탄 = 외국인+기관 현물", 답1,
+                    _flow_amt(실탄), vc, "방향"))
+
+    if 외선 is None:
+        행들.append(체크행(("h", "—"), "선물도 동의하나?", "외국인 선물 방향",
+                        "오늘은 선물 수급을 확보하지 못했습니다.", "—", "mid", "확신"))
+    elif 선물동의:
+        행들.append(체크행(("y", "✓"), "선물도 동의하나?", "외국인 선물 방향",
+                        "현물과 선물이 같은 방향 — 확신이 실린 수급입니다.",
+                        _flow_amt(외선), vc, "확신"))
+    else:
+        행들.append(체크행(("h", "△"), "선물도 동의하나?", "외국인 선물 방향",
+                        f"현물은 {'사면서' if 방향양 else '팔면서'} 선물은 반대로 갔습니다. "
+                        f"<b>보험(헤지)을 든 {'매수' if 방향양 else '매도'}</b>라 확신은 한 단계 낮춰 봅니다.",
+                        _flow_amt(외선), "mid", "확신"))
+
+    if 비중 is None:
+        행들.append(체크행(("h", "—"), "폭넓게 샀나?", "비차익 ÷ 실탄",
+                        "오늘은 프로그램매매(비차익) 데이터를 확보하지 못해 폭은 확인 불가입니다.",
+                        "—", "mid", "폭"))
+    elif 비중 >= FLOW_바스켓선:
+        행들.append(체크행(("y", "✓"), "폭넓게 샀나?", "비차익 ÷ 실탄",
+                        f"실탄의 <b>{비중*100:.0f}%</b>가 시장 전체(바스켓) {'매수' if 방향양 else '매도'} — "
+                        f"몇 종목이 아니라 <b>한국 시장 자체</b>{'를 산' if 방향양 else '에서 나간'} 겁니다.",
+                        f"{비중*100:.0f}%", vc, "폭"))
+    else:
+        행들.append(체크행(("h", "△"), "폭넓게 샀나?", "비차익 ÷ 실탄",
+                        f"바스켓 비중 <b>{비중*100:.0f}%</b> — 시장 전체보다 특정 종목 위주의 선별 "
+                        f"{'매수' if 방향양 else '매도'}입니다.", f"{비중*100:.0f}%", "mid", "폭"))
+
+    # ── 누적 그래프 (서버에서 SVG 생성) ──
+    그래프HTML = 판독HTML = 배지HTML = ""
+    if N >= 2:
+        표시 = 이력[-20:]
+        n = len(표시)
+        누적, acc = [], 0
+        for x in 표시:
+            acc += x["실탄"]
+            누적.append(acc)
+        누5 = sum(x["실탄"] for x in 이력[-5:])
+        누20 = 누적[-1]
+        W0, H0, PL, PR, PT, PB = 700, 240, 8, 8, 16, 8
+        PW, PH = W0-PL-PR, H0-PT-PB
+        X = lambda i: PL + PW*(i+0.5)/n
+        BW = PW/n*0.58
+        BMAX = max(abs(x["실탄"]) for x in 표시) or 1
+        B0 = PT + PH*0.78
+        BY = lambda v: B0 - (v/BMAX)*PH*0.40*0.55
+        CMIN, CMAX = min(0, min(누적)), max(누적)
+        span = (CMAX-CMIN) or 1
+        CY = lambda v: PT + (PH*0.66)*(1-(v-CMIN)/span)
+        g = []
+        if n >= 6:
+            bx = X(n-5) - BW*0.9
+            g.append(f'<rect x="{bx:.1f}" y="{PT}" width="{W0-PR-bx:.1f}" height="{PH}" fill="#e0c060" opacity=".07" rx="4"/>')
+            g.append(f'<text x="{bx+6:.1f}" y="{PT+11}" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".85">최근 5일</text>')
+        g.append(f'<line x1="{PL}" y1="{B0}" x2="{W0-PR}" y2="{B0}" stroke="#fff" stroke-opacity=".14"/>')
+        for i, x in enumerate(표시):
+            v = x["실탄"]; y1 = BY(v)
+            g.append(f'<rect x="{X(i)-BW/2:.1f}" y="{min(B0,y1):.1f}" width="{BW:.1f}" '
+                     f'height="{max(1.5,abs(y1-B0)):.1f}" rx="1.5" '
+                     f'fill="{"#C1432B" if v>=0 else "#2E6BD6"}" opacity="{1 if i==n-1 else .75}"/>')
+        선 = " ".join(f'{"L" if i else "M"}{X(i):.1f} {CY(v):.1f}' for i, v in enumerate(누적))
+        g.append(f'<path d="{선} L{X(n-1):.1f} {CY(CMIN):.1f} L{X(0):.1f} {CY(CMIN):.1f} Z" fill="url(#fsgr)" opacity=".5"/>')
+        g.append('<defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1">'
+                 '<stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/>'
+                 '<stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs>')
+        g.append(f'<path d="{선}" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/>')
+        if CMIN < 0 < CMAX:
+            g.append(f'<line x1="{PL}" y1="{CY(0):.1f}" x2="{W0-PR}" y2="{CY(0):.1f}" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/>')
+            g.append(f'<text x="{PL+4}" y="{CY(0)-4:.1f}" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text>')
+        g.append(f'<circle cx="{X(n-1):.1f}" cy="{CY(누적[-1]):.1f}" r="8" fill="#f0f0ee" opacity=".16"/>')
+        g.append(f'<circle cx="{X(n-1):.1f}" cy="{CY(누적[-1]):.1f}" r="3.4" fill="#fff"/>')
+        g.append(f'<text x="{X(n-1)-8:.1f}" y="{CY(누적[-1])-9:.1f}" text-anchor="end" '
+                 f'font-size="10.5" fill="#fff" font-weight="800">{_flow_amt(누20)}</text>')
+        저점i = 누적.index(min(누적))
+        if 0 < 저점i < n-1 and min(누적) < 누적[-1]*0.5:
+            d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
+            g.append(f'<circle cx="{X(저점i):.1f}" cy="{CY(누적[저점i]):.1f}" r="2.8" fill="#7fa8e8"/>')
+            g.append(f'<text x="{X(저점i):.1f}" y="{CY(누적[저점i])+14:.1f}" text-anchor="middle" '
+                     f'font-size="8.5" fill="#7fa8e8" font-weight="700">{d.month}/{d.day} 바닥</text>')
+        눈금 = sorted(set([0, n//3, 2*n//3, n-1]))
+        축 = "".join(f'<span>{datetime.strptime(표시[i]["날짜"], "%Y%m%d").strftime("%m/%d")}</span>' for i in 눈금)
+        배지HTML = (f'<div class="fs-badges">'
+                   f'<span class="fs-cb b5">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
+                   f'<span class="fs-cb b20">{n}일 누적 {_flow_amt(누20)}</span></div>')
+        그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
+                     + "".join(g) + f'</svg><div class="fs-x">{축}</div>')
+
+        # ── 판독문 (규칙 기반) ──
+        문장 = []
+        if 0 < 저점i < n-1 and 누적[저점i] < 0 < 누적[-1]:
+            d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
+            흐른일 = n - 1 - 저점i
+            문장.append(f"<b>{d.month}/{d.day}</b>까지 빠져나가던 실탄이 그날을 바닥으로 방향을 바꿔, "
+                       f"이후 <b>{흐른일}거래일째 쌓이는 중</b>입니다.")
+        elif 누적[-1] > 0:
+            문장.append(f"최근 {n}거래일간 실탄이 <b>{_flow_amt(누20)}</b> 쌓였습니다.")
+        else:
+            문장.append(f"최근 {n}거래일간 실탄이 <b>{_flow_amt(누20)}</b> — 빠져나가는 흐름입니다.")
+        if n >= 10 and 누20 != 0 and 누5/누20 > 0.55 and (누5 > 0) == (누20 > 0):
+            문장.append(f"특히 최근 5일에만 <b>{_flow_amt(누5)}</b> — 누적의 "
+                       f"<b>{abs(누5/누20)*100:.0f}%가 이번 주에</b> 움직였습니다. "
+                       f"돈이 {'들어오는' if 누20>0 else '빠져나가는'} 속도가 빨라지고 있다는 뜻입니다.")
+        elif n >= 10 and (누5 > 0) != (누20 > 0):
+            문장.append(f"다만 최근 5일은 <b>{_flow_amt(누5)}</b>로 방향이 반대입니다 — "
+                       f"한 달 흐름과 이번 주 흐름이 엇갈리는 구간입니다.")
+        판독HTML = f'<p class="fs-read">{" ".join(문장)}</p>'
+    else:
+        그래프HTML = (f'<div class="fs-building">📈 누적 그래프는 데이터가 쌓이는 대로 여기 그려집니다 '
+                     f'(현재 {N}/20거래일)</div>')
+
+    쌓임안내 = f' <span class="fs-n">({N}일치 기준)</span>' if N < 20 else ""
+
+    return f'''
+  <div class="fs-box">
+    <div class="fs-verdict">
+      <div class="fs-ico {vc}"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 {'22 V6 M13 6 l-7 7 M13 6 l7 7' if 방향양 else '4 V20 M13 20 l-7 -7 M13 20 l7 -7'}" stroke="{'#ff8a6e' if 방향양 else '#7fa8e8'}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+      <div class="fs-main">
+        <p class="fs-k">오늘의 실탄 (외국인+기관이 실제 주식에 넣은 현금){쌓임안내}</p>
+        <div class="fs-row"><span class="fs-num {vc}">{_flow_amt(실탄)}</span><span class="fs-state {vc}">{상태}{배수문}</span></div>
+        <div class="fs-chips">{칩HTML}</div>
+      </div>
+    </div>
+    <div class="fs-checks">
+      <p class="fs-checks-t">🔍 세 가지만 확인하면 됩니다</p>
+      {"".join(행들)}
+    </div>
+    <div class="fs-cum">
+      <div class="fs-cum-head">
+        <span class="fs-cum-t">📈 실탄이 쌓이는 흐름 — 최근 {min(N,20)}거래일</span>
+        {배지HTML}
+      </div>
+      {그래프HTML}
+      {판독HTML}
+    </div>
+    <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
+      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
+  </div>'''
+
+
 # ── 돈의 이동경로 ──
 def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     if not 돈의흐름:
@@ -830,6 +1063,13 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
     # '차익거래'는 '비차익거래'에도 포함되므로 분리 보정
     if 차익 is not None and 비차익 is not None and 차익 == 비차익:
         차익 = None
+    # 기준일 + 코스닥 수치를 부제로 곁들인다 (데이터가 있을 때만)
+    프로부제 = ""
+    if 프로.get("기준"):
+        닥 = 프로.get("코스닥") or {}
+        닥비차익 = _to_float(닥.get("비차익거래_순매수"))
+        닥문구 = f" · 코스닥 비차익 {fmt_flow(닥비차익)}" if 닥비차익 is not None else ""
+        프로부제 = f' <span class="mf-sub-x">({프로["기준"]} 코스피{닥문구})</span>'
     프로HTML = ""
     if 차익 is not None or 비차익 is not None:
         def 프로바(이름, v, 설명):
@@ -846,7 +1086,7 @@ def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
       <p class="fx-desc">{설명}</p>'''
         프로HTML = f'''
     <div class="fx-wrap">
-      <p class="mf-sub">프로그램매매 — 기계적 매매 vs 방향성 베팅</p>
+      <p class="mf-sub">프로그램매매 — 기계적 매매 vs 방향성 베팅{프로부제}</p>
       <div class="fx-chart">
         {프로바("차익", 차익, "선물·현물 가격차를 노린 기계적 매매 — 방향성 의미 적음")}
         {프로바("비차익", 비차익, "선물과 무관한 바스켓 매매 — 실제 방향성 베팅")}
@@ -1060,6 +1300,7 @@ a{{color:inherit;text-decoration:none}}
 .news-item:hover{{background:#FBFAF8}}
 .news-go{{font-size:10px;color:#b0aca6;margin-left:4px;vertical-align:middle}}
 .news-a:hover{{text-decoration:underline;text-underline-offset:3px}}
+.mf-sub-x{{font-size:9.5px;font-weight:600;color:#8a909a}}
 .news-foot{{font-size:10px;color:var(--sub);line-height:1.6;margin:-.2rem 0 1rem;padding:0 .2rem}}
 /* 지난 리포트 아카이브 */
 .arch-wrap{{background:var(--bg2);border:.5px solid var(--line);border-radius:var(--rlg);padding:.85rem 1rem;margin:1.4rem 0 .4rem}}
@@ -1187,6 +1428,52 @@ a{{color:inherit;text-decoration:none}}
 .mf-chip.in{{background:rgba(193,67,43,.28);color:#ffd0c0}}
 .mf-none{{font-size:10.5px;color:#8a909a}}
 .mf-arrow{{font-size:18px;color:#8a909a;flex-shrink:0}}
+/* 수급 관제신호 */
+.fs-box{{background:linear-gradient(180deg,#1c1f24,#282c33);border-radius:var(--rlg);padding:1.1rem 1.1rem .95rem;color:#e8e6e2;margin-bottom:1rem}}
+.fs-verdict{{display:flex;align-items:center;gap:14px;padding-bottom:.95rem;border-bottom:.5px solid rgba(255,255,255,.1);flex-wrap:wrap}}
+.fs-ico{{flex-shrink:0;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center}}
+.fs-ico.pos{{background:rgba(255,138,110,.13)}}
+.fs-ico.neg{{background:rgba(127,168,232,.13)}}
+.fs-main{{flex:1;min-width:200px}}
+.fs-k{{font-size:10px;font-weight:700;color:#9aa0a8;letter-spacing:.05em}}
+.fs-n{{color:#767c86;font-weight:600}}
+.fs-row{{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}}
+.fs-num{{font-size:30px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}}
+.fs-num.pos{{color:var(--up-soft)}} .fs-num.neg{{color:var(--dn-soft)}}
+.fs-state{{font-size:12.5px;font-weight:800}}
+.fs-state.pos{{color:var(--up-soft)}} .fs-state.neg{{color:var(--dn-soft)}}
+.fs-chips{{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}}
+.fs-chip{{font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:99px;border:.5px solid}}
+.fs-chip.good{{background:rgba(255,138,110,.12);border-color:rgba(255,138,110,.3);color:var(--up-soft)}}
+.fs-chip.warn{{background:rgba(224,192,96,.1);border-color:rgba(224,192,96,.32);color:#e0c060}}
+.fs-chip.info{{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#c8ccd2}}
+.fs-checks{{padding:.85rem 0 .9rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
+.fs-checks-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em;margin-bottom:.5rem}}
+.fs-ck{{display:grid;grid-template-columns:30px 110px 1fr auto;gap:9px;align-items:center;padding:7px 0}}
+.fs-ck-ico{{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}}
+.fs-ck-ico.y{{background:rgba(255,138,110,.15);color:var(--up-soft)}}
+.fs-ck-ico.n{{background:rgba(127,168,232,.15);color:var(--dn-soft)}}
+.fs-ck-ico.h{{background:rgba(224,192,96,.13);color:#e0c060}}
+.fs-ck-q{{font-size:11.5px;font-weight:800;color:#e8e6e2;line-height:1.4}}
+.fs-ck-q small{{display:block;font-size:9px;font-weight:600;color:#767c86}}
+.fs-ck-a{{font-size:11px;color:#a8aeb6;line-height:1.6}}
+.fs-ck-a b{{color:#dfe3e8}}
+.fs-ck-v{{font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}}
+.fs-ck-v.pos{{color:var(--up-soft)}} .fs-ck-v.neg{{color:var(--dn-soft)}} .fs-ck-v.mid{{color:#e0c060}}
+.fs-ck-v small{{display:block;font-size:8.5px;font-weight:700;color:#767c86}}
+.fs-cum{{padding-top:.95rem}}
+.fs-cum-head{{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:.2rem}}
+.fs-cum-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em}}
+.fs-badges{{display:flex;gap:6px;flex-wrap:wrap}}
+.fs-cb{{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;font-variant-numeric:tabular-nums}}
+.fs-cb.b5{{background:rgba(255,138,110,.14);color:var(--up-soft);border:.5px solid rgba(255,138,110,.3)}}
+.fs-cb.b20{{background:rgba(255,255,255,.06);color:#dfe3e8;border:.5px solid rgba(255,255,255,.14)}}
+.fs-x{{display:flex;justify-content:space-between;font-size:9px;color:#767c86;font-weight:600;margin-top:3px;padding:0 2px}}
+.fs-read{{font-size:11.5px;color:#c3c8ce;line-height:1.75;margin-top:.65rem}}
+.fs-read b{{color:#fff}}
+.fs-building{{background:rgba(255,255,255,.04);border:.5px dashed rgba(255,255,255,.16);border-radius:var(--rmd);padding:1.1rem;text-align:center;font-size:11px;color:#9aa0a8;margin-top:.4rem}}
+.fs-foot{{font-size:9.5px;color:#8a909a;line-height:1.7;margin-top:.8rem;border-top:.5px solid rgba(255,255,255,.08);padding-top:.6rem}}
+.fs-foot b{{color:#b6bcc4}}
 .mf-sub{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:.9rem 0 .45rem}}
 .mf-bar{{display:flex;height:22px;border-radius:6px;overflow:hidden}}
 .mf-seg{{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff}}
@@ -1242,6 +1529,11 @@ a{{color:inherit;text-decoration:none}}
 
 /* ── 모바일 ── */
 @media (max-width:600px){{
+  .fs-box{{padding:.95rem .8rem .85rem}}
+  .fs-num{{font-size:25px}}
+  .fs-ck{{grid-template-columns:26px 92px 1fr;gap:7px}}
+  .fs-ck-v{{grid-column:2/4;text-align:left;margin-left:33px}}
+  .fs-ck-q{{font-size:10.5px}}
   body{{padding:8px 0}}
   .rp{{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}}
   .top-bar{{flex-direction:column;gap:6px}}
@@ -1328,6 +1620,9 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label">🔍 프로의 시선</p>
   {build_insight(프로의시선)}
+
+  <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
+  {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
   <p class="sec-label">💸 돈의 흐름을 보자</p>
   {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수, data.get('파생'))}
