@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-b"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.06-c"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -51,6 +51,27 @@ def esc_url(u):
     if not u:
         return "#"
     return html.escape(str(u), quote=True)
+
+
+def idx_dir_class(지수):
+    """지수 카드 등락 색상 — 국내 HTS 문법(상승=빨강, 하락=파랑).
+
+    ⚠️ 예전 코드는 '등락방향'에 '-'가 들어있는지 봤는데, 이 값은 '상승'/'하락'
+       한글이라 마이너스 기호가 없다. 그래서 하락한 날도 빨강으로 나왔다.
+       이제 등락률의 부호를 먼저 보고, 없으면 방향 글자로 판단한다.
+    """
+    률 = str(지수.get("등락률", "")).strip()
+    if 률.startswith("-") or 률.startswith("−"):
+        return "ic-chg-dn"
+    방향 = str(지수.get("등락방향", ""))
+    if "하락" in 방향 or "▼" in 방향:
+        return "ic-chg-dn"
+    try:
+        if float(률.replace(",", "")) < 0:
+            return "ic-chg-dn"
+    except ValueError:
+        pass
+    return "ic-chg-up"
 
 
 def money_class(text):
@@ -896,7 +917,7 @@ def build_flow_signal(파생, 지수수급):
         if n >= 6:
             bx = X(n-5) - BW*0.9
             g.append(f'<rect x="{bx:.1f}" y="{PT}" width="{W0-PR-bx:.1f}" height="{PH}" fill="#e0c060" opacity=".07" rx="4"/>')
-            g.append(f'<text x="{bx+6:.1f}" y="{PT+11}" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".85">최근 5일</text>')
+            g.append(f'<text x="{bx+6:.1f}" y="{PT+PH-4:.1f}" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text>')
         g.append(f'<line x1="{PL}" y1="{B0}" x2="{W0-PR}" y2="{B0}" stroke="#fff" stroke-opacity=".14"/>')
         for i, x in enumerate(표시):
             v = x["실탄"]; y1 = BY(v)
@@ -917,7 +938,8 @@ def build_flow_signal(파생, 지수수급):
         g.append(f'<text x="{X(n-1)-8:.1f}" y="{CY(누적[-1])-9:.1f}" text-anchor="end" '
                  f'font-size="10.5" fill="#fff" font-weight="800">{_flow_amt(누20)}</text>')
         저점i = 누적.index(min(누적))
-        if 0 < 저점i < n-1 and min(누적) < 누적[-1]*0.5:
+        반등함 = 0 < 저점i < n-1 and 누적[저점i] < 0 <= 누적[-1]
+        if 반등함:
             d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
             g.append(f'<circle cx="{X(저점i):.1f}" cy="{CY(누적[저점i]):.1f}" r="2.8" fill="#7fa8e8"/>')
             g.append(f'<text x="{X(저점i):.1f}" y="{CY(누적[저점i])+14:.1f}" text-anchor="middle" '
@@ -925,14 +947,14 @@ def build_flow_signal(파생, 지수수급):
         눈금 = sorted(set([0, n//3, 2*n//3, n-1]))
         축 = "".join(f'<span>{datetime.strptime(표시[i]["날짜"], "%Y%m%d").strftime("%m/%d")}</span>' for i in 눈금)
         배지HTML = (f'<div class="fs-badges">'
-                   f'<span class="fs-cb b5">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
+                   f'<span class="fs-cb {"b5" if 누5 >= 0 else "b5n"}">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
                    f'<span class="fs-cb b20">{n}일 누적 {_flow_amt(누20)}</span></div>')
         그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
                      + "".join(g) + f'</svg><div class="fs-x">{축}</div>')
 
         # ── 판독문 (규칙 기반) ──
         문장 = []
-        if 0 < 저점i < n-1 and 누적[저점i] < 0 < 누적[-1]:
+        if 반등함:
             d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
             흐른일 = n - 1 - 저점i
             문장.append(f"<b>{d.month}/{d.day}</b>까지 빠져나가던 실탄이 그날을 바닥으로 방향을 바꿔, "
@@ -979,137 +1001,6 @@ def build_flow_signal(파생, 지수수급):
     </div>
     <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
       선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
-  </div>'''
-
-
-# ── 돈의 이동경로 ──
-def build_moneyflow(돈의흐름, 지수, 코수, 닥수, 파생=None):
-    if not 돈의흐름:
-        return '<div class="pending">⏳ 돈의 이동경로 — 생성 실패</div>'
-    파생 = 파생 or {}
-
-    # ── 현물 × 선물 4분면 위치 계산 ──
-    현물 = _to_float(코수.get("외국인"))
-    선물 = _to_float((파생.get("선물수급") or {}).get("외국인"))
-    분면HTML = ""
-    if 현물 is not None and 선물 is not None:
-        현부호 = "매수" if 현물 > 0 else "매도"
-        선부호 = "매수" if 선물 > 0 else "매도"
-        칸 = [("현물 매수", "선물 매수"), ("현물 매수", "선물 매도"),
-              ("현물 매도", "선물 매수"), ("현물 매도", "선물 매도")]
-        현재칸 = (f"현물 {현부호}", f"선물 {선부호}")
-        셀 = "".join(
-            f'<div class="q-cell {"on" if c == 현재칸 else ""}">'
-            f'<span class="q-t">{c[0]}</span><span class="q-t">{c[1]}</span></div>'
-            for c in 칸)
-        분면HTML = f'''
-    <div class="q-wrap">
-      <p class="mf-sub">외국인 현물 × 선물 조합</p>
-      <div class="q-grid">{셀}</div>
-      <div class="q-nums">
-        <span>현물 <b class="{'up' if 현물>0 else 'dn'}">{fmt_flow(현물)}</b></span>
-        <span>선물 <b class="{'up' if 선물>0 else 'dn'}">{fmt_flow(선물)}</b></span>
-      </div>
-    </div>'''
-    else:
-        분면HTML = '<p class="mf-na">※ 선물 수급 데이터 미확보 — 조합 분석은 다음 발행부터 제공됩니다.</p>'
-
-    def 블록(라벨, 내용, 아이콘):
-        if not 내용:
-            return ""
-        return f'''
-    <div class="mf-blk"><span class="mf-blk-t">{아이콘} {라벨}</span>
-      <p class="mf-blk-b">{내용}</p></div>'''
-
-    # ── 현물 · 선물 막대그래프 (외국인 기준) ──
-    #   옵션은 안정적으로 얻을 경로가 없어 코너에서 제외했다.
-    #   ('확인 불가'만 고정으로 나가는 칸은 유료 리포트에서 오히려 손해)
-    항목 = [("현물", 현물), ("선물", 선물)]
-    유효값 = [abs(v) for _, v in 항목 if v is not None]
-    최대 = max(유효값) if 유효값 else 1
-    막대들 = []
-    for 이름, v in 항목:
-        if v is None:
-            막대들.append(f'''
-      <div class="fx-row"><span class="fx-lb">{이름}</span>
-        <div class="fx-zone"><span class="fx-na">확인 불가</span></div>
-        <span class="fx-amt smut">—</span></div>''')
-            continue
-        폭 = max(4, abs(v) / 최대 * 46)   # 중앙 기준 좌우 최대 46%
-        방향 = "pos" if v > 0 else "neg"
-        cls = "up" if v > 0 else "dn"
-        막대들.append(f'''
-      <div class="fx-row"><span class="fx-lb">{이름}</span>
-        <div class="fx-zone">
-          <div class="fx-bar {방향}" style="width:{폭:.0f}%"></div>
-        </div>
-        <span class="fx-amt {cls}">{fmt_flow(v)}</span></div>''')
-
-    막대HTML = f'''
-    <div class="fx-wrap">
-      <p class="mf-sub">외국인 — 현물 · 선물 (0선 기준, 오른쪽=순매수)</p>
-      <div class="fx-chart">{"".join(막대들)}</div>
-    </div>'''
-
-    # ── 프로그램매매 차익 / 비차익 ──
-    프로 = 파생.get("프로그램매매") or {}
-    def 찾기(키워드):
-        for k, v in 프로.items():
-            if 키워드 in k and "순매수" in k:
-                return _to_float(v)
-        return None
-    차익 = 찾기("차익거래")
-    비차익 = 찾기("비차익")
-    # '차익거래'는 '비차익거래'에도 포함되므로 분리 보정
-    if 차익 is not None and 비차익 is not None and 차익 == 비차익:
-        차익 = None
-    # 기준일 + 코스닥 수치를 부제로 곁들인다 (데이터가 있을 때만)
-    프로부제 = ""
-    if 프로.get("기준"):
-        닥 = 프로.get("코스닥") or {}
-        닥비차익 = _to_float(닥.get("비차익거래_순매수"))
-        닥문구 = f" · 코스닥 비차익 {fmt_flow(닥비차익)}" if 닥비차익 is not None else ""
-        프로부제 = f' <span class="mf-sub-x">({프로["기준"]} 코스피{닥문구})</span>'
-    프로HTML = ""
-    if 차익 is not None or 비차익 is not None:
-        def 프로바(이름, v, 설명):
-            if v is None:
-                return ""
-            최 = max(abs(x) for x in (차익, 비차익) if x is not None) or 1
-            폭 = max(4, abs(v) / 최 * 46)
-            방향 = "pos" if v > 0 else "neg"
-            cls = "up" if v > 0 else "dn"
-            return f'''
-      <div class="fx-row"><span class="fx-lb2">{이름}</span>
-        <div class="fx-zone"><div class="fx-bar {방향}" style="width:{폭:.0f}%"></div></div>
-        <span class="fx-amt {cls}">{fmt_flow(v)}</span></div>
-      <p class="fx-desc">{설명}</p>'''
-        프로HTML = f'''
-    <div class="fx-wrap">
-      <p class="mf-sub">프로그램매매 — 기계적 매매 vs 방향성 베팅{프로부제}</p>
-      <div class="fx-chart">
-        {프로바("차익", 차익, "선물·현물 가격차를 노린 기계적 매매 — 방향성 의미 적음")}
-        {프로바("비차익", 비차익, "선물과 무관한 바스켓 매매 — 실제 방향성 베팅")}
-      </div>
-    </div>'''
-
-    체크 = 돈의흐름.get("체크포인트", "")
-    상세 = 블록("현물 vs 선물", 돈의흐름.get('현물선물조합'), "⚖️")
-    # 프로그램매매 해설은 실제 숫자가 들어온 날에만 붙인다
-    if 프로HTML:
-        상세 += 블록("프로그램매매 — 기계인가 방향성인가", 돈의흐름.get('프로그램해석'), "🤖")
-
-    return f'''
-  <div class="mf-box">
-    <p class="mf-badge">{돈의흐름.get('조합이름','—')}</p>
-    <p class="mf-summary">{돈의흐름.get('숨은한줄','')}</p>
-    {막대HTML}
-    {프로HTML}
-    {분면HTML}
-    <div class="hidden-block" id="moreFlow">{상세}</div>
-    <button class="more-btn dark" onclick="toggleMore('moreFlow',this,'▾ 자세한 해석 보기')">▾ 자세한 해석 보기</button>
-    {f'<p class="mf-check">👀 <b>내일 확인:</b> {체크}</p>' if 체크 else ''}
-    {'<p class="mf-todo">※ 차익거래는 선물·현물 가격차를 노린 기계적 매매, 비차익거래는 방향성 베팅입니다. 같은 순매도라도 성격이 다릅니다.</p>' if 프로HTML else ''}
   </div>'''
 
 
@@ -1467,6 +1358,7 @@ a{{color:inherit;text-decoration:none}}
 .fs-badges{{display:flex;gap:6px;flex-wrap:wrap}}
 .fs-cb{{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;font-variant-numeric:tabular-nums}}
 .fs-cb.b5{{background:rgba(255,138,110,.14);color:var(--up-soft);border:.5px solid rgba(255,138,110,.3)}}
+.fs-cb.b5n{{background:rgba(127,168,232,.14);color:var(--dn-soft);border:.5px solid rgba(127,168,232,.3)}}
 .fs-cb.b20{{background:rgba(255,255,255,.06);color:#dfe3e8;border:.5px solid rgba(255,255,255,.14)}}
 .fs-x{{display:flex;justify-content:space-between;font-size:9px;color:#767c86;font-weight:600;margin-top:3px;padding:0 2px}}
 .fs-read{{font-size:11.5px;color:#c3c8ce;line-height:1.75;margin-top:.65rem}}
@@ -1571,7 +1463,7 @@ a{{color:inherit;text-decoration:none}}
     <div class="idx-card2">
       <p class="ic-mkt">KOSPI</p>
       <p class="ic-num">{코.get('종가','—')}</p>
-      <p class="{'ic-chg-dn' if '-' in str(코.get('등락방향','')) else 'ic-chg-up'}">{코.get('등락방향','—')} {코.get('등락률','—')}%</p>
+      <p class="{idx_dir_class(코)}">{코.get('등락방향','—')} {코.get('등락률','—')}%</p>
       <div class="sup-grid">
         <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(코수.get('외국인'))}">{fmt_flow(코수.get('외국인'))}</p></div>
         <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(코수.get('기관계'))}">{fmt_flow(코수.get('기관계'))}</p></div>
@@ -1581,7 +1473,7 @@ a{{color:inherit;text-decoration:none}}
     <div class="idx-card2">
       <p class="ic-mkt">KOSDAQ</p>
       <p class="ic-num">{닥.get('종가','—')}</p>
-      <p class="{'ic-chg-dn' if '-' in str(닥.get('등락방향','')) else 'ic-chg-up'}">{닥.get('등락방향','—')} {닥.get('등락률','—')}%</p>
+      <p class="{idx_dir_class(닥)}">{닥.get('등락방향','—')} {닥.get('등락률','—')}%</p>
       <div class="sup-grid">
         <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(닥수.get('외국인'))}">{fmt_flow(닥수.get('외국인'))}</p></div>
         <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(닥수.get('기관계'))}">{fmt_flow(닥수.get('기관계'))}</p></div>
@@ -1623,9 +1515,6 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
-
-  <p class="sec-label">💸 돈의 흐름을 보자</p>
-  {build_moneyflow(해석.get('돈의흐름'), 지수, 코수, 닥수, data.get('파생'))}
 
   <p class="sec-label">📋 오늘의 중요 공시</p>
   <div class="disc-box">
