@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-a"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.06-b"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -553,6 +553,35 @@ def collect_macro():
     성공 = sum(1 for v in 결과.values() if v is not None)
     print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
     return 결과
+
+
+def naver_get(url, referer=None):
+    """네이버 페이지를 가져오되 **인코딩을 자동 판별**한다.
+
+    네이버는 페이지마다 인코딩이 달라(euc-kr / utf-8) 한쪽으로 고정하면
+    한글이 깨져서, 페이지가 정상적으로 열려도 '차익' 같은 단어를 찾지 못한다.
+    세 가지로 디코딩해보고 한글이 가장 멀쩡한 것을 고른다.
+    반환: (HTTP 상태코드, 본문 문자열, 사용한 인코딩)
+    """
+    h = dict(HEADERS)
+    if referer:
+        h["Referer"] = referer
+    r = requests.get(url, headers=h, timeout=12)
+    if r.status_code != 200:
+        return r.status_code, "", None
+    raw = r.content
+    최고, 최고점, 최고이름 = "", -1, None
+    for enc in ("euc-kr", "cp949", "utf-8"):
+        try:
+            t = raw.decode(enc, errors="replace")
+        except Exception:
+            continue
+        한글 = sum(1 for ch in t if "\uac00" <= ch <= "\ud7a3")
+        깨짐 = t.count("\ufffd")
+        점수 = 한글 - 깨짐 * 3
+        if 점수 > 최고점:
+            최고, 최고점, 최고이름 = t, 점수, enc
+    return 200, 최고, 최고이름
 
 
 def _flatten_cols(t):
