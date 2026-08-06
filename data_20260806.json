@@ -1,6 +1,6 @@
 {
   "날짜": "20260806",
-  "버전_collect": "v2026.08.06-c",
+  "버전_collect": "v2026.08.06-d",
   "공시": [
     {
       "회사명": "핑거",
@@ -393,6 +393,66 @@
   },
   "뉴스원본": [
     {
+      "제목": "코스피 안정될까…단일 레버리지 거래 첫 1조 아래로 '뚝' [분석+]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005318262&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "'멸종위기 1급' 토종 여우가 또 소백산에 돌아왔다…28마리 추가 방사",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962417&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "6000에서 1만2000까지?…골드만삭스 “코스피 조정은 강세장 일부”[투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002680622&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "[팩트체크] 절전보다 강풍? 냉방보다 제습?…전기료 아끼는 슬기로운 에어컨 사용법",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962415&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "'삼전·닉스' 동반 급락에도…골드만 \"코스피 목표치 1만2000 유지\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005558390&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "버스보다 택시·음식은 배달로…폭염에 생존형 지출 껑충",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962414&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "[올댓차이나] 홍콩 증시, 미중 관계 악화 우려에 반락 마감…H주 1.22%↓",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014113325&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "비수기에도 꺾이지 않는 아파트값…내주 추가 대책, 그린벨트 해제 또 만지작",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962406&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "'1만피' 접은 증권가…전망치 줄줄이 하향",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000893168&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "美 반도체 충격에 코스피 급락…SK하이닉스 10%대↓",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000893167&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "\"철길 터질라\" KTX도 멈춰 세운 폭염…경부선 지연 4배 폭증",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001962399&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "골드만 “코스피 급락? 조정일 뿐…곧 1만2000피 간다”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004649346&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "150만닉스 붕괴…‘270층’ 매수 미자 “지금 털면 죽어요”",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002809730&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "한달만에 거래액 14조 → 7500억…삼전닉스 레버리지 싸늘히 식었다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005717769&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "‘레버ETF’ 운용사, 얼마 벌었나 봤더니…입이 떡!!",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002809728&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
       "제목": "[마켓인]고려아연 최씨 일가, 메리츠 대주단에 추가 지분 담보 제공",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006346317&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     },
@@ -411,62 +471,18 @@
     {
       "제목": "포스코퓨처엠, LFP 양극재 벽 넘었다…대규모 장기 공급 체결",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000049605&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "포스코퓨처엠, LFP 양극재 19만톤 장기 공급 합의",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001154605&office_id=417&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "단일종목 막히자 우르르 몰려간 곳…한 주 만에 '대반전'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001261448&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "증시 반등하자 '빚투' 꿈틀…7거래일 만에 잔고 반등",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001261447&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "“내 주식 진짜 상폐돼?” 마지막 경고장 ‘68건’ 무더기 속출…주주들도 조마조마 [투자360]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002680609&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "한투, 2분기 순익 1조 육박…우리銀도 넘었다",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005318232&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "반도체주 투매에…코스피 4.58% 급락",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000893145&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "건설근로자공제회, 현장성 강화 위한 건설기능인 양성 사업 시작",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006346300&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "RIA 깨고 서학개미들 유턴.. 출시 넉달만에 순유출 전환",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005558338&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "특급호텔도 뛰어든 ‘럭셔리 크루즈’…유가 급등에도 신고가 노리는 비결 [플러스 관심종목]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005717763&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "11주 거래에 SK하닉 하한가… NXT 프리마켓 또 가격왜곡",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005558320&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "반도체로 돈 번 삼전닉스 주주환원 늘린다",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005558319&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1423.98,
-      "등락률": -0.31,
+      "값": 1428.31,
+      "등락률": -0.01,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 75.57,
-      "등락률": 0.47,
+      "값": 75.2,
+      "등락률": -0.03,
       "표시명": "WTI 유가",
       "단위": "$"
     },
