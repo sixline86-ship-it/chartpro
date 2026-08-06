@@ -1,6 +1,6 @@
 {
   "날짜": "20260806",
-  "버전_collect": "v2026.08.06-e",
+  "버전_collect": "v2026.08.06-f",
   "공시": [
     {
       "회사명": "핑거",
@@ -393,6 +393,18 @@
   },
   "뉴스원본": [
     {
+      "제목": "ETF 중 80%가 와르르, ‘돈 번 사람도 있어?’…잔인한 7월 [투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002680628&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "\"애플-CXMT 메모리 반도체 공급협상 결렬…가격 조건 안 맞아\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005318266&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
+      "제목": "“레버리지 청산 슬슬 마무리 되나”...미장 ‘콜옵션’ 늘었다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005717779&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
+    },
+    {
       "제목": "\"한국 따라 출렁인다\"…AI 훈풍에도 日 투자자들 매수 '주저'",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014113340&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     },
@@ -459,18 +471,6 @@
     {
       "제목": "한달만에 거래액 14조 → 7500억…삼전닉스 레버리지 싸늘히 식었다",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005717769&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "‘레버ETF’ 운용사, 얼마 벌었나 봤더니…입이 떡!!",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002809728&office_id=021&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "[마켓인]고려아연 최씨 일가, 메리츠 대주단에 추가 지분 담보 제공",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006346317&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
-    },
-    {
-      "제목": "판매량 7% 늘 때 이익 46% 뛰었다…KT&G 해외담배의 힘",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001154606&office_id=417&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260806&page=1"
     }
   ],
   "매크로": {
