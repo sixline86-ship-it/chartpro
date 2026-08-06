@@ -1,26 +1,46 @@
 # ============================================================
-# .github/workflows/daily.yml   (v3 — 텔레그램 알림 + 자동 스케줄)
+# .github/workflows/daily.yml   (v4 — 발행 시각 앞당김 + 지연 대비 재시도)
 # 차트프로 관제탑 — 매일 자동 발행 시간표
 # ------------------------------------------------------------
-#   ① collect_data.py    숫자 수집 (DART·네이버)
+#   ① collect_data.py    숫자 수집 (DART·네이버·pykrx)
 #   ② generate_report.py 해석글 생성 (Claude)
 #   ③ build_html.py      리포트 HTML 생성
 #   ④ 자동 커밋          → GitHub Pages 자동 배포
 #   ⑤ notify_telegram.py 텔레그램 알림 전송
+#
+# 🔴 왜 v3에서 9시 반이 넘어서 왔나?
+#    파이프라인 실행 자체는 6~8분밖에 안 걸린다(커밋 기록으로 확인).
+#    문제는 GitHub의 "예약 실행(schedule)"이 무료 공용 대기열이라
+#    정시가 아니라 **1~3시간 늦게** 깨어난 것이다.
+#    (특히 UTC 정각·30분은 전 세계 작업이 몰리는 혼잡 시간대)
+#
+# 🟢 이번 v4의 대응
+#    1) 시작 시각을 19:30 → 18:20으로 앞당겨 지연분을 흡수한다
+#    2) 혼잡한 정각·30분을 피해 :20 / :45 / :15 같은 어중간한 분에 건다
+#    3) 같은 날 4번 시도하고, 한 번 성공하면 나머지는 스스로 건너뛴다
+#       → 언제 깨어나든 "그날 가장 이른 시점"에 한 번만 발행된다
 # ============================================================
 name: 관제탑 일일 발행
 
 on:
   # (1) 수동 실행 버튼 — Actions 탭에서 "Run workflow"
+  #     수동 실행은 중복 방지 장치를 무시하고 무조건 다시 만든다(재발행용)
   workflow_dispatch:
 
-  # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 -9시간)
-  #     한국 저녁 8시 발행 목표 → 19:30 KST 실행 → UTC 10:30
+  # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   schedule:
-    - cron: '30 10 * * 1-5'   # 월~금 UTC 10:30 = KST 19:30
+    - cron: '20 9 * * 1-5'    # KST 18:20  ← 1차 (본 발행)
+    - cron: '45 9 * * 1-5'    # KST 18:45  ← 2차 (1차가 안 깨면)
+    - cron: '15 10 * * 1-5'   # KST 19:15  ← 3차
+    - cron: '45 10 * * 1-5'   # KST 19:45  ← 4차 (최후 보루)
 
 permissions:
   contents: write
+
+# 여러 시도가 동시에 겹쳐 돌지 않게 한 줄로 세운다
+concurrency:
+  group: chartpro-publish
+  cancel-in-progress: false
 
 # ⭐ GitHub 서버는 기본 UTC라 한국보다 9시간 느리다. 한국시간으로 맞춘다.
 env:
@@ -33,16 +53,37 @@ jobs:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
 
+      # ── ⓪ 중복 발행 차단 ──
+      #   오늘 날짜 리포트가 이미 저장소에 있으면 = 앞선 시도가 성공한 것
+      #   → 이번 실행은 아무것도 하지 않고 조용히 끝낸다 (텔레그램 중복 발송 방지)
+      - name: 오늘 이미 발행했는지 확인
+        id: guard
+        run: |
+          TODAY=$(date +%Y%m%d)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run=yes" >> $GITHUB_OUTPUT
+            echo "🔘 수동 실행 — 중복 확인을 건너뛰고 새로 만듭니다."
+          elif [ -f "report_${TODAY}.html" ]; then
+            echo "run=no" >> $GITHUB_OUTPUT
+            echo "⏭️ report_${TODAY}.html 이 이미 있습니다. 이번 시도는 건너뜁니다."
+          else
+            echo "run=yes" >> $GITHUB_OUTPUT
+            echo "▶️ 오늘 첫 발행을 시작합니다."
+          fi
+
       - name: 파이썬 준비
+        if: steps.guard.outputs.run == 'yes'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: 패키지 설치
+        if: steps.guard.outputs.run == 'yes'
         run: pip install -r requirements.txt
 
       # ── ① 숫자 수집 ──
       - name: 데이터 수집
+        if: steps.guard.outputs.run == 'yes'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
@@ -50,6 +91,7 @@ jobs:
 
       # ── ② 해석글 생성 (실패해도 다음 단계로) ──
       - name: 해석글 생성 (Claude)
+        if: steps.guard.outputs.run == 'yes'
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -57,21 +99,25 @@ jobs:
 
       # ── ③ HTML 생성 ──
       - name: 리포트 HTML 생성
+        if: steps.guard.outputs.run == 'yes'
         run: |
           python build_html.py
           cp report_$(date +%Y%m%d).html index.html
 
       # ── ④ 자동 커밋 → Pages 배포 ──
       - name: 자동 커밋 & 배포
+        if: steps.guard.outputs.run == 'yes'
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
-          git add index.html data_*.json report_*.json report_*.html || true
+          git add index.html data_*.json report_*.json report_*.html flow_history.json || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
+          git pull --rebase --autostash || true
           git push
 
       # ── ⑤ 텔레그램 알림 ──
       - name: 텔레그램 알림 전송
+        if: steps.guard.outputs.run == 'yes'
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
