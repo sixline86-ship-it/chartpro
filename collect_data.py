@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-b"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.06-c"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -477,6 +477,51 @@ MACRO_TICKERS = {
 }
 
 
+def backfill_flow_history(이력):
+    """과거 data_YYYYMMDD.json 을 훑어 flow_history의 빈 날짜를 메운다.
+
+    새 코너를 붙인 날 그래프가 한 점뿐이면 볼 게 없다. 그런데 지난 리포트의
+    data 파일에는 이미 '지수수급'이 들어 있어서 실탄(외국인+기관)은 복원할 수 있다.
+    (프로그램매매는 최근에야 수집되기 시작해 과거분은 비차익이 없다 —
+     비차익은 '오늘의 바스켓 비중'에만 쓰이므로 그래프에는 지장이 없다)
+    한 번 메워지면 그 뒤로는 매일 한 줄씩 정상 누적된다.
+    """
+    있는날 = {x.get("날짜") for x in 이력}
+    추가 = 0
+    for f in sorted(os.listdir(".")):
+        m = re.fullmatch(r"data_(\d{8})\.json", f)
+        if not m:
+            continue
+        ymd = m.group(1)
+        if ymd in 있는날:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+
+        def _f(v):
+            try:
+                return float(str(v).replace(",", ""))
+            except (TypeError, ValueError):
+                return None
+
+        코수 = ((d.get("지수수급") or {}).get("코스피_수급")) or {}
+        외현, 기관 = _f(코수.get("외국인")), _f(코수.get("기관계"))
+        if 외현 is None or 기관 is None:
+            continue
+        파생 = d.get("파생") or {}
+        이력.append({"날짜": ymd, "외현": 외현, "기관": 기관,
+                    "외선": _f((파생.get("선물수급") or {}).get("외국인")),
+                    "비차익": _f((파생.get("프로그램매매") or {}).get("비차익거래_순매수")),
+                    "실탄": round(외현 + 기관)})
+        추가 += 1
+    if 추가:
+        print(f"   📦 과거 리포트에서 {추가}일치를 복원했습니다.")
+    return 이력
+
+
 def update_flow_history(지수수급, 파생):
     """수급 관제신호의 원료 — 실탄(외국인+기관 현물)·선물·비차익을 매일 쌓는다.
 
@@ -518,6 +563,7 @@ def update_flow_history(지수수급, 파생):
            "실탄": round(외현 + 기관)}
     이력 = [x for x in 이력 if x.get("날짜") != DATE]      # 재발행 시 덮어쓰기
     이력.append(오늘)
+    이력 = backfill_flow_history(이력)                    # 빈 과거 날짜 메우기
     이력.sort(key=lambda x: x.get("날짜", ""))
     이력 = 이력[-60:]
 
