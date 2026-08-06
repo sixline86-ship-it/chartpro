@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-e"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.06-f"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -975,9 +975,11 @@ def build_flow_signal(파생, 지수수급):
         span = (CMAX-CMIN) or 1
         CY = lambda v: PT + (PH*0.66)*(1-(v-CMIN)/span)
         g = []
+        # 밴드는 '5일 전 기준점'에서 시작해야 5일간의 움직임이 통째로 안에 들어온다.
+        # (예전엔 마지막 5개 막대에만 맞춰서, 정작 상승분이 밴드 왼쪽 밖에 그려졌다)
         bx = PL
         if n >= 6:
-            bx = X(n-5) - BW*0.9
+            bx = X(n-6)
             g.append(f'<rect x="{bx:.1f}" y="{PT}" width="{W0-PR-bx:.1f}" height="{PH}" fill="#e0c060" opacity=".07" rx="4"/>')
             g.append(f'<text x="{bx+6:.1f}" y="{PT+PH-4:.1f}" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text>')
         g.append(f'<line x1="{PL}" y1="{B0}" x2="{W0-PR}" y2="{B0}" stroke="#fff" stroke-opacity=".14"/>')
@@ -1019,10 +1021,33 @@ def build_flow_signal(파생, 지수수급):
         #   그래서 기준점(5일 전 누적)에 가로선을 그어 눈으로 차이를 확인하게 한다.
         if n >= 6:
             기준y = CY(누적[n-6])
+            # ① 기준선 대비 위/아래를 색으로 칠한다 — 위(빨강)면 5일간 순유입
+            for i in range(n-6, n-1):
+                y0, y1 = CY(누적[i]), CY(누적[i+1])
+                위쪽 = (누적[i] + 누적[i+1]) / 2 >= 누적[n-6]
+                g.append(f'<polygon points="{X(i):.1f},{y0:.1f} {X(i+1):.1f},{y1:.1f} '
+                         f'{X(i+1):.1f},{기준y:.1f} {X(i):.1f},{기준y:.1f}" '
+                         f'fill="{"#C1432B" if 위쪽 else "#2E6BD6"}" opacity=".30"/>')
+            # ② 기준선
             g.append(f'<line x1="{bx:.1f}" y1="{기준y:.1f}" x2="{W0-PR}" y2="{기준y:.1f}" '
-                     f'stroke="#e0c060" stroke-opacity=".55" stroke-width="1.2" stroke-dasharray="4 3"/>')
-            g.append(f'<text x="{bx+6:.1f}" y="{기준y-5:.1f}" font-size="8.5" fill="#e0c060" '
-                     f'font-weight="700" opacity=".85">5일 전</text>')
+                     f'stroke="#e0c060" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="4 3"/>')
+            g.append(f'<circle cx="{X(n-6):.1f}" cy="{기준y:.1f}" r="2.6" fill="#e0c060" opacity=".8"/>')
+            g.append(f'<text x="{bx+7:.1f}" y="{기준y-6:.1f}" font-size="8.5" fill="#e0c060" '
+                     f'font-weight="700" opacity=".9">5일 전</text>')
+            # ③ 기준선 → 오늘 끝점의 화살표 = 5일 누적 그 자체
+            끝y = CY(누적[-1]); ax = X(n-1) - 26
+            위로 = 끝y < 기준y
+            색 = "#ff8a6e" if 위로 else "#7fa8e8"
+            if abs(끝y - 기준y) >= 10:      # 간격이 넉넉할 때만 화살표
+                머리 = f"{ax:.1f},{끝y:.1f} {ax-4.5:.1f},{끝y + (7 if 위로 else -7):.1f} {ax+4.5:.1f},{끝y + (7 if 위로 else -7):.1f}"
+                g.append(f'<line x1="{ax:.1f}" y1="{기준y:.1f}" x2="{ax:.1f}" y2="{끝y + (6 if 위로 else -6):.1f}" '
+                         f'stroke="{색}" stroke-width="1.8"/>')
+                g.append(f'<polygon points="{머리}" fill="{색}"/>')
+                라벨y = (기준y + 끝y) / 2 + 3
+            else:                            # 좁으면 기준선 바로 아래에 글자만
+                라벨y = 기준y + (16 if 위로 else -9)
+            g.append(f'<text x="{ax-7:.1f}" y="{라벨y:.1f}" text-anchor="end" font-size="9.5" '
+                     f'fill="{색}" font-weight="800">5일 {"▲" if 위로 else "▼"} {_flow_amt(누5)}</text>')
         if CMIN < 0 < CMAX:
             g.append(f'<line x1="{PL}" y1="{CY(0):.1f}" x2="{W0-PR}" y2="{CY(0):.1f}" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/>')
             g.append(f'<text x="{PL+4}" y="{CY(0)-4:.1f}" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text>')
@@ -1043,7 +1068,8 @@ def build_flow_signal(파생, 지수수급):
                    f'<span class="fs-cb {"b5" if 누5 >= 0 else "b5n"}">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
                    f'<span class="fs-cb b20">{n}일 누적 {_flow_amt(누20)}</span></div>')
         범례 = ('<div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span>'
-              '<span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span></div>') if len(선물있는) >= 2 else ""
+              '<span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span>'
+              '<span><i class="l-rf"></i>5일 전 기준선</span></div>') if len(선물있는) >= 2 else ""
         그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
                      + "".join(g) + f'</svg><div class="fs-x">{축}</div>{범례}')
 
@@ -1460,6 +1486,7 @@ a{{color:inherit;text-decoration:none}}
 .fs-leg i{{width:15px;height:0;border-top-width:2.2px;display:inline-block}}
 .fs-leg i.l-sp{{border-top-style:solid;border-color:#f0f0ee}}
 .fs-leg i.l-fu{{border-top-style:dashed;border-color:#7fa8e8;opacity:.6}}
+.fs-leg i.l-rf{{border-top-style:dashed;border-color:#e0c060;opacity:.8}}
 .fs-x{{display:flex;justify-content:space-between;font-size:9px;color:#767c86;font-weight:600;margin-top:3px;padding:0 2px}}
 .fs-read{{font-size:11.5px;color:#c3c8ce;line-height:1.75;margin-top:.65rem}}
 .fs-read b{{color:#fff}}
