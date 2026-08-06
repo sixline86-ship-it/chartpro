@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-c"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.06-d"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -929,6 +929,26 @@ def build_flow_signal(파생, 지수수급):
         g.append('<defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1">'
                  '<stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/>'
                  '<stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs>')
+        # ── 외국인 선물 누적 (흐릿한 점선, 방향 참고용) ──
+        #   현물과 규모 단위가 달라 크기 비교는 무의미하다. 0선만 공유하고
+        #   각자 자기 폭으로 스케일해 **방향과 기울기**만 겹쳐 본다.
+        선물있는 = [x for x in 표시 if x.get("외선") is not None]
+        if len(선물있는) >= 2:
+            f누적, facc = [], 0
+            for x in 표시:
+                facc += (x.get("외선") or 0)
+                f누적.append(facc)
+            FMAX = max(abs(v) for v in f누적) or 1
+            여유 = min(CY(0) - PT, (PT + PH*0.66) - CY(0))
+            여유 = max(여유, 8)
+            FY = lambda v: CY(0) - (v / FMAX) * 여유
+            f선 = " ".join(f'{"L" if i else "M"}{X(i):.1f} {FY(v):.1f}' for i, v in enumerate(f누적))
+            g.append(f'<path d="{f선}" fill="none" stroke="#7fa8e8" stroke-width="1.8" '
+                     f'stroke-dasharray="4 4" opacity=".45" stroke-linejoin="round"/>')
+            g.append(f'<circle cx="{X(n-1):.1f}" cy="{FY(f누적[-1]):.1f}" r="2.6" fill="#7fa8e8" opacity=".6"/>')
+            g.append(f'<text x="{X(n-1)-7:.1f}" y="{FY(f누적[-1])+11:.1f}" text-anchor="end" '
+                     f'font-size="8.5" fill="#7fa8e8" font-weight="700" opacity=".75">선물 {_flow_amt(f누적[-1])}</text>')
+
         g.append(f'<path d="{선}" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/>')
         if CMIN < 0 < CMAX:
             g.append(f'<line x1="{PL}" y1="{CY(0):.1f}" x2="{W0-PR}" y2="{CY(0):.1f}" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/>')
@@ -949,8 +969,10 @@ def build_flow_signal(파생, 지수수급):
         배지HTML = (f'<div class="fs-badges">'
                    f'<span class="fs-cb {"b5" if 누5 >= 0 else "b5n"}">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
                    f'<span class="fs-cb b20">{n}일 누적 {_flow_amt(누20)}</span></div>')
+        범례 = ('<div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span>'
+              '<span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span></div>') if len(선물있는) >= 2 else ""
         그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
-                     + "".join(g) + f'</svg><div class="fs-x">{축}</div>')
+                     + "".join(g) + f'</svg><div class="fs-x">{축}</div>{범례}')
 
         # ── 판독문 (규칙 기반) ──
         문장 = []
@@ -1000,7 +1022,7 @@ def build_flow_signal(파생, 지수수급):
       {판독HTML}
     </div>
     <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
-      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
+      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
   </div>'''
 
 
@@ -1360,6 +1382,11 @@ a{{color:inherit;text-decoration:none}}
 .fs-cb.b5{{background:rgba(255,138,110,.14);color:var(--up-soft);border:.5px solid rgba(255,138,110,.3)}}
 .fs-cb.b5n{{background:rgba(127,168,232,.14);color:var(--dn-soft);border:.5px solid rgba(127,168,232,.3)}}
 .fs-cb.b20{{background:rgba(255,255,255,.06);color:#dfe3e8;border:.5px solid rgba(255,255,255,.14)}}
+.fs-leg{{display:flex;gap:13px;flex-wrap:wrap;margin-top:5px}}
+.fs-leg span{{font-size:9.5px;color:#8a909a;font-weight:600;display:flex;align-items:center;gap:5px}}
+.fs-leg i{{width:15px;height:0;border-top-width:2.2px;display:inline-block}}
+.fs-leg i.l-sp{{border-top-style:solid;border-color:#f0f0ee}}
+.fs-leg i.l-fu{{border-top-style:dashed;border-color:#7fa8e8;opacity:.6}}
 .fs-x{{display:flex;justify-content:space-between;font-size:9px;color:#767c86;font-weight:600;margin-top:3px;padding:0 2px}}
 .fs-read{{font-size:11.5px;color:#c3c8ce;line-height:1.75;margin-top:.65rem}}
 .fs-read b{{color:#fff}}
