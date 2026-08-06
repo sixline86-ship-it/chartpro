@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.05-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.06-a"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -477,6 +477,56 @@ MACRO_TICKERS = {
 }
 
 
+def update_flow_history(지수수급, 파생):
+    """수급 관제신호의 원료 — 실탄(외국인+기관 현물)·선물·비차익을 매일 쌓는다.
+
+    flow_history.json 에 하루 한 줄씩 누적하며, 같은 날짜로 다시 실행되면
+    그 줄을 덮어쓴다(재발행 안전). 60거래일까지만 보관한다.
+    ⚠️ daily.yml 의 git add 목록에 flow_history.json 이 있어야 커밋된다.
+    """
+    파일 = "flow_history.json"
+    이력 = []
+    try:
+        if os.path.exists(파일):
+            with open(파일, encoding="utf-8") as f:
+                이력 = json.load(f)
+        if not isinstance(이력, list):
+            이력 = []
+    except Exception as e:
+        print(f"⚠️ flow_history 읽기 실패({type(e).__name__}) — 새로 시작합니다.")
+        이력 = []
+
+    def _f(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    코수 = (지수수급 or {}).get("코스피_수급") or {}
+    외현 = _f(코수.get("외국인"))
+    기관 = _f(코수.get("기관계"))
+    외선 = _f(((파생 or {}).get("선물수급") or {}).get("외국인"))
+    프로 = (파생 or {}).get("프로그램매매") or {}
+    비차익 = _f(프로.get("비차익거래_순매수"))
+
+    if 외현 is None or 기관 is None:
+        print("⚠️ 현물 수급 미확보 — flow_history에 오늘을 기록하지 않습니다.")
+        return 이력
+
+    오늘 = {"날짜": DATE, "외현": 외현, "기관": 기관,
+           "외선": 외선, "비차익": 비차익,
+           "실탄": round(외현 + 기관)}
+    이력 = [x for x in 이력 if x.get("날짜") != DATE]      # 재발행 시 덮어쓰기
+    이력.append(오늘)
+    이력.sort(key=lambda x: x.get("날짜", ""))
+    이력 = 이력[-60:]
+
+    with open(파일, "w", encoding="utf-8") as f:
+        json.dump(이력, f, ensure_ascii=False, indent=1)
+    print(f"✅ flow_history 갱신: 오늘 실탄 {오늘['실탄']:+,}억 · 누적 {len(이력)}일치")
+    return 이력
+
+
 def collect_macro():
     결과 = {}
     for key, info in MACRO_TICKERS.items():
@@ -528,29 +578,70 @@ def _num(v):
         return None
 
 
-def _extract_program(t):
-    """표 하나에서 차익거래·비차익거래 순매수를 뽑아낸다.
+def _pick_data_row(t, 날짜키=None):
+    """네이버 표의 **첫 줄은 빈 줄(NaN)** 이다. 진짜 데이터가 있는 첫 행을 고른다.
 
-    네이버 표가 가로형인지 세로형인지 알 수 없어 두 방식을 모두 시도한다.
-      · 컬럼형: 컬럼명이 '차익거래_순매수' 처럼 생긴 경우
-      · 행형  : 첫 칸이 '차익거래'이고 그 행 안에 순매수 값이 있는 경우
-    '순매수' 칸이 없으면 매수 − 매도로 직접 계산한다.
+    ⚠️ 이게 지난 실패의 원인이었다. iloc[0]을 읽었더니 전부 NaN이라
+       숫자 추출이 매번 None으로 떨어졌다.
+    날짜키가 주어지면(일별 표) 그 날짜 행을 우선 찾고, 없으면 첫 데이터 행을 쓴다.
     """
-    t = _flatten_cols(t.copy())
-    결과 = {}
+    t = _flatten_cols(t.copy()).dropna(how="all")
+    if t.empty:
+        return None, None
+    첫컬 = t.columns[0]
+    후보 = []
+    for _, row in t.iterrows():
+        라벨 = str(row[첫컬]).strip()
+        if 라벨 in ("", "nan", "None"):
+            continue
+        후보.append((라벨, row))
+    if not 후보:
+        return None, None
+    if 날짜키:
+        for 라벨, row in 후보:
+            if 날짜키 in 라벨:
+                return 라벨, row
+    return 후보[0]
 
-    def 담기(이름, 값):
-        if 값 is not None and 이름 not in 결과:
-            결과[이름] = 값
 
-    # ── ① 컬럼형 ──
-    for 라벨, 조건 in (("차익거래", lambda s: "차익" in s and "비차익" not in s),
-                     ("비차익거래", lambda s: "비차익" in s)):
+def _unit_factor(html_text):
+    """표의 '단위 : 백만원' 같은 표기를 읽어 **억원 기준 배율**을 돌려준다.
+
+    단위를 잘못 읽으면 숫자가 100배 틀어진다. 유료 리포트에서 가장 위험한 종류의
+    오류라, 표기를 못 찾으면 그 사실을 로그에 분명히 남긴다.
+    """
+    m = re.search(r"단위\s*[:：]\s*([^<,)\n]{1,12})", html_text)
+    표기 = m.group(1).strip() if m else ""
+    if "백만" in 표기:
+        return 0.01, 표기            # 백만원 → 억원
+    if "천원" in 표기:
+        return 0.00001, 표기
+    if "억" in 표기:
+        return 1.0, 표기
+    return 1.0, (표기 or "표기 없음(억원으로 가정)")
+
+
+def _extract_program(t, html_text="", 날짜키=None):
+    """프로그램매매 표에서 차익·비차익·전체 순매수를 뽑는다.
+
+    실제 확인된 표 구조 (2026-08-05 로그):
+      컬럼 = 시간 | 차익거래(매수·매도·순매수) | 비차익거래(…) | 전체(…)
+      → 평탄화하면 '차익거래_순매수' 처럼 된다.
+    '순매수' 칸이 비면 매수 − 매도로 직접 계산한다.
+    """
+    라벨, row = _pick_data_row(t, 날짜키)
+    if row is None:
+        return {}
+    배율, 단위표기 = _unit_factor(html_text)
+    t2 = _flatten_cols(t.copy())
+    컬럼들 = list(t2.columns)
+
+    def 뽑기(조건):
         순 = 매수 = 매도 = None
-        for col in t.columns:
+        for col in 컬럼들:
             if not 조건(col):
                 continue
-            v = _num(t[col].iloc[0]) if len(t) else None
+            v = _num(row.get(col))
             if "순매수" in col:
                 순 = v
             elif "매수" in col:
@@ -559,151 +650,79 @@ def _extract_program(t):
                 매도 = v
         if 순 is None and 매수 is not None and 매도 is not None:
             순 = 매수 - 매도
-        담기(f"{라벨}_순매수", 순)
+        return None if 순 is None else round(순 * 배율)
 
-    # ── ② 행형 ──
-    if len(결과) < 2:
-        for _, row in t.iterrows():
-            셀 = [str(x) for x in row.tolist()]
-            첫 = " ".join(셀[:2])
-            숫자 = [_num(x) for x in 셀]
-            숫자 = [x for x in 숫자 if x is not None]
-            if not 숫자:
-                continue
-            # '순매수' 컬럼이 있으면 그 위치를, 없으면 마지막 숫자를 순매수로 본다
-            순 = None
-            for i, col in enumerate(t.columns):
-                if "순매수" in str(col) and i < len(셀):
-                    순 = _num(셀[i])
-                    break
-            if 순 is None:
-                순 = 숫자[-1]
-            if "비차익" in 첫:
-                담기("비차익거래_순매수", 순)
-            elif "차익" in 첫:
-                담기("차익거래_순매수", 순)
+    결과 = {}
+    차익 = 뽑기(lambda s: "차익" in s and "비차익" not in s)
+    비차익 = 뽑기(lambda s: "비차익" in s)
+    전체 = 뽑기(lambda s: "전체" in s)
+    if 차익 is not None:
+        결과["차익거래_순매수"] = 차익
+    if 비차익 is not None:
+        결과["비차익거래_순매수"] = 비차익
+    if 전체 is not None:
+        결과["전체_순매수"] = 전체
+    if 결과:
+        결과["기준"] = 라벨
+        결과["단위"] = f"억원 (원문 단위: {단위표기})"
     return 결과
 
 
-def naver_get(url, referer=None):
-    """네이버 페이지를 가져오되 **인코딩을 자동 판별**한다.
-
-    ⚠️ 이게 왜 필요한가:
-       기존 코드는 모든 네이버 페이지에 euc-kr을 강제했다. 그런데 네이버는
-       페이지마다 인코딩이 다르고 일부는 UTF-8이다. 인코딩이 틀리면 한글이
-       전부 깨져서, 페이지가 정상적으로 열려도 '차익'을 찾을 수 없다.
-       → 세 가지로 디코딩해보고 한글이 가장 멀쩡한 것을 고른다.
-    """
-    h = dict(HEADERS)
-    if referer:
-        h["Referer"] = referer
-    r = requests.get(url, headers=h, timeout=12)
-    if r.status_code != 200:
-        return r.status_code, "", None
-    raw = r.content
-    최고, 최고점, 최고이름 = "", -1, None
-    for enc in ("euc-kr", "cp949", "utf-8"):
-        try:
-            t = raw.decode(enc, errors="replace")
-        except Exception:
-            continue
-        # 한글 글자 수 − 깨짐 문자 수 로 점수를 매긴다
-        한글 = sum(1 for ch in t if "\uac00" <= ch <= "\ud7a3")
-        깨짐 = t.count("\ufffd")
-        점수 = 한글 - 깨짐 * 3
-        if 점수 > 최고점:
-            최고, 최고점, 최고이름 = t, 점수, enc
-    return 200, 최고, 최고이름
-
-
 def collect_program_trading():
-    """프로그램매매(차익/비차익)를 수집한다.
+    """프로그램매매(차익/비차익) 수집 — 확인된 주소를 직접 친다.
 
-    진단 이력:
-      · 2026-08-04 로그: sise_program.naver 는 HTTP 200 인데 표가 1개(5행 4열)뿐이고
-        그 안에 '차익'이 없었다. 사용자는 브라우저에서 차익거래 표를 확인했다.
-      → 남은 가능성 3가지를 이번 판에서 한꺼번에 검사한다.
-        ① 인코딩 불일치로 한글이 깨져 '차익'을 못 찾은 것   → naver_get 으로 해결
-        ② 본문이 <iframe> 안에 있는 것                    → iframe 추적
-        ③ 표가 탭/하위 페이지에 있는 것                    → program 관련 <a> 추적
-      셋 다 실패하면 페이지 조각을 로그에 남겨 다음에 정확히 판단한다.
+    2026-08-05 탐색으로 확정된 사실:
+      · 실제 표는 sise_program.naver 가 아니라 그 안의 iframe에 있다
+        → https://finance.naver.com/sise/programDealTrendDay.naver?bizdate=YYYYMMDD&sosok=
+      · sosok 이 비어 있으면 코스피, sosok=02 면 코스닥
+      · 표 첫 줄은 빈 줄이고, 둘째 줄부터 최신 거래일 순
+      · 컬럼: 시간 | 차익거래(매수/매도/순매수) | 비차익거래(…) | 전체(…)
     """
-    BASE = "https://finance.naver.com"
-    시작 = f"{BASE}/sise/sise_program.naver"
-    대기, 방문, 깊이 = [시작], set(), {시작: 0}
-    본문보관 = {}
+    BASE = "https://finance.naver.com/sise/programDealTrendDay.naver"
+    날짜키 = f"{DATE[2:4]}.{DATE[4:6]}.{DATE[6:8]}"      # 20260805 → 26.08.05
+    시장들 = {"코스피": "", "코스닥": "02"}
+    수집 = {}
 
-    def 절대(src):
-        if src.startswith("//"):
-            return "https:" + src
-        if src.startswith("/"):
-            return BASE + src
-        if src.startswith("http"):
-            return src
-        return f"{BASE}/sise/" + src.lstrip("./")
-
-    while 대기:
-        url = 대기.pop(0)
-        if url in 방문:
-            continue
-        방문.add(url)
-        d = 깊이.get(url, 0)
+    for 시장, sosok in 시장들.items():
+        url = f"{BASE}?bizdate={DATE}&sosok={sosok}"
         try:
-            code, 본문, enc = naver_get(url, referer=시작)
+            code, 본문, enc = naver_get(url, referer="https://finance.naver.com/sise/sise_program.naver")
         except Exception as ex:
-            print(f"  ⚠️ {url} 요청 실패: {type(ex).__name__}")
+            print(f"  ⚠️ {시장} 프로그램매매 요청 실패: {type(ex).__name__}")
             continue
         if code != 200:
-            print(f"  ℹ️ {url.split('/')[-1]} → HTTP {code}")
+            print(f"  ⚠️ {시장} 프로그램매매 → HTTP {code}")
             continue
-        본문보관[url] = 본문
-        차익있음 = "차익" in 본문
-        print(f"  🔎 {url.split('/')[-1]} (깊이 {d}, {enc}) → '차익' {'있음' if 차익있음 else '없음'}")
+        찾음 = None
+        for t in read_html_safe(본문):
+            평 = " ".join(str(x) for x in t.columns)
+            if "차익" in 평:
+                찾음 = t
+                break
+        if 찾음 is None:
+            print(f"  ⚠️ {시장} — '차익' 컬럼을 가진 표를 못 찾음 ({enc})")
+            continue
+        값 = _extract_program(찾음, 본문, 날짜키)
+        if not 값:
+            print(f"  ⚠️ {시장} — 표는 찾았으나 숫자 추출 실패. 컬럼: {list(_flatten_cols(찾음.copy()).columns)[:6]}")
+            continue
+        if 날짜키 not in str(값.get("기준", "")):
+            print(f"  ⚠️ {시장} — 오늘({날짜키}) 행이 없어 최신행({값.get('기준')})을 씀. 장 마감 전 실행일 수 있음")
+        수집[시장] = 값
+        print(f"✅ {시장} 프로그램매매 [{값.get('기준')}] "
+              f"차익 {값.get('차익거래_순매수')}억 · 비차익 {값.get('비차익거래_순매수')}억 "
+              f"· 전체 {값.get('전체_순매수')}억 | {값.get('단위')}")
 
-        if 차익있음:
-            표들 = read_html_safe(본문)
-            print(f"     표 {len(표들)}개 스캔")
-            for t in 표들:
-                if t.empty:
-                    continue
-                전체 = " ".join(str(x) for x in t.columns) + " " + \
-                      " ".join(str(v) for v in t.values.ravel())
-                if "차익" not in 전체:
-                    continue
-                print(f"     📋 '차익' 표 {t.shape} — 컬럼: {list(t.columns)[:10]}")
-                print(f"     📋 첫 3행: {t.head(3).values.tolist()}")
-                값 = _extract_program(t)
-                if len(값) >= 1:
-                    print(f"✅ 프로그램매매 수집: {값}")
-                    return 값
-                print("     ⚠️ 표는 찾았으나 숫자 매핑 실패 — 위 두 줄로 다음에 보정")
-            # 표에는 없는데 글자에는 있다 = JS나 특이 마크업. 주변을 잘라 남긴다.
-            i = 본문.find("차익")
-            print("     🧩 표에 없음. '차익' 주변 원문:")
-            print("     " + 본문[max(0, i - 250):i + 450].replace("\n", " ")[:700])
+    if not 수집:
+        print("⚠️ 프로그램매매 미확보 — 해당 코너는 리포트에서 숨겨집니다.")
+        return None
 
-        if d < 2:
-            # ① iframe 추적
-            for m in re.finditer(r'<iframe[^>]+src=["\']([^"\']+)["\']', 본문, re.I):
-                nxt = 절대(m.group(1))
-                if "finance.naver.com" in nxt and nxt not in 방문:
-                    깊이[nxt] = d + 1
-                    대기.append(nxt)
-            # ② program 관련 링크 추적 (탭·하위 페이지)
-            for m in re.finditer(r'<a[^>]+href=["\']([^"\']*[Pp]rogram[^"\']*)["\']', 본문):
-                nxt = 절대(m.group(1))
-                if "finance.naver.com" in nxt and nxt not in 방문:
-                    깊이[nxt] = d + 1
-                    대기.append(nxt)
-
-    print(f"⚠️ 프로그램매매 미확보 (방문 {len(방문)}곳). 방문 목록:")
-    for u in 방문:
-        print(f"     - {u}")
-    첫 = 본문보관.get(시작, "")
-    if 첫:
-        아이프레임 = re.findall(r'<iframe[^>]+src=["\']([^"\']+)["\']', 첫, re.I)
-        print(f"     시작 페이지 iframe {len(아이프레임)}개: {아이프레임[:6]}")
-    return None
+    # 코스피를 기본값으로 펼치고(기존 렌더링 호환), 코스닥은 하위에 담는다
+    기본 = dict(수집.get("코스피") or list(수집.values())[0])
+    기본["시장"] = "코스피" if "코스피" in 수집 else list(수집.keys())[0]
+    if "코스닥" in 수집:
+        기본["코스닥"] = 수집["코스닥"]
+    return 기본
 
 
 def collect_program_and_futures():
@@ -1383,6 +1402,7 @@ if __name__ == "__main__":
     뉴스원본 = collect_news()
     매크로 = collect_macro()
     파생 = collect_program_and_futures()
+    update_flow_history(지수수급, 파생)
     강세레이더 = collect_strength_radar()
     매집레이더 = collect_accumulation_radar()
     마감브리핑 = collect_briefings()
