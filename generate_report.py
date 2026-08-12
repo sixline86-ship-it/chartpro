@@ -1,639 +1,2306 @@
 # ============================================================
-# generate_report.py  (v2)
-# ------------------------------------------------------------
-# 목적: collect_data.py 가 만든 data_YYYYMMDD.json 을 읽어서
-#       Claude API에게 해석 글을 써 달라고 요청한다.
-# 결과: report_YYYYMMDD.json  (숫자 + 해석글)
-#
-# 만드는 글 5가지:
-#   한줄평 / 오늘의_시장 / 오늘의_한문장 / 프로의시선(3부) / 오늘의_공부
-#   + 핵심이슈 / 핵심뉴스 / 관전포인트
+# build_html.py  (v2)
+#  data_YYYYMMDD.json (+ report_YYYYMMDD.json 있으면) → report_YYYYMMDD.html
+#  포함: 관제지수 게이지(산정기준 토글) · 주도섹터6(짙은분홍) · 예측셀프체크
 # ============================================================
 
 import json
 import os
-import re
-import sys
-import random
-import time
+import html
 from datetime import datetime
-import anthropic  # pip install anthropic
+
+SCRIPT_VERSION = "v2026.08.12-c"   # ⬅ 버전 표시
+# ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
+SHOW_CRITERIA = True
 
 DATE = datetime.now().strftime("%Y%m%d")
 DATA_PATH = f"data_{DATE}.json"
 REPORT_PATH = f"report_{DATE}.json"
+OUT_PATH = f"report_{DATE}.html"
 
-# ── 사용할 모델 선택 ────────────────────────────────────
-# 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
-# (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.06-f"
-
-# 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
-MAX_TOKENS_START = 16000
-MAX_TOKENS_CAP = 64000   # ⬅ 버전 표시
-MODEL = "claude-sonnet-5"      # $2/$10 도입가 · 속도·지능 균형 (추천 기본값)
-# MODEL = "claude-opus-4-8"    # $5/$25 · 복잡한 작업용 (약 2.5배 비용)
-# MODEL = "claude-fable-5"     # $10/$50 · 최상위 (약 5배 비용)
-# MODEL = "claude-haiku-4-5"   # $1/$5  · 가장 저렴·빠름 (품질 테스트용)
-
-# API 키는 환경변수 ANTHROPIC_API_KEY 에서 자동으로 읽힌다
-client = anthropic.Anthropic()
-
-
-SYSTEM_PROMPT = """\
-너는 주식 시황 리포트 "차트프로 관제탑"의 해설 작가다.
-아래 규칙을 반드시 지켜라.
-
-1. 숫자는 절대 지어내지 않는다. 입력으로 주어진 JSON 데이터에 있는 숫자만 사용한다.
-2. 데이터에 없는 값은 "확인 필요"라고 쓰고 임의로 채우지 않는다.
-3. 확정적인 투자 권유("반드시 오른다", "사야 한다" 등)는 쓰지 않는다.
-   전망이 필요하면 조건문(If-Then)으로 쓴다.
-4. 문장은 친절하고 담백하게, 초보 투자자도 이해할 수 있게 쓴다.
-   과장·신파·상투어는 피한다.
-5. 반드시 아래 JSON 형식으로만 답한다. 그 외 설명이나 인사말은 절대 넣지 않는다.
-6. ⚠️ 숫자 단위 표기 규칙 — 한국어 금액 표기를 반드시 지킨다.
-   · 10,000억 = 1조 이다. 만억·천억억 같은 표기는 절대 쓰지 않는다.
-   · 10,000억 이상이면 반드시 '조' 단위로 바꿔 쓴다.
-     (예: 30,000억 → "3조",  32,683억 → "3.27조",  51,782억 → "5.18조")
-   · 10,000억 미만이면 '억' 단위로 쓴다. (예: 8,500억)
-   · 입력 데이터의 수급 숫자는 '억원' 단위이므로, 위 규칙에 따라 변환해서 쓴다.
-   · 이 규칙은 채점표·프로의시선·돈의흐름 등 모든 항목에 동일하게 적용된다.
-
-각 항목 작성 지침:
-- 한줄평: 오늘 시장의 특징을 한 문장(공백 포함 40자 이내)으로 압축. 관제지수 옆에 붙는 짧은 총평.
-- 오늘의_시장: 지수·수급·주도섹터 숫자를 근거로 한 2~3문장 총평.
-- 오늘의_한문장: 오늘 시장이 준 '교훈'을 격언처럼 한 문장으로. 오래 기억에 남을 만큼
-  담백하고 묵직하게. 수치·종목명 없이 통찰만.
-- 프로의시선: 남들이 안 보는 3가지를 각각 짚는다. 반드시 아래 3개 키를 모두 채운다.
-  각 항목은 **4~5문장**으로 충분히 깊게 쓴다. 숫자 근거를 반드시 포함하고,
-  "그래서 이게 무슨 의미인지"까지 해석해준다. 짧게 끊지 말 것.
-  · 조용한_강세: 지수가 크게 움직인 날, 오히려 거의 안 움직였거나 반대로 간 곳을 짚는다.
-    종목·테마 이름과 등락률을 구체적으로 들고, 왜 그곳만 달랐는지 추론한다.
-  · 짖지_않은_개: 진짜 큰 변화라면 반응했어야 할 지표가 조용했던 점을 짚는다.
-    (환율·금리·특정 수급 주체 등) 무엇이 조용했고, 그 침묵이 무엇을 배제해주는지 설명한다.
-  · 다음_시나리오: 반드시 조건문(If-Then)으로. 관찰 대상을 종목·지표 이름으로 구체 지목하고,
-    과거에 비슷한 패턴이 어떻게 전개됐는지 한 문장 곁들인다. 예언이 아님을 명시.
-- 오늘의_공부: 주제를 **반드시 오늘 이 리포트 안에 실제로 실린 재료에서** 뽑는다.
-  ⚠️ 주제 선정 규칙 (가장 중요):
-    1) 아래 후보군에서만 고른다 — 오늘 입력 데이터에 실제로 존재하는 것만.
-       · 핵심뉴스·핵심이슈에 나온 사건 (정책·규제·기업 이슈)
-       · 오늘 수집된 공시의 종류 (유상증자·전환사채·자사주·대량보유 등)
-       · 매크로 수치 (환율·유가·금리) 중 오늘 눈에 띄게 움직인 것
-       · 오늘의 시황 현상 (사이드카·급등테마·수급 쏠림·거래대금 변화)
-       · 파생/프로그램 매매 데이터에 나타난 현상
-    2) 그중에서도 **초보 투자자가 오늘 이 리포트를 읽다가 "이게 뭐지?"** 하고
-       걸려 넘어질 만한 것을 우선한다. 이미 다 아는 상식적 용어는 피한다.
-    3) 오늘 데이터에 근거가 없는 개념은 절대 고르지 않는다.
-    4) ⚠️ **최근 반복 금지**: 입력 데이터에 '최근공부주제' 목록이 있으면
-       그 주제들과 **같거나 사실상 같은 개념은 절대 고르지 않는다.**
-       (예: 목록에 "사이드카"가 있으면 "매수 사이드카", "프로그램매매 호가 효력정지"도 금지)
-       매일 다른 것을 배우게 하는 것이 이 코너의 존재 이유다.
-       오늘 재료가 최근 주제와 겹치더라도, **다른 각도의 개념**을 찾아낸다.
-       (예: 또 사이드카가 터진 날이라면 → "서킷브레이커와 무엇이 다른가",
-        "프로그램매매 호가란 무엇인가", "변동성완화장치(VI)" 처럼 옆으로 한 칸 옮긴다)
-    5) "출제근거"에 그 재료가 리포트의 어느 코너에서 나왔는지 한 구로 적는다.
-       (예: "오늘의 공시 — OO의 전환사채 발행", "매크로 — 원/달러 1,4xx원 돌파")
-  아래 키를 모두 채운다. 초보자가 읽어도 이해되게, 생활 비유를 적극 활용한다.
-  · 출제근거: 이 주제를 오늘 리포트의 어디에서 뽑았는지 (25자 이내 한 구)
-  · 주제: 개념 이름 (짧은 명사구. 예시를 그대로 베끼지 말고 오늘 데이터에서 뽑을 것)
-  · 질문: 호기심을 자극하는 제목형 질문 (예: "왜 시장이 갑자기 5분간 멈출까?")
-  · 개념: 이게 무엇인지 2~3문장. 생활 비유 포함.
-  · 원리: 왜 그렇게 작동하는지 3~4문장. ①②③ 처럼 나눠 써도 좋다.
-  · 오늘연결: 오늘 데이터의 어느 지점과 연결되는지 2~3문장. 실제 숫자 인용.
-  · 한줄암기: 기억에 남을 한 문장 요약.
-  · 역사에서: 과거 비슷한 국면에서 이 개념이 어떻게 작동했는지 3~4문장.
-    구체적 시기(예: 2022년 금리 인상기)를 들되, 확실치 않은 수치는 쓰지 않는다.
-  · 투자적용: 이 개념을 실제 투자에 어떻게 쓰는지 점검 항목 3가지를 ①②③으로.
-    종목 추천이 아니라 '무엇을 확인할지'로 쓴다.
-  · 더깊이: 한 단계 더 들어간 내용 3~4문장. 혼동하기 쉬운 개념과의 차이를 짚어주면 좋다.
-    (예: 기준금리와 채권금리의 차이)
-- 매크로해설: 환율·유가·금리 각각에 대해 **초보자도 이해할 한 줄 해설**을 쓴다.
-  · 입력 데이터의 '매크로' 값(수치·등락률)만 근거로 쓴다. 없는 숫자를 지어내지 않는다.
-  · 각 1~2문장. "이 숫자가 오늘 우리 시장에 뭘 의미하는지"를 쉬운 말로.
-  · 어려운 용어를 쓰면 괄호로 풀어준다. 생활 비유를 써도 좋다.
-  · 오늘 지수·수급 흐름과 연결지으면 더 좋다.
-  (예시 톤 — 환율: "원화가 오히려 강세였습니다. 지수는 무너졌지만 외국인이 한국에서
-   돈을 빼간 건 아니라는 신호로 읽을 수 있습니다.")
-  (예시 톤 — 유가: "기름값이 뛰면 기업의 원가 부담이 커집니다. 물가를 자극해
-   금리 인하를 늦출 수 있다는 점이 부담입니다.")
-- 핵심이슈: 입력된 '뉴스원본' 제목들을 보고, 오늘 시장을 움직인 굵직한 이슈 3~4개를 뽑아
-  각각 태그(반도체/정책/수급/글로벌 등 적절히)와 1~2문장 설명으로 정리.
-- 핵심뉴스: 입력된 '뉴스원본' 중에서 **최대 8개**를 골라 정리한다. (많을수록 좋은 게 아니다)
-  ⚠️ 반드시 **중요한 순서대로** 배열한다. 1번이 가장 중요하고 뒤로 갈수록 덜 중요하다.
-     (뒤쪽 몇 개는 그날 상황에 따라 잘려나갈 수 있으므로, 순서가 곧 우선순위다)
-  ⚠️ 선정 기준 — 이 순서로 판단한다:
-    (가) **중복 배제 최우선**: 이 리포트의 다른 코너에서 이미 다룬 사안은 제외한다.
-         구체적으로 '오늘의_시장'·'핵심이슈'·'마감브리핑'·'공시해설'에 쓴 내용과
-         같은 사건을 다루는 뉴스는 뽑지 않는다. 같은 얘기를 두 번 읽게 하면 안 된다.
-    (나) 그러고 남은 것 중에서, 구독자가 **"이건 몰랐네"** 할 만한 것을 우선한다.
-         개별 기업 이슈, 정책·제도 변화, 해외 동향, 업종 구조 변화 등이 좋다.
-    (다) 지수가 몇 % 올랐다·내렸다 같은 시황 반복 기사는 최하 순위다.
-    (라) 8개를 못 채울 정도로 재료가 없으면 억지로 늘리지 말고 있는 만큼만 낸다.
-  ⚠️ 매우 중요 — 절대 규칙:
-    1) 제목이 겹치거나 같은 사안을 다루면 하나로 합친다.
-    2) 각 항목에 태그를 붙인다: 시황 / 정책 / 특징주 / 글로벌 중 하나.
-    3) 2~3문장으로 요약하되 직접 브리핑하듯 자연스럽게 쓴다("~했습니다" 체).
-    4) "링크"는 입력된 '뉴스원본'의 링크를 글자 하나 틀리지 않고 그대로 복사한다.
-       링크를 새로 만들거나 추측하거나 변형하는 것은 절대 금지.
-       합쳐진 여러 기사 중에서는 대표로 하나의 원본 링크만 사용한다.
-    5) '뉴스원본'이 비어 있으면 핵심이슈·핵심뉴스는 빈 배열 [] 로 둔다. 지어내지 않는다.
-    6) 제목은 원본 제목을 그대로 쓰지 말고, 무슨 일인지 바로 알 수 있게 다듬어 쓴다.
-- 마감브리핑: 입력된 '마감브리핑'(방송사별 자막)에서 **그 채널에서만 나온 관점**을 잡아낸다.
-  ⚠️⚠️ 가장 중요 — 뻔한 요약을 절대 쓰지 마라:
-    금지: "코스피가 급락했다", "사이드카가 발동됐다", "외국인이 팔았다",
-          "변동성이 크다", "방향성이 불투명하다" 같은 **뉴스에 이미 다 있는 사실**.
-          이런 문장은 '핵심이슈'·'핵심뉴스'와 중복되어 코너의 가치를 없앤다.
-    필수: 자막을 끝까지 읽고 **아래 중 하나 이상**을 찾아낸다.
-      · 구체적 기술적 레벨 (예: "120일선", "6,700선 지지", "윗꼬리 긴 주봉")
-      · 이름이 거론된 특정 종목·업종과 그 이유
-      · 남들과 다른 반대 의견이나 반박
-      · 인상적인 비유·표현
-      · 구체적 숫자로 제시된 기준 (예: "3거래일 안에", "거래대금 5조 넘으면")
-      · 실전 대응법 (분할 매수, 손절 라인 등 구체적 방법)
-    "이 방송을 본 사람만 아는 것"이 무엇인지 자문하고 그것을 써라.
-    정말 특별한 게 없다면 summary에 "오늘은 일반적인 시황 정리 위주였습니다"라고
-    솔직히 쓴다. 억지로 있는 척 포장하지 않는다.
-  ⚠️ 저작권 관련 절대 규칙 — 반드시 지켜라:
-    1) 자막 문장을 그대로 옮기는 것을 절대 금지한다. 한 문장도 복사하지 않는다.
-       반드시 내용을 이해한 뒤 완전히 다른 문장으로 다시 쓴다.
-    2) 따옴표를 사용한 직접 인용을 하지 않는다.
-    3) 각 채널당 2~3문장으로 압축한다. 방송 전체를 대체할 만큼 길게 쓰지 않는다.
-    4) angle에는 그 채널이 오늘 집중한 지점을 짧은 구로 넣는다.
-       ⚠️ "심층 분석", "수급 중심" 같은 뻔한 라벨 말고, 오늘 내용에 맞춘 구체적 표현으로.
-       (예: "120일선 공방", "선물 당일청산 패턴", "인버스 쏠림 경고")
-    5) "링크"는 입력된 링크를 그대로 복사한다. 변형 금지.
-    6) 자막이 비어 있는 채널은 summary를 빈 문자열로 둔다.
-    7) '마감브리핑' 입력이 비어 있으면 빈 배열 [] 로 둔다.
-- 관전포인트: 내일 확인할 관전 포인트 3개(①②③).
-  ⚠️ '프로의시선'과 반드시 성격이 달라야 한다. 겹치면 안 된다.
-    · 프로의시선 = 오늘 벌어진 일의 **해석**(왜 그랬나)
-    · 관전포인트 = 내일 **눈으로 확인할 체크리스트**(무엇을 보면 되나)
-  ⚠️ 반드시 **다음날 ○/× 로 채점 가능한 형태**로 써야 한다. 그래야 다음 리포트에서
-     '어제의 채점표'로 회수할 수 있다. 각 항목은 아래를 포함한다:
-    · 구체적 기준선(숫자) — 지수 레벨, 수급 금액, 거래대금, 등락률 중 하나 이상
-    · "무엇이 나오면 좋은 신호이고, 무엇이 나오면 나쁜 신호인지"를 함께 제시
-    예: "코스피가 6,700선을 회복하고 외국인 순매수가 5,000억 이상이면 반등 시도로,
-         6,600선이 깨지면 추가 하락 국면으로 봅니다."
-  해석·전망 서술이 아니라 **관찰 지시문**으로 쓴다. 2문장 이내.
-- 채점표: 입력 데이터에 '어제관전포인트'가 있으면, 각 항목을 오늘 실제 데이터로 채점한다.
-  · 결과는 "○"(맞음) / "×"(틀림) / "△"(부분 충족) 중 하나.
-  · 근거에는 **오늘의 실제 숫자**를 반드시 넣는다. (예: "코스피 6,690.62로 6,700선 미회복")
-  · 냉정하게 채점한다. 틀렸으면 틀렸다고 쓴다. 좋게 포장하지 않는다.
-  · '어제관전포인트'가 없으면 빈 배열 [] 로 둔다.
-- 돈의흐름: ⚠️ 위쪽 '지수+수급'에 이미 나온 숫자를 되풀이하지 마라.
-  여기서는 **선물과 프로그램매매**를 통해 "겉으로 안 보이는 돈의 성격"을 밝힌다.
-  · 현물선물조합: 외국인의 현물 순매수와 선물 순매수 **부호 조합**을 해석한다.
-    (입력 데이터의 '지수수급.코스피_수급.외국인'과 '파생.선물수급.외국인' 비교)
-      - 현물 매수 + 선물 매수 → 방향성 있는 진짜 매수. 확신이 실린 자금.
-      - 현물 매수 + 선물 매도 → 헤지를 깔고 산 것. 확신이 약하다는 뜻.
-      - 현물 매도 + 선물 매수 → 현물은 정리하되 반등에 대비. 바닥 신호일 수 있음.
-      - 현물 매도 + 선물 매도 → 방향성 있는 이탈. 가장 위험한 조합.
-    조합 이름을 짧게 붙이고(예: "헤지 동반 매수"), 무슨 뜻인지 2~3문장으로 설명한다.
-    ⚠️ 선물 데이터가 없으면 "확인 불가"로 쓰고 지어내지 않는다.
-  · 프로그램해석: 프로그램매매의 차익거래와 비차익거래를 구분해 설명한다.
-    입력의 '파생.프로그램매매'는 "차익거래_순매수", "비차익거래_순매수",
-    "전체_순매수" 같은 키를 가진다(단위: 억원). 이 숫자를 그대로 인용한다.
-      - 차익거래 = 선물과 현물의 가격차를 노린 **기계적 매매**. 방향성 의미 없음.
-      - 비차익거래 = 선물과 무관한 바스켓 매매. **실제 방향성 베팅**.
-    둘 중 어느 쪽이 컸는지 밝히고, 그에 따라 해석이 어떻게 달라지는지 짚는다.
-    2~3문장. ⚠️ 입력에 '파생.프로그램매매'가 없거나 null이면 이 항목은 **빈 문자열 ""**로 둔다.
-    ("확인 불가" 같은 문장을 쓰지 않는다 — 데이터가 없으면 리포트에서 코너 자체가 사라진다)
-  · 숨은한줄: 위 두 가지를 종합해, 표면 수급만 봐서는 알 수 없는 결론을 한 문장으로.
-    (예: "외국인은 팔았지만 선물은 사들였습니다 — 완전한 이탈로 보긴 이릅니다")
-
-  · 체크포인트: 이 관점에서 내일 확인할 것 1가지를 짧게.
-- 공시해설: 입력 데이터의 '공시' 목록 중 **상위 5건 각각**에 대해 한 줄 해설을 단다.
-  · 회사명을 키로, 한 줄 설명을 값으로 하는 객체를 만든다.
-  · 그 공시가 왜 눈여겨볼 만한지 초보자도 알게 1문장으로. 공시명을 그대로 반복하지 말 것.
-  · 방향 예측(오른다/내린다)은 금지. "변동 가능성이 있다" 수준의 관찰 표현만.
-  · 예: {"두산지오솔루션": "새 주식을 발행해 자금을 조달합니다. 기존 주주 지분이 희석될 수 있어 규모와 목적을 함께 봐야 합니다."}
-
-── 톤 예시 (이 결을 따를 것. 그대로 베끼지는 말 것) ──
-
-[한줄평 예시]
-- "반도체발 수급 사고, 양대 시장 사이드카"
-- "지수는 올랐지만, 오른 종목은 적었다"
-- "외국인이 돌아온 하루, 다만 조용하게"
-
-[오늘의_한문장 예시]
-- "급등도 급락도, 결국 같은 수급 쏠림의 양면이다."
-- "지수가 오른 날과 내 계좌가 오른 날은 다르다."
-- "시장이 조용할 때 움직이는 돈이, 시끄러울 때 값을 매긴다."
-
-위 예시처럼 — 짧고, 대구를 이루고, 여운이 남게. 감탄사·수식어·상투어는 빼고
-명사와 동사만으로 승부한다. "~하는 것이 중요합니다" 같은 훈계조는 쓰지 않는다.
-
-⚠️⚠️ 가장 중요한 규칙: 아래 형식의 12개 항목을 **하나도 빠짐없이 전부** 출력하라.
-항목이 많다고 중간에 생략하면 안 된다. 특히 "오늘의_공부"를 자주 빠뜨리는데,
-반드시 포함해야 한다. 데이터가 부족한 항목도 빈 값으로라도 키는 반드시 넣는다.
-
-출력 형식(JSON만):
-{
-  "한줄평": "...",
-  "오늘의_시장": "...",
-  "오늘의_한문장": "...",
-  "프로의시선": {
-    "조용한_강세": "...",
-    "짖지_않은_개": "...",
-    "다음_시나리오": "..."
-  },
-  "오늘의_공부": {
-    "출제근거": "오늘 리포트의 어느 코너에서 뽑았는지",
-    "주제": "...", "질문": "...", "개념": "...",
-    "원리": "...", "오늘연결": "...", "한줄암기": "...",
-    "역사에서": "...", "투자적용": "...", "더깊이": "..."
-  },
-  "공시해설": {"회사명": "한 줄 해설"},
-  "매크로해설": {
-    "환율": "...",
-    "유가": "...",
-    "금리": "..."
-  },
-  "핵심이슈": [
-    {"태그": "반도체", "내용": "..."}
-  ],
-  "핵심뉴스": [
-    {"태그": "시황", "제목": "...", "요약": "...", "링크": "입력 데이터의 원본 링크 그대로"}
-  ],
-  "마감브리핑": [
-    {"채널": "...", "angle": "수급 중심", "제목": "...", "summary": "재구성한 2~3문장", "링크": "원본 링크 그대로"}
-  ],
-  "관전포인트": ["①...", "②...", "③..."],
-  "채점표": [
-    {"항목": "어제 관전포인트 원문", "결과": "○", "근거": "오늘 실제 숫자로"}
-  ],
-  "돈의흐름": {
-    "조합이름": "예: 헤지 동반 매수 / 방향성 이탈 / 확인 불가",
-    "현물선물조합": "...",
-    "프로그램해석": "...",
-    "숨은한줄": "...",
-    "체크포인트": "..."
-  }
+# collect_data.py 와 동일한 사전(설명 붙이기용). 여기서도 참조.
+THEME_DICT = {
+    "S7": "반도체 소부장 그룹", "자원개발": "해외 광물·에너지 자원", "LNG": "액화천연가스",
+    "MLCC": "적층세라믹콘덴서(전자부품)", "OLED": "유기발광 디스플레이", "면역항암제": "암 치료 신약",
+    "CXL": "차세대 메모리 연결기술", "HBM": "고대역폭 메모리", "전력설비": "송배전·전력 인프라",
+    "마이크로 LED": "차세대 디스플레이", "PCB": "인쇄회로기판", "리튬": "2차전지 핵심 원료",
+    "희토류": "첨단산업 필수 광물", "탄소나노튜브": "차세대 소재",
 }
-"""
+THEME_SUFFIX = {"로봇": "(산업용/협동로봇)", "지능형로봇/인공지능(AI)": "(산업용/협동로봇)"}
 
 
-def load_previous_watchpoints():
-    """가장 최근 발행분(어제 등)의 관전포인트를 불러온다.
-    저장소에 report_YYYYMMDD.json 이 쌓이므로 그중 오늘 것을 뺀 최신 파일을 쓴다."""
-    import glob
-    files = sorted(glob.glob("report_*.json"))
-    files = [f for f in files if DATE not in f]
-    if not files:
-        print("ℹ️ 이전 발행분이 없어 '어제의 채점표'는 생략됩니다.")
+def load_json(path):
+    if not os.path.exists(path):
         return None
-    prev = files[-1]
-    try:
-        with open(prev, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        포인트 = (d.get("해석글") or {}).get("관전포인트")
-        if not 포인트:
-            return None
-        날짜 = d.get("날짜", "")
-        표기 = f"{날짜[:4]}.{날짜[4:6]}.{날짜[6:]}" if len(날짜) == 8 else 날짜
-        print(f"📋 이전 발행({표기}) 관전포인트 {len(포인트)}개 불러옴 → 채점 대상")
-        return {"날짜": 표기, "관전포인트": 포인트}
-    except Exception as e:
-        print(f"⚠️ 이전 발행분 읽기 실패: {type(e).__name__}")
-        return None
-
-
-def slim_data(data):
-    """Claude에게 보낼 데이터를 줄인다.
-
-    코너가 늘면서 data json이 비대해졌다(매집 레이더만 69종목 등).
-    화면에는 상위 몇 개만 쓰는데 전부 보내면
-      · 입력 토큰이 커져 비용이 오르고
-      · 모델이 핵심을 놓치기 쉬우며
-      · 출력이 max_tokens에 걸려 잘릴 위험이 커진다.
-    해석에 필요한 만큼만 잘라서 보낸다.
-    """
-    d = json.loads(json.dumps(data, ensure_ascii=False))   # 원본 보호
-
-    # 주도섹터: 종목은 3개씩이면 해석에 충분
-    for s in d.get("주도섹터", []) or []:
-        if isinstance(s.get("종목"), list):
-            s["종목"] = s["종목"][:3]
-
-    # 강세 레이더: 신규 각 5개, 추적 5개
-    강 = d.get("강세레이더") or {}
-    for k, v in (강.get("신규") or {}).items():
-        강["신규"][k] = v[:5]
-    if isinstance(강.get("추적"), list):
-        강["추적"] = 강["추적"][:5]
-
-    # 매집 레이더: 두 랭킹에 실제로 쓰이는 상위만 (69종목 → 최대 10종목)
-    매 = d.get("매집레이더") or {}
-    종목 = 매.get("종목") or []
-    if 종목:
-        상위금액 = sorted(종목, key=lambda x: x.get("시총대비", 0), reverse=True)[:5]
-        상위갭 = sorted([s for s in 종목 if s.get("매집갭") is not None],
-                      key=lambda x: x["매집갭"], reverse=True)[:5]
-        본 = {id(s): s for s in 상위금액 + 상위갭}
-        매["종목"] = list(본.values())
-        매["전체종목수"] = len(종목)
-
-    # 공시: 상위 8건이면 해설을 붙이기에 충분
-    if isinstance(d.get("공시"), list):
-        d["공시"] = d["공시"][:8]
-
-    # 뉴스 원본은 그대로 (핵심뉴스 생성에 전부 필요)
-    return d
-
-
-def load_data():
-    if not os.path.exists(DATA_PATH):
-        print(f"❌ {DATA_PATH} 파일이 없습니다. collect_data.py를 먼저 실행하세요.")
-        sys.exit(1)
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def extract_text(response):
-    """응답에서 '진짜 글'만 뽑아낸다.
 
-    ⚠️ 중요: 최신 모델은 생각(thinking) 블록을 함께 돌려줄 수 있다.
-    그래서 content[0] 을 그냥 집으면 생각 블록을 집을 위험이 있다.
-    반드시 type == 'text' 인 블록만 골라야 한다.
+def dev_note(text):
+    """개발용 조건 표시. SHOW_CRITERIA=False면 아무것도 출력하지 않는다."""
+    if not SHOW_CRITERIA:
+        return ""
+    return f'<p class="devnote">⚙️ <b>적용 조건</b> · {text}</p>'
+
+
+def esc_url(u):
+    """URL을 href에 넣기 전에 &를 &amp;로 바꾼다.
+    ⚠️ 이걸 안 하면 '&section_id'의 '&sect'를 브라우저가 § 기호로 해석해
+    링크가 깨진다(실제로 겪었던 버그)."""
+    if not u:
+        return "#"
+    return html.escape(str(u), quote=True)
+
+
+def idx_dir_class(지수):
+    """지수 카드 등락 색상 — 국내 HTS 문법(상승=빨강, 하락=파랑).
+
+    ⚠️ 예전 코드는 '등락방향'에 '-'가 들어있는지 봤는데, 이 값은 '상승'/'하락'
+       한글이라 마이너스 기호가 없다. 그래서 하락한 날도 빨강으로 나왔다.
+       이제 등락률의 부호를 먼저 보고, 없으면 방향 글자로 판단한다.
     """
-    조각들 = []
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            조각들.append(block.text)
-    return "\n".join(조각들).strip()
-
-
-def parse_json(raw_text):
-    """```json 감싸기 등을 벗겨내고 JSON으로 변환."""
-    t = raw_text.replace("```json", "").replace("```", "").strip()
-    # 혹시 앞뒤에 잡소리가 붙었으면 첫 { 부터 마지막 } 까지만 취한다
-    시작 = t.find("{")
-    끝 = t.rfind("}")
-    if 시작 != -1 and 끝 != -1:
-        t = t[시작:끝 + 1]
-    return json.loads(t)
-
-
-def recent_study_topics(일수=12):
-    """최근 리포트에서 '오늘의 공부' 주제를 모아 온다.
-
-    ⚠️ 왜 필요한가: 같은 재료(예: 사이드카)가 며칠 연속 터지면 Claude가
-       매번 같은 주제를 고른다. 실제로 5일 중 4일이 사이드카였다.
-       최근에 다룬 주제를 알려줘서 겹치지 않게 만든다.
-    """
-    주제들 = []
+    률 = str(지수.get("등락률", "")).strip()
+    if 률.startswith("-") or 률.startswith("−"):
+        return "ic-chg-dn"
+    방향 = str(지수.get("등락방향", ""))
+    if "하락" in 방향 or "▼" in 방향:
+        return "ic-chg-dn"
     try:
-        파일들 = sorted(
-            [f for f in os.listdir(".") if re.fullmatch(r"report_\d{8}\.json", f)],
-            reverse=True)[:일수]
-    except Exception:
-        return 주제들
-    for f in 파일들:
-        try:
-            with open(f, encoding="utf-8") as fp:
-                공부 = (json.load(fp).get("해석글") or {}).get("오늘의_공부") or {}
-            t = (공부.get("주제") or "").strip()
-            if t and t not in 주제들:
-                주제들.append(t)
-        except Exception:
-            continue
-    return 주제들
+        if float(률.replace(",", "")) < 0:
+            return "ic-chg-dn"
+    except ValueError:
+        pass
+    return "ic-chg-up"
 
 
-def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
-    슬림 = slim_data(data)
-    최근주제 = recent_study_topics()
-    if 최근주제:
-        슬림["최근공부주제"] = 최근주제        # 이 주제들은 다시 고르지 말 것
-        if 시도 == 1:
-            print(f"   📚 최근 공부 주제 {len(최근주제)}개 회피 대상: {', '.join(최근주제[:5])}"
-                  + (" ..." if len(최근주제) > 5 else ""))
-    본문 = json.dumps(슬림, ensure_ascii=False, indent=2)
-    if 시도 == 1:
-        원본크기 = len(json.dumps(data, ensure_ascii=False))
-        print(f"📦 입력 크기: 원본 {원본크기:,}자 → 슬림 {len(본문):,}자 "
-              f"({100 - len(본문)*100//max(1,원본크기)}% 감소)")
-    user_message = "오늘 수집된 시장 데이터는 다음과 같다:\n\n" + 본문
-
-    kwargs = dict(
-        model=MODEL,
-        max_tokens=max_tok,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    # ⭐ effort=low: 이 작업은 복잡한 추론이 아니라 "정해진 형식으로 글쓰기"라
-    #    깊게 생각할 필요가 없다. 기본값(high)은 '생각' 토큰을 많이 써서
-    #    - 답변이 max_tokens 안에서 끊길 위험을 높이고
-    #    - 비용도 불필요하게 올린다.
-    #    low로 낮추면 두 문제가 동시에 줄어든다.
-    if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
-        kwargs["output_config"] = {"effort": "low"}
-
-    response = client.messages.create(**kwargs)
-
-    # ⚠️ 답변이 중간에 끊겼으면 한도를 올려 다시 시도한다.
-    #    (예전엔 같은 한도로 재시도해서 똑같이 실패했다 — 무의미한 재시도)
-    if response.stop_reason == "max_tokens":
-        if 시도 < 3 and max_tok < MAX_TOKENS_CAP:
-            새한도 = min(max_tok * 2, MAX_TOKENS_CAP)
-            print(f"⚠️ 답변이 max_tokens({max_tok:,})에 걸려 잘렸습니다 "
-                  f"→ {새한도:,}로 올려 재시도합니다 ({시도}/2)")
-            time.sleep(1)
-            return ask_claude(data, 시도 + 1, 새한도)
-        print(f"❌ max_tokens {max_tok:,}로도 답변이 잘립니다. "
-              f"SYSTEM_PROMPT의 항목 수나 분량을 줄여야 합니다.")
-
-    raw = extract_text(response)
-    try:
-        return parse_json(raw)
-    except json.JSONDecodeError:
-        if 시도 < 3:
-            print("⚠️ JSON 형식이 아니어서 한 번 더 시도합니다...")
-            time.sleep(2)
-            return ask_claude(data, 시도 + 1, min(max_tok * 2, MAX_TOKENS_CAP))
-        print("❌ JSON 파싱 실패. 받은 응답 끝부분:")
-        print("   ..." + raw[-300:])
-        raise
+def money_class(text):
+    """수급 값의 부호로 색상 클래스 결정. +는 up(빨강), -는 dn(파랑)."""
+    v = _to_float(text)
+    if v is None:
+        # 숫자 변환 실패 시 문자열 기호로 폴백
+        t = str(text)
+        if "-" in t or "−" in t:
+            return "dn"
+        if "+" in t:
+            return "up"
+        return "smut"
+    if v > 0:
+        return "up"
+    if v < 0:
+        return "dn"
+    return "smut"
 
 
-REQUIRED_FIELDS = ["한줄평", "오늘의_시장", "오늘의_한문장", "프로의시선",
-                   "오늘의_공부", "공시해설", "매크로해설", "핵심이슈",
-                   "핵심뉴스", "마감브리핑", "관전포인트", "돈의흐름"]
-
-
-def check_fields(글):
-    """Claude가 항목을 빠뜨렸는지 검사한다.
-    항목이 많아지면 가끔 하나씩 누락되는데, 조용히 넘어가면
-    리포트에 '준비중'이 뜬 채로 발행돼 버린다."""
-    빠짐 = [f for f in REQUIRED_FIELDS if not 글.get(f)]
-    if 빠짐:
-        print(f"⚠️ 다음 항목이 비어 있습니다: {', '.join(빠짐)}")
-    else:
-        print("✅ 모든 항목 정상 생성됨")
-    return 빠짐
-
-
-def fill_missing(글, data, 빠짐):
-    """비어 있는 항목만 골라 한 번 더 요청해 채운다.
-    전체를 재생성하는 것보다 비용이 훨씬 적고, 이미 잘 나온 항목은 그대로 둔다."""
-    if not 빠짐:
-        return 글
-    print(f"🔄 빠진 항목 {len(빠짐)}개를 보충 요청합니다...")
-    요청 = (
-        "아래 시장 데이터를 보고, 다음 항목만 작성해서 JSON으로만 답하라.\n"
-        f"작성할 항목: {', '.join(빠짐)}\n\n"
-        "형식·톤 규칙은 시스템 프롬프트와 동일하다. 다른 항목은 넣지 마라.\n\n"
-        + json.dumps(data, ensure_ascii=False, indent=2)
-    )
-    try:
-        kwargs = dict(model=MODEL, max_tokens=4000, system=SYSTEM_PROMPT,
-                      messages=[{"role": "user", "content": 요청}])
-        if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
-            kwargs["output_config"] = {"effort": "low"}
-        resp = client.messages.create(**kwargs)
-        보충 = parse_json(extract_text(resp))
-        for k in 빠짐:
-            if 보충.get(k):
-                글[k] = 보충[k]
-                print(f"   ✅ {k} 보충 완료")
-    except Exception as e:
-        print(f"   ⚠️ 보충 실패({type(e).__name__}) — 해당 항목은 비어 있는 채로 발행됩니다.")
-    return 글
-
-
-def _article_key(url):
-    """뉴스 URL에서 기사 식별자만 뽑는다. (article_id + office_id)
-    Claude가 링크를 미세하게 다르게 복사해도 같은 기사로 인식하기 위함."""
-    if not url:
+def _to_float(x):
+    if x is None:
         return None
-    a = re.search(r"article_id=(\d+)", url)
-    o = re.search(r"office_id=(\d+)", url)
-    if a and o:
-        return f"{o.group(1)}:{a.group(1)}"
-    return url.strip()
+    s = str(x).replace(",", "").replace("%", "").replace("+", "").replace("−", "-").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
-def fix_units(obj):
-    """Claude가 '3만억'처럼 잘못 쓴 금액 표기를 '3조'로 자동 교정한다.
-    프롬프트로 지시해도 가끔 틀리므로 코드에서 한 번 더 잡는다.
-    (10,000억 = 1조)"""
-    def 고치기(t):
-        # "3만억", "3만 억", "3.2만억" → 조 단위
-        def repl(m):
-            v = float(m.group(1))
-            return f"{v:g}조"
-        t = re.sub(r"(\d+(?:\.\d+)?)\s*만\s*억", repl, t)
-        # "32,683억" 처럼 1만 이상인 억 표기 → 조
-        def repl2(m):
-            num = float(m.group(1).replace(",", ""))
-            if num >= 10000:
-                조 = num / 10000
-                return f"{조:.2f}조".replace(".00조", "조")
-            return m.group(0)
-        t = re.sub(r"([\d,]+(?:\.\d+)?)\s*억", repl2, t)
-        return t
-
-    if isinstance(obj, str):
-        return 고치기(obj)
-    if isinstance(obj, list):
-        return [fix_units(x) for x in obj]
-    if isinstance(obj, dict):
-        return {k: fix_units(v) for k, v in obj.items()}
-    return obj
+def fmt_flow(억값):
+    """네이버 수급(억원 단위 숫자) → '+3.66조' 또는 '+1,565억' 로 표시."""
+    v = _to_float(억값)
+    if v is None:
+        return "—"
+    sign = "+" if v > 0 else ("−" if v < 0 else "")
+    a = abs(v)
+    if a >= 10000:  # 1조 이상
+        return f"{sign}{a/10000:.2f}조"
+    return f"{sign}{a:,.0f}억"
 
 
-def verify_news_links(글, data_원본):
-    """Claude가 만든 링크를 원본과 대조한다.
-    ⚠️ 예전엔 '문자열 완전일치'로 비교해서, 링크가 한 글자만 달라도
-    뉴스가 통째로 사라졌다. 이제는 기사 ID로 매칭하고,
-    매칭되면 링크를 '원본 그대로'로 교체해 항상 정확한 주소가 나가게 한다."""
-    원본목록 = data_원본.get("뉴스원본") or []
-    원본맵 = {_article_key(item["링크"]): item["링크"] for item in 원본목록}
+def fmt_price(값):
+    """현재가 → 콤마 표시. '259500' → '259,500'."""
+    v = _to_float(값)
+    if v is None:
+        return str(값) if 값 not in (None, "") else "—"
+    return f"{v:,.0f}"
 
-    핵심뉴스 = 글.get("핵심뉴스", [])
-    검증됨, 걸러짐 = [], 0
-    for item in 핵심뉴스:
-        key = _article_key(item.get("링크"))
-        if key in 원본맵:
-            item["링크"] = 원본맵[key]   # 원본 링크로 복구
-            검증됨.append(item)
+
+def fmt_trade(값):
+    """거래대금(네이버 테마상세는 '백만원' 단위) → 조/억 표시.
+    예: 2801739(백만) → 2.80조 / 25005(백만) → 250억."""
+    v = _to_float(값)
+    if v is None:
+        return "—"
+    억 = v / 100  # 100백만 = 1억
+    if 억 >= 10000:
+        return f"{억/10000:.2f}조"
+    if 억 >= 1:
+        return f"{억:,.0f}억"
+    return f"{v:,.0f}백만"
+
+
+def stars_html(score):
+    score = score or 2
+    return "★" * score + '<span class="off">' + "★" * (5 - score) + "</span>"
+
+
+def theme_label(테마명):
+    """테마명 + (설명/부가). 사전에 있으면 설명, 없으면 원본만."""
+    suffix = THEME_SUFFIX.get(테마명, "")
+    desc = THEME_DICT.get(테마명, "")
+    label = f'<span class="sc-name">{테마명}</span>'
+    if suffix:
+        label += f'<span class="sc-sfx">{suffix}</span>'
+    elif desc:
+        label += f'<span class="sc-sfx">({desc})</span>'
+    return label
+
+
+# ── 게이지 ──────────────────────────────────────────────
+def build_gauge(gauge, 오늘한줄평):
+    if not gauge:
+        return '<div class="gauge-box"><p style="color:#9aa0a8">⏳ 관제지수 데이터 없음</p></div>'
+    점수 = gauge["점수"]
+    구간 = gauge["구간"]
+    이모지 = gauge["이모지"]
+
+    # 산정기준 표
+    행들 = []
+    for d in gauge.get("상세", []):
+        행들.append(f'''
+      <div class="gz-row">
+        <span class="gz-el">{d['요소']}</span>
+        <span class="gz-sc">{d['점수']}점</span>
+        <span class="gz-w">가중 {d['가중치']}%</span>
+        <span class="gz-ev">{d['근거']}</span>
+      </div>''')
+    기준표 = "".join(행들)
+
+    # 눈금 위 바늘 위치 (%)
+    needle = max(0, min(100, 점수))
+
+    # 한줄평 근거 배지
+    배지들 = gauge.get("배지", [])
+    배지HTML = ""
+    if 배지들:
+        배지HTML = '<div class="gz-badges">' + "".join(
+            f'<span class="gz-badge">{b}</span>' for b in 배지들) + '</div>'
+
+    return f'''
+  <div class="gauge-box">
+    <div class="gz-top">
+      <div class="gz-numwrap"><p class="gz-num">{점수}</p><p class="gz-lab">{구간} {이모지}</p></div>
+      <div class="gz-bodywrap">
+        <p class="gz-title">📡 관제지수 (0~100) — 오늘 시장의 온도</p>
+        <div class="gz-track">
+          <div class="gz z1"></div><div class="gz z2"></div><div class="gz z3"></div><div class="gz z4"></div><div class="gz z5"></div>
+          <div class="gz-needle" style="left:{needle}%"></div>
+        </div>
+        <div class="gz-scale"><span>혹한</span><span>한파</span><span>보통</span><span>온기</span><span>과열</span></div>
+      </div>
+    </div>
+    <p class="gz-oneline">📝 <b>한줄평:</b> {오늘한줄평}</p>
+    {배지HTML}
+    <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
+    <div class="hidden-block" id="gzDetail">
+      <div class="gz-detail">{기준표}
+        <p class="gz-note">※ 각 요소를 0~100으로 환산해 가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>
+      </div>
+    </div>
+  </div>'''
+
+
+# ── 주도 섹터 6개 ────────────────────────────────────────
+def one_sector_card(a):
+    rows = []
+    for s in a.get("종목", [])[:4]:
+        rate = str(s.get("등락률", "—"))
+        cls = "dn" if ("-" in rate or "−" in rate) else "up"
+        rows.append(f'''
+        <div class="sc-row"><span class="sc-stock">{s.get('종목명','—')}</span>
+          <span class="sc-price">{fmt_price(s.get('현재가'))}</span>
+          <span class="sc-rate {cls}">{rate}</span>
+          <span class="sc-vol">{fmt_trade(s.get('거래대금'))}</span></div>''')
+    et = a.get("테마등락")
+    et_s = f"{et:+.2f}%" if isinstance(et, (int, float)) else "—"
+    badge_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
+    head_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
+    점수 = a.get("주도력점수", "—")
+    return f'''
+    <div class="sector-card">
+      <div class="sc-head {head_cls}">
+        <div class="sc-name-row">{theme_label(a['테마명'])}
+          <span class="sc-chg {badge_cls}">{et_s}</span></div>
+        <p class="sc-score">주도력 {점수}점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        {"".join(rows)}
+      </div>
+    </div>'''
+
+
+# ── 섹터 지형도 (0선 기준 세로 막대, 데이터에 맞춰 자동 스케일) ──
+def build_terrain(주도섹터):
+    """주도섹터 6개의 테마 등락률로 막대 차트를 그린다.
+
+    ⚠️ 예전 방식의 두 가지 문제를 고쳤다.
+      ① 0선을 항상 한가운데(50%)에 고정 → 오늘처럼 6개가 전부 상승이면
+         아래 절반이 통째로 빈 공간이 됐다.
+      ② 막대 높이를 '등락률 × 8px'로 고정 → 등락률이 크면 막대가 영역을
+         뚫고 올라가 숫자가 제목과 겹쳤다.
+
+    새 방식: 0선 위치와 막대 높이를 **오늘 데이터에 맞춰 비율로 계산**한다.
+      · 전부 상승이면 0선을 바닥으로 내려 위쪽을 다 쓴다 (빈 공간 없음)
+      · 전부 하락이면 0선을 천장으로 올린다
+      · 섞여 있으면 양수·음수 최대치 비율대로 0선을 배치한다
+      · 가장 큰 막대가 그리는 영역을 꽉 채우되, 숫자가 앉을 자리(라벨 밴드)를
+        위아래에 미리 비워둬서 절대 겹치지 않는다
+      · 모든 값이 %라서 모바일에서 영역 높이가 줄어도 그대로 맞는다
+    """
+    if not 주도섹터:
+        return ""
+    항목 = []
+    for a in 주도섹터[:6]:
+        et = a.get("테마등락")
+        v = float(et) if isinstance(et, (int, float)) else 0.0
+        항목.append((a.get("테마명", ""), v))
+    if not 항목:
+        return ""
+
+    최대양 = max([v for _, v in 항목 if v > 0], default=0.0)
+    최대음 = max([-v for _, v in 항목 if v < 0], default=0.0)
+    합 = 최대양 + 최대음
+    if 합 <= 0:                      # 전부 0인 예외 상황
+        최대양, 합 = 1.0, 1.0
+
+    # 숫자가 앉을 자리를 위아래에 확보 (해당 방향에 막대가 있을 때만)
+    위여백 = 15.0 if 최대양 > 0 else 3.0
+    아래여백 = 15.0 if 최대음 > 0 else 3.0
+    그림영역 = 100.0 - 위여백 - 아래여백
+    영점 = 위여백 + (최대양 / 합) * 그림영역      # 위에서부터 % — 0선 위치
+
+    cols = []
+    for name, v in 항목:
+        h = max(1.5, abs(v) / 합 * 그림영역)      # 막대 높이(%)
+        if v >= 0:
+            바닥 = 100.0 - 영점
+            bar = f'<div class="bar pos" style="bottom:{바닥:.1f}%;height:{h:.1f}%"></div>'
+            val = (f'<span class="bar-val pos" '
+                   f'style="bottom:calc({바닥 + h:.1f}% + 2px)">{v:+.1f}%</span>')
         else:
-            걸러짐 += 1
-    if 걸러짐:
-        print(f"⚠️ 핵심뉴스 {걸러짐}건은 원본에 없는 링크라 제외했습니다.")
-    # ── 노출 개수를 매일 5~8개 사이에서 다르게 정한다 ──
-    #   같은 형식이 매일 똑같이 반복되면 리포트가 지루해지므로 길이에 변주를 준다.
-    #   Claude가 중요도 순으로 정렬해 보내므로, 뒤에서부터 자른다.
-    목표 = random.randint(5, 8)
-    if len(검증됨) > 목표:
-        print(f"   🎲 오늘 노출 개수 {목표}개 (확보 {len(검증됨)}건 중 상위만)")
-        검증됨 = 검증됨[:목표]
-    print(f"   핵심뉴스 {len(검증됨)}건 확정")
-    글["핵심뉴스"] = 검증됨
+            bar = f'<div class="bar neg" style="top:{영점:.1f}%;height:{h:.1f}%"></div>'
+            val = (f'<span class="bar-val neg" '
+                   f'style="top:calc({영점 + h:.1f}% + 2px)">{v:+.1f}%</span>')
+        disp = name if len(name) <= 6 else name[:5] + "…"
+        cols.append(f'''
+      <div class="bar-col">
+        <div class="bar-zone" style="--zero:{영점:.1f}%">{val}{bar}</div>
+        <p class="bar-name">{disp}</p>
+      </div>''')
+    return f'''
+  <div class="terrain-box">
+    <p class="terrain-title">📊 오늘의 섹터 지형도 — 주도 6개 업종 등락률</p>
+    <div class="bar-chart">{"".join(cols)}</div>
+  </div>'''
 
-    # 마감브리핑 링크도 동일하게 대조 (유튜브는 videoId로)
-    원본브리핑 = {}
-    for b in (data_원본.get("마감브리핑") or []):
-        vid = re.search(r"v=([\w-]+)", b["링크"])
-        원본브리핑[vid.group(1) if vid else b["링크"]] = b["링크"]
-    브리핑 = 글.get("마감브리핑", [])
-    if 원본브리핑:
-        통과 = []
-        for b in 브리핑:
-            vid = re.search(r"v=([\w-]+)", b.get("링크", "") or "")
-            k = vid.group(1) if vid else b.get("링크")
-            if k in 원본브리핑:
-                b["링크"] = 원본브리핑[k]
-                통과.append(b)
-        if len(통과) != len(브리핑):
-            print(f"⚠️ 마감브리핑 {len(브리핑)-len(통과)}건 제외됨(링크 불일치)")
-        글["마감브리핑"] = 통과
-    return 글
+
+def build_sectors(주도섹터, 설정=None):
+    if not 주도섹터:
+        return '<p class="smut">오늘 수집된 주도 섹터 데이터가 없습니다.</p>'
+    앞2 = 주도섹터[:2]
+    뒤4 = 주도섹터[2:6]
+    앞 = "".join(one_sector_card(a) for a in 앞2)
+    뒤 = "".join(one_sector_card(a) for a in 뒤4)
+    더보기 = ""
+    if 뒤4:
+        더보기 = f'''
+  <div class="hidden-block" id="moreSectors"><div class="sector-grid">{뒤}</div></div>
+  <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 ({len(뒤4)}개)')">▾ 주도 섹터 더보기 ({len(뒤4)}개)</button>'''
+    return f'<div class="sector-grid">{앞}</div>{더보기}'
+
+
+# ── 공시 ─────────────────────────────────────────────────
+def build_disclosures(disc, 공시해설=None):
+    공시해설 = 공시해설 or {}
+    if not disc:
+        return '<p class="disc-note" style="color:#8a909a">오늘 수집된 관심 유형 공시가 없습니다.</p>'
+
+    def 한줄(item):
+        회사 = item['회사명']
+        해설 = 공시해설.get(회사, "")
+        해설HTML = f'<p class="disc-why">💡 {해설}</p>' if 해설 else ''
+        return f'''
+    <a class="disc-row" href="{esc_url(item['링크'])}" target="_blank">
+      <div class="disc-head"><span class="disc-name">{회사}</span>
+        <span class="stars">{stars_html(item['별점'])}</span></div>
+      <p class="disc-note">{item['공시명']} <span class="disc-lnk">↗ 상세보기</span></p>
+      {해설HTML}
+    </a>'''
+
+    앞3 = "".join(한줄(i) for i in disc[:3])
+    뒤 = disc[3:8]
+    if not 뒤:
+        return 앞3
+    뒤HTML = "".join(한줄(i) for i in 뒤)
+    return f'''{앞3}
+    <div class="hidden-block" id="moreDisc">{뒤HTML}</div>
+    <button class="more-btn dark" onclick="toggleMore('moreDisc',this,'▾ 공시 {len(뒤)}개 더보기')">▾ 공시 {len(뒤)}개 더보기</button>'''
+
+
+# ── 오늘의 공부 (단계별) ──
+def build_study(공부):
+    if not 공부:
+        return '<div class="pending">⏳ 오늘의 공부 — 생성 실패</div>'
+    if isinstance(공부, str):  # 예전 형식(문자열)도 안전하게 처리
+        return f'<div class="study-box">📚 {공부}</div>'
+    단계 = [("개념", 공부.get("개념", "")), ("원리", 공부.get("원리", "")),
+            ("오늘 연결", 공부.get("오늘연결", ""))]
+    행들 = "".join(
+        f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
+        for k, v in 단계 if v)
+    암기 = 공부.get("한줄암기", "")
+    근거 = 공부.get("출제근거", "")
+    심화단계 = [("역사에서", 공부.get("역사에서", "")),
+              ("투자 적용", 공부.get("투자적용", "")),
+              ("더 깊이", 공부.get("더깊이", ""))]
+    심화행 = "".join(
+        f'<div class="study-step"><span class="study-k">{k}</span><span>{v}</span></div>'
+        for k, v in 심화단계 if v)
+    심화HTML = ""
+    if 심화행:
+        심화HTML = f'''
+    <div class="hidden-block" id="moreStudy" style="margin-top:.6rem">{심화행}</div>
+    <button class="more-btn" onclick="toggleMore('moreStudy',this,'▾ 심화 학습 더보기 (역사·투자 적용)')">▾ 심화 학습 더보기 (역사·투자 적용)</button>'''
+
+    return f'''
+  <div class="study-box">
+    <p class="study-no">📚 오늘 리포트에서 출제 · {공부.get("주제","")}</p>
+    {f'<p class="study-src">📍 출처: {근거}</p>' if 근거 else ''}
+    <p class="study-term">{공부.get("질문","")}</p>
+    {행들}
+    {f'<div class="study-memo">✏️ 한 줄 암기: {암기}</div>' if 암기 else ''}
+  </div>{심화HTML}'''
+
+
+# ── 지난 리포트 아카이브 (report_YYYYMMDD.html 자동 스캔) ──
+ARCHIVE_MAX = 14          # 최근 몇 개까지 보여줄지
+ARCHIVE_FOLD = 7          # 이 개수까지만 펼쳐 두고 나머지는 '더보기'
+_WD = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def find_past_reports():
+    """같은 폴더의 report_YYYYMMDD.html 을 모아 최신순으로 돌려준다."""
+    목록 = []
+    try:
+        파일들 = os.listdir(".")
+    except Exception:
+        return 목록
+    for f in 파일들:
+        if not (f.startswith("report_") and f.endswith(".html")):
+            continue
+        ymd = f[7:-5]
+        if len(ymd) != 8 or not ymd.isdigit():
+            continue
+        if ymd == DATE:          # 오늘 리포트는 목록에서 제외
+            continue
+        try:
+            d = datetime.strptime(ymd, "%Y%m%d")
+        except ValueError:
+            continue
+        목록.append((ymd, d, f))
+    목록.sort(key=lambda x: x[0], reverse=True)
+    return 목록[:ARCHIVE_MAX]
+
+
+def build_archive():
+    목록 = find_past_reports()
+    if not 목록:
+        return ('<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트</p>'
+                '<p class="arch-empty">아직 쌓인 리포트가 없습니다. 내일부터 이 자리에 목록이 쌓입니다.</p></div>')
+
+    def 칩(item):
+        ymd, d, f = item
+        return f'<a class="arch-link" href="{f}">{d.month}/{d.day}({_WD[d.weekday()]})</a>'
+
+    앞 = "".join(칩(x) for x in 목록[:ARCHIVE_FOLD])
+    뒤목록 = 목록[ARCHIVE_FOLD:]
+    뒤HTML = ""
+    if 뒤목록:
+        뒤칩 = "".join(칩(x) for x in 뒤목록)
+        뒤HTML = (f'<div class="hidden-block" id="moreArch" style="margin-top:6px">'
+                  f'<div class="arch-grid">{뒤칩}</div></div>'
+                  f'<button class="more-btn" style="margin-top:8px;margin-bottom:0" '
+                  f'onclick="toggleMore(\'moreArch\',this,\'▾ 이전 리포트 {len(뒤목록)}개 더보기\')">'
+                  f'▾ 이전 리포트 {len(뒤목록)}개 더보기</button>')
+    return (f'<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p>'
+            f'<div class="arch-grid">{앞}</div>{뒤HTML}</div>')
+
+
+# ── 핵심 이슈 ──
+def build_issues(핵심이슈):
+    if not 핵심이슈:
+        return '<div class="pending">⏳ 오늘 시장을 만든 이슈 3~4개 — 뉴스/공시 기반 자동 추출 준비중</div>'
+    rows = []
+    for it in 핵심이슈:
+        칩들 = "".join(
+            f'<a class="iss-link" href="{esc_url(l.get("링크",""))}" target="_blank">📎 {l.get("제목","기사")[:26]}…</a>'
+            for l in (it.get("관련링크") or [])[:2] if l.get("링크"))
+        rows.append(f'''
+    <div class="iss"><span class="itag">{it.get('태그','')}</span>
+      <span class="iss-text">{it.get('상세') or it.get('내용','')}{f'<span class="iss-links">{칩들}</span>' if 칩들 else ''}</span></div>''')
+    return f'<div class="issue-box">{"".join(rows)}</div>'
+
+
+# ── 핵심 뉴스 TOP10 (3개 노출 + 더보기) ──
+NEWS_TAG_CLASS = {"시황": "nt-market", "정책": "nt-policy", "특징주": "nt-stock", "글로벌": "nt-global"}
+
+
+def one_news_item(idx, item):
+    tag = item.get("태그", "시황")
+    cls = NEWS_TAG_CLASS.get(tag, "nt-market")
+    링크 = item.get("링크", "")
+    제목 = item.get("제목", "")
+    요약 = item.get("요약", "")
+    본문 = f'''
+      <span class="news-tag {cls}">{tag}</span>{제목}<span class="news-go">↗</span>'''
+    if 링크:
+        title_html = f'<a class="news-a" href="{esc_url(링크)}" target="_blank">{본문}</a>'
+    else:
+        title_html = 본문
+    return f'''
+    <div class="news-item">
+      <span class="news-rank">{idx}</span>
+      <div class="news-body">
+        <p class="news-title">{title_html}</p>
+        <p class="news-insight">{요약}</p>
+      </div>
+    </div>'''
+
+
+def news_title(핵심뉴스):
+    """섹션 제목. 개수가 매일 5~8개로 달라지므로 제목도 따라 움직인다."""
+    n = len(핵심뉴스 or [])
+    return f"이슈 밖 뉴스 {n}건 — 놓치기 쉬운 것들" if n else "이슈 밖 뉴스"
+
+
+def build_news(핵심뉴스):
+    """인기 뉴스 — 3개만 펼치고 나머지는 더보기.
+    개수는 generate 단계에서 매일 5~8개 사이로 정해져 넘어온다.
+    리포트 본문에서 이미 다룬 사안은 제외하고 고른 것들이다."""
+    if not 핵심뉴스:
+        return '<div class="pending">⏳ 네이버 증권 인기뉴스 수집 준비중</div>'
+    앞3 = 핵심뉴스[:3]
+    뒤 = 핵심뉴스[3:]
+    앞HTML = "".join(one_news_item(i + 1, it) for i, it in enumerate(앞3))
+    더보기 = ""
+    if 뒤:
+        뒤HTML = "".join(one_news_item(i + 4, it) for i, it in enumerate(뒤))
+        더보기 = (f'<div class="hidden-block" id="moreNews">'
+                f'<div class="news-wrap" style="border:none;box-shadow:none;margin:0">{뒤HTML}</div></div>'
+                f'<button class="more-btn" onclick="toggleMore(\'moreNews\',this,\'▾ 뉴스 {len(뒤)}개 더보기\')">'
+                f'▾ 뉴스 {len(뒤)}개 더보기</button>')
+    return (f'<div class="news-wrap">{앞HTML}</div>{더보기}'
+            '<p class="news-foot">※ 제목을 누르면 해당 기사 원문으로 이동합니다. '
+            '위 코너에서 이미 다룬 사안은 제외하고 골랐습니다.</p>')
+
+
+# ── 환율·유가·금리 카드 ──
+# ── 프로의 시선 (3개 렌즈) ──
+def build_insight(프로의시선):
+    if not 프로의시선:
+        return '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'
+    렌즈들 = [
+        ("조용한 강세", 프로의시선.get("조용한_강세", "")),
+        ("짖지 않은 개", 프로의시선.get("짖지_않은_개", "")),
+        ("다음 시나리오", 프로의시선.get("다음_시나리오", "")),
+    ]
+    rows = []
+    for 이름, 내용 in 렌즈들:
+        if not 내용:
+            continue
+        rows.append(f'''
+    <div class="si-item"><span class="si-lens">{이름}</span><span>{내용}</span></div>''')
+    if not rows:
+        return '<div class="pending">⏳ 프로의 시선 — 데이터 부족</div>'
+    return f'''
+  <div class="silent-wrap">
+    <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
+    {"".join(rows)}
+  </div>'''
+
+
+# ── 마감 브리핑 (방송사별) ──
+# ── 실제 강세 레이더 (오늘 신규 포착만 표시) ──
+def build_radar(강세레이더, 설정=None):
+    if not 강세레이더:
+        return '<div class="pending">⏳ 실제 강세 레이더 — 데이터 수집 준비중</div>'
+    설정 = (설정 or {}).get("강세", {})
+    조건 = dev_note(
+        f"시총 ≥ {설정.get('최소시총','?'):,}억 · 거래대금 ≥ {설정.get('최소거래대금','?'):,}억 · "
+        f"상승 종목만 · 전일 대비 거래량 ≥ {설정.get('거래량배수','?')}배 │ "
+        f"점수 = 회전율×{설정.get('회전비중','?')} + 상승률×{설정.get('상승비중','?')} "
+        f"(각각 0~100 정규화) + 거래량 {설정.get('가점배수','?')}배↑ 시 +{설정.get('가점','?')}점 │ "
+        f"추적 {설정.get('추적일','?')}거래일"
+    ) if 설정 else ""
+    신규 = 강세레이더.get("신규") or {}
+    추적 = 강세레이더.get("추적") or []
+
+    # ── 1단: 오늘 새로 포착 ──
+    def 시장블록(시장, 목록):
+        if not 목록:
+            return f'<p class="rd-empty">{시장} — 오늘 새로 포착된 종목이 없습니다.</p>'
+
+        def 행(rank, s):
+            등락 = s.get("등락률") or 0
+            폭발 = '<span class="rd-tag rd-boom">🔥 거래량 폭발</span>' if s.get("폭발") else ''
+            재 = s.get("재점화")
+            재HTML = f'<span class="rd-tag rd-re">🔄 {재}차 포착</span>' if 재 else ''
+            return f"""
+      <div class="rd-row">
+        <span class="rd-rank">{rank}</span>
+        <div class="rd-info">
+          <p class="rd-name">{s['종목명']}{재HTML}{폭발}</p>
+          <p class="rd-meta">회전율 {s.get('회전율','—')}% · 거래량 전일 <b>{s.get('배수','—')}배</b>
+            · 거래대금 {_fmt_eok(s.get('거래대금'))} · 시총 {_fmt_eok(s.get('시총'))}</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">{s.get('강세점수','—')}</span>
+          <span class="rd-chg up">+{등락:.2f}%</span>
+        </div>
+      </div>"""
+
+        앞5 = "".join(행(i+1, s) for i, s in enumerate(목록[:5]))
+        뒤 = 목록[5:10]
+        더보기 = ""
+        if 뒤:
+            gid = f"radar{시장}"
+            뒤HTML = "".join(행(i+6, s) for i, s in enumerate(뒤))
+            더보기 = f"""
+    <div class="hidden-block" id="{gid}">{뒤HTML}</div>
+    <button class="more-btn" onclick="toggleMore('{gid}',this,'▾ {시장} 6~{5+len(뒤)}위 더보기')">▾ {시장} 6~{5+len(뒤)}위 더보기</button>"""
+        return f"""
+    <div class="rd-market">
+      <p class="rd-mkt-name">📡 {시장}</p>
+      {앞5}{더보기}
+    </div>"""
+
+    신규HTML = 시장블록("코스피", 신규.get("코스피", [])) + 시장블록("코스닥", 신규.get("코스닥", []))
+
+    # ── (2단 '포착 이후 추적'은 화면에서 제거했다) ──
+    #   collect_data.py는 계속 추적 데이터를 쌓는다. 화면에 안 보일 뿐,
+    #   '🔄 N차 포착' 재점화 뱃지가 그 기록 위에서 돌아가기 때문이다.
+
+    return f"""
+  <div class="rd-box">
+    <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
+      시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 거래량 2배 이상</b> 종목 중에서,
+      회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
+    {조건}
+    {신규HTML}
+    <p class="rd-foot">🔥 폭발 = 전일 대비 거래량 3배 이상 · 🔄 N차 포착 = 추적 중이던 종목의 재점화.
+      점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
+  </div>"""
+
+
+
+
+# ── 5일 매집 레이더 (시총대비 + 아직 안 오른 매집) ──
+def build_accumulation(매집, 설정=None):
+    if not 매집:
+        return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
+    종목 = 매집.get("종목") or []
+    if not 종목:
+        return '<div class="pending">오늘은 조건을 만족한 매집 종목이 없습니다.</div>'
+    기간 = 매집.get("기간", 5)
+    쌍최소 = 매집.get("쌍끌이최소", 3)
+    단최소 = 매집.get("단독최소", 4)
+    쌍수 = 매집.get("쌍끌이수", 0)
+
+    cfg = (설정 or {}).get("매집", {})
+    스캔 = cfg.get("스캔범위") or {}
+    조건 = dev_note(
+        f"스캔 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 · "
+        f"관찰 {cfg.get('기간','?')}거래일 │ "
+        f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
+        f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑<br>"
+        f"조건 통과 종목 전부를 후보 풀에 담은 뒤 <b>코스피·코스닥으로 나눠</b> 각 시장에서 TOP5<br>"
+        f"<b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100 (내림차순 정렬)"
+    ) if cfg else ""
+
+    def 유형뱃지(t):
+        if t == "쌍끌이":
+            return '<span class="ac-tag ac-both">🤝 쌍끌이</span>'
+        return f'<span class="ac-tag ac-solo">💼 {t}</span>'
+
+    def 행(i, s, 값HTML, 부가=""):
+        return f"""
+        <div class="ac-row">
+          <span class="ac-rank">{i}</span>
+          <div class="ac-info">
+            <p class="ac-name">{s['종목명']}{유형뱃지(s.get('유형',''))}</p>
+            <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일
+              · 시총 {_fmt_eok(s.get('시총'))}{부가}</p>
+          </div>
+          {값HTML}
+        </div>"""
+
+    # ── 시장별 시총 대비 TOP5 ──
+    #   예전엔 '시총대비 / 매집갭' 두 랭킹이었는데, 매집갭은 해석 부담이 커서 뺐다.
+    #   대신 같은 기준(시총대비)을 코스피·코스닥으로 나눠 비교 가능성을 높였다.
+    def 시장랭킹(시장):
+        목록 = [x for x in 종목 if x.get("시장") == 시장]
+        목록 = sorted(목록, key=lambda x: x.get("시총대비", 0) or 0, reverse=True)[:5]
+        if not 목록:
+            return 0, f'<p class="rd-empty">{시장} — 오늘 조건을 만족한 종목이 없습니다.</p>'
+        전체 = len([x for x in 종목 if x.get("시장") == 시장])
+        행들 = "".join(
+            행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+              f' · 누적 +{_fmt_eok(s.get("합산"))}')
+            for i, s in enumerate(목록, 1))
+        return 전체, 행들
+
+    코스피수, 코스피행 = 시장랭킹("코스피")
+    코스닥수, 코스닥행 = 시장랭킹("코스닥")
+
+    # ── 중기(20일) 매집 — 같은 데이터 응답에서 나온 긴 호흡 랭킹 ──
+    중기 = 매집.get("중기종목") or []
+    중기블록 = ""
+    if 중기:
+        중기간 = 매집.get("중기기간", 20)
+        단기이름 = {s["종목명"] for s in 종목}
+        def 중기랭킹(시장):
+            목록 = [x for x in 중기 if x.get("시장") == 시장]
+            목록 = sorted(목록, key=lambda x: x.get("시총대비") or 0, reverse=True)[:5]
+            if not 목록:
+                return f'<p class="rd-empty">{시장} — 조건 만족 종목 없음</p>'
+            return "".join(
+                행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+                  f' · 누적 +{_fmt_eok(s.get("합산"))}'
+                  + (' <span class="ac-star">⭐ 단기도 등재</span>' if s["종목명"] in 단기이름 else ""))
+                for i, s in enumerate(목록, 1))
+        중기블록 = f'''
+    <div class="ac-long">
+      <p class="ac-long-t">🏗️ 중기 매집 — 최근 {중기간}거래일, 더 긴 호흡의 돈</p>
+      <p class="ac-long-s">5일이 "이번 주 신호"라면, {중기간}일은 "한 달째 이어지는 의지"입니다.
+        🤝쌍끌이 = 둘 다 {매집.get("중기쌍끌이",12)}일↑ · 💼단독 = 한쪽 {매집.get("중기단독",14)}일↑ ·
+        ⭐ = 5일 랭킹에도 동시 등재 (가장 강한 신호)</p>
+      <div class="ac-two">
+        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {중기간}일</p>{중기랭킹("코스피")}</div>
+        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일</p>{중기랭킹("코스닥")}</div>
+      </div>
+    </div>'''
+
+    보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
+          f'(🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}) — '
+          f'코스피 {코스피수} · 코스닥 {코스닥수}. 각 시장에서 시총 대비 상위 5개입니다.</p>')
+
+    return f"""
+  <div class="rd-box">
+    <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
+      조용히 돈이 쌓이는 종목을 코스피·코스닥에서 각각 찾습니다.
+      (강세 레이더가 '터진 것'을 본다면, 여기는 '쌓이는 것'을 봅니다)<br>
+      🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
+      💼 단독 = 한쪽만 {단최소}일 이상</p>
+    {조건}
+    <p class="ac-long-t" style="margin-top:.6rem">🔥 단기 매집 — 최근 {기간}거래일</p>
+    <div class="ac-two">
+      <div class="ac-col">
+        <p class="ac-col-t">📊 코스피 · 시총 대비</p>
+        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+        {코스피행}
+      </div>
+      <div class="ac-col">
+        <p class="ac-col-t">📊 코스닥 · 시총 대비</p>
+        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+        {코스닥행}
+      </div>
+    </div>
+    {보충}
+    {중기블록}
+    <p class="rd-foot">💡 <b>순위가 높다고 "곧 오른다"는 뜻이 아닙니다.</b> 그 회사 규모에 비해 들어온 돈이
+      컸다는 사실만 보여줄 뿐이며, 이유는 개별 확인이 필요합니다.
+      시장을 나눈 이유는 시총 규모가 다른 코스피·코스닥을 한 줄로 세우면 늘 소형주만 올라오기 때문입니다.<br>
+      ※ '기관'은 <b>기관계 합산</b>입니다. 증권사 자기매매(선물·ELS 헤지 등 방향성이 아닌 물량)가
+      포함될 수 있습니다. 관찰 참고용이며 매수 신호가 아닙니다.</p>
+  </div>"""
+
+
+def _fmt_eok(억):
+    """억원 숫자를 조/억으로 표기."""
+    v = _to_float(억)
+    if v is None:
+        return "—"
+    if abs(v) >= 10000:
+        return f"{v/10000:.1f}조"
+    return f"{v:,.0f}억"
+
+
+def build_briefings(마감브리핑):
+    if not 마감브리핑:
+        return '<div class="pending">⏳ 오늘 마감 브리핑 영상을 찾지 못했습니다</div>'
+
+    # 요약이 있는 것을 대표로 우선 선택
+    요약있음 = [b for b in 마감브리핑 if b.get("summary")]
+    대표 = 요약있음[0] if 요약있음 else 마감브리핑[0]
+    나머지 = [b for b in 마감브리핑 if b is not 대표]
+
+    대표HTML = f'''
+    <div class="tv-lead">
+      <span class="tv-lead-badge">⭐ 오늘의 대표 · {대표.get('채널','')}</span>
+      <p class="tv-lead-ch"><span class="tv-dot"></span>{대표.get('채널','')}
+        {f"· {대표.get('angle')}" if 대표.get('angle') else ''}</p>
+      <p class="tv-title">{대표.get('제목','')}</p>
+      <p class="tv-lead-body">{대표.get('summary','') or '요약 없음 — 원본 영상에서 확인하세요'}</p>
+      <a class="tv-see" href="{esc_url(대표.get('링크'))}" target="_blank">영상 보기 ↗</a>
+    </div>'''
+
+    행들 = []
+    for i, b in enumerate(나머지):
+        요약 = b.get("summary", "") or "요약 없음 — 원본 영상에서 확인하세요"
+        행들.append(f'''
+      <div class="tv-row-wrap">
+        <div class="tv-row tv-clickable" onclick="toggleTV('tvbody{i}',this)">
+          <span class="tv-ch">{b.get('채널','')}</span>
+          {f'<span class="tv-angle">{b.get("angle")}</span>' if b.get('angle') else ''}
+          <span class="tv-see-sm">보기 ▾</span>
+        </div>
+        <div class="tv-body-hidden" id="tvbody{i}">
+          <p class="tv-title">{b.get('제목','')}</p>
+          <p class="tv-sum">{요약}</p>
+          <a class="tv-link-sm" href="{esc_url(b.get('링크'))}" target="_blank">영상 보기 ↗</a>
+        </div>
+      </div>''')
+
+    나머지HTML = f'<div class="tv-others">{"".join(행들)}</div>' if 행들 else ''
+
+    return f'''
+  <div class="tv-wrap">{대표HTML}{나머지HTML}
+    <p class="tv-note">📡 각 채널의 관점을 요약한 것으로, 원문을 그대로 옮기지 않았습니다. 자세한 내용은 각 영상 링크에서 확인하세요.</p>
+  </div>'''
+
+
+# ── 어제의 채점표 ──
+def build_scorecard(채점표, 어제날짜=""):
+    if not 채점표:
+        return ""  # 첫 발행이면 아예 섹션을 숨긴다
+    rows = []
+    for it in 채점표:
+        결과 = it.get("결과", "△")
+        cls = {"○": "sc-o", "×": "sc-x"}.get(결과, "sc-t")
+        rows.append(f'''
+    <div class="score-row">
+      <span class="score-mark {cls}">{결과}</span>
+      <div class="score-body">
+        <p class="score-item">{it.get('항목','')}</p>
+        <p class="score-why">{it.get('근거','')}</p>
+      </div>
+    </div>''')
+    맞은수 = sum(1 for it in 채점표 if it.get("결과") == "○")
+    return f'''
+  <div class="score-box">
+    <p class="score-head">📋 어제 예고한 관전포인트를 오늘 결과로 채점했습니다
+      <span class="score-tally">{맞은수} / {len(채점표)} 적중</span></p>
+    {"".join(rows)}
+    <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
+  </div>'''
+
+
+def _load_market_history():
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            rows = (json.load(f).get("일별") or [])
+        return [r for r in rows if r.get("코스피") is not None]
+    except Exception:
+        return []
+
+
+def _mh_rank(rows, key, val):
+    """오늘이 최근 20행 안에서 '같은 방향으로' 몇 번째로 큰가.
+    매수일이면 매수 규모 순위, 매도일이면 매도 규모 순위 — 그래야 문장이 자연스럽다.
+    ("11일 중 8위로 판 날" 같은 어색함 방지). 6행 미만이면 None."""
+    vals = [r.get(key) for r in rows[-20:] if r.get(key) is not None]
+    if val is None or len(vals) < 6:
+        return None
+    if val >= 0:
+        동방향 = sorted([v for v in vals if v >= 0], reverse=True)
+    else:
+        동방향 = sorted([v for v in vals if v < 0])
+    순 = 동방향.index(val) + 1
+    if 순 <= 3:
+        return f"{len(vals)}일 중 {'매수' if val >= 0 else '매도'} {순}위"
+    return None      # 상위 3위 안일 때만 배지로 보여줄 가치가 있다
+
+
+def _mh_streak(rows, key):
+    n, sign = 0, None
+    for r in reversed(rows):
+        v = r.get(key)
+        if v is None or v == 0:
+            break
+        s = v > 0
+        if sign is None:
+            sign = s
+        if s != sign:
+            break
+        n += 1
+    if n < 2:
+        return None
+    return f"{n}일 연속 {'매수' if sign else '매도'}"
+
+
+def build_core(핵심편, data, 해석):
+    """핵심편 '90초 브리핑' — 리포트 최상단.
+
+    글(정의·공감·왜·특징·뒤집어보기)은 Claude가, 숫자 타일·티저는 코드가 만든다.
+    핵심편 JSON이 없으면(과거 리포트 재빌드) 빈 문자열 — 하위 호환.
+    """
+    if not 핵심편:
+        return ""
+    지수수급 = data.get("지수수급") or {}
+    코수 = 지수수급.get("코스피_수급") or {}
+    rows = _load_market_history()
+
+    def _f(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    # ── 수급 타일 3장 (기계) ──
+    타일들 = []
+    for 라벨, 키, mh키 in (("외국인", "외국인", "외국인_코스피"), ("기관", "기관계", "기관_코스피"), ("개인", "개인", "개인_코스피")):
+        v = _f(코수.get(키))
+        부제 = None
+        if mh키 and rows:
+            부제 = _mh_rank(rows, mh키, v) or _mh_streak(rows, mh키)
+            if 부제 is None and v is not None:
+                과값 = [abs(r[mh키]) for r in rows[-21:-1] if r.get(mh키) is not None]
+                if len(과값) >= 5 and sum(과값):
+                    부제 = f"평소의 {abs(v)/(sum(과값)/len(과값)):.1f}배"
+        cls = "b" if (v or 0) >= 0 else "s"
+        타일들.append(
+            f'<div class="tile"><p class="tile-k">{라벨}</p>'
+            f'<p class="tile-v {cls}">{_flow_amt(v)}</p>'
+            f'<p class="tile-s">{부제 or "&nbsp;"}</p></div>')
+    타일HTML = "".join(타일들)
+
+    삼줄 = "".join(
+        f'<div class="q3"><span class="q3-n">{i}</span><span>{줄}</span></div>'
+        for i, 줄 in enumerate((핵심편.get("세줄요약") or [])[:3], 1))
+
+    태그색 = {"반도체": "tg-semi", "글로벌": "tg-glo", "정책": "tg-pol", "수급": "tg-sup"}
+    이슈들 = "".join(
+        f'<div class="i9"><span class="i9-t {태그색.get(it.get("태그"), "tg-sup")}">{it.get("태그","")}</span>'
+        f'<span>{it.get("내용","")}</span></div>'
+        for it in (해석.get("핵심이슈") or [])[:4])
+    이슈블록 = (f'<div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p>'
+              f'<p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p>{이슈들}</div>'
+              ) if 이슈들 else ""
+
+    특징 = "".join(
+        f'<p class="mf"><span class="mf-i">{i}</span><span>{t}</span></p>'
+        for i, t in enumerate((핵심편.get("수급특징") or [])[:3], 1))
+    왜 = 핵심편.get("수급왜") or ""
+    왜블록 = (f'<div class="mny-why"><p class="mw-h">🤔 왜 이렇게 움직였을까요</p>'
+             f'<p class="mw-b">{왜}</p></div>') if 왜 else ""
+
+    위로 = 핵심편.get("내종목위로") or ""
+    위로P = f'<p class="mine-b">{위로}</p>' if 위로 else ''
+    내종목 = ('<div class="mine"><p class="mine-h">😮\u200d💨 오늘 내 종목이 내렸다면</p>'
+            + 위로P +
+            '<div class="mine-split">'
+            '<div class="ms"><p class="ms-k">거래량이 줄면서 내렸다면</p><p class="ms-v">파는 사람이 많은 게 아니라 <b style="color:#dfe3e8">사는 사람이 없는</b> 상태입니다. 관심이 잠시 다른 곳으로 갔을 가능성.</p></div>'
+            '<div class="ms"><p class="ms-k">거래량이 늘면서 내렸다면</p><p class="ms-v">실제로 <b style="color:#dfe3e8">물량이 나온</b> 것입니다. 이유가 있는지 아래 공시·뉴스를 확인해볼 자리입니다.</p></div>'
+            '</div>'
+            '<p class="mine-f">👉 이 둘은 성격이 완전히 다릅니다. 아래 <b>\'오늘의 중요 공시\'</b>에 내 종목이 있는지부터 보시는 게 가장 빠릅니다.</p></div>')
+
+    뒤집 = 핵심편.get("뒤집어보기") or ""
+    뒤집블록 = (f'<div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p>'
+              f'<p class="qf-b">{뒤집}</p></div>') if 뒤집 else ""
+
+    강세 = data.get("강세레이더") or {}
+    신규 = 강세.get("신규") or {}
+    신규수 = sum(len(v or []) for v in 신규.values()) if isinstance(신규, dict) else 0
+    매집 = data.get("매집레이더") or {}
+    단기이름 = {s.get("종목명") for s in (매집.get("종목") or [])}
+    별수 = sum(1 for s in (매집.get("중기종목") or []) if s.get("종목명") in 단기이름)
+    티저들 = []
+    if 신규수:
+        티저들.append(('#radar', '레이더', f'오늘 새로 포착된 종목 <span class="u">{신규수}개</span>, 꼭 확인하세요'))
+    if 별수:
+        티저들.append(('#acc', '매집', f'5일·20일 랭킹 <b>동시 등재</b> ⭐ <span class="u">{별수}종목</span>, 꼭 확인하세요'))
+    elif 매집.get("종목"):
+        티저들.append(('#acc', '매집', f'며칠째 큰돈이 쌓이는 <span class="u">{min(5, len(매집["종목"]))}종목</span>, 꼭 확인하세요'))
+    티저들.append(('#watch', '관전', '내일 아침, <b>이 숫자 하나</b>만 확인하세요'))
+    티저HTML = "".join(
+        f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span><span>{txt}</span>'
+        f'<span class="qt-go">확인 ↓</span></a>' for h, t, txt in 티저들[:3])
+
+    공감 = 핵심편.get("공감문구") or ""
+    왜그런가 = 핵심편.get("왜그런가") or ""
+    return ('<div class="q90"><div class="q90-top">'
+            '<span class="q90-badge">⏱️ 90초 브리핑</span>'
+            '<span class="q90-sub">바쁘시면 여기까지만 읽으셔도 됩니다</span></div>'
+            + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
+            + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
+            + (f'<p class="q90-why">{왜그런가}</p>' if 왜그런가 else '')
+            + f'<div class="q90-3">{삼줄}</div>'
+            + 이슈블록
+            + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
+            + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
+            + f'<div class="mny-tiles">{타일HTML}</div>'
+            + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
+            + 내종목 + 뒤집블록
+            + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
+            + '</div>'
+            + '<p class="q90-cut" id="deep">— 여기까지가 90초. 아래 <b>정밀 관제</b>는 근거와 상세입니다 ↓ —</p>')
+
+
+def build_temp(data):
+    """📊 수급 온도 (심층편) — 주체별 '오늘 vs 평소' 비교표.
+
+    아래 수급 관제신호의 누적 그래프와 겹치지 않게 **그래프 없이 표로만**.
+    핵심은 순위("20일 중 매도 2위")와 연속일 — 절대값이 아니라 상대 위치다.
+    이력 6일 미만이면 비교 열을 비운다(없는 비교는 만들지 않는다).
+    """
+    rows = _load_market_history()
+    if len(rows) < 2:
+        return ""
+    비교가능 = len(rows) >= 6
+
+    def 평소(key):
+        vals = [abs(r[key]) for r in rows[-21:-1] if r.get(key) is not None]
+        return round(sum(vals) / len(vals)) if len(vals) >= 5 else None
+
+    행들, 하이라이트 = [], None
+    for 라벨, key in (("외국인", "외국인_코스피"), ("기관", "기관_코스피"), ("개인", "개인_코스피")):
+        오늘 = rows[-1].get(key)
+        if 오늘 is None:
+            continue
+        평 = 평소(key) if 비교가능 else None
+        순 = _mh_rank(rows, key, 오늘) if 비교가능 else None
+        연 = _mh_streak(rows, key)
+        배수 = f"{abs(오늘)/평:.1f}배" if 평 else "—"
+        칩 = []
+        if 순:
+            칩.append(f'<span class="tp-chip hot">{순}</span>')
+            if 하이라이트 is None:
+                하이라이트 = (라벨, 순, 오늘)
+        if 연:
+            칩.append(f'<span class="tp-chip">{연}</span>')
+        cls = "up" if 오늘 >= 0 else "dn"
+        행들.append(
+            f'<div class="tp-row"><span class="tp-who">{라벨}</span>'
+            f'<span class="tp-val {cls}">{_flow_amt(오늘)}</span>'
+            f'<span class="tp-avg">{("평소 " + f"{평:,.0f}억 · " + 배수) if 평 else "—"}</span>'
+            f'<span class="tp-chips">{"".join(칩) or "&nbsp;"}</span></div>')
+    if not 행들:
+        return ""
+
+    if 하이라이트:
+        라벨, 순, v = 하이라이트
+        헤드 = f'오늘은 <b>{라벨}이 {순.split("중 ")[-1]}</b>로 {"산" if v >= 0 else "판"} 날입니다'
+    elif 비교가능:
+        헤드 = "오늘 수급은 평소 범위 안에 있었습니다"
+    else:
+        헤드 = f"수급 온도계를 달구는 중입니다 <small>({len(rows)}일치 — 비교는 6일부터)</small>"
+    쌓임 = f' <span style="color:#8a909a;font-weight:600;font-size:10px">({len(rows)}일치 축적 중)</span>' if len(rows) < 20 else ''
+
+    return (f'<p class="sec-label">📊 수급 온도 — 오늘이 최근 {min(len(rows),20)}거래일에서 몇 번째인가{쌓임}</p>'
+            '<div class="temp">'
+            + f'<p class="temp-h">{헤드}</p>'
+            + '<p class="temp-s">"얼마 샀나"보다 <b>평소와 얼마나 달랐나</b>가 정보입니다. 흐름 그래프는 아래 관제신호에 있습니다.</p>'
+            + f'<div class="tp-table">{"".join(행들)}</div>'
+            + '<p class="temp-read" style="margin-top:.55rem">읽는 법: <b>순위</b>는 같은 방향(매수는 매수끼리, 매도는 매도끼리) 안에서 상위 3위일 때만 표시됩니다 — 배지가 붙은 날이 특별한 날입니다.</p>'
+            + '</div>')
+
+
+# ── 수급 관제신호 (실탄·3질문·누적 그래프) ──
+FLOW_강한배수 = 1.4      # 평소 대비 이 배수 이상이면 "강한"
+FLOW_바스켓선 = 0.45     # 바스켓 비중 이 이상이면 "폭넓은 매수"
+FLOW_선물유의 = 0.5      # 선물이 평소의 이 배수 이상일 때만 반대 신호로 인정
+FLOW_실탄최소 = 2000     # 실탄이 이보다 작으면(억) 바스켓 비중이 튀어 판정 보류
+FLOW_평소일수 = 20       # '평소'를 계산할 기간(거래일). 오늘은 제외하고 이 일수만큼 본다
+
+
+def expiry_note(ymd=None):
+    """만기·지수변경 주간인지 판정한다.
+
+    한국 파생 만기 규칙:
+      · 옵션 만기      = 매월 **두 번째 목요일**
+      · 선물+옵션 동시 = 3·6·9·12월 두 번째 목요일 ("네 마녀의 날")
+      · 코스피200 정기변경 = 6월·12월 만기일에 맞춰 연 2회 적용
+    이 주간의 비차익은 방향성 베팅이 아니라 **기계적 조정**이라 해석을 달리해야 한다.
+    반환: (배지문구, 설명) 또는 (None, None)
+    """
+    d = datetime.strptime(ymd or DATE, "%Y%m%d")
+    # 그 달의 두 번째 목요일 구하기
+    첫날 = d.replace(day=1)
+    첫목 = 1 + (3 - 첫날.weekday()) % 7      # 목요일 = 3
+    만기일 = d.replace(day=첫목 + 7)
+    차이 = (d - 만기일).days                  # 음수면 만기 전
+    if not (-3 <= 차이 <= 1):
+        return None, None
+    분기 = d.month in (3, 6, 9, 12)
+    정기변경 = d.month in (6, 12)
+    이름 = "네 마녀의 날 주간" if 분기 else "옵션 만기 주간"
+    언제 = ("오늘이 만기일입니다" if 차이 == 0 else
+           (f"만기일이 {-차이}거래일 앞입니다" if 차이 < 0 else "어제가 만기일이었습니다"))
+    설명 = (f"{언제}. 이 시기의 비차익은 <b>방향성 베팅이 아니라 만기 청산·롤오버에 따른 "
+           f"기계적 조정</b>일 수 있습니다. 다음 날 반대로 나올 수 있으니 폭 판정을 그대로 믿지 마십시오.")
+    if 정기변경:
+        설명 += " 이번 달은 <b>코스피200 정기변경</b>도 겹칩니다 — 편입·편출 종목 매매가 비차익에 섞입니다."
+    return f"📅 {이름}", 설명
+
+
+def combo_tag(실탄, 비차익):
+    """실탄 부호 × 비차익 부호 → 4가지 장세 이름.
+
+    색은 국내 HTS 문법을 따른다.
+      빨강 = 돈이 들어옴 · 파랑 = 돈이 나감 · 노랑 = 지수와 종목이 엇갈림
+    """
+    if 실탄 is None or 비차익 is None or 실탄 == 0:
+        return None
+    실 = 실탄 >= 0
+    비 = 비차익 >= 0
+    if 실 and 비:
+        return ("good", "🔴 지수형 매수", "지수도 종목도 함께 오른 폭넓은 매수")
+    if 실 and not 비:
+        return ("warn", "🟠 종목 장세", "개별은 사고 지수 바스켓은 판 날 — 종목별 편차가 큼")
+    if (not 실) and 비:
+        return ("warn", "🟡 지수만 방어", "개별은 파는데 인덱스 자금이 지수를 떠받친 날")
+    return ("info", "🔵 지수형 매도", "지수도 종목도 함께 빠진 전면 이탈")
+
+
+def _flow_amt(v):
+    """억원 → '+1.17조' / '−2,672억' 표기"""
+    if v is None:
+        return "—"
+    a, s = abs(v), ("+" if v > 0 else "−")
+    if a >= 10000:
+        t = f"{a/10000:.2f}".rstrip("0").rstrip(".")
+        return f"{s}{t}조"
+    return f"{s}{a:,.0f}억"
+
+
+def build_flow_signal(파생, 지수수급):
+    """수급 관제신호: 오늘 실탄 판정 + 3질문 체크 + 20거래일 누적 그래프.
+
+    해석 문장까지 전부 규칙 기반(코드 생성)이다 — 숫자 코너에 AI 창작이 끼면
+    할루시네이션 위험이 있어서, 이 코너만큼은 기계가 끝까지 책임진다.
+    원료는 collect_data.py가 쌓는 flow_history.json.
+    """
+    이력 = load_json("flow_history.json") or []
+    if not isinstance(이력, list):
+        이력 = []
+    이력 = [x for x in 이력 if x.get("실탄") is not None]
+    if not 이력:
+        return '<div class="pending">⏳ 수급 관제신호 — 내일 발행부터 데이터가 쌓입니다</div>'
+
+    오늘 = 이력[-1]
+    실탄 = 오늘["실탄"]
+    외선 = 오늘.get("외선")
+    비차익 = 오늘.get("비차익")
+    N = len(이력)
+
+    # ── 평소 규모(있는 만큼의 평균, 오늘 제외해 자기참조 완화) ──
+    #   ⚠️ '평소'의 정의: **최근 20거래일 중 오늘을 뺀 날들의 |실탄| 평균**.
+    #      이력 파일은 60일까지 쌓이지만, 60일 평균을 쓰면 두 달 전 장세가
+    #      오늘 판정에 섞여 둔해진다. 화면 그래프도 20일이라 기준을 맞췄다.
+    #      과거가 5일 미만이면 '평소'라 부를 수 없어 규모 판정을 하지 않는다.
+    기준들 = 이력[-(FLOW_평소일수 + 1):-1] if N >= 6 else 이력
+    평소실탄 = sum(abs(x["실탄"]) for x in 기준들) / max(1, len(기준들))
+    평소선물 = None
+    선물있는 = [abs(x["외선"]) for x in 기준들 if x.get("외선") is not None]
+    if 선물있는:
+        평소선물 = sum(선물있는) / len(선물있는)
+
+    배수 = (abs(실탄) / 평소실탄) if 평소실탄 else None
+    방향양 = 실탄 >= 0
+    상태 = ("매수 우위" if 방향양 else "매도 우위")
+    if 배수 and 배수 >= FLOW_강한배수:
+        상태 = ("강한 매수" if 방향양 else "강한 매도")
+    배수문 = f" · 평소의 {배수:.1f}배" if (배수 and N >= 6) else ""
+    vc = "pos" if 방향양 else "neg"
+
+    # ── 체크②: 선물 동의 ──
+    선물동의 = None
+    if 외선 is not None:
+        선물동의 = (외선 >= 0) == 방향양
+        선물유의 = (abs(외선) / 평소선물 >= FLOW_선물유의) if 평소선물 else (abs(외선) >= 1000)
+
+    # ── 체크③: 바스켓 비중 ──
+    #   ⚠️ 비중이 100%를 넘을 수 있다. 비차익은 '시장 전체' 프로그램 순매수이고
+    #      실탄은 '외국인+기관'의 순매수 **합계(상계 후)** 라서 분모가 서로 다르다.
+    #      한쪽이 바스켓으로 크게 팔고 다른 쪽이 개별 종목으로 사면 실탄만 작아진다.
+    #      → 100% 초과는 오류가 아니라 '상계' 상태이므로 문구를 따로 준다.
+    #      → 실탄이 너무 작으면 비율이 무한대로 튀므로 아예 판정을 보류한다.
+    비중, 비중상태 = None, "없음"
+    if 비차익 is not None and 실탄:
+        if abs(실탄) < FLOW_실탄최소:
+            비중상태 = "보류"
+        elif 방향양 != (비차익 >= 0):
+            비중상태 = "역방향"
+            비중 = 비차익 / 실탄               # 음수가 된다
+        else:
+            비중 = 비차익 / 실탄
+            비중상태 = "초과" if 비중 > 1.0 else "정상"
+
+    # ── 칩 ──
+    칩 = []
+    if 비중상태 == "초과":
+        칩.append(("warn", f"🔀 바스켓 {비중*100:.0f}% — 주체 간 상계"))
+    elif 비중상태 == "역방향":
+        칩.append(("warn", "🔀 바스켓은 반대 방향"))
+    elif 비중 is not None and 비중 >= FLOW_바스켓선:
+        칩.append(("good", f"🧺 폭넓은 {'매수' if 방향양 else '매도'} — 바스켓 {비중*100:.0f}%"))
+    elif 비중 is not None:
+        칩.append(("info", f"🎯 종목 선별형 — 바스켓 {비중*100:.0f}%"))
+    선배수칩 = (abs(외선) / 평소선물) if (외선 is not None and 평소선물) else None
+    if 선물동의 is False and 선물유의:
+        if 선배수칩 is not None and 선배수칩 < 0.4:
+            칩.append(("info", "🪶 선물은 반대 (가벼운 헤지)"))
+        elif 선배수칩 is not None and 선배수칩 >= 2.0:
+            칩.append(("warn", "⚠️ 선물이 크게 반대 (강한 헤지)"))
+        else:
+            칩.append(("warn", "⚠️ 선물은 반대 (헤지 동반)"))
+    elif 선물동의 is True and 선물유의:
+        칩.append(("good", "🤝 선물도 같은 방향" +
+                  (" (강하게)" if (선배수칩 is not None and 선배수칩 >= 1.5) else "")))
+    조합 = combo_tag(실탄, 비차익)
+    if 조합:
+        칩.insert(0, (조합[0], 조합[1]))
+    만기배지, 만기설명 = expiry_note()
+    if 만기배지:
+        칩.append(("warn", 만기배지))
+    칩HTML = "".join(f'<span class="fs-chip {c}">{t}</span>' for c, t in 칩)
+
+    # ── 3단 체크 행 ──
+    def 체크행(아이콘, 질문, 부제, 답, 값, 값클래스, 꼬리):
+        return f'''
+      <div class="fs-ck">
+        <div class="fs-ck-ico {아이콘[0]}">{아이콘[1]}</div>
+        <p class="fs-ck-q">{질문}<small>{부제}</small></p>
+        <p class="fs-ck-a">{답}</p>
+        <p class="fs-ck-v {값클래스}">{값}<small>{꼬리}</small></p>
+      </div>'''
+
+    행들 = []
+    동사 = "들어왔습니다" if 방향양 else "빠져나갔습니다"
+    if 배수 and N >= 6:
+        if 배수 >= 2.5:
+            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{배수:.1f}배</b> — 눈에 띄게 큰 하루입니다."
+        elif 배수 >= FLOW_강한배수:
+            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{배수:.1f}배</b>로 평소보다 큽니다."
+        elif 배수 >= 0.6:
+            크기말 = f"규모는 최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)과 <b>비슷한 수준</b>({배수:.1f}배)입니다."
+        else:
+            크기말 = (f"다만 규모는 최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 "
+                    f"<b>{배수*100:.0f}%</b> 수준으로 조용한 편입니다.")
+        답1 = f"{동사}. {크기말}"
+    else:
+        답1 = f"{동사}. (비교할 과거 데이터가 {N}일치뿐이라 규모 판정은 다음 발행부터입니다)"
+    행들.append(체크행(("y" if 방향양 else "n", "✓" if 방향양 else "✗"),
+                    "돈이 들어왔나?", "실탄 = 외국인+기관 현물", 답1,
+                    _flow_amt(실탄), vc, "방향"))
+
+    if 외선 is None:
+        행들.append(체크행(("h", "—"), "선물도 동의하나?", "외국인 선물 방향",
+                        "오늘은 선물 수급을 확보하지 못했습니다.", "—", "mid", "확신"))
+    else:
+        선배수 = (abs(외선) / 평소선물) if 평소선물 else None
+        if 선배수 is None:
+            세기말 = ""
+        elif 선배수 >= 2.0:
+            세기말 = "그것도 평소보다 훨씬 큰 규모로 "
+        elif 선배수 >= 1.2:
+            세기말 = "평소보다 큰 규모로 "
+        elif 선배수 < 0.4:
+            세기말 = "다만 규모가 작아 참고 수준으로 "
+        else:
+            세기말 = ""
+        if 선물동의:
+            if 선배수 is not None and 선배수 >= 1.2:
+                답2 = (f"현물과 선물이 같은 방향입니다. 선물에서도 {세기말}"
+                      f"{'사들였으니' if 방향양 else '내던졌으니'} <b>확신이 실린 수급</b>으로 봅니다.")
+            elif 선배수 is not None and 선배수 < 0.4:
+                답2 = ("방향은 현물과 같습니다. 다만 선물 규모가 작아 "
+                      "<b>강한 확신까지는 아닌</b> 동의로 봅니다.")
+            else:
+                답2 = "현물과 선물이 같은 방향 — 확신이 실린 수급입니다."
+            행들.append(체크행(("y", "✓"), "선물도 동의하나?", "외국인 선물 방향",
+                            답2, _flow_amt(외선), vc, "확신"))
+        else:
+            반대 = "팔았습니다" if 방향양 else "샀습니다"
+            if 선배수 is not None and 선배수 >= 2.0:
+                답2 = (f"현물은 {'사면서' if 방향양 else '팔면서'} 선물은 {세기말}{반대}. "
+                      f"현물보다 선물 쪽 움직임이 커서, <b>{'상승' if 방향양 else '하락'}에 베팅했다기보다 "
+                      f"반대쪽을 대비한 포지션</b>일 수 있습니다.")
+            elif 선배수 is not None and 선배수 < 0.4:
+                답2 = (f"선물은 반대 방향이지만 규모가 작습니다. "
+                      f"<b>가벼운 헤지</b> 정도로 보고, 확신을 크게 깎지는 않습니다.")
+            else:
+                답2 = (f"현물은 {'사면서' if 방향양 else '팔면서'} 선물은 {세기말}{반대}. "
+                      f"<b>보험(헤지)을 든 {'매수' if 방향양 else '매도'}</b>라 확신은 한 단계 낮춰 봅니다.")
+            행들.append(체크행(("h", "△"), "선물도 동의하나?", "외국인 선물 방향",
+                            답2, _flow_amt(외선), "mid", "확신"))
+
+    질문3 = "폭넓게 샀나?" if 방향양 else "폭넓게 팔았나?"
+    if 비중상태 == "없음":
+        행들.append(체크행(("h", "—"), 질문3, "비차익 ÷ 실탄",
+                        "오늘은 프로그램매매(비차익) 데이터를 확보하지 못해 폭은 확인 불가입니다.",
+                        "—", "mid", "폭"))
+    elif 비중상태 == "보류":
+        행들.append(체크행(("h", "—"), 질문3, "비차익 ÷ 실탄",
+                        f"오늘 실탄이 <b>{_flow_amt(실탄)}</b>으로 작아, 비율로 나누면 값이 크게 튑니다. "
+                        f"오늘은 폭 판정을 보류합니다.",
+                        "판정 보류", "mid", f"비차익 {_flow_amt(비차익)}"))
+    elif 비중상태 == "역방향":
+        행들.append(체크행(("h", "△"), 질문3, "비차익 ÷ 실탄",
+                        f"실탄은 {'유입' if 방향양 else '유출'}인데 바스켓은 <b>반대로 "
+                        f"{_flow_amt(비차익)}</b>입니다. 지수 전체와 개별 종목이 서로 다른 방향으로 "
+                        f"움직인 날입니다.", "반대", "mid", f"비차익 {_flow_amt(비차익)}"))
+    elif 비중상태 == "초과":
+        행들.append(체크행(("h", "△"), 질문3, "비차익 ÷ 실탄",
+                        f"바스켓 {_flow_amt(비차익)}이 실탄 {_flow_amt(실탄)}보다 <b>커서 "
+                        f"{비중*100:.0f}%</b>가 나왔습니다. 오류가 아니라 <b>한쪽은 지수를 통째로 "
+                        f"{'사고' if 방향양 else '팔고'} 다른 쪽은 개별 종목을 반대로 매매해 "
+                        f"서로 상계된</b> 상태입니다.",
+                        f"{비중*100:.0f}%", "mid", f"비차익 {_flow_amt(비차익)}"))
+    else:
+        p = 비중 * 100
+        매매 = "매수" if 방향양 else "매도"
+        if p >= 90:
+            답3 = (f"실탄의 <b>{p:.0f}%</b> — 사실상 <b>전부 바스켓</b>입니다. 종목을 고른 게 아니라 "
+                  f"코스피200을 통째로 {'담은' if 방향양 else '내놓은'} 날입니다.")
+            아이 = ("y", "✓")
+        elif p >= 65:
+            답3 = (f"실탄의 <b>{p:.0f}%</b>가 시장 전체(바스켓) {매매} — 몇 종목이 아니라 "
+                  f"<b>한국 시장 자체</b>{'를 산' if 방향양 else '에서 나간'} 겁니다.")
+            아이 = ("y", "✓")
+        elif p >= FLOW_바스켓선*100:
+            답3 = (f"실탄의 <b>{p:.0f}%</b>가 바스켓 {매매}입니다. 지수 전체와 개별 종목이 "
+                  f"<b>절반씩 섞인</b> 흐름입니다.")
+            아이 = ("y", "✓")
+        elif p >= 20:
+            답3 = (f"바스켓 비중 <b>{p:.0f}%</b> — 시장 전체보다 <b>특정 종목·업종 위주</b>의 "
+                  f"선별 {매매}에 가깝습니다.")
+            아이 = ("h", "△")
+        else:
+            답3 = (f"바스켓 비중 <b>{p:.0f}%</b>로 거의 없습니다. 지수가 아니라 "
+                  f"<b>골라잡은 종목</b>에 돈이 오간 날입니다.")
+            아이 = ("h", "△")
+        행들.append(체크행(아이, 질문3, "비차익 ÷ 실탄",
+                        답3, f"{p:.0f}%", vc if p >= FLOW_바스켓선*100 else "mid",
+                        f"비차익 {_flow_amt(비차익)}"))
+
+    # ── 누적 그래프 (서버에서 SVG 생성) ──
+    그래프HTML = 판독HTML = 배지HTML = ""
+    if N >= 2:
+        표시 = 이력[-20:]
+        n = len(표시)
+        누적, acc = [], 0
+        for x in 표시:
+            acc += x["실탄"]
+            누적.append(acc)
+        누5 = sum(x["실탄"] for x in 이력[-5:])
+        누20 = 누적[-1]
+        W0, H0, PL, PR, PT, PB = 700, 240, 8, 8, 16, 8
+        PW, PH = W0-PL-PR, H0-PT-PB
+        X = lambda i: PL + PW*(i+0.5)/n
+        BW = PW/n*0.58
+        BMAX = max(abs(x["실탄"]) for x in 표시) or 1
+        B0 = PT + PH*0.78
+        BY = lambda v: B0 - (v/BMAX)*PH*0.40*0.55
+        CMIN, CMAX = min(0, min(누적)), max(누적)
+        span = (CMAX-CMIN) or 1
+        CY = lambda v: PT + (PH*0.66)*(1-(v-CMIN)/span)
+        g = []
+        # 밴드는 '5일 전 기준점'에서 시작해야 5일간의 움직임이 통째로 안에 들어온다.
+        # (예전엔 마지막 5개 막대에만 맞춰서, 정작 상승분이 밴드 왼쪽 밖에 그려졌다)
+        bx = PL
+        if n >= 6:
+            bx = X(n-6)
+            g.append(f'<rect x="{bx:.1f}" y="{PT}" width="{W0-PR-bx:.1f}" height="{PH}" fill="#e0c060" opacity=".07" rx="4"/>')
+            g.append(f'<text x="{bx+6:.1f}" y="{PT+PH-4:.1f}" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text>')
+        g.append(f'<line x1="{PL}" y1="{B0}" x2="{W0-PR}" y2="{B0}" stroke="#fff" stroke-opacity=".14"/>')
+        for i, x in enumerate(표시):
+            v = x["실탄"]; y1 = BY(v)
+            g.append(f'<rect x="{X(i)-BW/2:.1f}" y="{min(B0,y1):.1f}" width="{BW:.1f}" '
+                     f'height="{max(1.5,abs(y1-B0)):.1f}" rx="1.5" '
+                     f'fill="{"#C1432B" if v>=0 else "#2E6BD6"}" opacity="{1 if i==n-1 else .75}"/>')
+        선 = " ".join(f'{"L" if i else "M"}{X(i):.1f} {CY(v):.1f}' for i, v in enumerate(누적))
+        g.append(f'<path d="{선} L{X(n-1):.1f} {CY(CMIN):.1f} L{X(0):.1f} {CY(CMIN):.1f} Z" fill="url(#fsgr)" opacity=".5"/>')
+        g.append('<defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1">'
+                 '<stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/>'
+                 '<stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs>')
+        # ── 외국인 선물 누적 (흐릿한 점선, 방향 참고용) ──
+        #   현물과 규모 단위가 달라 크기 비교는 무의미하다. 0선만 공유하고
+        #   각자 자기 폭으로 스케일해 **방향과 기울기**만 겹쳐 본다.
+        선물있는 = [x for x in 표시 if x.get("외선") is not None]
+        if len(선물있는) >= 2:
+            f누적, facc = [], 0
+            for x in 표시:
+                facc += (x.get("외선") or 0)
+                f누적.append(facc)
+            FMAX = max(abs(v) for v in f누적) or 1
+            여유 = min(CY(0) - PT, (PT + PH*0.66) - CY(0))
+            여유 = max(여유, 8)
+            FY = lambda v: CY(0) - (v / FMAX) * 여유
+            f선 = " ".join(f'{"L" if i else "M"}{X(i):.1f} {FY(v):.1f}' for i, v in enumerate(f누적))
+            g.append(f'<path d="{f선}" fill="none" stroke="#7fa8e8" stroke-width="1.8" '
+                     f'stroke-dasharray="4 4" opacity=".45" stroke-linejoin="round"/>')
+            g.append(f'<circle cx="{X(n-1):.1f}" cy="{FY(f누적[-1]):.1f}" r="2.6" fill="#7fa8e8" opacity=".6"/>')
+            g.append(f'<text x="{X(n-1)-7:.1f}" y="{FY(f누적[-1])+11:.1f}" text-anchor="end" '
+                     f'font-size="8.5" fill="#7fa8e8" font-weight="700" opacity=".75">선물 {_flow_amt(f누적[-1])}</text>')
+
+        g.append(f'<path d="{선}" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/>')
+        # ── 5일 전 기준선 ──
+        #   밴드 구간의 '겉모습'(고점에서 흘러내림)과 배지 숫자(+4,595억)가
+        #   반대로 보이는 착시가 있었다. 5일 누적은 '5일 전 누적과 오늘 누적의 차'인데,
+        #   밴드 왼쪽 끝의 상승 구간이 이미 그 안에 포함돼 있기 때문이다.
+        #   그래서 기준점(5일 전 누적)에 가로선을 그어 눈으로 차이를 확인하게 한다.
+        if n >= 6:
+            기준y = CY(누적[n-6])
+            # ① 기준선 대비 위/아래를 색으로 칠한다 — 위(빨강)면 5일간 순유입
+            for i in range(n-6, n-1):
+                y0, y1 = CY(누적[i]), CY(누적[i+1])
+                위쪽 = (누적[i] + 누적[i+1]) / 2 >= 누적[n-6]
+                g.append(f'<polygon points="{X(i):.1f},{y0:.1f} {X(i+1):.1f},{y1:.1f} '
+                         f'{X(i+1):.1f},{기준y:.1f} {X(i):.1f},{기준y:.1f}" '
+                         f'fill="{"#C1432B" if 위쪽 else "#2E6BD6"}" opacity=".30"/>')
+            # ② 기준선
+            g.append(f'<line x1="{bx:.1f}" y1="{기준y:.1f}" x2="{W0-PR}" y2="{기준y:.1f}" '
+                     f'stroke="#e0c060" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="4 3"/>')
+            g.append(f'<circle cx="{X(n-6):.1f}" cy="{기준y:.1f}" r="2.6" fill="#e0c060" opacity=".8"/>')
+            g.append(f'<text x="{bx+7:.1f}" y="{기준y-6:.1f}" font-size="8.5" fill="#e0c060" '
+                     f'font-weight="700" opacity=".9">5일 전</text>')
+            # ③ 기준선 → 오늘 끝점의 화살표 = 5일 누적 그 자체
+            끝y = CY(누적[-1]); ax = X(n-1) - 26
+            위로 = 끝y < 기준y
+            색 = "#ff8a6e" if 위로 else "#7fa8e8"
+            if abs(끝y - 기준y) >= 10:      # 간격이 넉넉할 때만 화살표
+                머리 = f"{ax:.1f},{끝y:.1f} {ax-4.5:.1f},{끝y + (7 if 위로 else -7):.1f} {ax+4.5:.1f},{끝y + (7 if 위로 else -7):.1f}"
+                g.append(f'<line x1="{ax:.1f}" y1="{기준y:.1f}" x2="{ax:.1f}" y2="{끝y + (6 if 위로 else -6):.1f}" '
+                         f'stroke="{색}" stroke-width="1.8"/>')
+                g.append(f'<polygon points="{머리}" fill="{색}"/>')
+                라벨y = (기준y + 끝y) / 2 + 3
+            else:                            # 좁으면 기준선 바로 아래에 글자만
+                라벨y = 기준y + (16 if 위로 else -9)
+            g.append(f'<text x="{ax-7:.1f}" y="{라벨y:.1f}" text-anchor="end" font-size="9.5" '
+                     f'fill="{색}" font-weight="800">5일 {"▲" if 위로 else "▼"} {_flow_amt(누5)}</text>')
+        if CMIN < 0 < CMAX:
+            g.append(f'<line x1="{PL}" y1="{CY(0):.1f}" x2="{W0-PR}" y2="{CY(0):.1f}" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/>')
+            g.append(f'<text x="{PL+4}" y="{CY(0)-4:.1f}" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text>')
+        g.append(f'<circle cx="{X(n-1):.1f}" cy="{CY(누적[-1]):.1f}" r="8" fill="#f0f0ee" opacity=".16"/>')
+        g.append(f'<circle cx="{X(n-1):.1f}" cy="{CY(누적[-1]):.1f}" r="3.4" fill="#fff"/>')
+        g.append(f'<text x="{X(n-1)-8:.1f}" y="{CY(누적[-1])-9:.1f}" text-anchor="end" '
+                 f'font-size="10.5" fill="#fff" font-weight="800">{_flow_amt(누20)}</text>')
+        저점i = 누적.index(min(누적))
+        반등함 = 0 < 저점i < n-1 and 누적[저점i] < 0 <= 누적[-1]
+        if 반등함:
+            d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
+            g.append(f'<circle cx="{X(저점i):.1f}" cy="{CY(누적[저점i]):.1f}" r="2.8" fill="#7fa8e8"/>')
+            g.append(f'<text x="{X(저점i):.1f}" y="{CY(누적[저점i])+14:.1f}" text-anchor="middle" '
+                     f'font-size="8.5" fill="#7fa8e8" font-weight="700">{d.month}/{d.day} 바닥</text>')
+        눈금 = sorted(set([0, n//3, 2*n//3, n-1]))
+        축 = "".join(f'<span>{datetime.strptime(표시[i]["날짜"], "%Y%m%d").strftime("%m/%d")}</span>' for i in 눈금)
+        배지HTML = (f'<div class="fs-badges">'
+                   f'<span class="fs-cb {"b5" if 누5 >= 0 else "b5n"}">최근 {min(5, N)}일 {_flow_amt(누5)}</span>'
+                   f'<span class="fs-cb b20">{n}일 누적 {_flow_amt(누20)}</span></div>')
+        범례 = ('<div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span>'
+              '<span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span>'
+              '<span><i class="l-rf"></i>5일 전 기준선</span></div>') if len(선물있는) >= 2 else ""
+        그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
+                     + "".join(g) + f'</svg><div class="fs-x">{축}</div>{범례}')
+
+        # ── 판독문 (규칙 기반) ──
+        문장 = []
+        if 반등함:
+            d = datetime.strptime(표시[저점i]["날짜"], "%Y%m%d")
+            흐른일 = n - 1 - 저점i
+            문장.append(f"<b>{d.month}/{d.day}</b>까지 빠져나가던 실탄이 그날을 바닥으로 방향을 바꿔, "
+                       f"이후 <b>{흐른일}거래일째 쌓이는 중</b>입니다.")
+        elif 누적[-1] > 0:
+            문장.append(f"최근 {n}거래일간 실탄이 <b>{_flow_amt(누20)}</b> 쌓였습니다.")
+        else:
+            문장.append(f"최근 {n}거래일간 실탄이 <b>{_flow_amt(누20)}</b> — 빠져나가는 흐름입니다.")
+        if n >= 10 and 누20 != 0 and 누5/누20 > 0.55 and (누5 > 0) == (누20 > 0):
+            문장.append(f"특히 최근 5일에만 <b>{_flow_amt(누5)}</b> — 누적의 "
+                       f"<b>{abs(누5/누20)*100:.0f}%가 이번 주에</b> 움직였습니다. "
+                       f"돈이 {'들어오는' if 누20>0 else '빠져나가는'} 속도가 빨라지고 있다는 뜻입니다.")
+        elif n >= 10 and (누5 > 0) != (누20 > 0):
+            문장.append(f"다만 최근 5일은 <b>{_flow_amt(누5)}</b>로 방향이 반대입니다 — "
+                       f"한 달 흐름과 이번 주 흐름이 엇갈리는 구간입니다.")
+        판독HTML = f'<p class="fs-read">{" ".join(문장)}</p>'
+    else:
+        그래프HTML = (f'<div class="fs-building">📈 누적 그래프는 데이터가 쌓이는 대로 여기 그려집니다 '
+                     f'(현재 {N}/20거래일)</div>')
+
+    쌓임안내 = f' <span class="fs-n">({N}일치 기준)</span>' if N < 20 else ""
+
+    return f'''
+  <div class="fs-box">
+    <div class="fs-verdict">
+      <div class="fs-ico {vc}"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 {'22 V6 M13 6 l-7 7 M13 6 l7 7' if 방향양 else '4 V20 M13 20 l-7 -7 M13 20 l7 -7'}" stroke="{'#ff8a6e' if 방향양 else '#7fa8e8'}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
+      <div class="fs-main">
+        <p class="fs-k">오늘의 실탄 (외국인+기관이 실제 주식에 넣은 현금){쌓임안내}</p>
+        <div class="fs-row"><span class="fs-num {vc}">{_flow_amt(실탄)}</span><span class="fs-state {vc}">{상태}{배수문}</span></div>
+        <div class="fs-chips">{칩HTML}</div>
+      </div>
+    </div>
+    <div class="fs-checks">
+      <p class="fs-checks-t">🔍 세 가지만 확인하면 됩니다</p>
+      {"".join(행들)}
+    </div>
+    {f'<p class="fs-combo"><b>{조합[1]}</b> — {조합[2]}</p>' if 조합 else ''}
+    {f'<p class="fs-warn">{만기배지} — {만기설명}</p>' if 만기배지 else ''}
+    <div class="fs-cum">
+      <div class="fs-cum-head">
+        <span class="fs-cum-t">📈 실탄이 쌓이는 흐름 — 최근 {min(N,20)}거래일</span>
+        {배지HTML}
+      </div>
+      {그래프HTML}
+      {판독HTML}
+    </div>
+    <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
+      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
+  </div>'''
+
+
+def build_macro_card(item, 해설=""):
+    if not item:
+        return '<div class="mr-card"><p class="mr-label">—</p><p class="mr-val">— (준비중)</p></div>'
+    cls = "dn" if item["등락률"] < 0 else "up"
+    단위 = item.get("단위", "")
+    값표시 = f"{단위}{item['값']:,.2f}" if 단위 == "$" else f"{item['값']:,.2f}{단위}"
+    해설HTML = f'<p class="mr-comment">{해설}</p>' if 해설 else ''
+    return f'''
+    <div class="mr-card">
+      <p class="mr-label">{item['표시명']}</p>
+      <p class="mr-val">{값표시}</p>
+      <span class="{cls}" style="font-size:11px;font-weight:700">{item['등락률']:+.2f}%</span>
+      {해설HTML}
+    </div>'''
+
+
+def build_html(data, report):
+    지수 = (data.get("지수수급") or {}).get("지수") or {}
+    코 = 지수.get("코스피", {})
+    닥 = 지수.get("코스닥", {})
+    코수 = (data.get("지수수급") or {}).get("코스피_수급") or {}
+    닥수 = (data.get("지수수급") or {}).get("코스닥_수급") or {}
+    해석 = (report or {}).get("해석글", {})
+    오늘의시장 = 해석.get("오늘의_시장", "— (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)")
+    오늘한줄평 = 해석.get("한줄평", "— (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)")
+    오늘의문장 = 해석.get("오늘의_한문장", "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)")
+    프로의시선 = 해석.get("프로의시선") or {}
+    오늘의공부 = 해석.get("오늘의_공부", "")
+    날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
+
+    # ── 공유 카드(OG) — 같은 문장이 세 번 겹치던 문제를 역할 분담으로 해결 ──
+    #   og:title = 한줄평 (카드 흰 글씨)  /  og:description = 날짜만 (회색 글씨)
+    #   og:image = 매일 새로 생성되는 썸네일 PNG (make_thumb.py)
+    #   관제지수는 카드에서 전부 뺀다 — 클릭 전 사람에게는 의미 없는 숫자.
+    관제 = data.get("관제지수") or {}
+    if isinstance(오늘한줄평, str) and not 오늘한줄평.startswith("—"):
+        og_title = 오늘한줄평
+    else:
+        og_title = f"차트프로 관제탑 {날짜}"
+    _d = data["날짜"]
+    _요일 = "월화수목금토일"[datetime.strptime(_d, "%Y%m%d").weekday()]
+    og_desc = f"{int(_d[4:6])}월 {int(_d[6:])}일 ({_요일}) 마감 · 차트프로 관제탑"
+    og_img = f"https://sixline86-ship-it.github.io/chartpro/thumb/{_d}.png"
+    og_url = f"https://sixline86-ship-it.github.io/chartpro/report_{_d}.html"
+
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>차트프로 관제탑 · {날짜}</title>
+<meta property="og:title" content="{og_title}">
+<meta property="og:description" content="{og_desc}">
+<meta property="og:type" content="article">
+<meta property="og:image" content="{og_img}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="{og_url}">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+:root{{
+  --font-sans:'Pretendard','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --ink:#1a1a1a; --sub:#6b6b6b; --bg:#fff; --bg2:#f6f5f3; --line:#e2e0dc;
+  --up:#C1432B; --dn:#2E6BD6; --rmd:8px; --rlg:12px;
+  --pink:#7a2b4d; --pink2:#9c3862; --pink-line:#c86a92;
+}}
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{background:#f0efec;padding:24px 12px;display:flex;justify-content:center;font-family:var(--font-sans)}}
+.rp{{padding:1.5rem 1.75rem 2rem;background:var(--bg);max-width:780px;width:100%;border-radius:16px;box-shadow:0 2px 24px rgba(0,0,0,.06)}}
+a{{color:inherit;text-decoration:none}}
+.top-bar{{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}}
+.rp-title{{font-size:17px;font-weight:800}}
+.badge{{font-size:11px;color:var(--sub);background:var(--bg2);padding:3px 9px;border-radius:var(--rmd);border:.5px solid var(--line);height:fit-content}}
+.sec-label{{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.07em;text-transform:uppercase;margin:1.5rem 0 .7rem;display:flex;gap:6px}}
+.sec-label::after{{content:'';flex:1;height:.5px;background:var(--line);align-self:center}}
+.up{{color:var(--up);font-weight:600}} .dn{{color:var(--dn);font-weight:600}} .smut{{color:var(--sub)}}
+
+/* ── 게이지 ── */
+.gauge-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1.15rem 1.25rem;color:#e8e6e2;margin-bottom:1rem}}
+.gz-top{{display:flex;gap:18px;align-items:center;flex-wrap:wrap}}
+.gz-numwrap{{text-align:center;flex-shrink:0}}
+.gz-num{{font-size:40px;font-weight:800;color:#7fa8e8;line-height:1}}
+.gz-lab{{font-size:12px;font-weight:700;color:#7fa8e8;margin-top:3px}}
+.gz-bodywrap{{flex:1;min-width:230px}}
+.gz-title{{font-size:12px;font-weight:700;color:#c8ccd2;margin-bottom:9px}}
+.gz-track{{position:relative;height:12px;border-radius:6px;display:flex;overflow:visible}}
+.gz{{height:100%;width:20%}}
+.z1{{background:#2E6BD6;border-radius:6px 0 0 6px}} .z2{{background:#6b93d8}} .z3{{background:#8a8f98}} .z4{{background:#d08a6a}} .z5{{background:#C1432B;border-radius:0 6px 6px 0}}
+.gz-needle{{position:absolute;top:-5px;width:3px;height:22px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(255,255,255,.8);transform:translateX(-50%)}}
+.gz-scale{{display:flex;margin-top:7px}}
+.gz-scale span{{width:20%;text-align:center;font-size:9.5px;color:#8a909a;font-weight:600}}
+.gz-toggle{{margin-top:.9rem;width:100%;font-size:11px;font-weight:600;color:#c8ccd2;background:rgba(255,255,255,.06);border:.5px solid rgba(255,255,255,.14);border-radius:99px;padding:6px 0;cursor:pointer;font-family:var(--font-sans)}}
+.gz-detail{{margin-top:.7rem;background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.7rem .9rem}}
+.gz-row{{display:grid;grid-template-columns:96px 42px 62px 1fr;gap:6px;align-items:center;padding:6px 0;border-bottom:.5px solid rgba(255,255,255,.08);font-size:11px}}
+.gz-row:last-of-type{{border-bottom:none}}
+.gz-el{{font-weight:700;color:#e8e6e2}}
+.gz-sc{{font-weight:800;color:#7fa8e8;text-align:right}}
+.gz-w{{color:#9aa0a8;font-size:10px}}
+.gz-ev{{color:#c3c8ce;font-size:10.5px}}
+.gz-note{{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.6rem}}
+.gz-oneline{{font-size:12px;color:#e8e6e2;line-height:1.7;margin-top:.9rem;padding-top:.85rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.gz-oneline b{{color:#7fa8e8}}
+.gz-badges{{display:flex;gap:6px;flex-wrap:wrap;margin-top:.7rem}}
+.gz-badge{{font-size:10.5px;font-weight:600;background:rgba(255,255,255,.08);border:.5px solid rgba(255,255,255,.14);color:#dfe3e8;padding:3px 10px;border-radius:99px}}
+
+/* ── 지수+수급 ── */
+.idx-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1rem}}
+.idx-card2{{background:#23262b;color:#eee;border-radius:var(--rmd);padding:.8rem .9rem}}
+.ic-mkt{{font-size:10px;color:#9aa0a8}}
+.ic-num{{font-size:21px;font-weight:800}}
+.ic-chg-up{{color:#ff6b4a;font-weight:700}} .ic-chg-dn{{color:#5b9bff;font-weight:700}}
+.sup-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:9px}}
+.sup{{background:rgba(0,0,0,.22);border-radius:6px;padding:5px 4px;text-align:center}}
+.sup-who{{font-size:9px;color:#9aa0a8}}
+.sup-amt{{font-size:11.5px;font-weight:800}}
+.sup-amt.up{{color:#ff6b4a}} .sup-amt.dn{{color:#5b9bff}} .sup-amt.smut{{color:#c3c8ce}}
+
+.today-market{{background:#EAF3DE;border-radius:var(--rlg);padding:.85rem 1.05rem;font-size:12.5px;color:#3B6D11;line-height:1.75;margin-bottom:1rem}}
+
+/* ── 섹터 지형도 (v8 스타일) ── */
+.terrain-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1rem 1.15rem 1.1rem;margin-bottom:1rem}}
+.terrain-title{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin-bottom:.55rem;letter-spacing:.04em}}
+.bar-chart{{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}}
+.bar-col{{display:flex;flex-direction:column;align-items:center}}
+.bar-zone{{position:relative;width:100%;height:132px}}
+.bar-zone::after{{content:'';position:absolute;left:6%;right:6%;top:var(--zero,50%);height:1px;background:rgba(255,255,255,.25)}}
+.bar{{position:absolute;left:50%;transform:translateX(-50%);width:55%;max-width:24px;border-radius:4px;z-index:1}}
+.bar.pos{{background:linear-gradient(180deg,#ff8a6e,#C1432B)}}
+.bar.neg{{background:linear-gradient(180deg,#2E6BD6,#7fa8e8)}}
+.bar-val{{position:absolute;left:50%;transform:translateX(-50%);font-size:10px;font-weight:800;white-space:nowrap;z-index:2}}
+.bar-val.pos{{color:#ef8a72}} .bar-val.neg{{color:#7fa8e8}}
+.bar-name{{font-size:10px;font-weight:600;color:#c8ccd2;margin-top:6px;white-space:nowrap}}
+
+/* ── 주도섹터 (v8 라이트 카드) ── */
+.sector-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:.7rem}}
+.sector-card{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.03)}}
+.sc-head{{padding:.7rem .9rem .55rem;border-bottom:.5px solid var(--line);background:linear-gradient(135deg,#FBFAF8,#F4F1EB);position:relative}}
+.sc-head::before{{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dn)}}
+.sc-head.pos::before{{background:var(--up)}}
+.sc-name-row{{display:flex;align-items:baseline;gap:6px}}
+.sc-name{{font-size:14px;font-weight:800;color:var(--ink)}}
+.sc-sfx{{font-size:10px;color:var(--sub);font-weight:600}}
+.sc-chg{{font-size:12px;font-weight:800;padding:2px 8px;border-radius:6px;margin-left:auto;background:rgba(46,107,214,.1);color:var(--dn)}}
+.sc-chg.pos{{background:rgba(193,67,43,.1);color:var(--up)}}
+.sc-score{{font-size:10px;color:var(--sub);margin-top:5px;font-weight:600}}
+.sc-list{{padding:.15rem .9rem .5rem}}
+.sc-cols{{display:grid;grid-template-columns:1.1fr 72px 58px 64px;font-size:9.5px;color:#a8a49c;font-weight:600;padding:6px 0 3px;border-bottom:.5px solid var(--line)}}
+.sc-cols span:not(:first-child){{text-align:right}}
+.sc-row{{display:grid;grid-template-columns:1.1fr 72px 58px 64px;align-items:center;padding:6px 0;border-bottom:.5px solid var(--line);font-size:12px}}
+.sc-row:last-child{{border-bottom:none}}
+.sc-stock{{font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.sc-price{{text-align:right;color:var(--sub);font-variant-numeric:tabular-nums}}
+.sc-rate{{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}}
+.sc-rate.up{{color:var(--up)}} .sc-rate.dn{{color:var(--dn)}}
+.sc-vol{{text-align:right;color:#8a6d3b;font-weight:700;font-size:11px;font-variant-numeric:tabular-nums}}
+
+/* ── 공시 ── */
+.disc-box{{background:#23262b;border-radius:var(--rlg);padding:1rem 1.15rem;margin-bottom:.6rem}}
+.disc-row{{display:block;padding:.85rem 0;border-bottom:.5px solid rgba(255,255,255,.08)}}
+.disc-row:last-child{{border-bottom:none}}
+.disc-head{{display:flex;align-items:center;gap:8px}}
+.disc-name{{font-size:13.5px;font-weight:800;color:#fff}}
+.stars{{font-size:12px;color:#E0A100;margin-left:auto}}
+.stars .off{{color:#565b64}}
+.disc-note{{font-size:11.5px;color:#c3c8ce;line-height:1.6}}
+.disc-lnk{{color:#8a909a;font-size:10px}}
+
+/* ── 공용 ── */
+.pending{{background:var(--bg2);border:.5px dashed var(--line);border-radius:var(--rmd);padding:.9rem 1rem;font-size:11.5px;color:var(--sub);margin-bottom:1rem;line-height:1.7;text-align:center}}
+
+/* 핵심 이슈 */
+.issue-box{{background:var(--bg2);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}}
+.iss{{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid var(--line);line-height:1.65}}
+.iss:last-child{{border-bottom:none;padding-bottom:0}}
+.iss-links{{display:block;margin-top:3px}}
+.iss-link{{font-size:9.5px;color:#8a86c8;text-decoration:none;font-weight:600;margin-right:8px}}
+.iss-link:hover{{text-decoration:underline}}
+.itag{{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:2px;background:#E6F1FB;color:#0C447C}}
+.iss-text{{font-size:12.5px;color:var(--ink)}}
+
+/* 핵심 뉴스 */
+.news-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:.6rem}}
+.news-item{{display:flex;gap:11px;padding:.75rem 1.15rem;border-bottom:.5px solid var(--line);align-items:flex-start}}
+.news-item:last-child{{border-bottom:none}}
+.news-rank{{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;flex-shrink:0;width:20px;line-height:1.5}}
+.news-body{{flex:1}}
+.news-title{{font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.55;margin-bottom:3px}}
+.news-tag{{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:4px;margin-right:5px;vertical-align:middle}}
+.nt-market{{background:#E6F1FB;color:#0C447C}} .nt-stock{{background:#FAECE7;color:#993C1D}}
+.nt-policy{{background:#FAEEDA;color:#854F0B}} .nt-global{{background:#EEEDFE;color:#3C3489}}
+.news-insight{{font-size:11.5px;color:var(--sub);line-height:1.6}}
+.news-a{{text-decoration:none;color:inherit}}
+.news-a:hover .news-tag{{filter:brightness(.94)}}
+.news-item:hover{{background:#FBFAF8}}
+.news-go{{font-size:10px;color:#b0aca6;margin-left:4px;vertical-align:middle}}
+.news-a:hover{{text-decoration:underline;text-underline-offset:3px}}
+.mf-sub-x{{font-size:9.5px;font-weight:600;color:#8a909a}}
+.news-foot{{font-size:10px;color:var(--sub);line-height:1.6;margin:-.2rem 0 1rem;padding:0 .2rem}}
+/* 지난 리포트 아카이브 */
+.arch-wrap{{background:var(--bg2);border:.5px solid var(--line);border-radius:var(--rlg);padding:.85rem 1rem;margin:1.4rem 0 .4rem}}
+.arch-head{{font-size:11.5px;font-weight:800;color:var(--ink);margin-bottom:.6rem;letter-spacing:-.01em}}
+.arch-grid{{display:flex;flex-wrap:wrap;gap:6px}}
+.arch-link{{font-size:11.5px;font-weight:600;color:var(--ink);background:var(--bg);border:.5px solid var(--line);border-radius:99px;padding:5px 12px;text-decoration:none;font-variant-numeric:tabular-nums;white-space:nowrap}}
+.arch-link:hover{{background:#23262b;color:#fff;border-color:#23262b}}
+.arch-empty{{font-size:11px;color:var(--sub)}}
+.silent-wrap{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}}
+.silent-head{{font-size:12.5px;font-weight:800;color:#3C3489;margin-bottom:.6rem}}
+.si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #e0dcf0;font-size:12.5px;line-height:1.75;color:#33305e}}
+.si-item:last-child{{border-bottom:none;padding-bottom:0}}
+.si-lens{{font-size:10px;font-weight:700;background:#E3DFF5;color:#3C3489;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.study-src{{font-size:10.5px;font-weight:600;color:#5b8a2a;background:#dcebc8;display:inline-block;padding:2px 9px;border-radius:99px;margin:2px 0 6px}}
+.study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
+.hidden-block{{display:none}} .hidden-block.open{{display:block}}
+.more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
+.macro-row{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:1rem}}
+.mr-card{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .9rem}}
+.mr-label{{font-size:11px;color:var(--sub);margin-bottom:3px}}
+.mr-val{{font-size:15px;font-weight:700;color:var(--sub)}}
+.mr-comment{{font-size:10.5px;color:var(--sub);margin-top:6px;line-height:1.6}}
+.watch-item{{background:#23262b;color:#e8e6e2;border-radius:var(--rmd);padding:.75rem .95rem;font-size:12.5px;line-height:1.7;margin-bottom:8px}}
+.tv-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:1rem}}
+.tv-row-wrap{{padding:.8rem 1.1rem;border-bottom:.5px solid var(--line)}}
+.tv-row{{display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap}}
+.tv-ch{{font-size:12.5px;font-weight:800;color:var(--ink)}}
+.tv-angle{{font-size:10px;color:var(--sub);background:var(--bg2);padding:2px 7px;border-radius:4px;white-space:nowrap}}
+.tv-see{{margin-left:auto;font-size:10.5px;font-weight:700;color:#fff;background:#23262b;padding:3px 11px;border-radius:99px;white-space:nowrap}}
+.tv-title{{font-size:11.5px;color:var(--sub);line-height:1.5;margin-bottom:4px}}
+.tv-sum{{font-size:12.5px;color:var(--ink);line-height:1.75}}
+.tv-note{{font-size:10px;color:var(--sub);line-height:1.6;padding:.7rem 1.1rem;background:var(--bg2)}}
+.tv-lead{{padding:1rem 1.15rem .95rem;background:linear-gradient(135deg,#F7F3EC,#FBF9F5);border-bottom:.5px solid var(--line)}}
+.tv-lead-badge{{display:inline-block;font-size:10.5px;font-weight:800;color:#8a5a1f;background:#F3E4C8;padding:3px 10px;border-radius:99px;margin-bottom:.55rem}}
+.tv-lead-ch{{font-size:14px;font-weight:800;color:var(--ink);margin-bottom:.45rem;display:flex;align-items:center;gap:7px}}
+.tv-dot{{width:7px;height:7px;border-radius:50%;background:var(--up);flex-shrink:0}}
+.tv-lead-body{{font-size:12.5px;color:var(--ink);line-height:1.85;margin-bottom:.6rem}}
+.tv-others{{padding:.15rem 1.15rem}}
+.tv-clickable{{cursor:pointer}}
+.tv-see-sm{{margin-left:auto;font-size:10.5px;font-weight:700;color:#fff;background:#23262b;padding:3px 12px;border-radius:99px;white-space:nowrap}}
+.tv-body-hidden{{max-height:0;overflow:hidden;transition:max-height .28s ease}}
+.tv-body-hidden.open{{max-height:500px;padding-bottom:11px}}
+.tv-link-sm{{display:inline-block;font-size:10.5px;font-weight:700;color:var(--dn);margin-top:5px}}
+.disc-why{{font-size:11px;color:#9fb4cc;line-height:1.6;margin-top:6px;padding-left:2px}}
+.study-no{{font-size:10px;font-weight:700;color:#3B6D11;letter-spacing:.06em}}
+.study-term{{font-size:15px;font-weight:800;color:#2c520c;margin:4px 0 10px;line-height:1.4}}
+.study-step{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #d5e3c2;font-size:12.5px;line-height:1.75;color:#3B6D11}}
+.study-step:last-of-type{{border-bottom:none}}
+.study-k{{font-size:10px;font-weight:800;background:#d9e8c4;color:#2c520c;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.study-memo{{background:#2c520c;color:#eef5e2;border-radius:var(--rmd);padding:.6rem .9rem;font-size:12px;font-weight:600;margin-top:.7rem;line-height:1.6}}
+
+/* ── 회전율 레이더 ── */
+.rd-box{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);padding:1rem 1.1rem;margin-bottom:1rem}}
+.devnote{{background:#FFF8E6;border:.5px dashed #E0C060;border-radius:var(--rmd);padding:.55rem .8rem;font-size:10px;color:#7a5a10;line-height:1.7;margin-bottom:.8rem}}
+.devnote b{{color:#5a4208}}
+.rd-lead{{font-size:11.5px;color:var(--sub);line-height:1.7;margin-bottom:.9rem;background:var(--bg2);padding:.7rem .85rem;border-radius:var(--rmd)}}
+.rd-market{{margin-bottom:.8rem}}
+.rd-mkt-name{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.5rem}}
+.rd-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.rd-row:last-child{{border-bottom:none}}
+.rd-rank{{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;width:20px;flex-shrink:0;text-align:center}}
+.rd-info{{flex:1;min-width:0}}
+.rd-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.rd-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
+.rd-new{{background:#FAECE7;color:#993C1D}} .rd-stay{{background:#FAEEDA;color:#854F0B}}
+.rd-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
+.rd-nums{{text-align:right;flex-shrink:0}}
+.rd-score{{display:block;font-size:15px;font-weight:800;color:#8a5a1f}}\n.rd-boom{{background:#FAECE7;color:#C1432B}}
+.rd-chg{{font-size:11px;font-weight:700}}
+.ac-gap{{text-align:right;flex-shrink:0}}
+.ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
+.ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
+.ac-two{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.ac-col{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .8rem}}
+.ac-col-t{{font-size:12px;font-weight:800;color:var(--ink)}}
+.ac-col-s{{font-size:9.5px;color:var(--sub);margin:2px 0 .5rem}}
+.ac-rank{{font-size:11px;font-weight:800;color:#c9c1b0;font-style:italic;width:14px;flex-shrink:0}}
+.ac-info{{flex:1;min-width:0}}
+.ac-name{{font-size:11.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:4px;flex-wrap:wrap}}
+.ac-meta{{font-size:9.5px;color:var(--sub);margin-top:1px}}
+.ac-val{{font-size:11.5px;font-weight:800;color:var(--up);flex-shrink:0;text-align:right}}
+.ac-solo{{background:var(--bg);color:var(--sub);border:.5px solid var(--line)}}
+.ac-note{{font-size:10px;color:var(--sub);margin-top:.6rem}}
+@media (max-width:600px){{ .ac-gap{{text-align:right;flex-shrink:0}}
+.ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
+.ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
+.ac-two{{grid-template-columns:1fr}} }}
+.ac-group{{margin-bottom:.8rem}}
+.ac-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.ac-row:last-child{{border-bottom:none}}
+.ac-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
+.ac-days{{background:var(--bg2);color:var(--sub)}}
+.ac-both{{background:#FAECE7;color:#C1432B}}
+.ac-money{{display:block;font-size:14px;font-weight:800}}
+.ac-ratio{{font-size:10px;color:var(--sub)}}
+.sort-tabs{{display:flex;border:.5px solid var(--line);border-radius:99px;overflow:hidden;width:fit-content;margin-bottom:.8rem}}
+.sort-tab{{font-size:11px;font-weight:600;padding:5px 16px;background:var(--bg);color:var(--sub);border:none;cursor:pointer;font-family:var(--font-sans)}}
+.sort-tab.active{{background:#23262b;color:#fff}}
+.rd-re{{background:#EEEDFE;color:#3C3489}}
+.rd-empty{{font-size:11.5px;color:var(--sub);padding:.5rem 0}}
+.ac-long{{margin-top:1rem;border-top:.5px solid var(--line);padding-top:.85rem}}
+.ac-long-t{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.2rem}}
+.ac-long-s{{font-size:10.5px;color:var(--sub);line-height:1.65;margin-bottom:.6rem}}
+.ac-star{{font-size:9px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:1px 7px;margin-left:4px}}
+.rd-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}}
+
+/* ── 어제의 채점표 ── */
+.score-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
+.score-head{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.7rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.score-tally{{font-size:10.5px;font-weight:700;color:#8a5a1f;background:#F3E4C8;padding:2px 9px;border-radius:99px}}
+.score-row{{display:flex;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
+.score-row:last-of-type{{border-bottom:none}}
+.score-mark{{font-size:15px;font-weight:800;width:22px;text-align:center;flex-shrink:0;line-height:1.5}}
+.sc-o{{color:var(--up)}} .sc-x{{color:var(--dn)}} .sc-t{{color:#a8a49c}}
+.score-item{{font-size:12px;color:var(--ink);line-height:1.6;font-weight:600}}
+.score-why{{font-size:11px;color:var(--sub);line-height:1.6;margin-top:3px}}
+.score-foot{{font-size:9.5px;color:var(--sub);margin-top:.6rem;line-height:1.5}}
+
+/* ── 돈의 이동경로 ── */
+.mf-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:1.05rem 1.15rem;color:#e8e6e2;margin-bottom:1rem}}
+.mf-summary{{font-size:13px;font-weight:700;color:#fff;line-height:1.7;margin-bottom:.9rem}}
+.mf-move{{display:flex;align-items:center;gap:10px;background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.75rem .85rem}}
+.mf-side{{flex:1;min-width:0}}
+.mf-side-t{{font-size:10px;font-weight:700;margin-bottom:6px}}
+.mf-side-t.out{{color:#7fa8e8}} .mf-side-t.in{{color:#ff8a6e}}
+.mf-chips{{display:flex;flex-wrap:wrap;gap:4px}}
+.mf-chip{{font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap}}
+.mf-chip.out{{background:rgba(46,107,214,.25);color:#bcd2f5}}
+.mf-chip.in{{background:rgba(193,67,43,.28);color:#ffd0c0}}
+.mf-none{{font-size:10.5px;color:#8a909a}}
+.mf-arrow{{font-size:18px;color:#8a909a;flex-shrink:0}}
+/* ══ 핵심편·수급온도 — 시안 v5 (화이트리스트 이식) ══ */
+
+.top-bar{{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:1rem;gap:10px}}
+
+.part-line{{display:flex;align-items:center;gap:10px;margin:2.2rem 0 1.1rem}}
+
+.part-line span{{font-size:12px;font-weight:800;color:#fff;background:#23262b;padding:5px 14px;border-radius:99px;white-space:nowrap}}
+
+.part-line::after{{content:'';flex:1;height:1.5px;background:#23262b}}
+
+.q90{{background:linear-gradient(180deg,#1e2127,#282c34);border-radius:var(--rlg);padding:1.3rem 1.35rem 1.2rem;color:#e8e6e2}}
+
+.q90-top{{display:flex;align-items:center;gap:8px;margin-bottom:.9rem;flex-wrap:wrap}}
+
+.q90-badge{{font-size:11.5px;font-weight:800;color:#20242b;background:#e0c060;padding:3px 12px;border-radius:99px}}
+
+.q90-sub{{font-size:12px;color:#9aa0a8}}
+
+.q90-def{{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
+
+.q90-def .hi{{color:var(--up-soft)}}
+
+.q90-feel{{font-size:13.5px;color:#e0c060;font-weight:700;line-height:1.6;padding-left:11px;border-left:2.5px solid #e0c060;margin-bottom:.75rem}}
+
+.q90-why{{font-size:13.5px;color:#b9bfc7;line-height:1.75;padding-bottom:1rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
+
+.q90-why b{{color:#fff;font-weight:800}}
+
+.q90-3{{padding:.9rem 0 .2rem}}
+
+.q3{{display:flex;gap:10px;padding:8px 0;font-size:13.5px;line-height:1.75;color:#dfe3e8}}
+
+.q3-n{{font-size:12px;font-weight:800;color:#20242b;background:#9aa0a8;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:3px}}
+
+.q3 b{{color:#fff;font-weight:800}}
+
+.q3 .u{{color:var(--up-soft);font-weight:800}}
+.q3 .d{{color:var(--dn-soft);font-weight:800}}
+
+.iss90{{background:rgba(255,255,255,.045);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}}
+
+.iss90-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
+
+.iss90-s{{font-size:11px;color:#8a909a;margin-bottom:.7rem}}
+
+.i9{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13px;line-height:1.7;color:#dfe3e8}}
+
+.i9:last-child{{border-bottom:none;padding-bottom:0}}
+
+.i9-t{{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px}}
+
+.tg-semi{{background:rgba(120,180,255,.16);color:#9fc6f5}}
+
+.tg-pol{{background:rgba(224,192,96,.16);color:#e0c060}}
+
+.tg-glo{{background:rgba(200,150,255,.14);color:#c3a7ee}}
+
+.tg-sup{{background:rgba(255,154,128,.16);color:var(--up-soft)}}
+
+.i9 b{{color:#fff;font-weight:800}}
+
+.i9 .u{{color:var(--up-soft);font-weight:800}}
+.i9 .d{{color:var(--dn-soft);font-weight:800}}
+
+.mny{{background:rgba(0,0,0,.25);border-radius:var(--rmd);padding:.95rem 1rem 1rem;margin-top:.8rem}}
+
+.mny-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
+
+.mny-sub{{font-size:11px;color:#8a909a;margin-bottom:.8rem}}
+
+.mny-tiles{{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}}
+
+.tile{{background:rgba(255,255,255,.05);border-radius:7px;padding:.62rem .55rem;text-align:center}}
+
+.tile-k{{font-size:10.5px;color:#9aa0a8;font-weight:600;margin-bottom:3px}}
+
+.tile-v{{font-size:17px;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums}}
+
+.tile-v.b{{color:var(--up-soft)}}
+.tile-v.s{{color:var(--dn-soft)}}
+
+.tile-s{{font-size:10px;font-weight:700;margin-top:3px;color:#9aa0a8}}
+
+.mny-feat{{margin-top:.9rem;display:flex;flex-direction:column;gap:8px}}
+
+.mf{{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:#c3c8ce;line-height:1.7}}
+
+.mf-i{{font-size:11px;font-weight:800;color:#20242b;background:#e0c060;width:17px;height:17px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}}
+
+.mf b{{color:#fff;font-weight:800}}
+
+.mf .u{{color:var(--up-soft);font-weight:800}}
+.mf .d{{color:var(--dn-soft);font-weight:800}}
+
+.mny-why{{margin-top:.9rem;background:rgba(224,192,96,.1);border-radius:6px;padding:.75rem .85rem}}
+
+.mw-h{{font-size:11.5px;font-weight:800;color:#e0c060;margin-bottom:.35rem}}
+
+.mw-b{{font-size:13px;color:#fff;line-height:1.75;font-weight:600}}
+
+.mw-b b{{color:#e0c060;font-weight:800}}
+
+.mine{{background:rgba(143,180,238,.09);border:.5px solid rgba(143,180,238,.22);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}}
+
+.mine-h{{font-size:12.5px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}}
+
+.mine-b{{font-size:13px;color:#dfe3e8;line-height:1.8}}
+
+.mine-b b{{color:#fff;font-weight:800}}
+
+.mine-split{{margin-top:.7rem;display:grid;grid-template-columns:1fr 1fr;gap:7px}}
+
+.ms{{background:rgba(0,0,0,.2);border-radius:6px;padding:.6rem .7rem}}
+
+.ms-k{{font-size:11px;font-weight:800;color:#e0c060;margin-bottom:3px}}
+
+.ms-v{{font-size:12px;color:#c3c8ce;line-height:1.6}}
+
+.mine-f{{font-size:11.5px;color:#8a909a;margin-top:.65rem;line-height:1.6}}
+
+
+.q90-flip{{background:rgba(224,192,96,.07);border-left:3px solid #e0c060;padding:.9rem 1rem;margin-top:.8rem}}
+
+.qf-h{{font-size:12px;font-weight:800;color:#e0c060;margin-bottom:.45rem}}
+
+.qf-b{{font-size:13.5px;color:#dfe3e8;line-height:1.8}}
+
+.qf-b b{{color:#fff;font-weight:800}}
+
+.q90-tease{{margin-top:1rem;padding-top:.9rem;border-top:.5px solid rgba(255,255,255,.1)}}
+
+.qt-h{{font-size:12.5px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}}
+
+.qt{{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13.5px;color:#fff;line-height:1.6;font-weight:700}}
+
+.qt:last-child{{border-bottom:none;padding-bottom:0}}
+
+.qt-tag{{font-size:10px;font-weight:800;padding:3px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;background:rgba(255,255,255,.1);color:#c8ccd2}}
+
+.qt-go{{margin-left:auto;font-size:11.5px;font-weight:800;color:#e0c060;white-space:nowrap;flex-shrink:0}}
+
+.qt .u{{color:var(--up-soft)}}
+
+.q90-cut{{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}}
+
+.temp{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);padding:1.05rem 1.15rem;margin-bottom:.6rem}}
+
+.temp-h{{font-size:14.5px;font-weight:800;margin-bottom:.2rem}}
+
+.temp-s{{font-size:12.5px;color:var(--sub);line-height:1.7;margin-bottom:.95rem}}
+
+.spark{{margin-bottom:1.1rem}}
+
+.spark-lab{{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:7px}}
+
+.spark-lab b{{color:var(--ink);font-size:12px}}
+
+.spark-box{{position:relative;height:92px}}
+
+.spark-bars{{display:flex;align-items:center;gap:3px;height:92px}}
+
+.sbw{{flex:1;position:relative;height:100%}}
+
+.sbw i{{position:absolute;left:12%;right:12%;border-radius:2px;font-style:normal}}
+
+.sbw i.p{{bottom:50%;background:#e8a893}}
+
+.sbw i.n{{top:50%;background:#a6c3ec}}
+
+.sbw.today i.p{{background:var(--up)}}
+
+.sbw.today i.n{{background:var(--dn)}}
+
+.spark-mid{{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line)}}
+
+.spark-x{{display:flex;justify-content:space-between;font-size:10.5px;color:#a8a49c;margin-top:6px}}
+
+.temp-read{{background:var(--bg2);border-radius:var(--rmd);padding:.8rem .95rem;font-size:12.5px;line-height:1.85;margin-top:.9rem}}
+
+.temp-read b{{font-weight:800}}
+
+.temp-note{{font-size:11.5px;color:var(--sub);line-height:1.7;margin-top:.7rem}}
+@media (max-width:600px){{
+  body{{padding:8px 0}}
+  .rp{{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}}
+  .top-bar{{flex-direction:column;gap:6px}}
+  .q90{{padding:1.05rem .95rem}}
+  .q90-def{{font-size:18.5px}}
+  .mny-tiles{{grid-template-columns:1fr;gap:6px}}
+  .tile{{display:flex;align-items:center;justify-content:space-between;text-align:left;padding:.55rem .7rem}}
+  .tile-k{{margin-bottom:0}}.tile-v{{font-size:15px}}.tile-s{{margin-top:0}}
+  .mine-split{{grid-template-columns:1fr}}
+  .tower-dash{{padding:1rem .9rem}}
+  .idx-grid{{grid-template-columns:1fr}}
+  .bar-chart{{gap:3px}}.bar-zone{{height:112px}}.bar-val{{font-size:9px}}.bar-name{{font-size:9px}}
+  .sector-grid{{grid-template-columns:1fr}}
+  .sc-cols,.sc-row{{grid-template-columns:1.3fr 74px 58px 52px;font-size:12.5px}}
+  .macro-row{{grid-template-columns:1fr}}
+  table.tt{{font-size:11.5px}}
+  table.tt th,table.tt td{{padding:7px 4px}}
+}}
+.tp-table{{margin-top:.6rem}}
+.tp-row{{display:grid;grid-template-columns:52px 100px 1fr;grid-template-areas:"who val avg" "who val chips";column-gap:10px;row-gap:3px;align-items:center;padding:8px 0;border-bottom:.5px dashed var(--line)}}
+.tp-who{{grid-area:who}} .tp-val{{grid-area:val}} .tp-avg{{grid-area:avg;white-space:nowrap}}
+.tp-chips{{grid-area:chips;justify-content:flex-start}}
+.tp-row:last-child{{border-bottom:none}}
+.tp-who{{font-size:11.5px;font-weight:800;color:var(--sub)}}
+.tp-val{{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}}
+.tp-val.up{{color:var(--up)}} .tp-val.dn{{color:var(--dn)}}
+.tp-avg{{font-size:11px;color:var(--sub)}}
+.tp-chips{{display:flex;gap:5px}}
+.tp-chip{{font-size:9.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--sub);border:.5px solid var(--line);white-space:nowrap}}
+.tp-chip.hot{{background:#fdeae4;color:#C1432B;border-color:#f2c4b4}}
+/* 핵심편 색 고정 — 시안 v5 값 강제 */
+.q90 .u,.mny .u,.tile-v.b{{color:#ff9a80!important;font-weight:800}}
+.q90 .d,.mny .d,.tile-v.s{{color:#8fb4ee!important;font-weight:800}}
+.mf b,.i9 b,.mine-b b,.qf-b b{{color:#fff}}
+.mw-b b{{color:#e0c060;font-weight:800}}
+/* ══ 폰트 일괄 확대 (v-12-a) ══ */
+.rp{{font-size:13.5px}}
+.rp p{{line-height:1.75}}
+.ic-num{{font-size:21px}}
+.rd-foot,.fs-foot,.ac-note,.mf-sub-x{{font-size:11px}}
+.iss-text,.news-insight,.mr-comment,.fs-read{{font-size:12.5px}}
+.fs-ck-a{{font-size:12px}}
+/* 수급 관제신호 */
+.fs-box{{background:linear-gradient(180deg,#141e2b,#1c2a3a);border:.5px solid rgba(120,160,220,.14);border-radius:var(--rlg);padding:1.1rem 1.1rem .95rem;color:#e8e6e2;margin-bottom:1rem}}
+.fs-verdict{{display:flex;align-items:center;gap:14px;padding-bottom:.95rem;border-bottom:.5px solid rgba(255,255,255,.1);flex-wrap:wrap}}
+.fs-ico{{flex-shrink:0;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center}}
+.fs-ico.pos{{background:rgba(255,138,110,.13)}}
+.fs-ico.neg{{background:rgba(127,168,232,.13)}}
+.fs-main{{flex:1;min-width:200px}}
+.fs-k{{font-size:10px;font-weight:700;color:#9aa0a8;letter-spacing:.05em}}
+.fs-n{{color:#767c86;font-weight:600}}
+.fs-row{{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}}
+.fs-num{{font-size:30px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}}
+.fs-num.pos{{color:var(--up-soft)}} .fs-num.neg{{color:var(--dn-soft)}}
+.fs-state{{font-size:12.5px;font-weight:800}}
+.fs-state.pos{{color:var(--up-soft)}} .fs-state.neg{{color:var(--dn-soft)}}
+.fs-chips{{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}}
+.fs-chip{{font-size:10.5px;font-weight:700;padding:3px 10px;border-radius:99px;border:.5px solid}}
+.fs-chip.good{{background:rgba(255,138,110,.12);border-color:rgba(255,138,110,.3);color:var(--up-soft)}}
+.fs-chip.warn{{background:rgba(224,192,96,.1);border-color:rgba(224,192,96,.32);color:#e0c060}}
+.fs-chip.info{{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14);color:#c8ccd2}}
+.fs-checks{{padding:.85rem 0 .9rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
+.fs-checks-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em;margin-bottom:.5rem}}
+.fs-ck{{display:grid;grid-template-columns:30px 110px 1fr auto;gap:9px;align-items:center;padding:7px 0}}
+.fs-ck-ico{{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}}
+.fs-ck-ico.y{{background:rgba(255,138,110,.15);color:var(--up-soft)}}
+.fs-ck-ico.n{{background:rgba(127,168,232,.15);color:var(--dn-soft)}}
+.fs-ck-ico.h{{background:rgba(224,192,96,.13);color:#e0c060}}
+.fs-ck-q{{font-size:11.5px;font-weight:800;color:#e8e6e2;line-height:1.4}}
+.fs-ck-q small{{display:block;font-size:9px;font-weight:600;color:#767c86}}
+.fs-ck-a{{font-size:11px;color:#a8aeb6;line-height:1.6}}
+.fs-ck-a b{{color:#dfe3e8}}
+.fs-ck-v{{font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}}
+.fs-ck-v.pos{{color:var(--up-soft)}} .fs-ck-v.neg{{color:var(--dn-soft)}} .fs-ck-v.mid{{color:#e0c060}}
+.fs-ck-v small{{display:block;font-size:8.5px;font-weight:700;color:#767c86;white-space:nowrap}}
+.fs-combo{{font-size:11px;color:#c3c8ce;line-height:1.7;margin-top:.7rem;background:rgba(255,255,255,.04);border-radius:var(--rmd);padding:.5rem .75rem}}
+.fs-combo b{{color:#fff}}
+.fs-warn{{font-size:11px;color:#e8d9a8;line-height:1.7;margin-top:.5rem;background:rgba(224,192,96,.09);border:.5px solid rgba(224,192,96,.25);border-radius:var(--rmd);padding:.5rem .75rem}}
+.fs-warn b{{color:#f0e2b8}}
+.fs-cum{{padding-top:.95rem}}
+.fs-cum-head{{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:.2rem}}
+.fs-cum-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em}}
+.fs-badges{{display:flex;gap:6px;flex-wrap:wrap}}
+.fs-cb{{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;font-variant-numeric:tabular-nums}}
+.fs-cb.b5{{background:rgba(255,138,110,.14);color:var(--up-soft);border:.5px solid rgba(255,138,110,.3)}}
+.fs-cb.b5n{{background:rgba(127,168,232,.14);color:var(--dn-soft);border:.5px solid rgba(127,168,232,.3)}}
+.fs-cb.b20{{background:rgba(255,255,255,.06);color:#dfe3e8;border:.5px solid rgba(255,255,255,.14)}}
+.fs-leg{{display:flex;gap:13px;flex-wrap:wrap;margin-top:5px}}
+.fs-leg span{{font-size:9.5px;color:#8a909a;font-weight:600;display:flex;align-items:center;gap:5px}}
+.fs-leg i{{width:15px;height:0;border-top-width:2.2px;display:inline-block}}
+.fs-leg i.l-sp{{border-top-style:solid;border-color:#f0f0ee}}
+.fs-leg i.l-fu{{border-top-style:dashed;border-color:#7fa8e8;opacity:.6}}
+.fs-leg i.l-rf{{border-top-style:dashed;border-color:#e0c060;opacity:.8}}
+.fs-x{{display:flex;justify-content:space-between;font-size:9px;color:#767c86;font-weight:600;margin-top:3px;padding:0 2px}}
+.fs-read{{font-size:11.5px;color:#c3c8ce;line-height:1.75;margin-top:.65rem}}
+.fs-read b{{color:#fff}}
+.fs-building{{background:rgba(255,255,255,.04);border:.5px dashed rgba(255,255,255,.16);border-radius:var(--rmd);padding:1.1rem;text-align:center;font-size:11px;color:#9aa0a8;margin-top:.4rem}}
+.fs-foot{{font-size:9.5px;color:#8a909a;line-height:1.7;margin-top:.8rem;border-top:.5px solid rgba(255,255,255,.08);padding-top:.6rem}}
+.fs-foot b{{color:#b6bcc4}}
+.mf-sub{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:.9rem 0 .45rem}}
+.mf-bar{{display:flex;height:22px;border-radius:6px;overflow:hidden}}
+.mf-seg{{display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;color:#fff}}
+.mf-kospi{{background:#4a6fa5}} .mf-kosdaq{{background:#b5652f}}
+.mf-hint{{font-size:9.5px;color:#8a909a;margin-top:5px;line-height:1.5}}
+.mf-flow-row{{display:flex;align-items:center;gap:8px;margin-bottom:6px}}
+.mf-who{{font-size:11px;color:#c8ccd2;width:42px;flex-shrink:0}}
+.mf-track{{flex:1;height:9px;background:rgba(255,255,255,.08);border-radius:5px;overflow:hidden}}
+.mf-fill{{height:100%;border-radius:5px}}
+.mf-fill.up{{background:linear-gradient(90deg,#ff8a6e,#C1432B)}}
+.mf-fill.dn{{background:linear-gradient(90deg,#7fa8e8,#2E6BD6)}}
+.mf-amt{{font-size:11px;font-weight:800;width:64px;text-align:right;flex-shrink:0}}
+.mf-amt.up{{color:#ff8a6e}} .mf-amt.dn{{color:#7fa8e8}}
+.mf-read{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:.9rem;padding-top:.8rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.fx-wrap{{margin-top:.8rem}}
+.fx-chart{{display:flex;flex-direction:column;gap:7px}}
+.fx-row{{display:flex;align-items:center;gap:8px}}
+.fx-lb{{font-size:11px;color:#c8ccd2;width:34px;flex-shrink:0;font-weight:600}}
+.fx-zone{{flex:1;position:relative;height:16px;background:rgba(255,255,255,.06);border-radius:4px}}
+.fx-zone::after{{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.3)}}
+.fx-bar{{position:absolute;top:2px;bottom:2px;border-radius:3px}}
+.fx-bar.pos{{left:50%;background:linear-gradient(90deg,#ff8a6e,#C1432B)}}
+.fx-bar.neg{{right:50%;background:linear-gradient(270deg,#7fa8e8,#2E6BD6)}}
+.fx-lb2{{font-size:11px;color:#c8ccd2;width:44px;flex-shrink:0;font-weight:600}}
+.fx-desc{{font-size:9.5px;color:#8a909a;margin:1px 0 6px 52px;line-height:1.5}}
+.fx-amt{{font-size:11px;font-weight:800;width:66px;text-align:right;flex-shrink:0}}
+.fx-amt.up{{color:#ff8a6e}} .fx-amt.dn{{color:#7fa8e8}} .fx-amt.smut{{color:#8a909a}}
+.fx-na{{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:9.5px;color:#8a909a}}
+.more-btn.dark{{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.14);color:#c8ccd2;margin-top:.6rem}}
+.mf-badge{{display:inline-block;font-size:10.5px;font-weight:800;color:#ffd9c9;background:rgba(193,67,43,.3);padding:3px 11px;border-radius:99px;margin-bottom:.6rem}}
+.mf-blk{{background:rgba(0,0,0,.22);border-radius:var(--rmd);padding:.7rem .85rem;margin-top:.65rem}}
+.mf-blk-t{{font-size:10.5px;font-weight:800;color:#c8ccd2}}
+.mf-blk-b{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-top:5px}}
+.mf-check{{font-size:12px;color:#ffd9c9;line-height:1.7;margin-top:.8rem;padding-top:.75rem;border-top:.5px solid rgba(255,255,255,.1)}}
+.mf-na{{font-size:11px;color:#8a909a;line-height:1.6;margin:.7rem 0}}
+.q-wrap{{margin-top:.8rem}}
+.q-grid{{display:grid;grid-template-columns:1fr 1fr;gap:5px}}
+.q-cell{{background:rgba(255,255,255,.05);border:.5px solid rgba(255,255,255,.1);border-radius:6px;padding:.55rem .4rem;text-align:center;display:flex;flex-direction:column;gap:2px}}
+.q-cell.on{{background:rgba(193,67,43,.32);border-color:#ff8a6e}}
+.q-t{{font-size:10px;color:#c8ccd2;font-weight:600}}
+.q-cell.on .q-t{{color:#fff;font-weight:800}}
+.q-nums{{display:flex;gap:14px;justify-content:center;margin-top:8px;font-size:11px;color:#c8ccd2}}
+.q-nums .up{{color:#ff8a6e}} .q-nums .dn{{color:#7fa8e8}}
+.mf-todo{{font-size:9.5px;color:#8a909a;margin-top:.6rem;line-height:1.5}}
+
+/* ── 오늘의 한 문장 (필사 코너) ── */
+.quote-box{{background:linear-gradient(135deg,#1c1f24,#2c3038);border-radius:var(--rlg);padding:1.6rem 1.4rem;color:#e8e6e2;margin-bottom:1rem;text-align:center;position:relative;overflow:hidden}}
+.quote-mark{{font-size:52px;font-weight:800;color:rgba(127,168,232,.25);line-height:.5;height:24px}}
+.quote-text{{font-size:16px;font-weight:700;color:#fff;line-height:1.75;letter-spacing:-.01em;margin:.4rem 0 .8rem;word-break:keep-all}}
+.quote-sub{{font-size:11px;color:#9aa0a8}}
+
+.foot{{font-size:10px;color:#b0aca6;line-height:1.6;border-top:.5px solid var(--line);padding-top:.8rem;margin-top:1.2rem}}
+
+/* ── 모바일 ── */
+@media (max-width:600px){{
+  .fs-box{{padding:.95rem .8rem .85rem}}
+  .fs-num{{font-size:25px}}
+  .fs-ck{{grid-template-columns:26px 92px 1fr;gap:7px}}
+  .fs-ck-v{{grid-column:2/4;text-align:left;margin-left:33px}}
+  .fs-ck-q{{font-size:10.5px}}
+  body{{padding:8px 0}}
+  .rp{{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}}
+  .top-bar{{flex-direction:column;gap:6px}}
+  .badge{{align-self:flex-start}}
+  .rp-title{{font-size:16px}}
+  .gz-num{{font-size:34px}}
+  .gz-bodywrap{{min-width:100%}}
+  .gz-row{{grid-template-columns:84px 38px 1fr;row-gap:2px}}
+  .gz-ev{{grid-column:1/-1;color:#9aa0a8}}
+  .idx-grid{{grid-template-columns:1fr;gap:8px}}
+  .bar-chart{{gap:3px}} .bar-zone{{height:112px}} .bar-val{{font-size:8.5px}} .bar-name{{font-size:8.5px}}
+  .sector-grid{{grid-template-columns:1fr}}
+  .sc-cols,.sc-row{{grid-template-columns:1.3fr 76px 58px 60px;font-size:11.5px}}
+  .macro-row{{grid-template-columns:1fr}}
+}}
+@media (max-width:380px){{
+  .sc-cols,.sc-row{{grid-template-columns:1.2fr 62px 50px 52px;font-size:10.5px}}
+  .bar-name{{font-size:8px}}
+}}
+</style>
+</head>
+<body>
+<div class="rp">
+  <div class="top-bar">
+    <p class="rp-title">🗼 차트프로 관제탑</p>
+    <span class="badge">{날짜} 마감</span>
+  </div>
+
+  {build_core(해석.get('핵심편'), data, 해석)}
+
+  {build_gauge(data.get('관제지수'), 오늘한줄평)}
+
+  {build_terrain(data.get('주도섹터'))}
+
+  <p class="sec-label">📊 지수 + 수급</p>
+  <div class="idx-grid">
+    <div class="idx-card2">
+      <p class="ic-mkt">KOSPI</p>
+      <p class="ic-num">{코.get('종가','—')}</p>
+      <p class="{idx_dir_class(코)}">{코.get('등락방향','—')} {코.get('등락률','—')}%</p>
+      <div class="sup-grid">
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(코수.get('외국인'))}">{fmt_flow(코수.get('외국인'))}</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(코수.get('기관계'))}">{fmt_flow(코수.get('기관계'))}</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt {money_class(코수.get('개인'))}">{fmt_flow(코수.get('개인'))}</p></div>
+      </div>
+    </div>
+    <div class="idx-card2">
+      <p class="ic-mkt">KOSDAQ</p>
+      <p class="ic-num">{닥.get('종가','—')}</p>
+      <p class="{idx_dir_class(닥)}">{닥.get('등락방향','—')} {닥.get('등락률','—')}%</p>
+      <div class="sup-grid">
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(닥수.get('외국인'))}">{fmt_flow(닥수.get('외국인'))}</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(닥수.get('기관계'))}">{fmt_flow(닥수.get('기관계'))}</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt {money_class(닥수.get('개인'))}">{fmt_flow(닥수.get('개인'))}</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
+
+  <p class="sec-label">🔥 핵심 이슈 — 상세</p>
+  {build_issues(해석.get('핵심이슈'))}
+
+  <p class="sec-label">🌐 환율 · 유가 · 금리</p>
+  <div class="macro-row">
+    {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
+    {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''))}
+    {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
+  </div>
+
+  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
+            f"{(data.get('설정') or {}).get('주도섹터',{}).get('가중치','?')} 점수로 재정렬 → "
+            f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
+            f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
+  {build_sectors(data.get('주도섹터'))}
+
+  <p class="sec-label" id="radar">📡 실제 강세 레이더 — 오늘 새로 포착</p>
+  {build_radar(data.get('강세레이더'), data.get('설정'))}
+
+  <p class="sec-label" id="acc">🐢 매집 레이더 — 조용히 쌓이는 돈</p>
+  {build_accumulation(data.get('매집레이더'), data.get('설정'))}
+
+  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  {build_briefings(해석.get('마감브리핑'))}
+
+  <p class="sec-label">🔍 프로의 시선</p>
+  {build_insight(프로의시선)}
+
+  {build_temp(data)}
+
+  <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
+  {build_flow_signal(data.get('파생'), data.get('지수수급'))}
+
+  <p class="sec-label">📋 오늘의 중요 공시</p>
+  <div class="disc-box">
+    {build_disclosures(data.get('공시'), 해석.get('공시해설'))}
+    <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
+  </div>
+
+  <p class="sec-label">🔥 {news_title(해석.get('핵심뉴스'))}</p>
+  {build_news(해석.get('핵심뉴스'))}
+
+  {f'<p class="sec-label">✅ 어제의 채점표</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
+
+  <p class="sec-label" id="watch">🗼 내일의 관전 포인트</p>
+  {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
+
+  <p class="sec-label">📚 오늘의 공부</p>
+  {build_study(오늘의공부)}
+
+  <!-- 오늘의 한 문장 (필사 코너) -->
+  <p class="sec-label">✍️ 오늘의 한 문장</p>
+  <div class="quote-box">
+    <div class="quote-mark">“</div>
+    <p class="quote-text">{오늘의문장}</p>
+    <p class="quote-sub">— 차트프로 관제탑, {날짜}</p>
+  </div>
+
+  {build_archive()}
+
+  <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[{SCRIPT_VERSION}]</span></p>
+</div>
+<script>
+function toggleMore(id,btn,label){{
+  var el=document.getElementById(id);
+  var open=el.classList.toggle('open');
+  btn.textContent=open?'▴ 접기':label;
+}}
+function sortAcc(key,btn){{
+  document.querySelectorAll('.sort-tab').forEach(function(t){{t.classList.remove('active')}});
+  btn.classList.add('active');
+  var attr = (key==='money') ? 'money' : 'ratio';
+  document.querySelectorAll('[data-acclist]').forEach(function(list){{
+    var rows = Array.prototype.slice.call(list.querySelectorAll('.ac-row'));
+    rows.sort(function(a,b){{
+      return (parseFloat(b.dataset[attr])||0) - (parseFloat(a.dataset[attr])||0);
+    }});
+    rows.forEach(function(r,i){{
+      var n = r.querySelector('.rd-rank');
+      if(n) n.textContent = i+1;
+      list.appendChild(r);
+    }});
+  }});
+}}
+function toggleTV(id,el){{
+  var body=document.getElementById(id);
+  var open=body.classList.toggle('open');
+  var see=el.querySelector('.tv-see-sm');
+  if(see) see.textContent = open ? '접기 ▴' : '보기 ▾';
+}}
+</script>
+</body>
+</html>"""
 
 
 if __name__ == "__main__":
-    print(f"=== {DATE} 해석 글 생성 | generate_report {SCRIPT_VERSION} | 모델 {MODEL} ===\n")
-
-    data = load_data()
-    어제 = load_previous_watchpoints()
-    if 어제:
-        data["어제관전포인트"] = 어제
-
-    try:
-        글 = ask_claude(data)
-        빠짐 = check_fields(글)
-        글 = fill_missing(글, data, 빠짐)
-        글 = fix_units(글)
-        글 = verify_news_links(글, data)
-    except Exception as e:
-        # 실패해도 파이프라인 전체가 죽지 않도록 명확히 알리고 종료.
-        # (build_html.py 는 해석글 없이도 리포트를 만들 수 있다)
-        print("\n❌ 해석 글 생성 실패")
-        print(f"   원인: {type(e).__name__}: {e}")
-        이름 = type(e).__name__
-        메시지 = str(e).lower()
-        if "authentication" in 메시지 or "api_key" in 메시지:
-            print("   👉 ANTHROPIC_API_KEY 시크릿이 없거나 잘못됐습니다.")
-        elif "credit" in 메시지 or "billing" in 메시지 or "quota" in 메시지:
-            print("   👉 Claude API 잔액이 부족합니다. 콘솔에서 충전하세요.")
-        elif "not_found" in 메시지 or "model" in 메시지:
-            print(f"   👉 모델명({MODEL})이 잘못됐을 수 있습니다.")
-        elif 이름 == "JSONDecodeError":
-            print("   👉 응답이 JSON이 아니거나 중간에 잘렸습니다. max_tokens를 더 올리거나")
-            print("      SYSTEM_PROMPT의 항목 수를 줄여야 할 수 있습니다.")
-        elif "overloaded" in 메시지 or "rate" in 메시지:
-            print("   👉 API가 일시적으로 혼잡합니다. 잠시 후 재실행하세요.")
-        else:
-            print("   👉 위 원인 메시지를 그대로 알려주시면 진단할 수 있습니다.")
-        print("   → 리포트는 해석글 없이 생성됩니다.")
-        sys.exit(1)
-
-    최종 = {**data, "해석글": 글}
-    with open(REPORT_PATH, "w", encoding="utf-8") as f:
-        json.dump(최종, f, ensure_ascii=False, indent=2)
-
-    print("✅ 생성된 해석 글:\n")
-    for key, value in 글.items():
-        print(f"[{key}]\n{value}\n")
-
-    print(f"🎉 완료! → {REPORT_PATH}")
+    data = load_json(DATA_PATH)
+    if data is None:
+        print(f"❌ {DATA_PATH} 없음. collect_data.py 먼저 실행.")
+        exit(1)
+    report = load_json(REPORT_PATH)
+    if report is None:
+        print(f"⚠️ {REPORT_PATH} 없음 (해석글 미생성) — '오늘의 시장'은 안내문으로 채움.")
+    html = build_html(data, report)
+    with open(OUT_PATH, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f"🎉 완료! → {OUT_PATH}  (build_html {SCRIPT_VERSION})")
