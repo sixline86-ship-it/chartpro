@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.06-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.12-c"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -512,10 +512,19 @@ def backfill_flow_history(이력):
         if 외현 is None or 기관 is None:
             continue
         파생 = d.get("파생") or {}
+        비차익p = _f((파생.get("프로그램매매") or {}).get("비차익거래_순매수"))
+        실탄p = round(외현 + 기관)
+        조합p = None
+        if 비차익p is not None and 실탄p != 0:
+            조합p = {(True, True): "지수형매수", (True, False): "종목장세",
+                    (False, True): "지수만방어", (False, False): "지수형매도"}[
+                    (실탄p > 0, 비차익p > 0)]
         이력.append({"날짜": ymd, "외현": 외현, "기관": 기관,
                     "외선": _f((파생.get("선물수급") or {}).get("외국인")),
-                    "비차익": _f((파생.get("프로그램매매") or {}).get("비차익거래_순매수")),
-                    "실탄": round(외현 + 기관)})
+                    "비차익": 비차익p, "실탄": 실탄p,
+                    "코스피등락": _f(((d.get("지수수급") or {}).get("지수") or {})
+                                    .get("코스피", {}).get("등락률")),
+                    "조합": 조합p})
         추가 += 1
     if 추가:
         print(f"   📦 과거 리포트에서 {추가}일치를 복원했습니다.")
@@ -558,9 +567,18 @@ def update_flow_history(지수수급, 파생):
         print("⚠️ 현물 수급 미확보 — flow_history에 오늘을 기록하지 않습니다.")
         return 이력
 
+    코등락 = _f(((지수수급 or {}).get("지수") or {}).get("코스피", {}).get("등락률"))
+    실탄값 = round(외현 + 기관)
+    # 조합 태그: 나중에 "올해 🟠 종목 장세 며칠, 그때 지수는?" 통계의 원료.
+    # 부호만으로 복원 가능하지만, 기준이 바뀌어도 그날의 판정이 보존되도록 저장해둔다.
+    조합 = None
+    if 비차익 is not None and 실탄값 != 0:
+        조합 = {(True, True): "지수형매수", (True, False): "종목장세",
+               (False, True): "지수만방어", (False, False): "지수형매도"}[
+               (실탄값 > 0, 비차익 > 0)]
     오늘 = {"날짜": DATE, "외현": 외현, "기관": 기관,
            "외선": 외선, "비차익": 비차익,
-           "실탄": round(외현 + 기관)}
+           "실탄": 실탄값, "코스피등락": 코등락, "조합": 조합}
     이력 = [x for x in 이력 if x.get("날짜") != DATE]      # 재발행 시 덮어쓰기
     이력.append(오늘)
     이력 = backfill_flow_history(이력)                    # 빈 과거 날짜 메우기
@@ -571,6 +589,174 @@ def update_flow_history(지수수급, 파생):
         json.dump(이력, f, ensure_ascii=False, indent=1)
     print(f"✅ flow_history 갱신: 오늘 실탄 {오늘['실탄']:+,}억 · 누적 {len(이력)}일치")
     return 이력
+
+
+def collect_updown_counts():
+    """코스피·코스닥의 상승/하락/보합 종목 수.
+
+    네이버 국내증시 메인에 시장별로 "상승 N 상한 n 보합 N 하락 N"이 있다.
+    이 숫자는 pykrx 등으로 **사후 복원이 불가능**해서 매일 그날 담아둬야 한다.
+    실패하면 None — market_history에 null로 남기고 추정값을 넣지 않는다.
+    """
+    try:
+        r = requests.get("https://finance.naver.com/sise/",
+                         headers=HEADERS, timeout=12)
+        r.encoding = "euc-kr"
+        t = r.text
+    except Exception:
+        return None
+    결과 = {}
+    # 시장 블록별로 상승/보합/하락 수를 찾는다 (KOSPI 블록이 먼저, KOSDAQ이 다음)
+    블록들 = re.split(r"(?i)kosdaq", t, maxsplit=1)
+    이름들 = ["코스피", "코스닥"]
+    for 이름, 블록 in zip(이름들, 블록들 if len(블록들) == 2 else [t, ""]):
+        m = {}
+        for k in ("상승", "보합", "하락"):
+            mm = re.search(k + r"[^0-9]{0,40}?([\d,]+)", 블록)
+            if mm:
+                m[k] = int(mm.group(1).replace(",", ""))
+        if len(m) == 3:
+            결과[이름] = m
+    if not 결과:
+        print("⚠️ 상승/하락 종목 수를 찾지 못했습니다 (null로 기록)")
+        return None
+    for 이름, m in 결과.items():
+        print(f"   {이름} 상승 {m['상승']} · 보합 {m['보합']} · 하락 {m['하락']}")
+    return 결과
+
+
+def update_market_history(지수수급, 파생, 게이지, 등락수):
+    """market_history.json — 서비스가 존재하는 한 **영구 누적**하는 시장 일지.
+
+    🔴 원칙: 절대 자르지 않는다 (60일 캡 없음). 같은 날짜 재실행 시에만 그 행 덮어쓰기.
+       상승/하락 종목 수·레이더 이력 등은 사후 복원이 불가능한 데이터다.
+       이 파일이 유료 챕터(국면 내비·확률 캘린더·수급 온도)의 원료가 된다.
+    ⚠️ daily.yml 의 git add 목록에 market_history.json 이 있어야 커밋된다.
+    """
+    파일 = "market_history.json"
+    본체 = {"meta": {"설명": "영구 누적. 절대 자르지 않음.",
+                   "시작일": f"{DATE[:4]}-{DATE[4:6]}-{DATE[6:]}", "스키마버전": 1},
+           "일별": []}
+    try:
+        if os.path.exists(파일):
+            with open(파일, encoding="utf-8") as f:
+                기존 = json.load(f)
+            if isinstance(기존, dict) and isinstance(기존.get("일별"), list):
+                본체 = 기존
+    except Exception as e:
+        print(f"⚠️ market_history 읽기 실패({type(e).__name__}) — 새로 시작")
+
+    def _f(v):
+        try:
+            return float(str(v).replace(",", "").replace("%", ""))
+        except (TypeError, ValueError):
+            return None
+
+    def _대금억(s):
+        # "25,657,754백만" → 억원
+        v = _f(str(s).replace("백만", ""))
+        return round(v / 100) if v is not None else None
+
+    지수 = (지수수급 or {}).get("지수") or {}
+    코 = 지수.get("코스피") or {}
+    닥 = 지수.get("코스닥") or {}
+    코수 = (지수수급 or {}).get("코스피_수급") or {}
+    닥수 = (지수수급 or {}).get("코스닥_수급") or {}
+    외 = _f(코수.get("외국인")); 기 = _f(코수.get("기관계")); 개 = _f(코수.get("개인"))
+    실탄 = round(외 + 기) if (외 is not None and 기 is not None) else None
+    프로 = (파생 or {}).get("프로그램매매") or {}
+    비차익 = _f(프로.get("비차익거래_순매수"))
+    외선 = _f(((파생 or {}).get("선물수급") or {}).get("외국인"))
+    바스켓 = None
+    if 비차익 is not None and 실탄 and abs(실탄) >= 2000 and (실탄 > 0) == (비차익 > 0):
+        바스켓 = round(비차익 / 실탄, 3)
+    조합 = None
+    if 비차익 is not None and 실탄:
+        조합 = {(True, True): "지수형매수", (True, False): "종목장세",
+               (False, True): "지수만방어", (False, False): "지수형매도"}[
+               (실탄 > 0, 비차익 > 0)]
+    등락수 = 등락수 or {}
+    코등락수 = 등락수.get("코스피") or {}
+    닥등락수 = 등락수.get("코스닥") or {}
+    def _합(k):
+        a, b = 코등락수.get(k), 닥등락수.get(k)
+        return (a or 0) + (b or 0) if (a is not None or b is not None) else None
+
+    요일 = "월화수목금토일"[datetime.strptime(DATE, "%Y%m%d").weekday()]
+    행 = {"날짜": f"{DATE[:4]}-{DATE[4:6]}-{DATE[6:]}", "요일": 요일,
+         "코스피": _f(코.get("종가")), "코스피등락": _f(코.get("등락률")),
+         "코스닥": _f(닥.get("종가")), "코스닥등락": _f(닥.get("등락률")),
+         "거래대금_코스피": _대금억(코.get("거래대금")),
+         "거래대금_코스닥": _대금억(닥.get("거래대금")),
+         "상승종목수": _합("상승"), "하락종목수": _합("하락"), "보합종목수": _합("보합"),
+         "상승_코스피": 코등락수.get("상승"), "하락_코스피": 코등락수.get("하락"),
+         "상승_코스닥": 닥등락수.get("상승"), "하락_코스닥": 닥등락수.get("하락"),
+         "외국인_코스피": 외, "기관_코스피": 기, "개인_코스피": 개,
+         "외국인_코스닥": _f(닥수.get("외국인")), "기관_코스닥": _f(닥수.get("기관계")),
+         "개인_코스닥": _f(닥수.get("개인")),
+         "실탄": 실탄, "외국인선물": 외선, "비차익": 비차익, "바스켓비중": 바스켓,
+         "조합태그": 조합,
+         "관제지수": (게이지 or {}).get("점수"), "관제구간": (게이지 or {}).get("구간"),
+         "스키마버전": 1}
+
+    오늘키 = 행["날짜"]
+    본체["일별"] = [x for x in 본체["일별"] if x.get("날짜") != 오늘키]
+    본체["일별"].append(행)
+    본체["일별"].sort(key=lambda x: x.get("날짜", ""))
+    # ⚠️ 자르지 않는다 — 영구 보관이 이 파일의 존재 이유
+
+    # ── 최초 1회 백필: 과거 data_*.json에서 복원 가능한 필드만 ──
+    있는날 = {x.get("날짜") for x in 본체["일별"]}
+    추가 = 0
+    for f in sorted(os.listdir(".")):
+        m = re.fullmatch(r"data_(\d{8})\.json", f)
+        if not m:
+            continue
+        ymd = m.group(1)
+        키 = f"{ymd[:4]}-{ymd[4:6]}-{ymd[6:]}"
+        if 키 in 있는날:
+            continue
+        try:
+            with open(f, encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+        p지 = (d.get("지수수급") or {}).get("지수") or {}
+        p코, p닥 = p지.get("코스피") or {}, p지.get("코스닥") or {}
+        p코수 = (d.get("지수수급") or {}).get("코스피_수급") or {}
+        p닥수 = (d.get("지수수급") or {}).get("코스닥_수급") or {}
+        p외, p기 = _f(p코수.get("외국인")), _f(p코수.get("기관계"))
+        p파 = d.get("파생") or {}
+        p비 = _f((p파.get("프로그램매매") or {}).get("비차익거래_순매수"))
+        p실 = round(p외 + p기) if (p외 is not None and p기 is not None) else None
+        p조 = None
+        if p비 is not None and p실:
+            p조 = {(True, True): "지수형매수", (True, False): "종목장세",
+                  (False, True): "지수만방어", (False, False): "지수형매도"}[(p실 > 0, p비 > 0)]
+        본체["일별"].append({
+            "날짜": 키, "요일": "월화수목금토일"[datetime.strptime(ymd, "%Y%m%d").weekday()],
+            "코스피": _f(p코.get("종가")), "코스피등락": _f(p코.get("등락률")),
+            "코스닥": _f(p닥.get("종가")), "코스닥등락": _f(p닥.get("등락률")),
+            "거래대금_코스피": _대금억(p코.get("거래대금")),
+            "거래대금_코스닥": _대금억(p닥.get("거래대금")),
+            "상승종목수": None, "하락종목수": None, "보합종목수": None,   # 복원 불가 — 추정 금지
+            "상승_코스피": None, "하락_코스피": None, "상승_코스닥": None, "하락_코스닥": None,
+            "외국인_코스피": p외, "기관_코스피": p기, "개인_코스피": _f(p코수.get("개인")),
+            "외국인_코스닥": _f(p닥수.get("외국인")), "기관_코스닥": _f(p닥수.get("기관계")),
+            "개인_코스닥": _f(p닥수.get("개인")),
+            "실탄": p실, "외국인선물": _f((p파.get("선물수급") or {}).get("외국인")),
+            "비차익": p비, "바스켓비중": None, "조합태그": p조,
+            "관제지수": (d.get("관제지수") or {}).get("점수"),
+            "관제구간": (d.get("관제지수") or {}).get("구간"), "스키마버전": 1})
+        추가 += 1
+    if 추가:
+        본체["일별"].sort(key=lambda x: x.get("날짜", ""))
+        print(f"   📦 market_history 백필 {추가}일치 (복원 불가 필드는 null)")
+
+    with open(파일, "w", encoding="utf-8") as f:
+        json.dump(본체, f, ensure_ascii=False, indent=1)
+    print(f"✅ market_history 갱신: 총 {len(본체['일별'])}일치 (영구 누적)")
+    return 본체
 
 
 def collect_macro():
@@ -871,7 +1057,7 @@ def _fetch_prev_volume(code):
     return None
 
 
-TRACK_DAYS = 5          # 포착 후 추적 기간(거래일)
+TRACK_DAYS = 20         # 포착 후 추적 기간(거래일). 이 기간 안에 다시 조건을 만족하면 재점화(N차)
 
 # ── 강세 레이더 설정 (여기 숫자만 바꾸면 리포트 설명도 자동으로 따라간다) ──
 STR_MIN_시총 = 5000       # 억원
@@ -882,7 +1068,10 @@ STR_가점 = 15
 STR_W_회전, STR_W_상승 = 0.5, 0.5
 
 # ── 5일 매집 레이더 설정 ──
-ACC_DAYS = 5            # 관찰 기간(거래일)
+ACC_DAYS = 5            # 단기 관찰 기간(거래일)
+ACC_LONG = 20           # 중기 관찰 기간(거래일) — 네이버 frgn 1페이지가 딱 20행이라 추가 요청 없음
+ACC_L_BOTH = 12         # 중기 쌍끌이: 20일 중 12일(60%) 이상 — 5일 기준(3/5=60%)과 같은 비율
+ACC_L_SOLO = 14         # 중기 단독: 14일(70%) — 5일 기준(4/5=80%)보다 살짝 완화. 20일 연속성은 훨씬 어렵다
 ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
 ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
 ACC_DROP_LINE = -5.0    # 5일 등락률이 이 아래면 '하락 중 매집'(⚠️ 물타기 가능성)
@@ -894,7 +1083,7 @@ ACC_POOL = None         # 후보 풀 상한. None = 상한 없음(조건 통과�
 ACC_UNIVERSE = {"코스피": 100, "코스닥": 40}  # 시총 상위 몇 종목까지 스캔할지
 
 
-def _fetch_investor_flow(code, days=ACC_DAYS):
+def _fetch_investor_flow(code, days=ACC_LONG):
     """종목별 외국인·기관 일별 순매매를 가져온다.
     네이버 '외국인·기관' 탭 표에는 순매매'량'(주식 수)이 있으므로
     종가를 곱해 금액(억원)으로 환산한다.
@@ -937,7 +1126,7 @@ def _fetch_investor_flow(code, days=ACC_DAYS):
         return None
 
     df = 표.dropna(subset=[날짜열]).head(days)
-    if len(df) < days:
+    if len(df) < ACC_DAYS:          # 최소 5일은 있어야 단기 판정이 가능
         return None
 
     외 , 기 = [], []
@@ -956,12 +1145,17 @@ def _fetch_investor_flow(code, days=ACC_DAYS):
 
     # 5일 등락률 — 이미 받아온 종가로 계산하므로 추가 요청이 없다.
     # (표는 최신일이 0번째, 가장 오래된 날이 마지막)
-    최근, 시작 = 종가들[0], 종가들[-1]
-    등락 = (최근 - 시작) / 시작 * 100 if 시작 else None
+    최근 = 종가들[0]
+    시작5 = 종가들[min(ACC_DAYS, len(종가들)) - 1]
+    시작N = 종가들[-1]
+    등락5 = (최근 - 시작5) / 시작5 * 100 if 시작5 else None
+    등락N = (최근 - 시작N) / 시작N * 100 if 시작N else None
 
-    return {"외국인": 외, "기관": 기,
-            "종가": 최근, "시작종가": 시작,
-            "5일등락률": round(등락, 2) if 등락 is not None else None}
+    return {"외국인": 외, "기관": 기,          # 최신일이 0번째, 최대 20일치
+            "종가": 최근,
+            "5일등락률": round(등락5, 2) if 등락5 is not None else None,
+            "장기등락률": round(등락N, 2) if 등락N is not None else None,
+            "일수": len(외)}
 
 
 def collect_accumulation_radar():
@@ -1025,16 +1219,39 @@ def collect_accumulation_radar():
     print(f"📥 매집 레이더 스캔 대상 {len(유니버스)}종목 (시총 상위)")
 
     쌍끌이, 단독 = [], []
+    중기목록 = []
     실패 = 0
     for 이름, 코드, 시장, 시총 in 유니버스:
         flow = _fetch_investor_flow(코드)
         if not flow:
             실패 += 1
             continue
-        외, 기 = flow["외국인"], flow["기관"]
+        외전체, 기전체 = flow["외국인"], flow["기관"]
+        외, 기 = 외전체[:ACC_DAYS], 기전체[:ACC_DAYS]        # 단기 = 최근 5일
         외일수 = sum(1 for v in 외 if v > 0)
         기일수 = sum(1 for v in 기 if v > 0)
         외누적, 기누적 = sum(외), sum(기)
+
+        # ── 중기(20일) 판정 — 같은 응답에서 추가 요청 없이 ──
+        if len(외전체) >= ACC_LONG:
+            외20, 기20 = 외전체[:ACC_LONG], 기전체[:ACC_LONG]
+            외일20 = sum(1 for v in 외20 if v > 0)
+            기일20 = sum(1 for v in 기20 if v > 0)
+            외누20, 기누20 = sum(외20), sum(기20)
+            중기 = None
+            if 외일20 >= ACC_L_BOTH and 기일20 >= ACC_L_BOTH and 외누20 > 0 and 기누20 > 0:
+                중기 = ("쌍끌이", 외누20 + 기누20)
+            elif 외일20 >= ACC_L_SOLO and 외누20 > 0:
+                중기 = ("외국인 단독", 외누20)
+            elif 기일20 >= ACC_L_SOLO and 기누20 > 0:
+                중기 = ("기관 단독", 기누20)
+            if 중기:
+                중기목록.append({"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
+                              "외인일수": 외일20, "기관일수": 기일20,
+                              "외국인": round(외누20, 1), "기관": round(기누20, 1),
+                              "유형": 중기[0], "합산": round(중기[1], 1),
+                              "시총대비": round(중기[1] / 시총 * 100, 3) if 시총 else None,
+                              "장기등락률": flow.get("장기등락률")})
 
         기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
                "외인일수": 외일수, "기관일수": 기일수,
@@ -1079,7 +1296,14 @@ def collect_accumulation_radar():
         print(f"   [{s['유형']}] {s['종목명']} {s['합산']:,.0f}억 "
               f"(외{s['외인일수']}일/기{s['기관일수']}일, 시총대비 {s['시총대비']}%)")
 
-    return {"종목": 종목, "기간": ACC_DAYS,
+    중기목록.sort(key=lambda x: x.get("시총대비") or 0, reverse=True)
+    if 중기목록:
+        상위 = 중기목록[0]
+        print(f"🏗️ 중기(20일) 매집 {len(중기목록)}종목 — 1위 {상위['종목명']} "
+              f"{상위['합산']:,.0f}억 (시총대비 {상위['시총대비']}%)")
+    return {"종목": 종목, "중기종목": 중기목록, "중기기간": ACC_LONG,
+            "중기쌍끌이": ACC_L_BOTH, "중기단독": ACC_L_SOLO,
+            "기간": ACC_DAYS,
             "쌍끌이최소": ACC_BOTH_DAYS, "단독최소": ACC_SOLO_DAYS,
             "쌍끌이수": len(쌍끌이)}
 
@@ -1478,6 +1702,8 @@ if __name__ == "__main__":
     매크로 = collect_macro()
     파생 = collect_program_and_futures()
     update_flow_history(지수수급, 파생)
+    등락수 = collect_updown_counts()
+    update_market_history(지수수급, 파생, 게이지, 등락수)
     강세레이더 = collect_strength_radar()
     매집레이더 = collect_accumulation_radar()
     마감브리핑 = collect_briefings()
@@ -1494,6 +1720,7 @@ if __name__ == "__main__":
         "파생": 파생,
         "강세레이더": 강세레이더,
         "매집레이더": 매집레이더,
+        "등락종목수": 등락수,
         "설정": {
             "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
                    "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
