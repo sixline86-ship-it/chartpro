@@ -4,10 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>차트프로 관제탑 · 2026.08.12</title>
-<meta property="og:title" content="🗼 차트프로 관제탑 2026.08.12 — 관제지수 72 · 온기">
-<meta property="og:description" content="코스피 3.68% 급등, 오른 종목은 절반뿐">
+<meta property="og:title" content="코스피 3.68% 급등, 오른 종목은 절반뿐">
+<meta property="og:description" content="8월 12일 (수) 마감 · 차트프로 관제탑">
 <meta property="og:type" content="article">
-<!-- og:image는 자동화 단계에서 리포트 캡처 이미지 경로로 추가 예정 -->
+<meta property="og:image" content="https://sixline86-ship-it.github.io/chartpro/thumb/20260812.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:url" content="https://sixline86-ship-it.github.io/chartpro/report_20260812.html">
 <meta name="twitter:card" content="summary_large_image">
 <style>
 :root{
@@ -59,7 +62,7 @@ a{color:inherit;text-decoration:none}
 .idx-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1rem}
 .idx-card2{background:#23262b;color:#eee;border-radius:var(--rmd);padding:.8rem .9rem}
 .ic-mkt{font-size:10px;color:#9aa0a8}
-.ic-num{font-size:19px;font-weight:800}
+.ic-num{font-size:21px;font-weight:800}
 .ic-chg-up{color:#ff6b4a;font-weight:700} .ic-chg-dn{color:#5b9bff;font-weight:700}
 .sup-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:9px}
 .sup{background:rgba(0,0,0,.22);border-radius:6px;padding:5px 4px;text-align:center}
@@ -124,6 +127,9 @@ a{color:inherit;text-decoration:none}
 .issue-box{background:var(--bg2);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}
 .iss{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid var(--line);line-height:1.65}
 .iss:last-child{border-bottom:none;padding-bottom:0}
+.iss-links{display:block;margin-top:3px}
+.iss-link{font-size:9.5px;color:#8a86c8;text-decoration:none;font-weight:600;margin-right:8px}
+.iss-link:hover{text-decoration:underline}
 .itag{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:2px;background:#E6F1FB;color:#0C447C}
 .iss-text{font-size:12.5px;color:var(--ink)}
 
@@ -245,6 +251,10 @@ a{color:inherit;text-decoration:none}
 .sort-tab.active{background:#23262b;color:#fff}
 .rd-re{background:#EEEDFE;color:#3C3489}
 .rd-empty{font-size:11.5px;color:var(--sub);padding:.5rem 0}
+.ac-long{margin-top:1rem;border-top:.5px solid var(--line);padding-top:.85rem}
+.ac-long-t{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.2rem}
+.ac-long-s{font-size:10.5px;color:var(--sub);line-height:1.65;margin-bottom:.6rem}
+.ac-star{font-size:9px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:1px 7px;margin-left:4px}
 .rd-foot{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}
 
 /* ── 어제의 채점표 ── */
@@ -272,8 +282,233 @@ a{color:inherit;text-decoration:none}
 .mf-chip.in{background:rgba(193,67,43,.28);color:#ffd0c0}
 .mf-none{font-size:10.5px;color:#8a909a}
 .mf-arrow{font-size:18px;color:#8a909a;flex-shrink:0}
+/* ══ 핵심편·수급온도 — 시안 v5 (화이트리스트 이식) ══ */
+
+.top-bar{display:flex;align-items:flex-start;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:1rem;gap:10px}
+
+.part-line{display:flex;align-items:center;gap:10px;margin:2.2rem 0 1.1rem}
+
+.part-line span{font-size:12px;font-weight:800;color:#fff;background:#23262b;padding:5px 14px;border-radius:99px;white-space:nowrap}
+
+.part-line::after{content:'';flex:1;height:1.5px;background:#23262b}
+
+.q90{background:linear-gradient(180deg,#1e2127,#282c34);border-radius:var(--rlg);padding:1.3rem 1.35rem 1.2rem;color:#e8e6e2}
+
+.q90-top{display:flex;align-items:center;gap:8px;margin-bottom:.9rem;flex-wrap:wrap}
+
+.q90-badge{font-size:11.5px;font-weight:800;color:#20242b;background:#e0c060;padding:3px 12px;border-radius:99px}
+
+.q90-sub{font-size:12px;color:#9aa0a8}
+
+.q90-def{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}
+
+.q90-def .hi{color:var(--up-soft)}
+
+.q90-feel{font-size:13.5px;color:#e0c060;font-weight:700;line-height:1.6;padding-left:11px;border-left:2.5px solid #e0c060;margin-bottom:.75rem}
+
+.q90-why{font-size:13.5px;color:#b9bfc7;line-height:1.75;padding-bottom:1rem;border-bottom:.5px solid rgba(255,255,255,.1)}
+
+.q90-why b{color:#fff;font-weight:800}
+
+.q90-3{padding:.9rem 0 .2rem}
+
+.q3{display:flex;gap:10px;padding:8px 0;font-size:13.5px;line-height:1.75;color:#dfe3e8}
+
+.q3-n{font-size:12px;font-weight:800;color:#20242b;background:#9aa0a8;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:3px}
+
+.q3 b{color:#fff;font-weight:800}
+
+.q3 .u{color:var(--up-soft);font-weight:800}
+.q3 .d{color:var(--dn-soft);font-weight:800}
+
+.iss90{background:rgba(255,255,255,.045);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}
+
+.iss90-h{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}
+
+.iss90-s{font-size:11px;color:#8a909a;margin-bottom:.7rem}
+
+.i9{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13px;line-height:1.7;color:#dfe3e8}
+
+.i9:last-child{border-bottom:none;padding-bottom:0}
+
+.i9-t{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px}
+
+.tg-semi{background:rgba(120,180,255,.16);color:#9fc6f5}
+
+.tg-pol{background:rgba(224,192,96,.16);color:#e0c060}
+
+.tg-glo{background:rgba(200,150,255,.14);color:#c3a7ee}
+
+.tg-sup{background:rgba(255,154,128,.16);color:var(--up-soft)}
+
+.i9 b{color:#fff;font-weight:800}
+
+.i9 .u{color:var(--up-soft);font-weight:800}
+.i9 .d{color:var(--dn-soft);font-weight:800}
+
+.mny{background:rgba(0,0,0,.25);border-radius:var(--rmd);padding:.95rem 1rem 1rem;margin-top:.8rem}
+
+.mny-h{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}
+
+.mny-sub{font-size:11px;color:#8a909a;margin-bottom:.8rem}
+
+.mny-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+
+.tile{background:rgba(255,255,255,.05);border-radius:7px;padding:.62rem .55rem;text-align:center}
+
+.tile-k{font-size:10.5px;color:#9aa0a8;font-weight:600;margin-bottom:3px}
+
+.tile-v{font-size:17px;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums}
+
+.tile-v.b{color:var(--up-soft)}
+.tile-v.s{color:var(--dn-soft)}
+
+.tile-s{font-size:10px;font-weight:700;margin-top:3px;color:#9aa0a8}
+
+.mny-feat{margin-top:.9rem;display:flex;flex-direction:column;gap:8px}
+
+.mf{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;color:#c3c8ce;line-height:1.7}
+
+.mf-i{font-size:11px;font-weight:800;color:#20242b;background:#e0c060;width:17px;height:17px;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+
+.mf b{color:#fff;font-weight:800}
+
+.mf .u{color:var(--up-soft);font-weight:800}
+.mf .d{color:var(--dn-soft);font-weight:800}
+
+.mny-why{margin-top:.9rem;background:rgba(224,192,96,.1);border-radius:6px;padding:.75rem .85rem}
+
+.mw-h{font-size:11.5px;font-weight:800;color:#e0c060;margin-bottom:.35rem}
+
+.mw-b{font-size:13px;color:#fff;line-height:1.75;font-weight:600}
+
+.mw-b b{color:#e0c060;font-weight:800}
+
+.mine{background:rgba(143,180,238,.09);border:.5px solid rgba(143,180,238,.22);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}
+
+.mine-h{font-size:12.5px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}
+
+.mine-b{font-size:13px;color:#dfe3e8;line-height:1.8}
+
+.mine-b b{color:#fff;font-weight:800}
+
+.mine-split{margin-top:.7rem;display:grid;grid-template-columns:1fr 1fr;gap:7px}
+
+.ms{background:rgba(0,0,0,.2);border-radius:6px;padding:.6rem .7rem}
+
+.ms-k{font-size:11px;font-weight:800;color:#e0c060;margin-bottom:3px}
+
+.ms-v{font-size:12px;color:#c3c8ce;line-height:1.6}
+
+.mine-f{font-size:11.5px;color:#8a909a;margin-top:.65rem;line-height:1.6}
+
+
+.q90-flip{background:rgba(224,192,96,.07);border-left:3px solid #e0c060;padding:.9rem 1rem;margin-top:.8rem}
+
+.qf-h{font-size:12px;font-weight:800;color:#e0c060;margin-bottom:.45rem}
+
+.qf-b{font-size:13.5px;color:#dfe3e8;line-height:1.8}
+
+.qf-b b{color:#fff;font-weight:800}
+
+.q90-tease{margin-top:1rem;padding-top:.9rem;border-top:.5px solid rgba(255,255,255,.1)}
+
+.qt-h{font-size:12.5px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}
+
+.qt{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13.5px;color:#fff;line-height:1.6;font-weight:700}
+
+.qt:last-child{border-bottom:none;padding-bottom:0}
+
+.qt-tag{font-size:10px;font-weight:800;padding:3px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;background:rgba(255,255,255,.1);color:#c8ccd2}
+
+.qt-go{margin-left:auto;font-size:11.5px;font-weight:800;color:#e0c060;white-space:nowrap;flex-shrink:0}
+
+.qt .u{color:var(--up-soft)}
+
+.q90-cut{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}
+
+.temp{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);padding:1.05rem 1.15rem;margin-bottom:.6rem}
+
+.temp-h{font-size:14.5px;font-weight:800;margin-bottom:.2rem}
+
+.temp-s{font-size:12.5px;color:var(--sub);line-height:1.7;margin-bottom:.95rem}
+
+.spark{margin-bottom:1.1rem}
+
+.spark-lab{display:flex;justify-content:space-between;font-size:11.5px;color:var(--sub);font-weight:600;margin-bottom:7px}
+
+.spark-lab b{color:var(--ink);font-size:12px}
+
+.spark-box{position:relative;height:92px}
+
+.spark-bars{display:flex;align-items:center;gap:3px;height:92px}
+
+.sbw{flex:1;position:relative;height:100%}
+
+.sbw i{position:absolute;left:12%;right:12%;border-radius:2px;font-style:normal}
+
+.sbw i.p{bottom:50%;background:#e8a893}
+
+.sbw i.n{top:50%;background:#a6c3ec}
+
+.sbw.today i.p{background:var(--up)}
+
+.sbw.today i.n{background:var(--dn)}
+
+.spark-mid{position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line)}
+
+.spark-x{display:flex;justify-content:space-between;font-size:10.5px;color:#a8a49c;margin-top:6px}
+
+.temp-read{background:var(--bg2);border-radius:var(--rmd);padding:.8rem .95rem;font-size:12.5px;line-height:1.85;margin-top:.9rem}
+
+.temp-read b{font-weight:800}
+
+.temp-note{font-size:11.5px;color:var(--sub);line-height:1.7;margin-top:.7rem}
+@media (max-width:600px){
+  body{padding:8px 0}
+  .rp{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}
+  .top-bar{flex-direction:column;gap:6px}
+  .q90{padding:1.05rem .95rem}
+  .q90-def{font-size:18.5px}
+  .mny-tiles{grid-template-columns:1fr;gap:6px}
+  .tile{display:flex;align-items:center;justify-content:space-between;text-align:left;padding:.55rem .7rem}
+  .tile-k{margin-bottom:0}.tile-v{font-size:15px}.tile-s{margin-top:0}
+  .mine-split{grid-template-columns:1fr}
+  .tower-dash{padding:1rem .9rem}
+  .idx-grid{grid-template-columns:1fr}
+  .bar-chart{gap:3px}.bar-zone{height:112px}.bar-val{font-size:9px}.bar-name{font-size:9px}
+  .sector-grid{grid-template-columns:1fr}
+  .sc-cols,.sc-row{grid-template-columns:1.3fr 74px 58px 52px;font-size:12.5px}
+  .macro-row{grid-template-columns:1fr}
+  table.tt{font-size:11.5px}
+  table.tt th,table.tt td{padding:7px 4px}
+}
+.tp-table{margin-top:.6rem}
+.tp-row{display:grid;grid-template-columns:52px 100px 1fr;grid-template-areas:"who val avg" "who val chips";column-gap:10px;row-gap:3px;align-items:center;padding:8px 0;border-bottom:.5px dashed var(--line)}
+.tp-who{grid-area:who} .tp-val{grid-area:val} .tp-avg{grid-area:avg;white-space:nowrap}
+.tp-chips{grid-area:chips;justify-content:flex-start}
+.tp-row:last-child{border-bottom:none}
+.tp-who{font-size:11.5px;font-weight:800;color:var(--sub)}
+.tp-val{font-size:15px;font-weight:800;font-variant-numeric:tabular-nums}
+.tp-val.up{color:var(--up)} .tp-val.dn{color:var(--dn)}
+.tp-avg{font-size:11px;color:var(--sub)}
+.tp-chips{display:flex;gap:5px}
+.tp-chip{font-size:9.5px;font-weight:800;padding:2px 8px;border-radius:99px;background:var(--bg2);color:var(--sub);border:.5px solid var(--line);white-space:nowrap}
+.tp-chip.hot{background:#fdeae4;color:#C1432B;border-color:#f2c4b4}
+/* 핵심편 색 고정 — 시안 v5 값 강제 */
+.q90 .u,.mny .u,.tile-v.b{color:#ff9a80!important;font-weight:800}
+.q90 .d,.mny .d,.tile-v.s{color:#8fb4ee!important;font-weight:800}
+.mf b,.i9 b,.mine-b b,.qf-b b{color:#fff}
+.mw-b b{color:#e0c060;font-weight:800}
+/* ══ 폰트 일괄 확대 (v-12-a) ══ */
+.rp{font-size:13.5px}
+.rp p{line-height:1.75}
+.ic-num{font-size:21px}
+.rd-foot,.fs-foot,.ac-note,.mf-sub-x{font-size:11px}
+.iss-text,.news-insight,.mr-comment,.fs-read{font-size:12.5px}
+.fs-ck-a{font-size:12px}
 /* 수급 관제신호 */
-.fs-box{background:linear-gradient(180deg,#1c1f24,#282c33);border-radius:var(--rlg);padding:1.1rem 1.1rem .95rem;color:#e8e6e2;margin-bottom:1rem}
+.fs-box{background:linear-gradient(180deg,#141e2b,#1c2a3a);border:.5px solid rgba(120,160,220,.14);border-radius:var(--rlg);padding:1.1rem 1.1rem .95rem;color:#e8e6e2;margin-bottom:1rem}
 .fs-verdict{display:flex;align-items:center;gap:14px;padding-bottom:.95rem;border-bottom:.5px solid rgba(255,255,255,.1);flex-wrap:wrap}
 .fs-ico{flex-shrink:0;width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center}
 .fs-ico.pos{background:rgba(255,138,110,.13)}
@@ -304,7 +539,11 @@ a{color:inherit;text-decoration:none}
 .fs-ck-a b{color:#dfe3e8}
 .fs-ck-v{font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
 .fs-ck-v.pos{color:var(--up-soft)} .fs-ck-v.neg{color:var(--dn-soft)} .fs-ck-v.mid{color:#e0c060}
-.fs-ck-v small{display:block;font-size:8.5px;font-weight:700;color:#767c86}
+.fs-ck-v small{display:block;font-size:8.5px;font-weight:700;color:#767c86;white-space:nowrap}
+.fs-combo{font-size:11px;color:#c3c8ce;line-height:1.7;margin-top:.7rem;background:rgba(255,255,255,.04);border-radius:var(--rmd);padding:.5rem .75rem}
+.fs-combo b{color:#fff}
+.fs-warn{font-size:11px;color:#e8d9a8;line-height:1.7;margin-top:.5rem;background:rgba(224,192,96,.09);border:.5px solid rgba(224,192,96,.25);border-radius:var(--rmd);padding:.5rem .75rem}
+.fs-warn b{color:#f0e2b8}
 .fs-cum{padding-top:.95rem}
 .fs-cum-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:.2rem}
 .fs-cum-t{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em}
@@ -414,6 +653,8 @@ a{color:inherit;text-decoration:none}
   </div>
 
   
+
+  
   <div class="gauge-box">
     <div class="gz-top">
       <div class="gz-numwrap"><p class="gz-num">72</p><p class="gz-lab">온기 🔥</p></div>
@@ -510,7 +751,7 @@ a{color:inherit;text-decoration:none}
 
   <div class="today-market">💡 <b>오늘의 시장:</b> 코스피가 6,579.04로 3.68% 급등하며 매수 사이드카까지 발동됐고, 외국인이 코스피에서 2조8,354억원을 순매수하며 지수를 끌어올렸습니다. 다만 코스닥은 858.91로 0.12% 상승에 그쳤고, 코스닥에서는 외국인(-1,623억원)과 기관(-1,459억원)이 모두 팔며 개인(+3,127억원)만 사들이는 엇갈린 하루였습니다.</div>
 
-  <p class="sec-label">🔥 핵심 이슈</p>
+  <p class="sec-label">🔥 핵심 이슈 — 상세</p>
   <div class="issue-box">
     <div class="iss"><span class="itag">반도체</span>
       <span class="iss-text">삼성전자, SK하이닉스 등 대형 반도체주가 오늘 코스피 급등을 주도했습니다. S7 테마는 등락률 +5.42%, 확산도 100%를 기록하며 시장 전체를 끌어올렸습니다.</span></div>
@@ -526,22 +767,22 @@ a{color:inherit;text-decoration:none}
     
     <div class="mr-card">
       <p class="mr-label">원/달러 환율</p>
-      <p class="mr-val">1,415.20</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-0.15%</span>
+      <p class="mr-val">1,415.48</p>
+      <span class="dn" style="font-size:11px;font-weight:700">-0.13%</span>
       <p class="mr-comment">원/달러 환율이 1,415.2원으로 0.15% 소폭 하락했습니다. 코스피가 크게 오른 날치고는 환율 변동이 작아, 외국인 자금이 급격히 몰려든 것보다는 반도체 개별 재료에 반응한 것으로 볼 수 있습니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">WTI 유가</p>
-      <p class="mr-val">$82.94</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-0.31%</span>
+      <p class="mr-val">$83.74</p>
+      <span class="up" style="font-size:11px;font-weight:700">+0.65%</span>
       <p class="mr-comment">WTI 유가는 82.94달러로 0.31% 내렸습니다. 유가가 안정된 흐름을 보이면 물가 부담이 덜해 금리 정책에 미치는 압력도 상대적으로 크지 않다는 뜻입니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">미국채 10년물</p>
-      <p class="mr-val">4.68%</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-0.32%</span>
+      <p class="mr-val">4.66%</p>
+      <span class="dn" style="font-size:11px;font-weight:700">-0.60%</span>
       <p class="mr-comment">미국채 10년물 금리는 4.68%로 0.32% 하락했습니다. 시중금리가 오히려 낮아진 건 위험자산 쏠림보다는 안전자산 선호가 완전히 꺾이지 않았음을 보여줍니다.</p>
     </div>
   </div>
@@ -714,13 +955,13 @@ a{color:inherit;text-decoration:none}
     </div></div></div>
   <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 (4개)')">▾ 주도 섹터 더보기 (4개)</button>
 
-  <p class="sec-label">📡 실제 강세 레이더 — 오늘 새로 포착</p>
+  <p class="sec-label" id="radar">📡 실제 강세 레이더 — 오늘 새로 포착</p>
   
   <div class="rd-box">
     <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
       시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 거래량 2배 이상</b> 종목 중에서,
       회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
-    <p class="devnote">⚙️ <b>적용 조건</b> · 시총 ≥ 5,000억 · 거래대금 ≥ 500억 · 상승 종목만 · 전일 대비 거래량 ≥ 2.0배 │ 점수 = 회전율×0.5 + 상승률×0.5 (각각 0~100 정규화) + 거래량 3.0배↑ 시 +15점 │ 추적 5거래일</p>
+    <p class="devnote">⚙️ <b>적용 조건</b> · 시총 ≥ 5,000억 · 거래대금 ≥ 500억 · 상승 종목만 · 전일 대비 거래량 ≥ 2.0배 │ 점수 = 회전율×0.5 + 상승률×0.5 (각각 0~100 정규화) + 거래량 3.0배↑ 시 +15점 │ 추적 20거래일</p>
     
     <div class="rd-market">
       <p class="rd-mkt-name">📡 코스피</p>
@@ -832,7 +1073,7 @@ a{color:inherit;text-decoration:none}
       점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🐢 5일 매집 레이더 — 조용히 쌓이는 돈</p>
+  <p class="sec-label" id="acc">🐢 매집 레이더 — 조용히 쌓이는 돈</p>
   
   <div class="rd-box">
     <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
@@ -841,6 +1082,7 @@ a{color:inherit;text-decoration:none}
       🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> 5일 중 3일 이상 순매수 ·
       💼 단독 = 한쪽만 4일 이상</p>
     <p class="devnote">⚙️ <b>적용 조건</b> · 스캔 = 시총 상위 코스피 100 + 코스닥 40종목 · 관찰 5거래일 │ 🤝쌍끌이 = 외국인·기관 <b>둘 다</b> 3일↑ 순매수 & 각자 누적 + · 💼단독 = 한쪽만 4일↑<br>조건 통과 종목 전부를 후보 풀에 담은 뒤 <b>코스피·코스닥으로 나눠</b> 각 시장에서 TOP5<br><b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100 (내림차순 정렬)</p>
+    <p class="ac-long-t" style="margin-top:.6rem">🔥 단기 매집 — 최근 5거래일</p>
     <div class="ac-two">
       <div class="ac-col">
         <p class="ac-col-t">📊 코스피 · 시총 대비</p>
@@ -944,6 +1186,98 @@ a{color:inherit;text-decoration:none}
       </div>
     </div>
     <p class="ac-note">※ 오늘 후보 풀 70종목 (🤝쌍끌이 12 + 💼단독 58) — 코스피 58 · 코스닥 12. 각 시장에서 시총 대비 상위 5개입니다.</p>
+    
+    <div class="ac-long">
+      <p class="ac-long-t">🏗️ 중기 매집 — 최근 20거래일, 더 긴 호흡의 돈</p>
+      <p class="ac-long-s">5일이 "이번 주 신호"라면, 20일은 "한 달째 이어지는 의지"입니다.
+        🤝쌍끌이 = 둘 다 12일↑ · 💼단독 = 한쪽 14일↑ ·
+        ⭐ = 5일 랭킹에도 동시 등재 (가장 강한 신호)</p>
+      <div class="ac-two">
+        <div class="ac-col"><p class="ac-col-t">📊 코스피 · 20일</p>
+        <div class="ac-row">
+          <span class="ac-rank">1</span>
+          <div class="ac-info">
+            <p class="ac-name">SK텔레콤<span class="ac-tag ac-solo">💼 기관 단독</span></p>
+            <p class="ac-meta">외 5일 · 기 14일
+              · 시총 18.9조 · 누적 +4,312억</p>
+          </div>
+          <span class="ac-val">2.286%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">2</span>
+          <div class="ac-info">
+            <p class="ac-name">SK이노베이션<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
+            <p class="ac-meta">외 13일 · 기 15일
+              · 시총 20.7조 · 누적 +4,327억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">2.091%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">3</span>
+          <div class="ac-info">
+            <p class="ac-name">아모레퍼시픽<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
+            <p class="ac-meta">외 15일 · 기 12일
+              · 시총 7.9조 · 누적 +1,454억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">1.831%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">4</span>
+          <div class="ac-info">
+            <p class="ac-name">삼양식품<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 16일 · 기 7일
+              · 시총 9.1조 · 누적 +1,486억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">1.639%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">5</span>
+          <div class="ac-info">
+            <p class="ac-name">키움증권<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 18일 · 기 3일
+              · 시총 7.8조 · 누적 +1,135억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">1.447%</span>
+        </div></div>
+        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · 20일</p>
+        <div class="ac-row">
+          <span class="ac-rank">1</span>
+          <div class="ac-info">
+            <p class="ac-name">실리콘투<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 14일 · 기 10일
+              · 시총 3.0조 · 누적 +365억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">1.231%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">2</span>
+          <div class="ac-info">
+            <p class="ac-name">에스티팜<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 14일 · 기 6일
+              · 시총 2.2조 · 누적 +206억</p>
+          </div>
+          <span class="ac-val">0.923%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">3</span>
+          <div class="ac-info">
+            <p class="ac-name">휴젤<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 16일 · 기 7일
+              · 시총 3.4조 · 누적 +185억 <span class="ac-star">⭐ 단기도 등재</span></p>
+          </div>
+          <span class="ac-val">0.551%</span>
+        </div>
+        <div class="ac-row">
+          <span class="ac-rank">4</span>
+          <div class="ac-info">
+            <p class="ac-name">케어젠<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 14일 · 기 9일
+              · 시총 3.5조 · 누적 +88억</p>
+          </div>
+          <span class="ac-val">0.255%</span>
+        </div></div>
+      </div>
+    </div>
     <p class="rd-foot">💡 <b>순위가 높다고 "곧 오른다"는 뜻이 아닙니다.</b> 그 회사 규모에 비해 들어온 돈이
       컸다는 사실만 보여줄 뿐이며, 이유는 개별 확인이 필요합니다.
       시장을 나눈 이유는 시총 규모가 다른 코스피·코스닥을 한 줄로 세우면 늘 소형주만 올라오기 때문입니다.<br>
@@ -987,6 +1321,8 @@ a{color:inherit;text-decoration:none}
     <div class="si-item"><span class="si-lens">다음 시나리오</span><span>만약 내일 선물시장에서 외국인 순매수가 재개된다면(오늘은 -1,071억원 순매도) 오늘의 현물 매수가 방향성 있는 진짜 베팅으로 확인될 수 있습니다. 반대로 선물 순매도가 이어지고 코스피가 6,500선 아래로 밀리면, 오늘의 급등은 단기 반등에 그칠 가능성이 있습니다. 과거에도 현물-선물이 엇갈린 다음 날 방향이 갈리는 경우가 많았던 만큼, 예단하기보다는 지켜볼 대목입니다.</span></div>
   </div>
 
+  <p class="sec-label">📊 수급 온도 — 오늘이 최근 16거래일에서 몇 번째인가 <span style="color:#8a909a;font-weight:600;font-size:10px">(16일치 축적 중)</span></p><div class="temp"><p class="temp-h">오늘은 <b>외국인이 매수 2위</b>로 산 날입니다</p><p class="temp-s">"얼마 샀나"보다 <b>평소와 얼마나 달랐나</b>가 정보입니다. 흐름 그래프는 아래 관제신호에 있습니다.</p><div class="tp-table"><div class="tp-row"><span class="tp-who">외국인</span><span class="tp-val up">+2.84조</span><span class="tp-avg">평소 24,142억 · 1.2배</span><span class="tp-chips"><span class="tp-chip hot">16일 중 매수 2위</span><span class="tp-chip">2일 연속 매수</span></span></div><div class="tp-row"><span class="tp-who">기관</span><span class="tp-val up">+5,279억</span><span class="tp-avg">평소 9,014억 · 0.6배</span><span class="tp-chips"><span class="tp-chip">4일 연속 매수</span></span></div><div class="tp-row"><span class="tp-who">개인</span><span class="tp-val dn">−3.19조</span><span class="tp-avg">평소 27,849억 · 1.1배</span><span class="tp-chips"><span class="tp-chip hot">16일 중 매도 2위</span><span class="tp-chip">2일 연속 매도</span></span></div></div><p class="temp-read" style="margin-top:.55rem">읽는 법: <b>순위</b>는 같은 방향(매수는 매수끼리, 매도는 매도끼리) 안에서 상위 3위일 때만 표시됩니다 — 배지가 붙은 날이 특별한 날입니다.</p></div>
+
   <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
   
   <div class="fs-box">
@@ -995,7 +1331,7 @@ a{color:inherit;text-decoration:none}
       <div class="fs-main">
         <p class="fs-k">오늘의 실탄 (외국인+기관이 실제 주식에 넣은 현금) <span class="fs-n">(16일치 기준)</span></p>
         <div class="fs-row"><span class="fs-num pos">+3.36조</span><span class="fs-state pos">매수 우위 · 평소의 1.2배</span></div>
-        <div class="fs-chips"><span class="fs-chip info">🎯 종목 선별형 — 바스켓 12%</span></div>
+        <div class="fs-chips"><span class="fs-chip good">🔴 지수형 매수</span><span class="fs-chip info">🎯 종목 선별형 — 바스켓 12%</span><span class="fs-chip warn">📅 옵션 만기 주간</span></div>
       </div>
     </div>
     <div class="fs-checks">
@@ -1017,9 +1353,11 @@ a{color:inherit;text-decoration:none}
         <div class="fs-ck-ico h">△</div>
         <p class="fs-ck-q">폭넓게 샀나?<small>비차익 ÷ 실탄</small></p>
         <p class="fs-ck-a">바스켓 비중 <b>12%</b>로 거의 없습니다. 지수가 아니라 <b>골라잡은 종목</b>에 돈이 오간 날입니다.</p>
-        <p class="fs-ck-v mid">12%<small>폭</small></p>
+        <p class="fs-ck-v mid">12%<small>비차익 +4,039억</small></p>
       </div>
     </div>
+    <p class="fs-combo"><b>🔴 지수형 매수</b> — 지수도 종목도 함께 오른 폭넓은 매수</p>
+    <p class="fs-warn">📅 옵션 만기 주간 — 만기일이 1거래일 앞입니다. 이 시기의 비차익은 <b>방향성 베팅이 아니라 만기 청산·롤오버에 따른 기계적 조정</b>일 수 있습니다. 다음 날 반대로 나올 수 있으니 폭 판정을 그대로 믿지 마십시오.</p>
     <div class="fs-cum">
       <div class="fs-cum-head">
         <span class="fs-cum-t">📈 실탄이 쌓이는 흐름 — 최근 16거래일</span>
@@ -1088,7 +1426,7 @@ a{color:inherit;text-decoration:none}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🔥 인기 뉴스 TOP 7</p>
+  <p class="sec-label">🔥 이슈 밖 뉴스 7건 — 놓치기 쉬운 것들</p>
   <div class="news-wrap">
     <div class="news-item">
       <span class="news-rank">1</span>
@@ -1176,7 +1514,7 @@ a{color:inherit;text-decoration:none}
     <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🗼 내일의 관전 포인트</p>
+  <p class="sec-label" id="watch">🗼 내일의 관전 포인트</p>
   <div class="watch-item"><span>①코스피가 6,500선을 지키고 외국인 순매수가 오늘(+2.84조원) 수준의 절반 이상 이어지면 반등 지속으로, 6,400선이 깨지면 단기 쏠림 해소로 봅니다.</span></div><div class="watch-item"><span>②선물시장 외국인이 순매수로 전환되면(오늘 -1,071억원) 확신 있는 매수로, 순매도가 이어지면 헤지성 자금으로 봅니다.</span></div><div class="watch-item"><span>③코스닥 비차익거래 순매도가 오늘(-1,189억원)보다 축소되면 수급 안정으로, 확대되면 개별 종목 이탈 심화로 봅니다.</span></div>
 
   <p class="sec-label">📚 오늘의 공부</p>
@@ -1201,7 +1539,7 @@ a{color:inherit;text-decoration:none}
 
   <div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p><div class="arch-grid"><a class="arch-link" href="report_20260811.html">8/11(화)</a><a class="arch-link" href="report_20260810.html">8/10(월)</a><a class="arch-link" href="report_20260807.html">8/7(금)</a><a class="arch-link" href="report_20260806.html">8/6(목)</a><a class="arch-link" href="report_20260805.html">8/5(수)</a><a class="arch-link" href="report_20260804.html">8/4(화)</a><a class="arch-link" href="report_20260803.html">8/3(월)</a></div><div class="hidden-block" id="moreArch" style="margin-top:6px"><div class="arch-grid"><a class="arch-link" href="report_20260731.html">7/31(금)</a><a class="arch-link" href="report_20260730.html">7/30(목)</a><a class="arch-link" href="report_20260729.html">7/29(수)</a><a class="arch-link" href="report_20260728.html">7/28(화)</a><a class="arch-link" href="report_20260727.html">7/27(월)</a><a class="arch-link" href="report_20260725.html">7/25(토)</a><a class="arch-link" href="report_20260724.html">7/24(금)</a></div></div><button class="more-btn" style="margin-top:8px;margin-bottom:0" onclick="toggleMore('moreArch',this,'▾ 이전 리포트 7개 더보기')">▾ 이전 리포트 7개 더보기</button></div>
 
-  <p class="foot">데이터: 2026.08.12 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.06-f]</span></p>
+  <p class="foot">데이터: 2026.08.12 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.12-c]</span></p>
 </div>
 <script>
 function toggleMore(id,btn,label){
