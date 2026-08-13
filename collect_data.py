@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-d"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.13-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
@@ -505,6 +505,7 @@ MACRO_TICKERS = {
     "원달러환율": {"심볼": "KRW=X", "표시명": "원/달러 환율", "단위": ""},
     "WTI유가": {"심볼": "CL=F", "표시명": "WTI 유가", "단위": "$"},
     "미국채10년": {"심볼": "^TNX", "표시명": "미국채 10년물", "단위": "%"},
+    "국제금": {"심볼": "GC=F", "표시명": "국제 금", "단위": "$"},   # 안전자산 심리 — 코스피와 자주 역상관
 }
 
 
