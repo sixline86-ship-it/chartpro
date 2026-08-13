@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-f"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-g"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -240,6 +240,62 @@ def build_gauge(gauge, 오늘한줄평):
 
 
 # ── 주도 섹터 6개 ────────────────────────────────────────
+# 주도 섹터의 '최근 20일 강도' — 오늘 테마가 지난 한 달간 얼마나 자주 상위권에 있었나.
+#   반짝 테마(오늘 처음)와 꾸준한 대장(며칠째 상위)을 구분해준다. 전부 규칙 기반.
+_SECTOR_HIST_CACHE = None
+
+
+def _sector_history(days=20):
+    """archive/data_*.json에서 최근 days일의 [ (날짜, [테마명 순위대로]) ] 를 읽는다.
+    한 번 읽으면 캐시(같은 리포트 빌드 중 여러 섹터가 재사용)."""
+    global _SECTOR_HIST_CACHE
+    if _SECTOR_HIST_CACHE is not None:
+        return _SECTOR_HIST_CACHE
+    hist = []
+    try:
+        import glob
+        files = sorted(glob.glob(os.path.join(ARCHIVE, "data_*.json")))
+        # 루트에도 있을 수 있어 합침(하위호환)
+        files += sorted(glob.glob("data_*.json"))
+        files = sorted(set(files))[-days:]
+        for f in files:
+            try:
+                with open(f, encoding="utf-8") as fp:
+                    주도 = (json.load(fp).get("주도섹터") or [])
+                hist.append([s.get("테마명") for s in 주도])
+            except Exception:
+                continue
+    except Exception:
+        pass
+    _SECTOR_HIST_CACHE = hist
+    return hist
+
+
+def sector_strength_badge(테마명):
+    """테마 하나의 20일 강도 배지 HTML. 이력이 얇으면 빈 문자열."""
+    hist = _sector_history()
+    N = len(hist)
+    if N < 3 or not 테마명:
+        return ""     # 최소 3일은 쌓여야 의미 있음
+    순위들 = [day.index(테마명) + 1 for day in hist if 테마명 in day]
+    등장 = len(순위들)
+    if 등장 <= 1:
+        # 오늘 처음(또는 오늘만) — 신규 대장
+        return ('<span class="sc-str new">🆕 신규 주도 · '
+                f'최근 {N}일 중 처음</span>')
+    평균 = sum(순위들) / 등장
+    최고 = min(순위들)
+    # 꾸준함 강도로 라벨을 나눈다
+    if 등장 >= max(3, N // 3) and 평균 <= 3:
+        급 = "🔥 대장 지속"
+    elif 등장 >= 2:
+        급 = "📈 재등장"
+    else:
+        급 = "📈 재등장"
+    return (f'<span class="sc-str">{급} · '
+            f'{N}일 중 <b>{등장}일</b> 상위 · 평균 <b>{평균:.1f}위</b></span>')
+
+
 def one_sector_card(a):
     rows = []
     for s in a.get("종목", [])[:4]:
@@ -255,12 +311,14 @@ def one_sector_card(a):
     badge_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
     head_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
     점수 = a.get("주도력점수", "—")
+    강도배지 = sector_strength_badge(a.get('테마명'))
     return f'''
     <div class="sector-card">
       <div class="sc-head {head_cls}">
         <div class="sc-name-row">{theme_label(a['테마명'])}
           <span class="sc-chg {badge_cls}">{et_s}</span></div>
         <p class="sc-score">주도력 {점수}점</p>
+        {f'<p class="sc-strline">{강도배지}</p>' if 강도배지 else ''}
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -856,6 +914,75 @@ def build_scorecard(채점표, 어제날짜=""):
   </div>'''
 
 
+def _flow_highlight(key, days_max=20):
+    """수급 한 주체의 '가장 눈에 띄는 특징'을 최대 20일 범위에서 자동으로 고른다.
+
+    항상 20일 고정이 아니라, 최근 5/10/20일 관점을 모두 계산해 가장 강한 신호 하나만
+    문장으로 돌려준다. 우선순위: 방향 전환(3) > 기간 내 최대(2) > 연속·순위(1).
+    전부 규칙 기반(코드) — flow_history.json의 외현/기관 컬럼을 읽는다.
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get(key) is not None][-days_max:]
+    except Exception:
+        return None
+    N = len(h)
+    if N < 2:
+        return None
+    오늘 = h[-1].get(key)
+    if 오늘 is None:
+        return None
+    방향 = "매수" if 오늘 >= 0 else "매도"
+    후보 = []
+
+    # ① 최근 5일 vs 이전 5일 방향 전환 (가장 중요)
+    if N >= 10:
+        최근5 = sum((r.get(key) or 0) for r in h[-5:])
+        이전5 = sum((r.get(key) or 0) for r in h[-10:-5])
+        if 이전5 <= 0 < 최근5:
+            후보.append((3, '최근 5일 매도 <span class="nw">→매수 전환</span>'))
+        elif 최근5 <= 0 < 이전5:
+            후보.append((3, '최근 5일 매수 <span class="nw">→매도 전환</span>'))
+
+    # ② 최근 5/10/20일 중 최대 규모 (짧은 기간 우선)
+    for days in (5, 10, 20):
+        if N >= days:
+            창 = [r.get(key) for r in h[-days:] if r.get(key) is not None]
+            같은방향 = [v for v in 창 if (v >= 0) == (오늘 >= 0)]
+            if 같은방향 and 오늘 == max(같은방향, key=abs):
+                후보.append((2, f"{days}일 중 최대 {방향}"))
+                break
+
+    # ③ 연속 일수
+    n, sign = 0, None
+    for r in reversed(h):
+        v = r.get(key)
+        if v is None or v == 0:
+            break
+        s = v >= 0
+        if sign is None:
+            sign = s
+        if s != sign:
+            break
+        n += 1
+    if n >= 3:
+        후보.append((1, f"{n}일 연속 {'매수' if sign else '매도'}"))
+
+    # ④ 순위 (상위 3위)
+    같은방향전체 = sorted(
+        [r.get(key) for r in h if r.get(key) is not None and (r.get(key) >= 0) == (오늘 >= 0)],
+        key=abs, reverse=True)
+    if 오늘 in 같은방향전체:
+        순 = 같은방향전체.index(오늘) + 1
+        if 순 <= 3:
+            후보.append((1, f"{N}일 중 {방향} {순}위"))
+
+    if not 후보:
+        return "순매수" if 오늘 >= 0 else "순매도"
+    후보.sort(key=lambda x: x[0], reverse=True)
+    return 후보[0][1]
+
+
 def _load_market_history():
     try:
         with open("market_history.json", encoding="utf-8") as f:
@@ -927,6 +1054,271 @@ def safe_emoji(s):
     return s
 
 
+# ── 지수 헤더 스타일 선택 ──
+#   핵심편 맨 위 헤더의 시각 스타일. 아래 하나만 바꾸면 전체가 바뀐다.
+#   "BC"=막대+성격 · "F"=도넛 게이지 · "G"=카드 분할 · "H"=타임라인 · "I"=히트 스트립
+HEADER_STYLE = "BC"
+
+
+# ── 맨 앞 아이콘 스타일 ──
+#   "ring"=링+화살표 · "gauge"=반원 게이지 · "light"=신호등 3점 · "shield"=방패
+#   "arrow"=큰 화살표 · "badge"=각진 배지(관제지수) · "candle"=미니 캔들
+#   "bar"=세로바 · "round"=라운드 사각 이모지
+ICON_STYLE = "light"
+
+
+def _head_icon(코등, 링색, 이모, 관제점수=None, 관제구간=None, 태그색=None):
+    """핵심편 맨 앞 성격 아이콘 — ICON_STYLE 상수로 9종 중 하나."""
+    st = ICON_STYLE
+    화살표 = "↗" if (코등 or 0) > 0 else "↘" if (코등 or 0) < 0 else "→"
+
+    if st == "ring":
+        return (f'<div class="hi-ring" style="border-color:{링색};color:{링색}">{화살표}</div>')
+
+    if st == "gauge":
+        frac = min(abs(코등 or 0) / 4.0, 1.0)
+        dash = 55 * frac
+        return (f'<div class="hi-gauge"><svg width="46" height="46" style="transform:rotate(135deg)">'
+                f'<circle cx="23" cy="23" r="18" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="5" stroke-dasharray="85 200"/>'
+                f'<circle cx="23" cy="23" r="18" fill="none" stroke="{링색}" stroke-width="5" stroke-linecap="round" stroke-dasharray="{dash:.0f} 200"/></svg>'
+                f'<span class="hi-gauge-c">{이모}</span></div>')
+
+    if st == "light":
+        # 신호등 본능: 초록=좋음/안전 · 노랑=주의 · 빨강=위험/멈춤
+        #   조합태그 기준 — 지수형매수(good)=초록불 / 종목장세·지수만방어(warn)=노란불
+        #   / 지수형매도(info)=빨간불. 태그 없으면 지수 방향으로 폴백.
+        GRN, YEL, RED = "#4ade80", "#e0c060", "#ff5a4a"
+        if 태그색 == "good":
+            켜 = "green"
+        elif 태그색 == "info":
+            켜 = "red"
+        elif 태그색 == "warn":
+            켜 = "yellow"
+        else:
+            켜 = ("green" if (코등 or 0) > 0.3 else "red" if (코등 or 0) < -0.3 else "yellow")
+        def dot(pos, color):
+            on = (켜 == pos)
+            bg = color if on else "#333"
+            glow = f';box-shadow:0 0 9px {color}' if on else ''
+            return f'<div class="hi-dot" style="background:{bg}{glow}"></div>'
+        return ('<div class="hi-light">'
+                + dot("red", RED) + dot("yellow", YEL) + dot("green", GRN)
+                + '</div>')
+
+    if st == "shield":
+        return (f'<div class="hi-shield"><svg width="42" height="42" viewBox="0 0 24 24" fill="none">'
+                f'<path d="M12 2 L20 5 V11 C20 16 16 20 12 22 C8 20 4 16 4 11 V5 Z" '
+                f'fill="{링색}22" stroke="{링색}" stroke-width="1.6"/>'
+                f'<text x="12" y="15" font-size="9" fill="{링색}" text-anchor="middle" font-weight="900">관</text></svg></div>')
+
+    if st == "arrow":
+        return (f'<div class="hi-arrow" style="color:{링색}">{화살표}</div>')
+
+    if st == "badge":
+        점 = 관제점수 if 관제점수 is not None else "—"
+        구 = 관제구간 or ""
+        return (f'<div class="hi-badge" style="background:linear-gradient(135deg,{링색},{링색}cc)">'
+                f'<span class="hi-badge-n">{점}</span><span class="hi-badge-s">{구}</span></div>')
+
+    if st == "candle":
+        return ('<div class="hi-candle">'
+                '<div style="height:22px;background:#ff6b4a"></div>'
+                '<div style="height:36px;background:#e0c060"></div>'
+                '<div style="height:16px;background:#5b9bff"></div></div>')
+
+    if st == "bar":
+        return (f'<div class="hi-bar" style="background:linear-gradient(180deg,{링색},{링색}bb)"></div>')
+
+    if st == "round":
+        return (f'<div class="hi-round" style="background:{링색}26;border-color:{링색}66">{이모}</div>')
+
+    # 기본: 링
+    return (f'<div class="hi-ring" style="border-color:{링색};color:{링색}">{화살표}</div>')
+
+
+
+def _header_data(지수수급, 파생, 코수):
+    """헤더 5종이 공통으로 쓰는 값을 한 번에 계산한다(코드 계산 · 항상 최신)."""
+    지 = (지수수급 or {}).get("지수") or {}
+    파생 = 파생 or {}
+    코수 = 코수 or {}
+
+    def f0(v):
+        try: return float(str(v).replace(",", ""))
+        except (TypeError, ValueError): return None
+
+    def one(key):
+        o = 지.get(key) or {}
+        등 = f0(o.get("등락률"))
+        cls = "flat" if 등 is None else ("up" if 등 >= 0 else "down")
+        부호 = "+" if (등 or 0) >= 0 and 등 is not None else ""
+        등문 = "—" if 등 is None else f"{부호}{등:.2f}%"
+        return {"종가": o.get("종가") or "—", "등": 등, "cls": cls, "등문": 등문}
+
+    코 = one("코스피"); 닥 = one("코스닥")
+
+    외 = f0(코수.get("외국인")); 기 = f0(코수.get("기관계"))
+    실탄 = (외 + 기) if (외 is not None and 기 is not None) else None
+    비차익 = f0((파생.get("프로그램") or {}).get("비차익")) or f0(파생.get("비차익"))
+    태그 = combo_tag(실탄, 비차익) if (실탄 is not None and 비차익 is not None) else None
+
+    if 태그:
+        이모 = 태그[1].split()[0] if 태그[1][0] in "🔴🟠🟡🔵" else "🟡"
+        이름 = 태그[1].split(maxsplit=1)[-1] if " " in 태그[1] else 태그[1]
+        성격부제 = 태그[2]
+    else:
+        코등 = 코["등"] or 0
+        이름 = ("함께 오른 하루" if 코등 > 0 else "함께 내린 하루" if 코등 < 0 else "숨 고른 하루")
+        이모 = ("🔴" if 코등 > 0 else "🔵" if 코등 < 0 else "⚪")
+        성격부제 = "코스피·코스닥 지수 흐름 요약"
+
+    # 수급 특징 — 최대 20일 범위에서 '가장 눈에 띄는 신호' 자동 선택(코드 계산).
+    #   flow_history의 외현/기관을 읽어, 전환/최대/연속/순위 중 강한 것 하나를 문장으로.
+    외배지 = _flow_highlight("외현") if 외 is not None else "&nbsp;"
+    기배지 = _flow_highlight("기관") if 기 is not None else "&nbsp;"
+
+    return {"코": 코, "닥": 닥, "실탄": 실탄, "외인": 외, "기관": 기,
+            "외배지": 외배지, "기배지": 기배지,
+            "이모": 이모, "성격이름": 이름, "성격부제": 성격부제, "태그색": (태그[0] if 태그 else None)}
+
+
+def _flow_line(실탄):
+    if 실탄 is None:
+        return "", "flat"
+    cls = "up" if 실탄 >= 0 else "down"
+    word = "순매수" if 실탄 >= 0 else "순매도"
+    return f"{_flow_amt(실탄)} {word}", cls
+
+
+def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
+    """핵심편 최상단 지수 헤더 — style 상수로 5가지 레이아웃 중 하나를 그린다."""
+    style = style or HEADER_STYLE
+    d = _header_data(지수수급, 파생, 코수)
+    코, 닥 = d["코"], d["닥"]
+    실탄문, 실탄cls = _flow_line(d["실탄"])
+
+    def barfill(cls, 등):
+        w = 0.0 if 등 is None else min(abs(등) / 4.0, 1.0) * 50.0
+        색 = ("linear-gradient(90deg,#ff6b4a,#ff9a80)" if cls == "up"
+              else "linear-gradient(270deg,#5b9bff,#2E6BD6)" if cls == "down"
+              else "rgba(255,255,255,.2)")
+        side = "left" if (등 or 0) >= 0 else "right"
+        return f'{side}:50%;width:{w:.1f}%;background:{색}'
+
+    # ── BC · 막대 + 성격 (지수 2줄 + 수급 2줄) ──
+    #   색 규칙: 지수는 HTS식(상승 빨강 / 하락 파랑),
+    #            수급은 매수 초록 / 매도 보라(#a78bfa) — 지수 색과 겹치지 않게.
+    #   맨 앞 성격은 '링+화살표'(지수 방향까지 표현).
+    #   수급 밑 작은 글씨엔 '연속·순위' 배지, 그 아래 60일 누적을 붙인다.
+    #   스케일: 지수 ±4% / 수급 ±3조. 단위가 다르므로 각자 기준(정직).
+    if style == "BC":
+        def row(nm, o):
+            return (f'<div class="ix-bar-row"><span class="ix-bn">{nm}</span>'
+                    f'<div class="ix-bt"><span class="ix-bz"></span>'
+                    f'<div class="ix-bf" style="{barfill(o["cls"],o["등"])}"></div></div>'
+                    f'<span class="ix-bv {o["cls"]}">{o["등문"]}<small>{o["종가"]}</small></span></div>')
+
+        def flow_row(nm, v, 배지):
+            # v: 억원. 매수(+)=초록, 매도(-)=보라. ±3조(30,000억)를 최대폭으로.
+            if v is None:
+                return (f'<div class="ix-bar-row"><span class="ix-bn">{nm}</span>'
+                        f'<div class="ix-bt"><span class="ix-bz"></span></div>'
+                        f'<span class="ix-bv flat">—<small>&nbsp;</small></span></div>')
+            매수 = v >= 0
+            w = min(abs(v) / 30000.0, 1.0) * 50.0
+            색 = ("linear-gradient(90deg,#4ade80,#2a9d5a)" if 매수
+                  else "linear-gradient(270deg,#a78bfa,#7c5cd6)")
+            side = "left" if 매수 else "right"
+            vcls = "buy" if 매수 else "sellv"
+            return (f'<div class="ix-bar-row"><span class="ix-bn">{nm}</span>'
+                    f'<div class="ix-bt"><span class="ix-bz"></span>'
+                    f'<div class="ix-bf" style="{side}:50%;width:{w:.1f}%;background:{색}"></div></div>'
+                    f'<span class="ix-bv {vcls}">{_flow_amt(v)}<small>{배지}</small></span></div>')
+
+        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조 · 매수 초록 / 매도 보라)</p>'
+                  f'{flow_row("외국인", d["외인"], d["외배지"])}{flow_row("기관", d["기관"], d["기배지"])}'
+                  f'<div class="ix-scale"><span>-3조</span><span>0</span><span>+3조</span></div>'
+                  ) if (d["외인"] is not None or d["기관"] is not None) else ""
+
+        # 맨 앞 '링 + 화살표' — 코스피 방향으로 상승↗/하락↘, 색은 성격/지수 기준
+        코등 = 코["등"] or 0
+        링색 = {"good": "#ff6b4a", "warn": "#e0c060", "info": "#5b9bff"}.get(d.get("태그색"),
+                "#ff6b4a" if 코등 > 0 else "#5b9bff" if 코등 < 0 else "#9aa0a8")
+        _관 = 관제 or {}
+        아이콘HTML = _head_icon(코등, 링색, d["이모"],
+                             관제점수=_관.get("점수"), 관제구간=_관.get("구간"),
+                             태그색=d.get("태그색"))
+
+        return (f'<div class="ix-head"><div class="ix-mood">{아이콘HTML}'
+                f'<div class="ix-mood-txt"><p class="ix-mood-t">오늘은 <span class="yl">{d["성격이름"]}</span></p>'
+                f'<p class="ix-mood-s">{d["성격부제"]}</p></div></div>'
+                f'<div class="ix-bars"><p class="ix-grouplbl">지수 (±4%)</p>'
+                f'{row("코스피",코)}{row("코스닥",닥)}'
+                f'<div class="ix-scale"><span>-4%</span><span>0</span><span>+4%</span></div>'
+                f'{수급블록}</div></div>')
+
+    # ── F · 도넛 게이지 ──
+    if style == "F":
+        def ring(nm, o):
+            등 = o["등"] or 0
+            frac = min(abs(등) / 4.0, 1.0)
+            circ = 239.0
+            off = circ * (1 - frac)
+            stroke = "#ff6b4a" if o["cls"] == "up" else "#5b9bff" if o["cls"] == "down" else "#888"
+            return (f'<div class="f-gauge"><div class="f-ring">'
+                    f'<svg width="88" height="88"><circle cx="44" cy="44" r="38" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="8"/>'
+                    f'<circle cx="44" cy="44" r="38" fill="none" stroke="{stroke}" stroke-width="8" stroke-linecap="round" '
+                    f'stroke-dasharray="{circ:.0f}" stroke-dashoffset="{off:.0f}"/></svg>'
+                    f'<div class="f-ring-txt"><span class="f-pct {o["cls"]}">{o["등문"]}</span></div></div>'
+                    f'<div class="f-nm">{nm}</div><div class="f-close">{o["종가"]}</div></div>')
+        moodline = f'{d["이모"]} {d["성격이름"]}' + (f' · 외인+기관 {실탄문}' if 실탄문 else '')
+        return (f'<div class="ix-head"><div class="f-wrap">{ring("코스피",코)}{ring("코스닥",닥)}</div>'
+                f'<div class="f-mood yl">{moodline}</div></div>')
+
+    # ── G · 카드 분할 ──
+    if style == "G":
+        return (f'<div class="ix-head"><div class="g-grid">'
+                f'<div class="g-main"><span class="k">KOSPI</span>'
+                f'<span class="v {코["cls"]}">{코["종가"]}</span>'
+                f'<span class="c {코["cls"]}">▲ {코["등문"]}</span>'
+                f'<span class="g-tag">오늘의 주인공</span></div>'
+                f'<div class="g-sub"><p class="k">KOSDAQ</p><p class="v {닥["cls"]}">{닥["종가"]} '
+                f'<span style="font-size:11px">{닥["등문"]}</span></p></div>'
+                f'<div class="g-sub"><p class="k">외인+기관</p><p class="v {실탄cls}">{실탄문 or "—"}</p></div>'
+                f'</div><p class="g-mood">{d["이모"]} <b class="yl">{d["성격이름"]}</b> — {d["성격부제"]}</p></div>')
+
+    # ── H · 타임라인 내러티브 ──
+    if style == "H":
+        점색 = "#ff6b4a" if 코["cls"] == "up" else "#5b9bff" if 코["cls"] == "down" else "#888"
+        flowdot = ('<div class="h-item"><span class="h-dot" style="background:#4ade80"></span>'
+                   f'<div><p class="h-txt"><b>외국인·기관 {실탄문}</b></p>'
+                   f'<p class="h-sub">큰손이 어느 쪽에 섰는지 보여주는 신호입니다</p></div></div>') if 실탄문 else ""
+        return (f'<div class="ix-head">'
+                f'<div class="h-item"><span class="h-dot" style="background:{점색}"></span>'
+                f'<div><p class="h-txt"><b class="{코["cls"]}">코스피 {코["등문"]}</b> · 코스닥 {닥["등문"]}</p>'
+                f'<p class="h-sub">코스피 {코["종가"]} · 코스닥 {닥["종가"]}</p></div></div>'
+                f'{flowdot}'
+                f'<div class="h-item"><span class="h-dot" style="background:#e0c060"></span>'
+                f'<div><p class="h-txt"><b class="yl">{d["이모"]} {d["성격이름"]}</b></p>'
+                f'<p class="h-sub">{d["성격부제"]}</p></div></div></div>')
+
+    # ── I · 히트 스트립 ──
+    if style == "I":
+        def seg(nm, val, sub, grad):
+            return (f'<div class="i-seg" style="background:{grad}">'
+                    f'<span class="k">{nm}</span><span class="v">{val}</span><span class="c">{sub}</span></div>')
+        코grad = "linear-gradient(135deg,#c1432b,#ff6b4a)" if 코["cls"]=="up" else "linear-gradient(135deg,#2E6BD6,#5b9bff)"
+        닥grad = "linear-gradient(135deg,#8a5a2b,#c99a4a)"
+        segs = seg("코스피", 코["종가"], 코["등문"], 코grad) + seg("코스닥", 닥["종가"], 닥["등문"], 닥grad)
+        if 실탄문:
+            segs += seg("외인+기관", 실탄문.split()[0], 실탄문.split()[-1], "linear-gradient(135deg,#2a6b4a,#3aa06a)")
+        return (f'<div class="ix-head"><p class="i-head">{d["이모"]} 오늘은 '
+                f'<span class="hl">{d["성격이름"]}</span></p>'
+                f'<div class="i-strip">{segs}</div></div>')
+
+    return ""   # 알 수 없는 스타일
+
+
 def build_core(핵심편, data, 해석):
     """핵심편 '90초 브리핑' — 리포트 최상단.
 
@@ -939,43 +1331,8 @@ def build_core(핵심편, data, 해석):
     코수 = 지수수급.get("코스피_수급") or {}
     rows = _load_market_history()
 
-    # ── 지수 스트립 (최상단) — 코스피·코스닥 색상 강조 + 오늘의 성격 ──
-    지 = (지수수급.get("지수") or {})
-    def _idx_cell(name, key):
-        o = 지.get(key) or {}
-        종가 = o.get("종가") or "—"
-        try:
-            등 = float(str(o.get("등락률") or "").replace("%", ""))
-        except (TypeError, ValueError):
-            등 = None
-        if 등 is None:
-            cls, 등문, 부호 = "flat", "—", ""
-        elif 등 >= 0:
-            cls, 등문, 부호 = "up", f"{등:.2f}%", "+"
-        else:
-            cls, 등문, 부호 = "down", f"{등:.2f}%", ""
-        return (f'<div class="ix-cell"><p class="ix-k">{name}</p>'
-                f'<p class="ix-v {cls}">{종가}</p>'
-                f'<p class="ix-c {cls}">{부호}{등문}</p></div>')
-
-    파생 = data.get("파생") or {}
-    def _f0(v):
-        try: return float(str(v).replace(",", ""))
-        except (TypeError, ValueError): return None
-    _외 = _f0(코수.get("외국인")); _기 = _f0(코수.get("기관계"))
-    _실탄 = (_외 + _기) if (_외 is not None and _기 is not None) else None
-    _비차익 = _f0((파생.get("프로그램") or {}).get("비차익")) or _f0(파생.get("비차익"))
-    _태그 = combo_tag(_실탄, _비차익) if (_실탄 is not None and _비차익 is not None) else None
-    if _태그:
-        _cls3 = {"good": "up", "info": "down", "warn": "warn"}.get(_태그[0], "flat")
-        성격셀 = (f'<div class="ix-cell"><p class="ix-k">오늘의 성격</p>'
-                 f'<p class="ix-tag {_cls3}">{_태그[1]}</p>'
-                 f'<p class="ix-c sub">{_태그[2][:14]}</p></div>')
-    else:
-        성격셀 = ('<div class="ix-cell"><p class="ix-k">오늘의 성격</p>'
-                 '<p class="ix-tag flat">—</p><p class="ix-c sub">판정 보류</p></div>')
-    지수스트립 = (f'<div class="ix-strip">{_idx_cell("코스피","코스피")}'
-                f'{_idx_cell("코스닥","코스닥")}{성격셀}</div>')
+    # ── 지수 헤더 (스타일은 HEADER_STYLE 상수로 전환) ──
+    지수스트립 = build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"))
 
     def _f(v):
         try:
@@ -1319,39 +1676,36 @@ def flow_pattern_analysis():
                 f'<p class="fp-line"><b>{태그이름}</b> 조합은 기록상 {len(같은)+1}번째입니다 — '
                 f'다음날 통계는 사례가 5번 이상 쌓인 뒤 제공합니다 <span class="fp-acc">(축적 중)</span>.</p>')
 
-    # ── ② 외국인·기관 흐름 변화 (최근 5일 vs 그 이전 5일) ──
-    if len(h) >= 10:
-        최근 = h[-5:]
-        이전 = h[-10:-5]
+    # ── ② 외국인·기관 20일 분석 (헤더와 동일 로직 · 여기선 더 상세하게) ──
+    #    각 주체마다: 오늘 규모 + 20일 자동선택 특징 + 5일 흐름 + 매수일수를 한 줄로.
+    def _합(rows, key):
+        return sum((r.get(key) or 0) for r in rows)
+    def _매수일(rows, key, days=5):
+        return sum(1 for r in rows[-days:] if (r.get(key) or 0) > 0)
 
-        def _합(rows, key):
-            return sum((r.get(key) or 0) for r in rows)
-
-        def _매수일(rows, key):
-            return sum(1 for r in rows if (r.get(key) or 0) > 0)
-
-        변화문 = []
-        for 라벨, key in (("외국인", "외현"), ("기관", "기관")):
-            최근합 = _합(최근, key)
-            이전합 = _합(이전, key)
-            매수일 = _매수일(최근, key)
-            # 방향 전환 감지
-            if 이전합 <= 0 < 최근합:
-                변화문.append(
-                    f'<b>{라벨}</b>은 직전 5일 {_flow_amt(이전합)} → 최근 5일 <b>{_flow_amt(최근합)}</b>로 '
-                    f'<b class="fp-turn">순매도에서 순매수로 돌아섰습니다</b> (최근 매수 {매수일}/5일).')
-            elif 최근합 <= 0 < 이전합:
-                변화문.append(
-                    f'<b>{라벨}</b>은 직전 5일 {_flow_amt(이전합)} → 최근 5일 <b>{_flow_amt(최근합)}</b>로 '
-                    f'<b class="fp-turn">순매수에서 순매도로 돌아섰습니다</b> (최근 매수 {매수일}/5일).')
+    상세문 = []
+    for 라벨, key in (("외국인", "외현"), ("기관", "기관")):
+        오늘값 = h[-1].get(key)
+        if 오늘값 is None:
+            continue
+        특징 = _flow_highlight(key)          # 20일 자동선택 (전환/최대/연속/순위)
+        매수일 = _매수일(h, key)
+        방향 = "매수" if 오늘값 >= 0 else "매도"
+        # 5일 흐름(추세 방향)
+        추세 = ""
+        if len(h) >= 10:
+            최근합 = _합(h[-5:], key); 이전합 = _합(h[-10:-5], key)
+            if 이전합 <= 0 < 최근합 or 최근합 <= 0 < 이전합:
+                추세 = f' · 5일 흐름 {_flow_amt(이전합)}→<b>{_flow_amt(최근합)}</b>'
             else:
-                방향 = "매수" if 최근합 >= 0 else "매도"
-                강해짐 = abs(최근합) > abs(이전합)
-                변화문.append(
-                    f'<b>{라벨}</b>은 최근 5일 <b>{_flow_amt(최근합)}</b>로 순{방향} 기조를 '
-                    f'{"이어가며 강해졌습니다" if 강해짐 else "이어가되 다소 옅어졌습니다"} (매수 {매수일}/5일).')
-        if 변화문:
-            블록.append('<p class="fp-line">' + " ".join(변화문) + '</p>')
+                추세 = f' · 최근 5일 <b>{_flow_amt(최근합)}</b>'
+        turn = ' fp-turn' if (특징 and "전환" in 특징) else ''
+        상세문.append(
+            f'<div class="fp-sub"><span class="fp-who">{라벨}</span>'
+            f'<span class="fp-body">오늘 <b>{_flow_amt(오늘값)}</b> 순{방향} — '
+            f'<b class="fp-hl{turn}">{특징}</b>{추세} · 최근 5일 중 {매수일}일 매수</span></div>')
+    if 상세문:
+        블록.append('<div class="fp-detail">' + "".join(상세문) + '</div>')
 
     if not 블록:
         return ""
@@ -1899,6 +2253,11 @@ a{{color:inherit;text-decoration:none}}
 .sc-chg{{font-size:12px;font-weight:800;padding:2px 8px;border-radius:6px;margin-left:auto;background:rgba(46,107,214,.1);color:var(--dn)}}
 .sc-chg.pos{{background:rgba(193,67,43,.1);color:var(--up)}}
 .sc-score{{font-size:10px;color:var(--sub);margin-top:5px;font-weight:600}}
+.sc-strline{{margin-top:4px}}
+.sc-str{{display:inline-block;font-size:9.5px;font-weight:700;color:#b98a1a;background:rgba(224,192,96,.14);border:.5px solid rgba(224,192,96,.3);border-radius:5px;padding:2px 7px;line-height:1.4;word-break:keep-all}}
+.sc-str b{{color:#8a6a10;font-weight:800}}
+.sc-str.new{{color:#2a7d5a;background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.3)}}
+.sc-str.new b{{color:#1a6a44}}
 .sc-list{{padding:.15rem .9rem .5rem}}
 .sc-cols{{display:grid;grid-template-columns:1.1fr 72px 58px 64px;font-size:9.5px;color:#a8a49c;font-weight:600;padding:6px 0 3px;border-bottom:.5px solid var(--line)}}
 .sc-cols span:not(:first-child){{text-align:right}}
@@ -2102,15 +2461,85 @@ a{{color:inherit;text-decoration:none}}
 .q90-sub{{font-size:12px;color:#9aa0a8}}
 
 .q90-def{{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
-.ix-strip{{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:8px;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}}
-.ix-cell{{background:rgba(255,255,255,.04);border-radius:10px;padding:.7rem .5rem;text-align:center}}
-.ix-k{{font-size:10.5px;color:#9aa0a8;font-weight:700;margin-bottom:5px;letter-spacing:.02em}}
-.ix-v{{font-size:19px;font-weight:900;line-height:1.1;letter-spacing:-.01em}}
-.ix-c{{font-size:12.5px;font-weight:800;margin-top:3px}}
-.ix-c.sub{{font-size:10px;color:#9aa0a8;font-weight:600;line-height:1.3}}
-.ix-tag{{font-size:14.5px;font-weight:900;line-height:1.15;letter-spacing:-.01em}}
-.ix-strip .up{{color:#ff6b4a}} .ix-strip .down{{color:#5b9bff}}
-.ix-strip .warn{{color:#e0c060}} .ix-strip .flat{{color:#c3c8ce}}
+.ix-head{{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}}
+.ix-head .up{{color:#ff6b4a}} .ix-head .down{{color:#5b9bff}} .ix-head .yl{{color:#e0c060}}
+.ix-mood{{display:flex;align-items:center;gap:12px;margin-bottom:14px}}
+.ix-mood-emoji{{font-size:32px;line-height:1;flex-shrink:0}}
+.ix-mood-txt{{flex:1}}
+.ix-mood-t{{font-size:18px;font-weight:900;letter-spacing:-.02em;line-height:1.15;color:#f0efec}}
+.ix-mood-s{{font-size:11px;color:#9aa0a8;margin-top:3px;line-height:1.4}}
+.ix-bars{{background:rgba(255,255,255,.03);border-radius:12px;padding:.95rem .9rem .75rem}}
+.ix-bar-row{{display:flex;align-items:center;gap:9px;margin-bottom:11px}}
+.ix-bn{{width:48px;font-size:12px;font-weight:800;color:#dfe3e8;flex-shrink:0}}
+.ix-bt{{flex:1;height:18px;background:rgba(255,255,255,.05);border-radius:5px;position:relative;overflow:hidden}}
+.ix-bz{{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)}}
+.ix-bf{{position:absolute;top:0;bottom:0;border-radius:4px}}
+.ix-bv{{width:100px;text-align:right;font-size:13.5px;font-weight:900;flex-shrink:0;line-height:1.05}}
+.ix-bv small{{font-size:10px;color:#9aa0a8;font-weight:600;display:block;margin-top:5px;word-break:keep-all;line-height:1.4}}
+.ix-scale{{display:flex;justify-content:space-between;font-size:8.5px;color:#6b7078;padding-left:57px}}
+.ix-flow{{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}}
+.ix-flow-k{{font-size:11px;color:#9aa0a8;font-weight:700}}
+.ix-flow-v{{font-size:14.5px;font-weight:900}}
+.ix-head .buy{{color:#4ade80}} .ix-head .sell{{color:#ff6b4a}} .ix-head .flat{{color:#8a909a}}
+.ix-head .sellv{{color:#a78bfa}}
+.ix-ring{{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}}
+.hi-ring{{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}}
+.hi-gauge{{width:46px;height:46px;position:relative;flex-shrink:0}}
+.hi-gauge-c{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px}}
+.hi-light{{display:flex;flex-direction:column;gap:5px;flex-shrink:0;padding:6px 5px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);border-radius:10px}}
+.hi-light .hi-dot{{width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.25)}}
+.hi-shield{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
+.hi-arrow{{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}}
+.hi-badge{{width:46px;height:46px;border-radius:11px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#20242b}}
+.hi-badge-n{{font-size:17px;font-weight:900;line-height:1}}
+.hi-badge-s{{font-size:8px;font-weight:800;margin-top:1px}}
+.hi-candle{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:flex-end;justify-content:center;gap:3px}}
+.hi-candle>div{{width:7px;border-radius:2px}}
+.hi-bar{{width:5px;height:44px;border-radius:3px;flex-shrink:0}}
+.hi-round{{width:46px;height:46px;border-radius:13px;border:1.5px solid;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px}}
+.ix-cum{{font-size:10.5px;color:#9aa0a8;margin-top:9px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1);line-height:1.5}}
+.ix-cum b{{font-weight:800}}
+.ix-cum .buy{{color:#4ade80}} .ix-cum .sellv{{color:#a78bfa}}
+.ix-grouplbl{{font-size:9px;color:#7d838c;font-weight:700;letter-spacing:.04em;margin-bottom:6px;padding-left:2px}}
+.ix-div{{height:1px;background:rgba(255,255,255,.08);margin:9px 0 8px}}
+.ix-bv small{{font-size:9px}}
+/* F 도넛 */
+.f-wrap{{display:flex;gap:10px}}
+.f-gauge{{flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:1rem .6rem;text-align:center}}
+.f-ring{{width:88px;height:88px;margin:0 auto 6px;position:relative}}
+.f-ring svg{{transform:rotate(-90deg)}}
+.f-ring-txt{{position:absolute;inset:0;display:flex;justify-content:center;align-items:center}}
+.f-pct{{font-size:17px;font-weight:900}}
+.f-nm{{font-size:11px;color:#9aa0a8;font-weight:700}}
+.f-close{{font-size:11px;color:#c3c8ce;font-weight:700;margin-top:2px}}
+.f-mood{{text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);font-size:13px;font-weight:800}}
+/* G 카드분할 */
+.g-grid{{display:grid;grid-template-columns:1.4fr 1fr;grid-template-rows:auto auto;gap:8px}}
+.g-main{{grid-row:span 2;background:linear-gradient(135deg,#2a1f1a,#3a2620);border-radius:12px;padding:1rem;display:flex;flex-direction:column;justify-content:center}}
+.g-main .k{{font-size:11px;color:#ffb4a0;font-weight:700}}
+.g-main .v{{font-size:29px;font-weight:900;line-height:1;margin:6px 0}}
+.g-main .c{{font-size:15px;font-weight:900}}
+.g-tag{{font-size:10px;color:#9aa0a8;margin-top:8px}}
+.g-sub{{background:rgba(255,255,255,.04);border-radius:12px;padding:.75rem .85rem}}
+.g-sub .k{{font-size:10px;color:#9aa0a8;font-weight:700}}
+.g-sub .v{{font-size:16px;font-weight:900;margin-top:3px}}
+.g-mood{{font-size:12px;color:#9aa0a8;margin-top:10px;line-height:1.5}}
+/* H 타임라인 */
+.h-item{{display:flex;gap:11px;padding-bottom:12px;position:relative}}
+.h-item:not(:last-child)::before{{content:'';position:absolute;left:5px;top:16px;bottom:-2px;width:2px;background:rgba(255,255,255,.1)}}
+.h-dot{{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-top:3px}}
+.h-txt{{font-size:13px;line-height:1.5}}
+.h-txt b{{font-weight:900}}
+.h-sub{{font-size:11px;color:#9aa0a8;margin-top:2px}}
+/* I 히트스트립 */
+.i-head{{font-size:15px;font-weight:900;margin-bottom:12px;line-height:1.4}}
+.i-head .hl{{background:linear-gradient(transparent 60%,rgba(255,107,74,.4) 60%);padding:0 2px}}
+.i-strip{{display:flex;height:52px;border-radius:10px;overflow:hidden;gap:2px}}
+.i-seg{{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#fff}}
+.i-seg .k{{font-size:9.5px;opacity:.85;font-weight:700}}
+.i-seg .v{{font-size:15px;font-weight:900;margin-top:2px}}
+.i-seg .c{{font-size:10px;font-weight:700;opacity:.9}}
+.ix-head .up{{color:#ff6b4a}} .ix-head .dn,.ix-head .down{{color:#5b9bff}} .ix-head .yl{{color:#e0c060}}
 
 .q90-def .hi{{color:var(--up-soft)}}
 
@@ -2371,6 +2800,15 @@ a{{color:inherit;text-decoration:none}}
 .fp-line{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-bottom:.5rem}}
 .fp-line b{{color:#fff;font-weight:800}}
 .fp-turn{{color:#ff8a6e!important}}
+.fp-detail{{margin:.5rem 0}}
+.fp-sub{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.06)}}
+.fp-sub:last-child{{border-bottom:0}}
+.fp-who{{flex-shrink:0;width:48px;font-size:11.5px;font-weight:800;color:#e0c060}}
+.fp-body{{flex:1;font-size:12px;color:#dfe3e8;line-height:1.7;word-break:keep-all}}
+.fp-body b{{color:#fff;font-weight:800}}
+.fp-hl{{color:#e0c060!important}}
+.fp-hl.fp-turn{{color:#ff8a6e!important}}
+.nw{{white-space:nowrap}}
 .fp-acc{{color:#9aa0a8;font-weight:600}}
 .fp-foot{{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.5rem}}
 .fs-foot b{{color:#b6bcc4}}
