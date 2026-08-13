@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-e"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-f"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -899,6 +899,34 @@ def _mh_streak(rows, key):
     return f"{n}일 연속 {'매수' if sign else '매도'}"
 
 
+# 구형 기기·카톡에서 □(두부)로 깨지는 최신 이모지 → 널리 지원되는 것으로 치환.
+# 프롬프트로 막아도 이미 생성된 옛 리포트엔 남아 있으므로, 화면 그리는 마지막 단계에서
+# 코드가 한 번 더 강제한다(숫자를 규칙으로 막는 것과 같은 원리 — 표현도 규칙으로 방어).
+# 매핑 대상: Emoji 13.1~15.x 계열 중 감정 코너에 쓰일 법한 것들.
+_EMOJI_SAFE = {
+    "🫠": "😮\u200d💨",  # melting face → 한숨
+    "🫥": "😶",          # dotted line face
+    "🫡": "🫡",          # (경례 — 유지하되 필요시 😐)
+    "🫨": "😳",          # shaking face
+    "🫤": "😕",          # diagonal mouth
+    "🥹": "🥲",          # holding back tears
+    "🫢": "😮",          # face with peeking eye
+    "🫣": "🙈",          # face with peeking eye variant
+}
+# 경례는 지원 폭이 애매해서 감정 코너에선 중립으로 낮춘다
+_EMOJI_SAFE["🫡"] = "😐"
+
+
+def safe_emoji(s):
+    """문자열 안의 '깨질 수 있는 최신 이모지'를 안전한 것으로 바꾼다."""
+    if not s:
+        return s
+    for bad, good in _EMOJI_SAFE.items():
+        if bad in s:
+            s = s.replace(bad, good)
+    return s
+
+
 def build_core(핵심편, data, 해석):
     """핵심편 '90초 브리핑' — 리포트 최상단.
 
@@ -910,6 +938,44 @@ def build_core(핵심편, data, 해석):
     지수수급 = data.get("지수수급") or {}
     코수 = 지수수급.get("코스피_수급") or {}
     rows = _load_market_history()
+
+    # ── 지수 스트립 (최상단) — 코스피·코스닥 색상 강조 + 오늘의 성격 ──
+    지 = (지수수급.get("지수") or {})
+    def _idx_cell(name, key):
+        o = 지.get(key) or {}
+        종가 = o.get("종가") or "—"
+        try:
+            등 = float(str(o.get("등락률") or "").replace("%", ""))
+        except (TypeError, ValueError):
+            등 = None
+        if 등 is None:
+            cls, 등문, 부호 = "flat", "—", ""
+        elif 등 >= 0:
+            cls, 등문, 부호 = "up", f"{등:.2f}%", "+"
+        else:
+            cls, 등문, 부호 = "down", f"{등:.2f}%", ""
+        return (f'<div class="ix-cell"><p class="ix-k">{name}</p>'
+                f'<p class="ix-v {cls}">{종가}</p>'
+                f'<p class="ix-c {cls}">{부호}{등문}</p></div>')
+
+    파생 = data.get("파생") or {}
+    def _f0(v):
+        try: return float(str(v).replace(",", ""))
+        except (TypeError, ValueError): return None
+    _외 = _f0(코수.get("외국인")); _기 = _f0(코수.get("기관계"))
+    _실탄 = (_외 + _기) if (_외 is not None and _기 is not None) else None
+    _비차익 = _f0((파생.get("프로그램") or {}).get("비차익")) or _f0(파생.get("비차익"))
+    _태그 = combo_tag(_실탄, _비차익) if (_실탄 is not None and _비차익 is not None) else None
+    if _태그:
+        _cls3 = {"good": "up", "info": "down", "warn": "warn"}.get(_태그[0], "flat")
+        성격셀 = (f'<div class="ix-cell"><p class="ix-k">오늘의 성격</p>'
+                 f'<p class="ix-tag {_cls3}">{_태그[1]}</p>'
+                 f'<p class="ix-c sub">{_태그[2][:14]}</p></div>')
+    else:
+        성격셀 = ('<div class="ix-cell"><p class="ix-k">오늘의 성격</p>'
+                 '<p class="ix-tag flat">—</p><p class="ix-c sub">판정 보류</p></div>')
+    지수스트립 = (f'<div class="ix-strip">{_idx_cell("코스피","코스피")}'
+                f'{_idx_cell("코스닥","코스닥")}{성격셀}</div>')
 
     def _f(v):
         try:
@@ -961,8 +1027,8 @@ def build_core(핵심편, data, 해석):
     if isinstance(마음, str):          # 구버전 호환
         마음 = {"본문": 마음}
     본문 = 마음.get("본문") or 핵심편.get("내종목위로") or ""
-    제목 = 마음.get("제목") or "😮‍💨 오늘 내 종목이 내렸다면"
-    한줄 = 마음.get("한줄") or ""
+    제목 = safe_emoji(마음.get("제목") or "😮‍💨 오늘 내 종목이 내렸다면")
+    한줄 = safe_emoji(마음.get("한줄") or "")
     내종목 = ""
     if 본문:
         내종목 = ('<div class="mine">'
@@ -990,40 +1056,79 @@ def build_core(핵심편, data, 해석):
     별명단 = _acc_star_names(매집)
     별종목 = [s for s in 중기 if s.get("종목명") in 별명단]
 
+    # ⚠️ 티저에는 '로직 용어'(거래량 N배·시총·가중치)를 절대 노출하지 않는다.
+    #    구독자에게 보이는 건 "무엇이 얼마나 셌나(등락률·일수)"와 "왜 봐야 하나"뿐.
+    #    로직 수치는 운영자만 아는 내부 재료다.
     티저들 = []
-    # 1) 강세 — 점수 최고 1종목만, 종목명 대신 '무엇이 특별한가'로
+    선도섹터 = ((data.get("주도섹터") or [{}])[0].get("테마명") or "").strip()
+    # 1) 강세 — 가장 센 1종목의 '등락률'만. 배수(로직) 대신 상승률로 말한다.
     if 전체신규:
         top = max(전체신규, key=lambda s: s.get("강세점수") or 0)
-        배수 = top.get("배수")
+        등락 = top.get("등락률")
+        섹터문 = f'{선도섹터} 중심으로 ' if 선도섹터 else ''
         티저들.append(('#radar', '레이더',
-                     f'거래량이 평소의 <span class="u">{배수:.0f}배</span> 터진 종목이 나왔습니다'
-                     if 배수 else '오늘 새로 불붙은 종목이 있습니다'))
-    # 2) 매집 — ⭐(5일+20일 동시) 최우선, 그다음 20일 최장연속, 마지막 5일 연속
-    #    종목명은 노출하지 않는다(추천으로 읽힐 위험) — 대신 "왜 지금 봐야 하는지"를 구체적으로.
+                     f'{섹터문}오늘 <span class="u">+{등락:.1f}%</span> 급등하며 새로 불붙은 곳이 있습니다'
+                     if isinstance(등락,(int,float)) else '오늘 새로 불붙은 곳이 있습니다'))
+    # 2) 매집 — ⭐(5일+20일 동시) → 20일 최장연속 → 5일 연속 순.
+    #    "N일 동안 외국인/기관이 사들인 종목" 식으로, 왜 봐야 하는지를 말한다.
     if 별종목:
         기간 = 매집.get("중기기간", 20)
         티저들.append(('#acc', '매집',
-                     f'5일도, {기간}일도 <b>동시에</b> 사들인 종목 — 오늘의 매집 1순위, 꼭 확인하세요'))
+                     f'최근 5일과 {기간}일, <b>양쪽 모두</b> 꾸준히 사들인 종목이 있습니다 — 꼭 확인하세요'))
     elif 중기:
         top = max(중기, key=lambda s: max(s.get("외인일수") or 0, s.get("기관일수") or 0))
         주체 = "외국인" if (top.get("외인일수") or 0) >= (top.get("기관일수") or 0) else "기관"
         일수 = max(top.get("외인일수") or 0, top.get("기관일수") or 0)
         기간 = 매집.get("중기기간", 20)
         티저들.append(('#acc', '매집',
-                     f'{기간}일 중 <span class="u">{일수}일</span>, {주체}이 꾸준히 사들인 종목 — 꼭 확인하세요'
-                     if 일수 else '조용히 오래 쌓이는 곳이 있습니다'))
+                     f'{기간}일 중 <span class="u">{일수}일</span>을 {주체}이 조용히 사들인 종목이 있습니다 — 꼭 확인하세요'
+                     if 일수 else '조용히 오래 쌓이는 곳이 있습니다 — 꼭 확인하세요'))
     elif 단기:
         top = max(단기, key=lambda s: max(s.get("외인일수") or 0, s.get("기관일수") or 0))
         주체 = "외국인" if (top.get("외인일수") or 0) >= (top.get("기관일수") or 0) else "기관"
         일수 = max(top.get("외인일수") or 0, top.get("기관일수") or 0)
         티저들.append(('#acc', '매집',
-                     f'5일 중 <span class="u">{일수}일</span>, {주체}이 연달아 사들인 종목 — 꼭 확인하세요'
-                     if 일수 else '조용히 돈이 쌓이는 곳이 있습니다'))
-    # 3) 관전 — 항상
-    티저들.append(('#watch', '관전', '내일 아침, <b>이 숫자 하나</b>만 확인하세요'))
+                     f'최근 5일 중 <span class="u">{일수}일</span>을 {주체}이 사들인 종목이 있습니다 — 꼭 확인하세요'
+                     if 일수 else '조용히 돈이 쌓이는 곳이 있습니다 — 꼭 확인하세요'))
     티저HTML = "".join(
         f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span><span>{txt}</span>'
         f'<span class="qt-go">확인 ↓</span></a>' for h, t, txt in 티저들[:3])
+
+    # 내일장 대응 — 핵심편만 읽는 사람을 위해 '내일 관찰 포인트'를 맨 끝에.
+    #   ⚠️ 항상 지수만 보여주면 지루하다. 관전포인트 3개(지수/선물/프로그램)를
+    #      날짜 기준으로 순환시키고, 섹터·매집 관찰 포인트도 후보에 섞어
+    #      발행마다 다른 각도가 나오게 한다.
+    관전 = [str(p).lstrip("①②③④⑤1234567890. ").strip()
+          for p in (해석.get("관전포인트") or []) if str(p).strip()]
+    후보들 = list(관전)   # 지수·수급 / 선물 / 프로그램
+
+    # 섹터 관찰 포인트 (오늘 1위 주도섹터가 내일도 이어지는지)
+    _주도 = data.get("주도섹터") or []
+    if _주도:
+        _s = _주도[0]
+        _nm = (_s.get("테마명") or "").strip()
+        _등 = _s.get("테마등락")
+        if _nm and isinstance(_등,(int,float)):
+            후보들.append(f'오늘 시장을 이끈 <b>{_nm}</b>(+{_등:.1f}%)가 내일도 힘을 이어가는지, '
+                        f'아니면 하루 만에 식는지 — 주도 섹터의 <b>이틀째</b>를 보세요.')
+
+    # 매집 관찰 포인트 (⭐ 동시 매집 종목이 있으면)
+    _매집 = data.get("매집레이더") or {}
+    _별 = _acc_star_names(_매집)
+    if _별:
+        후보들.append(f'외국인·기관이 <b>5일·20일 모두</b> 사들인 매집 종목들이 내일도 매수세를 '
+                    f'유지하는지 확인하세요 — 조용한 매집이 진짜인지 갈리는 날입니다.')
+
+    내일대응 = ""
+    if 후보들:
+        # 날짜 숫자로 순환 — 같은 날은 항상 같은 포인트, 발행마다 달라짐
+        try:
+            _seed = int(DATE)      # 발행일(YYYYMMDD) 기준 순환 — 매일 다른 각도
+        except Exception:
+            _seed = 0
+        pick = 후보들[_seed % len(후보들)]
+        내일대응 = (f'<div class="tmr"><p class="tmr-h">🌅 내일장, 이것만 기억하세요</p>'
+                   f'<p class="tmr-b">{pick}</p></div>')
 
     # ⚠️ 장 마감 전(09:00~15:30) 또는 개장 전에 돌면 지수·섹터가 전부 0%로 잡힌다.
     #    데이터가 아니라 실행 시각의 문제이므로, 조용히 넘기지 말고 명시한다.
@@ -1039,6 +1144,7 @@ def build_core(핵심편, data, 해석):
     return (장전경고 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
+            + 지수스트립
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
             + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
@@ -1051,8 +1157,13 @@ def build_core(핵심편, data, 해석):
             + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
             + 내종목 + 뒤집블록
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
+            + 내일대응
             + '</div>'
-            + '<p class="q90-cut" id="deep">— 핵심편은 여기까지입니다. 지금부터는 근거와 상세를 담은 <b>심층편</b>입니다 ↓ —</p>')
+            + ('<div class="deep-cut" id="deep">'
+               '<span class="deep-arrow">⌄</span>'
+               '<div class="deep-txt"><p class="deep-t1">여기까지가 핵심편입니다</p>'
+               '<p class="deep-t2">지금부터는 근거와 상세를 담은 <b>심층편</b></p></div>'
+               '<span class="deep-arrow">⌄</span></div>'))
 
 
 def temp_inline():
@@ -1163,6 +1274,92 @@ def _flow_amt(v):
         t = f"{a/10000:.2f}".rstrip("0").rstrip(".")
         return f"{s}{t}조"
     return f"{s}{a:,.0f}억"
+
+
+def flow_pattern_analysis():
+    """수급 과거 패턴 분석 — 전부 규칙 기반(코드 계산). Claude 미개입.
+
+    두 가지를 본다:
+      ① 오늘 조합태그가 과거에 나왔을 때 '다음날' 코스피가 어땠나 (빈도)
+         → 표본 5일 미만이면 통계 대신 "축적 중"으로 정직하게 표시.
+      ② 외국인·기관의 '최근 5일 vs 그 이전 5일' 흐름 변화
+         → 순매도→순매수 전환 같은 방향 전환을 잡아낸다.
+
+    원칙: 없는 비교는 만들지 않는다. 표본이 얇으면 말을 아낀다.
+    """
+    h = load_json("flow_history.json") or []
+    if not isinstance(h, list):
+        h = []
+    h = [r for r in h if r.get("실탄") is not None]
+    if len(h) < 6:
+        return ""   # 6일 미만이면 아예 분석하지 않음
+
+    블록 = []
+
+    # ── ① 조합태그 다음날 빈도 ──
+    조합오늘 = h[-1].get("조합")
+    if 조합오늘:
+        같은 = []
+        for i in range(len(h) - 1):
+            if h[i].get("조합") == 조합오늘:
+                nxt = h[i + 1].get("코스피등락")
+                if nxt is not None:
+                    같은.append(nxt)
+        태그이름 = {"지수형매수": "🔴 지수형 매수", "종목장세": "🟠 종목 장세",
+                  "지수만방어": "🟡 지수만 방어", "지수형매도": "🔵 지수형 매도"}.get(조합오늘, 조합오늘)
+        if len(같은) >= 5:
+            상승 = sum(1 for r in 같은 if r > 0)
+            평균 = sum(같은) / len(같은)
+            블록.append(
+                f'<p class="fp-line"><b>{태그이름}</b> 조합은 기록상 이번이 <b>{len(같은)+1}번째</b>입니다. '
+                f'과거 {len(같은)}번의 <b>다음날</b> 코스피는 상승 {상승} · 하락 {len(같은)-상승}, '
+                f'평균 <b>{평균:+.2f}%</b>였습니다.</p>')
+        else:
+            블록.append(
+                f'<p class="fp-line"><b>{태그이름}</b> 조합은 기록상 {len(같은)+1}번째입니다 — '
+                f'다음날 통계는 사례가 5번 이상 쌓인 뒤 제공합니다 <span class="fp-acc">(축적 중)</span>.</p>')
+
+    # ── ② 외국인·기관 흐름 변화 (최근 5일 vs 그 이전 5일) ──
+    if len(h) >= 10:
+        최근 = h[-5:]
+        이전 = h[-10:-5]
+
+        def _합(rows, key):
+            return sum((r.get(key) or 0) for r in rows)
+
+        def _매수일(rows, key):
+            return sum(1 for r in rows if (r.get(key) or 0) > 0)
+
+        변화문 = []
+        for 라벨, key in (("외국인", "외현"), ("기관", "기관")):
+            최근합 = _합(최근, key)
+            이전합 = _합(이전, key)
+            매수일 = _매수일(최근, key)
+            # 방향 전환 감지
+            if 이전합 <= 0 < 최근합:
+                변화문.append(
+                    f'<b>{라벨}</b>은 직전 5일 {_flow_amt(이전합)} → 최근 5일 <b>{_flow_amt(최근합)}</b>로 '
+                    f'<b class="fp-turn">순매도에서 순매수로 돌아섰습니다</b> (최근 매수 {매수일}/5일).')
+            elif 최근합 <= 0 < 이전합:
+                변화문.append(
+                    f'<b>{라벨}</b>은 직전 5일 {_flow_amt(이전합)} → 최근 5일 <b>{_flow_amt(최근합)}</b>로 '
+                    f'<b class="fp-turn">순매수에서 순매도로 돌아섰습니다</b> (최근 매수 {매수일}/5일).')
+            else:
+                방향 = "매수" if 최근합 >= 0 else "매도"
+                강해짐 = abs(최근합) > abs(이전합)
+                변화문.append(
+                    f'<b>{라벨}</b>은 최근 5일 <b>{_flow_amt(최근합)}</b>로 순{방향} 기조를 '
+                    f'{"이어가며 강해졌습니다" if 강해짐 else "이어가되 다소 옅어졌습니다"} (매수 {매수일}/5일).')
+        if 변화문:
+            블록.append('<p class="fp-line">' + " ".join(변화문) + '</p>')
+
+    if not 블록:
+        return ""
+
+    return (f'<div class="fs-pattern"><p class="fp-h">🧠 오늘 수급, 과거엔 어땠나 · 최근 무엇이 달라졌나</p>'
+            + "".join(블록)
+            + f'<p class="fp-foot">기록({len(h)}일치)에 근거한 사실 정리이며, 미래 예측이나 매매 신호가 아닙니다. '
+            f'데이터가 쌓일수록 정확해집니다.</p></div>')
 
 
 def build_flow_signal(파생, 지수수급):
@@ -1546,6 +1743,7 @@ def build_flow_signal(파생, 지수수급):
       {그래프HTML}
       {판독HTML}
     </div>
+    {flow_pattern_analysis()}
     <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
       선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
   </div>'''
@@ -1620,6 +1818,9 @@ def build_html(data, report):
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#f0efec;padding:24px 12px;display:flex;justify-content:center;font-family:var(--font-sans)}}
 .rp{{padding:1.5rem 1.75rem 2rem;background:var(--bg);max-width:780px;width:100%;border-radius:16px;box-shadow:0 2px 24px rgba(0,0,0,.06)}}
+.deep-wrap{{background:#e4e7ec;background:linear-gradient(180deg,#e6e9ef,#dfe3ea);margin:.2rem -1.75rem 0;padding:1.4rem 1.75rem 1.5rem;border-top:3px solid #c0c6d0}}
+.deep-wrap .sec-label{{color:#2b3038}}
+.deep-wrap .sec-label small{{color:#7a828d}}
 a{{color:inherit;text-decoration:none}}
 .top-bar{{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}}
 .rp-title{{font-size:17px;font-weight:800}}
@@ -1901,6 +2102,15 @@ a{{color:inherit;text-decoration:none}}
 .q90-sub{{font-size:12px;color:#9aa0a8}}
 
 .q90-def{{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
+.ix-strip{{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:8px;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}}
+.ix-cell{{background:rgba(255,255,255,.04);border-radius:10px;padding:.7rem .5rem;text-align:center}}
+.ix-k{{font-size:10.5px;color:#9aa0a8;font-weight:700;margin-bottom:5px;letter-spacing:.02em}}
+.ix-v{{font-size:19px;font-weight:900;line-height:1.1;letter-spacing:-.01em}}
+.ix-c{{font-size:12.5px;font-weight:800;margin-top:3px}}
+.ix-c.sub{{font-size:10px;color:#9aa0a8;font-weight:600;line-height:1.3}}
+.ix-tag{{font-size:14.5px;font-weight:900;line-height:1.15;letter-spacing:-.01em}}
+.ix-strip .up{{color:#ff6b4a}} .ix-strip .down{{color:#5b9bff}}
+.ix-strip .warn{{color:#e0c060}} .ix-strip .flat{{color:#c3c8ce}}
 
 .q90-def .hi{{color:var(--up-soft)}}
 
@@ -2029,6 +2239,16 @@ a{{color:inherit;text-decoration:none}}
 .q90-gloss{{font-size:12px;color:#9aa0a8;line-height:1.7;margin:-.2rem 0 .6rem}}
 .mine-f2{{font-size:13px;font-weight:800;color:#fff;margin-top:.5rem}}
 .q90-cut{{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}}
+.deep-cut{{display:flex;align-items:center;justify-content:center;gap:16px;margin:1.2rem 0 .2rem;padding:1rem 1rem;background:linear-gradient(180deg,#2a2e36,#20242b);border-radius:14px;border:1px solid rgba(224,192,96,.25)}}
+.deep-arrow{{font-size:38px;font-weight:900;color:#e0c060;line-height:.6;animation:deepbob 1.4s ease-in-out infinite}}
+@keyframes deepbob{{0%,100%{{transform:translateY(-2px)}}50%{{transform:translateY(3px)}}}}
+.deep-txt{{text-align:center}}
+.deep-t1{{font-size:12px;color:#9aa0a8;font-weight:700}}
+.deep-t2{{font-size:14px;color:#e8e6e2;font-weight:800;margin-top:2px}}
+.deep-t2 b{{color:#e0c060}}
+.tmr{{margin-top:1rem;padding:.9rem 1rem;background:linear-gradient(180deg,#2b2f37,#242830);border-radius:12px;border-left:4px solid #e0c060}}
+.tmr-h{{font-size:13px;font-weight:800;color:#e0c060;margin-bottom:6px}}
+.tmr-b{{font-size:13px;color:#e8e6e2;line-height:1.7}}
 
 
 
@@ -2051,6 +2271,7 @@ a{{color:inherit;text-decoration:none}}
 @media (max-width:600px){{
   body{{padding:8px 0}}
   .rp{{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}}
+  .deep-wrap{{margin-left:-1rem;margin-right:-1rem;padding-left:1rem;padding-right:1rem}}
   .top-bar{{flex-direction:column;gap:6px}}
   .q90{{padding:1.05rem .95rem}}
   .q90-def{{font-size:18.5px}}
@@ -2145,6 +2366,13 @@ a{{color:inherit;text-decoration:none}}
 .fs-read b{{color:#fff}}
 .fs-building{{background:rgba(255,255,255,.04);border:.5px dashed rgba(255,255,255,.16);border-radius:var(--rmd);padding:1.1rem;text-align:center;font-size:11px;color:#9aa0a8;margin-top:.4rem}}
 .fs-foot{{font-size:9.5px;color:#8a909a;line-height:1.7;margin-top:.8rem;border-top:.5px solid rgba(255,255,255,.08);padding-top:.6rem}}
+.fs-pattern{{margin-top:.9rem;padding:.9rem 1rem;background:rgba(224,192,96,.06);border:1px solid rgba(224,192,96,.2);border-radius:10px}}
+.fp-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.6rem}}
+.fp-line{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-bottom:.5rem}}
+.fp-line b{{color:#fff;font-weight:800}}
+.fp-turn{{color:#ff8a6e!important}}
+.fp-acc{{color:#9aa0a8;font-weight:600}}
+.fp-foot{{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.5rem}}
 .fs-foot b{{color:#b6bcc4}}
 .mf-sub{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:.9rem 0 .45rem}}
 .mf-bar{{display:flex;height:22px;border-radius:6px;overflow:hidden}}
@@ -2236,6 +2464,7 @@ a{{color:inherit;text-decoration:none}}
 
   {build_core(해석.get('핵심편'), data, 해석)}
 
+  <div class="deep-wrap">
   {build_gauge(data.get('관제지수'), 오늘한줄평)}
 
   {build_terrain(data.get('주도섹터'))}
@@ -2290,7 +2519,7 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
-  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>📡 오늘 불붙은 곳</p>
+  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불 붙은 곳</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
   <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
@@ -2323,6 +2552,8 @@ a{{color:inherit;text-decoration:none}}
     <p class="quote-text">{오늘의문장}</p>
     <p class="quote-sub">— 차트프로 관제탑, {날짜}</p>
   </div>
+
+  </div><!-- /deep-wrap -->
 
   {build_archive()}
 
