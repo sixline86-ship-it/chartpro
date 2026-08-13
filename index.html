@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>차트프로 관제탑 · 2026.08.13</title>
-<meta property="og:title" content="반도체 홀로 이끈 급등, 코스닥은 잠잠">
+<meta property="og:title" content="삼전닉스가 끌고 간 6,800, 폭은 좁았다">
 <meta property="og:description" content="8월 13일 (목) 마감 · 차트프로 관제탑">
 <meta property="og:type" content="article">
 <meta property="og:image" content="https://sixline86-ship-it.github.io/chartpro/thumb/20260813.png">
@@ -103,6 +103,11 @@ a{color:inherit;text-decoration:none}
 .sc-chg{font-size:12px;font-weight:800;padding:2px 8px;border-radius:6px;margin-left:auto;background:rgba(46,107,214,.1);color:var(--dn)}
 .sc-chg.pos{background:rgba(193,67,43,.1);color:var(--up)}
 .sc-score{font-size:10px;color:var(--sub);margin-top:5px;font-weight:600}
+.sc-strline{margin-top:4px}
+.sc-str{display:inline-block;font-size:9.5px;font-weight:700;color:#b98a1a;background:rgba(224,192,96,.14);border:.5px solid rgba(224,192,96,.3);border-radius:5px;padding:2px 7px;line-height:1.4;word-break:keep-all}
+.sc-str b{color:#8a6a10;font-weight:800}
+.sc-str.new{color:#2a7d5a;background:rgba(74,222,128,.12);border-color:rgba(74,222,128,.3)}
+.sc-str.new b{color:#1a6a44}
 .sc-list{padding:.15rem .9rem .5rem}
 .sc-cols{display:grid;grid-template-columns:1.1fr 72px 58px 64px;font-size:9.5px;color:#a8a49c;font-weight:600;padding:6px 0 3px;border-bottom:.5px solid var(--line)}
 .sc-cols span:not(:first-child){text-align:right}
@@ -307,15 +312,85 @@ a{color:inherit;text-decoration:none}
 .q90-sub{font-size:12px;color:#9aa0a8}
 
 .q90-def{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}
-.ix-strip{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:8px;margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}
-.ix-cell{background:rgba(255,255,255,.04);border-radius:10px;padding:.7rem .5rem;text-align:center}
-.ix-k{font-size:10.5px;color:#9aa0a8;font-weight:700;margin-bottom:5px;letter-spacing:.02em}
-.ix-v{font-size:19px;font-weight:900;line-height:1.1;letter-spacing:-.01em}
-.ix-c{font-size:12.5px;font-weight:800;margin-top:3px}
-.ix-c.sub{font-size:10px;color:#9aa0a8;font-weight:600;line-height:1.3}
-.ix-tag{font-size:14.5px;font-weight:900;line-height:1.15;letter-spacing:-.01em}
-.ix-strip .up{color:#ff6b4a} .ix-strip .down{color:#5b9bff}
-.ix-strip .warn{color:#e0c060} .ix-strip .flat{color:#c3c8ce}
+.ix-head{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}
+.ix-head .up{color:#ff6b4a} .ix-head .down{color:#5b9bff} .ix-head .yl{color:#e0c060}
+.ix-mood{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.ix-mood-emoji{font-size:32px;line-height:1;flex-shrink:0}
+.ix-mood-txt{flex:1}
+.ix-mood-t{font-size:18px;font-weight:900;letter-spacing:-.02em;line-height:1.15;color:#f0efec}
+.ix-mood-s{font-size:11px;color:#9aa0a8;margin-top:3px;line-height:1.4}
+.ix-bars{background:rgba(255,255,255,.03);border-radius:12px;padding:.95rem .9rem .75rem}
+.ix-bar-row{display:flex;align-items:center;gap:9px;margin-bottom:11px}
+.ix-bn{width:48px;font-size:12px;font-weight:800;color:#dfe3e8;flex-shrink:0}
+.ix-bt{flex:1;height:18px;background:rgba(255,255,255,.05);border-radius:5px;position:relative;overflow:hidden}
+.ix-bz{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)}
+.ix-bf{position:absolute;top:0;bottom:0;border-radius:4px}
+.ix-bv{width:100px;text-align:right;font-size:13.5px;font-weight:900;flex-shrink:0;line-height:1.05}
+.ix-bv small{font-size:10px;color:#9aa0a8;font-weight:600;display:block;margin-top:5px;word-break:keep-all;line-height:1.4}
+.ix-scale{display:flex;justify-content:space-between;font-size:8.5px;color:#6b7078;padding-left:57px}
+.ix-flow{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}
+.ix-flow-k{font-size:11px;color:#9aa0a8;font-weight:700}
+.ix-flow-v{font-size:14.5px;font-weight:900}
+.ix-head .buy{color:#4ade80} .ix-head .sell{color:#ff6b4a} .ix-head .flat{color:#8a909a}
+.ix-head .sellv{color:#a78bfa}
+.ix-ring{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}
+.hi-ring{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}
+.hi-gauge{width:46px;height:46px;position:relative;flex-shrink:0}
+.hi-gauge-c{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px}
+.hi-light{display:flex;flex-direction:column;gap:5px;flex-shrink:0;padding:6px 5px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);border-radius:10px}
+.hi-light .hi-dot{width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.25)}
+.hi-shield{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.hi-arrow{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}
+.hi-badge{width:46px;height:46px;border-radius:11px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#20242b}
+.hi-badge-n{font-size:17px;font-weight:900;line-height:1}
+.hi-badge-s{font-size:8px;font-weight:800;margin-top:1px}
+.hi-candle{width:44px;height:44px;flex-shrink:0;display:flex;align-items:flex-end;justify-content:center;gap:3px}
+.hi-candle>div{width:7px;border-radius:2px}
+.hi-bar{width:5px;height:44px;border-radius:3px;flex-shrink:0}
+.hi-round{width:46px;height:46px;border-radius:13px;border:1.5px solid;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px}
+.ix-cum{font-size:10.5px;color:#9aa0a8;margin-top:9px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1);line-height:1.5}
+.ix-cum b{font-weight:800}
+.ix-cum .buy{color:#4ade80} .ix-cum .sellv{color:#a78bfa}
+.ix-grouplbl{font-size:9px;color:#7d838c;font-weight:700;letter-spacing:.04em;margin-bottom:6px;padding-left:2px}
+.ix-div{height:1px;background:rgba(255,255,255,.08);margin:9px 0 8px}
+.ix-bv small{font-size:9px}
+/* F 도넛 */
+.f-wrap{display:flex;gap:10px}
+.f-gauge{flex:1;background:rgba(255,255,255,.04);border-radius:12px;padding:1rem .6rem;text-align:center}
+.f-ring{width:88px;height:88px;margin:0 auto 6px;position:relative}
+.f-ring svg{transform:rotate(-90deg)}
+.f-ring-txt{position:absolute;inset:0;display:flex;justify-content:center;align-items:center}
+.f-pct{font-size:17px;font-weight:900}
+.f-nm{font-size:11px;color:#9aa0a8;font-weight:700}
+.f-close{font-size:11px;color:#c3c8ce;font-weight:700;margin-top:2px}
+.f-mood{text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.08);font-size:13px;font-weight:800}
+/* G 카드분할 */
+.g-grid{display:grid;grid-template-columns:1.4fr 1fr;grid-template-rows:auto auto;gap:8px}
+.g-main{grid-row:span 2;background:linear-gradient(135deg,#2a1f1a,#3a2620);border-radius:12px;padding:1rem;display:flex;flex-direction:column;justify-content:center}
+.g-main .k{font-size:11px;color:#ffb4a0;font-weight:700}
+.g-main .v{font-size:29px;font-weight:900;line-height:1;margin:6px 0}
+.g-main .c{font-size:15px;font-weight:900}
+.g-tag{font-size:10px;color:#9aa0a8;margin-top:8px}
+.g-sub{background:rgba(255,255,255,.04);border-radius:12px;padding:.75rem .85rem}
+.g-sub .k{font-size:10px;color:#9aa0a8;font-weight:700}
+.g-sub .v{font-size:16px;font-weight:900;margin-top:3px}
+.g-mood{font-size:12px;color:#9aa0a8;margin-top:10px;line-height:1.5}
+/* H 타임라인 */
+.h-item{display:flex;gap:11px;padding-bottom:12px;position:relative}
+.h-item:not(:last-child)::before{content:'';position:absolute;left:5px;top:16px;bottom:-2px;width:2px;background:rgba(255,255,255,.1)}
+.h-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-top:3px}
+.h-txt{font-size:13px;line-height:1.5}
+.h-txt b{font-weight:900}
+.h-sub{font-size:11px;color:#9aa0a8;margin-top:2px}
+/* I 히트스트립 */
+.i-head{font-size:15px;font-weight:900;margin-bottom:12px;line-height:1.4}
+.i-head .hl{background:linear-gradient(transparent 60%,rgba(255,107,74,.4) 60%);padding:0 2px}
+.i-strip{display:flex;height:52px;border-radius:10px;overflow:hidden;gap:2px}
+.i-seg{flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;color:#fff}
+.i-seg .k{font-size:9.5px;opacity:.85;font-weight:700}
+.i-seg .v{font-size:15px;font-weight:900;margin-top:2px}
+.i-seg .c{font-size:10px;font-weight:700;opacity:.9}
+.ix-head .up{color:#ff6b4a} .ix-head .dn,.ix-head .down{color:#5b9bff} .ix-head .yl{color:#e0c060}
 
 .q90-def .hi{color:var(--up-soft)}
 
@@ -576,6 +651,15 @@ a{color:inherit;text-decoration:none}
 .fp-line{font-size:12px;color:#dfe3e8;line-height:1.75;margin-bottom:.5rem}
 .fp-line b{color:#fff;font-weight:800}
 .fp-turn{color:#ff8a6e!important}
+.fp-detail{margin:.5rem 0}
+.fp-sub{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.06)}
+.fp-sub:last-child{border-bottom:0}
+.fp-who{flex-shrink:0;width:48px;font-size:11.5px;font-weight:800;color:#e0c060}
+.fp-body{flex:1;font-size:12px;color:#dfe3e8;line-height:1.7;word-break:keep-all}
+.fp-body b{color:#fff;font-weight:800}
+.fp-hl{color:#e0c060!important}
+.fp-hl.fp-turn{color:#ff8a6e!important}
+.nw{white-space:nowrap}
 .fp-acc{color:#9aa0a8;font-weight:600}
 .fp-foot{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.5rem}
 .fs-foot b{color:#b6bcc4}
@@ -667,7 +751,7 @@ a{color:inherit;text-decoration:none}
     <span class="badge">2026.08.13 마감</span>
   </div>
 
-  <div class="q90"><div class="q90-top"><span class="q90-badge">⏱️ 90초 브리핑</span><span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div><div class="ix-strip"><div class="ix-cell"><p class="ix-k">코스피</p><p class="ix-v up">6,813.34</p><p class="ix-c up">+3.56%</p></div><div class="ix-cell"><p class="ix-k">코스닥</p><p class="ix-v up">861.37</p><p class="ix-c up">+0.29%</p></div><div class="ix-cell"><p class="ix-k">오늘의 성격</p><p class="ix-tag flat">—</p><p class="ix-c sub">판정 보류</p></div></div><p class="q90-def">오늘은 '반도체 단독 잔치'인 날입니다</p><p class="q90-gloss">잔치는 크게 벌어졌지만 초대받은 손님이 정해져 있었다는 뜻으로, 코스피는 3.56% 급등했지만 그 힘의 대부분이 반도체 대표주에 몰렸다는 말입니다.</p><p class="q90-feel">"오른 건 아는데 내 종목은 아니네"</p><p class="q90-why">코스피는 6,813.34로 3.56% 급등했지만 코스닥은 0.29% 상승에 그쳤습니다. 반도체 대표주 테마는 확산도 100%로 상승 폭을 독식하다시피 했습니다. 지수만 보고 시장 전체가 좋았다고 느꼈다면 그건 이상한 게 아니라 지수 구성 자체가 반도체 비중이 크기 때문입니다.</p><div class="q90-3"><div class="q3"><span class="q3-n">1</span><span>코스피 6,813.34로 +3.56%, 코스닥 861.37로 +0.29% 마감했습니다.</span></div><div class="q3"><span class="q3-n">2</span><span>코스피에서 외국인 2.11조, 기관 6,817억을 순매수했습니다.</span></div><div class="q3"><span class="q3-n">3</span><span>반도체 대표주 테마가 확산도 100%, 등락률 +5.22%로 상승을 이끌었습니다.</span></div></div><div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p><p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p><div class="i9"><span class="i9-t tg-semi">반도체</span><span>삼성전자·SK하이닉스가 각각 4.89%, 5.92% 급등하며 코스피를 3.56% 끌어올려 6,800선을 회복했습니다. 반도체 대표주 테마는 확산도 100%로 오늘 상승을 사실상 독식했습니다.</span></div><div class="i9"><span class="i9-t tg-pol">정책</span><span>8·13 가계부채 대책으로 총량 증가율 목표가 2배로 늘어 '대출 오픈런' 해소 기대가 나왔고, 레버리지 대책 이후 변동성지수는 36% 하락해 3개월래 최저를 기록했습니다.</span></div><div class="i9"><span class="i9-t tg-glo">글로벌</span><span>미국 7월 CPI가 예상치에 부합하며 시장이 안도했고, 원/달러 환율은 사흘 만에 1,419원대로 반등했습니다.</span></div><div class="i9"><span class="i9-t tg-sup">수급</span><span>외국인 순매수가 이어지며 삼성전자 그룹 시가총액이 2천조원을 회복했고, SK그룹도 1,420조원을 기록했습니다.</span></div></div><div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p><p class="mny-sub">최근 20거래일과 비교했습니다</p><div class="mny-tiles"><div class="tile"><p class="tile-k">외국인</p><p class="tile-v b">+2.11조</p><p class="tile-s">3일 연속 매수</p></div><div class="tile"><p class="tile-k">기관</p><p class="tile-v b">+6,834억</p><p class="tile-s">5일 연속 매수</p></div><div class="tile"><p class="tile-k">개인</p><p class="tile-v s">−2.74조</p><p class="tile-s">17일 중 매도 3위</p></div></div><div class="mny-feat"><p class="mf"><span class="mf-i">1</span><span><b>외국인 매수는 컸지만 최근 평균보다는 오히려 약했습니다.</b> 20일 하루평균 2.44조인데 오늘은 2.11조으로 순위로도 20일 중 4위입니다.</span></p><p class="mf"><span class="mf-i">2</span><span><b>기관은 5일 연속 순매수를 이어갔습니다.</b> 하루평균 8,781억 대비 오늘은 6,817억으로 다소 못 미쳤지만 연속성은 유지됐습니다.</span></p><p class="mf"><span class="mf-i">3</span><span><b>개인은 코스피와 코스닥에서 반대로 움직였습니다.</b> 코스피에서는 2.74조을 팔았지만 코스닥에서는 2,567억을 사들여, 자금이 대형주로 쏠린 흐름과 대비됩니다.</span></p></div><div class="mny-why"><p class="mw-h">🧭 왜 이렇게 움직였을까요</p><p class="mw-b">🔍 반도체 업종의 실적 기대와 미국 CPI 안도감이 겹치면서 외국인과 기관 자금이 삼성전자·SK하이닉스 등 대형주로 집중된 것으로 보입니다.<br><br>그 결과 코스피 지수는 크게 뛰었지만 코스닥과 개인 매도 물량이 몰린 코스피 대형주 사이의 괴리가 커졌습니다. 지수 급등의 온기가 시장 전반으로 퍼지지 않은 하루였습니다.</p></div></div><div class="mine"><p class="mine-h">😮‍💨 다 오르는데 내 것만 안 올랐다면</p><p class="mine-b">오늘 코스피는 3.56% 뛰었지만 그 힘은 반도체 대표주에 집중됐고, 코스닥은 0.29% 상승에 그쳤습니다. 개인은 코스피에서 2.74조을 내다 팔았지만 코스닥에서는 2,567억을 사들이며 방향이 엇갈렸습니다. 지수가 오른 날과 내 계좌가 오른 날이 다를 수 있다는 걸 오늘 숫자가 보여줍니다.</p><p class="mine-f2">지수는 축제, 계좌는 조용.</p></div><div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p><p class="qf-b">보통 외국인이 2조 넘게 순매수하면 '역대급 매수'라고 씁니다. 그런데 최근 20일 하루평균이 2.44조이고 오늘은 2.11조으로, 순위로 따지면 20일 중 4위에 그칩니다. 절대금액만 보면 커 보이지만 최근 흐름 대비로는 오히려 평범한 수준이었던 셈입니다. 숫자의 크기보다 최근 평균과 비교하는 습관이 필요한 이유입니다.</p></div><div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p><a class="qt" href="#radar"><span class="qt-tag">레이더</span><span>반도체 대표주(생산) 중심으로 오늘 <span class="u">+9.7%</span> 급등하며 새로 불붙은 곳이 있습니다</span><span class="qt-go">확인 ↓</span></a><a class="qt" href="#acc"><span class="qt-tag">매집</span><span>최근 5일과 20일, <b>양쪽 모두</b> 꾸준히 사들인 종목이 있습니다 — 꼭 확인하세요</span><span class="qt-go">확인 ↓</span></a></div><div class="tmr"><p class="tmr-h">🌅 내일장, 이것만 기억하세요</p><p class="tmr-b">오늘 시장을 이끈 <b>반도체 대표주(생산)</b>(+5.2%)가 내일도 힘을 이어가는지, 아니면 하루 만에 식는지 — 주도 섹터의 <b>이틀째</b>를 보세요.</p></div></div><div class="deep-cut" id="deep"><span class="deep-arrow">⌄</span><div class="deep-txt"><p class="deep-t1">여기까지가 핵심편입니다</p><p class="deep-t2">지금부터는 근거와 상세를 담은 <b>심층편</b></p></div><span class="deep-arrow">⌄</span></div>
+  <div class="q90"><div class="q90-top"><span class="q90-badge">⏱️ 90초 브리핑</span><span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div><div class="ix-head"><div class="ix-mood"><div class="hi-light"><div class="hi-dot" style="background:#333"></div><div class="hi-dot" style="background:#333"></div><div class="hi-dot" style="background:#4ade80;box-shadow:0 0 9px #4ade80"></div></div><div class="ix-mood-txt"><p class="ix-mood-t">오늘은 <span class="yl">함께 오른 하루</span></p><p class="ix-mood-s">코스피·코스닥 지수 흐름 요약</p></div></div><div class="ix-bars"><p class="ix-grouplbl">지수 (±4%)</p><div class="ix-bar-row"><span class="ix-bn">코스피</span><div class="ix-bt"><span class="ix-bz"></span><div class="ix-bf" style="left:50%;width:44.5%;background:linear-gradient(90deg,#ff6b4a,#ff9a80)"></div></div><span class="ix-bv up">+3.56%<small>6,813.34</small></span></div><div class="ix-bar-row"><span class="ix-bn">코스닥</span><div class="ix-bt"><span class="ix-bz"></span><div class="ix-bf" style="left:50%;width:3.6%;background:linear-gradient(90deg,#ff6b4a,#ff9a80)"></div></div><span class="ix-bv up">+0.29%<small>861.37</small></span></div><div class="ix-scale"><span>-4%</span><span>0</span><span>+4%</span></div><div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조 · 매수 초록 / 매도 보라)</p><div class="ix-bar-row"><span class="ix-bn">외국인</span><div class="ix-bt"><span class="ix-bz"></span><div class="ix-bf" style="left:50%;width:35.2%;background:linear-gradient(90deg,#4ade80,#2a9d5a)"></div></div><span class="ix-bv buy">+2.11조<small>3일 연속 매수</small></span></div><div class="ix-bar-row"><span class="ix-bn">기관</span><div class="ix-bt"><span class="ix-bz"></span><div class="ix-bf" style="left:50%;width:11.4%;background:linear-gradient(90deg,#4ade80,#2a9d5a)"></div></div><span class="ix-bv buy">+6,834억<small>최근 5일 매도 <span class="nw">→매수 전환</span></small></span></div><div class="ix-scale"><span>-3조</span><span>0</span><span>+3조</span></div></div></div><p class="q90-def">오늘은 '반도체 특식'인 날입니다</p><p class="q90-gloss">잔칫상에 반찬은 많아도 결국 다들 고기 한 접시만 파고들었다는 뜻으로, 오늘 지수는 크게 올랐지만 실제로는 반도체 몇 종목에만 돈이 몰렸다는 말입니다.</p><p class="q90-feel">"올랐다는데 왜 내 건 그대로일까"</p><p class="q90-why">코스피는 +3.56% 급등했지만 등락 종목 비율 점수는 44점에 불과했습니다. 외국인이 코스피에서 2.11조원을 순매수하며 삼성전자·SK하이닉스에 자금이 집중됐기 때문입니다. 지수만 보면 화려하지만 실제 체감은 다를 수 있는 게, 이상한 게 아니라 대형주 쏠림장의 전형적인 모습입니다.</p><div class="q90-3"><div class="q3"><span class="q3-n">1</span><span>주요 테마 평균 상승종목 비율이 44%에 그쳐, 오른 종목보다 안 오른 종목이 더 많았던 셈입니다.</span></div><div class="q3"><span class="q3-n">2</span><span>외국인과 기관이 합쳐 2.79조원을 순매수했는데, 이는 최근 20일 평균(2.85조원)과 비슷한 수준으로 특별히 폭발적인 규모는 아니었습니다.</span></div><div class="q3"><span class="q3-n">3</span><span>반도체 대표주 테마는 확산도 100%로 완전히 쏠린 반면 코스닥은 코스피보다 3.27%p 뒤처져, 대형주와 중소형주 간 온도차가 뚜렷했습니다.</span></div></div><div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p><p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p><div class="i9"><span class="i9-t tg-semi">반도체</span><span>코스피가 반도체 강세에 힘입어 6,800선과 시가총액 6,000조원을 동시에 회복했습니다. 삼성전자·SK하이닉스가 각각 4.89%, 5.92% 오르며 지수 상승을 견인했습니다.</span></div><div class="i9"><span class="i9-t tg-sup">수급</span><span>외국인이 삼성전자·SK하이닉스를 집중 매수하는 동안, 개인 투자자들은 오히려 물량을 던지며 불안한 모습을 보였습니다.</span></div><div class="i9"><span class="i9-t tg-glo">글로벌</span><span>모건스탠리가 국내 기술주 최선호주로 삼성전자 대신 삼성전기를 제시하며, 삼성전기 관련주가 강하게 반응했습니다.</span></div><div class="i9"><span class="i9-t tg-pol">정책</span><span>SK하이닉스가 자회사를 다시 상장시키는 '5단 중복상장'을 추진한다는 소식에 소액주주들의 비판이 쏟아졌습니다.</span></div></div><div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p><p class="mny-sub">최근 20거래일과 비교했습니다</p><div class="mny-tiles"><div class="tile"><p class="tile-k">외국인</p><p class="tile-v b">+2.11조</p><p class="tile-s">3일 연속 매수</p></div><div class="tile"><p class="tile-k">기관</p><p class="tile-v b">+6,834억</p><p class="tile-s">5일 연속 매수</p></div><div class="tile"><p class="tile-k">개인</p><p class="tile-v s">−2.74조</p><p class="tile-s">17일 중 매도 3위</p></div></div><div class="mny-feat"><p class="mf"><span class="mf-i">1</span><span><b>외국인 순매수는 평소보다 오히려 적었습니다.</b> 20일 평균 하루 순매수가 2.44조원인데 오늘은 2.11조원으로 순위로도 20일 중 4위 수준입니다.</span></p><p class="mf"><span class="mf-i">2</span><span><b>기관은 5일 연속 순매수를 이어갔습니다.</b> 오늘 6,834억원으로 20일 평균(8,781억원)보다는 적었지만 꾸준함이 유지되고 있습니다.</span></p><p class="mf"><span class="mf-i">3</span><span><b>개인은 코스피에서 큰 폭으로 팔았습니다.</b> 2.74조원 순매도로, 외국인·기관의 매수를 받아내는 반대편에 서 있었다는 뜻입니다.</span></p></div><div class="mny-why"><p class="mw-h">🧭 왜 이렇게 움직였을까요</p><p class="mw-b">🔍 오늘 상승은 미국 CPI가 예상치에 부합하며 금리 인상 우려가 진정된 데다, 데이터센터·AI 인프라 관련주가 미국 증시에서 폭등한 여파가 국내 반도체주로 옮겨온 결과로 보입니다.<br><br>여기에 싱가포르 국부펀드가 삼성전자·SK하이닉스에 직접 투자를 검토한다는 소식까지 겹치며 외국인 매수세가 반도체 대형주에 집중됐습니다. 다만 코스닥과 중소형주는 이 훈풍에서 소외돼, 온기가 시장 전체로 퍼지지는 못했습니다.</p></div></div><div class="mine"><p class="mine-h">😐 다 오르는데 내 것만 안 올랐다면</p><p class="mine-b">오늘 주요 테마의 평균 상승종목 비율은 44%였습니다. 즉 지수가 3.56% 뛴 날에도 절반 넘는 종목은 오르지 못했다는 뜻입니다. 코스피가 6,813으로 마감했다고 해서 모든 계좌가 초록불이었던 건 아니라는 사실을, 데이터가 그대로 말해줍니다.</p><p class="mine-f2">지수와 계좌는 다른 이야기다.</p></div><div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p><p class="qf-b">보통은 '외국인+기관 2.79조 순매수'라고 하면 강한 매수세로 해석합니다. 그런데 20일 평균(2.85조원)과 비교하면 오히려 평소보다 살짝 적은 규모이고, 순위로도 20일 중 3위에 그칩니다. 즉 절대금액은 커 보여도 '평소보다 특별히 더 산 것'은 아니라는 뜻이며, 오늘의 급등은 매수 규모보다 반도체 쏠림 효과가 더 크게 작용한 결과로 보는 게 맞습니다.</p></div><div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p><a class="qt" href="#radar"><span class="qt-tag">레이더</span><span>반도체 대표주(생산) 중심으로 오늘 <span class="u">+9.7%</span> 급등하며 새로 불붙은 곳이 있습니다</span><span class="qt-go">확인 ↓</span></a><a class="qt" href="#acc"><span class="qt-tag">매집</span><span>최근 5일과 20일, <b>양쪽 모두</b> 꾸준히 사들인 종목이 있습니다 — 꼭 확인하세요</span><span class="qt-go">확인 ↓</span></a></div><div class="tmr"><p class="tmr-h">🌅 내일장, 이것만 기억하세요</p><p class="tmr-b">오늘 시장을 이끈 <b>반도체 대표주(생산)</b>(+5.2%)가 내일도 힘을 이어가는지, 아니면 하루 만에 식는지 — 주도 섹터의 <b>이틀째</b>를 보세요.</p></div></div><div class="deep-cut" id="deep"><span class="deep-arrow">⌄</span><div class="deep-txt"><p class="deep-t1">여기까지가 핵심편입니다</p><p class="deep-t2">지금부터는 근거와 상세를 담은 <b>심층편</b></p></div><span class="deep-arrow">⌄</span></div>
 
   <div class="deep-wrap">
   
@@ -683,7 +767,7 @@ a{color:inherit;text-decoration:none}
         <div class="gz-scale"><span>혹한</span><span>한파</span><span>보통</span><span>온기</span><span>과열</span></div>
       </div>
     </div>
-    <p class="gz-oneline">📝 <b>한줄평:</b> 반도체 홀로 이끈 급등, 코스닥은 잠잠</p>
+    <p class="gz-oneline">📝 <b>한줄평:</b> 삼전닉스가 끌고 간 6,800, 폭은 좁았다</p>
     <div class="gz-badges"><span class="gz-badge">📈 코스피·코스닥 동반 상승</span><span class="gz-badge">🔵 시장 전반 하락 우위 (44%)</span><span class="gz-badge">💸 외인+기관 +2.79조 순매수</span></div>
     <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
     <div class="hidden-block" id="gzDetail">
@@ -765,18 +849,18 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 
-  <div class="today-market">💡 <b>오늘의 시장:</b> 코스피가 3.56% 급등해 6,813.34로 마감하며 나흘째 상승했지만, 코스닥은 0.29% 상승에 그쳐 온도차가 뚜렷했습니다. 외국인이 코스피에서 2.11조(2.11조) 순매수해 3일 연속 사들였고 기관도 6,817억을 보태며 대형 반도체주 쏠림을 만들었습니다. 반도체 대표주 테마는 확산도 100%, 등락 +5.22%로 오늘 상승의 진짜 엔진이었습니다.</div>
+  <div class="today-market">💡 <b>오늘의 시장:</b> 코스피는 +3.56%로 급등했지만 등락 종목 비율 점수는 44점에 그쳐, 상승이 삼성전자·SK하이닉스 등 대형 반도체주에 집중된 쏠림장이었다는 점이 확인됩니다. 코스닥은 +0.29%에 머물며 코스피와의 상승폭 격차가 3.27%p까지 벌어졌는데, 이는 자금이 지수를 움직이는 소수 종목에만 몰렸다는 뜻입니다. 이런 구조는 지수 착시를 만들기 쉬워, 내일 이후에는 상승 종목수 자체가 늘어나는지를 함께 봐야 진짜 반등인지 판단할 수 있습니다.</div>
 
   <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 왜, 어디로, 무엇을 볼까</p>
   <div class="issue-box">
     <div class="iss"><span class="itag">반도체</span>
-      <span class="iss-text">미국 7월 CPI가 예상치에 부합하며 금리 부담이 완화된 게 반도체·AI 인프라주 매수 심리를 자극한 배경입니다. 외국인이 삼성전자·SK하이닉스에 3거래일째 순매수를 이어가면서 반도체 장비, 전력·연료전지, ESS 등 관련 밸류체인 전반으로 매수세가 번졌습니다. 다음 배당·실적 발표 이벤트가 예정된 8월 말~9월 구간에 이 흐름이 이어지는지가 관전 포인트입니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0000895436&amp;office_id=422&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 반도체 훈풍에 코스피 나흘째 상승…6,800선 …</a><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0016250376&amp;office_id=001&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 반도체 연일 강세…삼전·닉스, 4~5%대 급등 …</a></span></span></div>
-    <div class="iss"><span class="itag">정책</span>
-      <span class="iss-text">단일 레버리지 상품 규제 여파로 ETF·파생상품 육성책이 사실상 개점휴업 상태에 놓인 것이 배경입니다. 개인 투자자들은 일주일 새 삼성전자·SK하이닉스 레버리지 상품에서 0.8조원을 순유출시키며 위험자산 회피 움직임을 보였습니다. 변동성지수가 3개월래 최저로 내려온 만큼, 이 흐름이 추가 레버리지 자금 이탈로 이어지는지 확인할 필요가 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0016250427&amp;office_id=001&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 [8·13대책] 가계부채 총량 증가율 목표 2배…</a><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0016250415&amp;office_id=001&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 변동성지수, 레버리지 대책후 36% 내려 50대…</a></span></span></div>
-    <div class="iss"><span class="itag">글로벌</span>
-      <span class="iss-text">핵심 물가가 예상과 같게 나오며 연준의 추가 금리 인상 우려가 크게 줄어든 것이 배경입니다. 이 안도감이 국내 반도체·기술주 매수 심리로 이어져 외국인 순매수 확대로 연결됐습니다. 다음 주 미국 PPI 등 후속 지표에서 같은 흐름이 재확인되는지가 볼 포인트입니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0005720693&amp;office_id=009&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 코스피, 미 CPI 안도·반도체주 강세에 3.6…</a><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0016250375&amp;office_id=001&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 환율, 저가 매수·달러 강세에 사흘만에 반등…1…</a></span></span></div>
+      <span class="iss-text">미국 CPI가 예상치에 부합하며 금리 우려가 완화되고, 간밤 미국 AI 데이터센터 관련주들이 급등한 여파가 국내 반도체로 옮겨온 것이 배경입니다. 이 훈풍은 반도체 장비·소부장(DB하이텍, ISC 등)과 MLCC 밸류체인(삼성전기, 삼화콘덴서)까지 넓게 번졌습니다. 앞으로는 삼성전자·SK하이닉스의 신규 주주환원 정책 발표 여부와, 외국인 매수세가 내일도 이어지는지를 확인 포인트로 삼을 수 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0000895553&amp;office_id=422&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 반도체 강세…코스피 6,800선·시총 6천조 회…</a></span></span></div>
     <div class="iss"><span class="itag">수급</span>
-      <span class="iss-text">삼성전자·SK하이닉스의 역대급 주주환원 기대와 합산 영업이익 전망이 이 흐름의 배경으로 거론됩니다. 그룹 시총 회복은 삼성전자·SK하이닉스 비중이 큰 지수 전체의 밸류에이션 부담을 낮추는 효과로 이어질 수 있습니다. 앞으로 배당 발표 시점과 실제 순매수 지속 여부를 함께 확인할 필요가 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0016250386&amp;office_id=001&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 삼성전자 달리자 그룹 시총 2천조원 회복…SK그…</a><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0003042322&amp;office_id=029&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 "2차례 역대 최대 주주환원" "합산 영업익 1…</a></span></span></div></div>
+      <span class="iss-text">최근 주가 급락 이후 반등 국면에서 개인은 차익실현 또는 저점 매도 심리가 겹치며 코스피에서만 2.74조원을 순매도했습니다. 이 자금은 외국인(2.11조)과 기관(6,834억)이 받아내는 구조로 이어졌습니다. 앞으로 개인 매도세가 진정되는지, 외국인 매수가 특정 종목에 국한되는지를 살펴볼 필요가 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0005320739&amp;office_id=015&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 '버텨야 하나' 속타는 삼전닉스 개미들…외국인은…</a></span></span></div>
+    <div class="iss"><span class="itag">글로벌</span>
+      <span class="iss-text">MLCC 가격 상승과 기판수 확대 기대감이 맞물리며 공급자 우위 국면이 내후년까지 이어질 수 있다는 분석이 배경입니다. 이 여파로 삼화콘덴서, 아비텍 등 밸류체인 종목까지 동반 강세를 보였습니다. 목표주가 상향(256만→262만원) 이후 실제 실적 발표에서 이 기대가 확인되는지를 지켜볼 포인트입니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0002811311&amp;office_id=021&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 모건스탠리 변심 “S전자 말고 S전기 사라” 이…</a></span></span></div>
+    <div class="iss"><span class="itag">정책</span>
+      <span class="iss-text">중복상장은 모회사 가치가 자회사 상장 과정에서 분산돼 기존 주주 가치가 희석될 수 있다는 우려가 배경입니다. 이는 지배구조 이슈로 번져 다른 대기업 계열사 중복상장 사례에도 재조명 여론이 확산될 수 있습니다. 향후 이사회의 구체적 상장 계획과 소액주주 대응 여부를 확인할 필요가 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0005802936&amp;office_id=277&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 "창피합니다 회장님"…SK하이닉스 '5단 중복상…</a></span></span></div></div>
 
   <p class="sec-label"><small>환율 · 유가 · 금리 · 금</small>🌏 바깥 날씨</p>
   <div class="macro-row">
@@ -785,28 +869,28 @@ a{color:inherit;text-decoration:none}
       <p class="mr-label">원/달러 환율</p>
       <p class="mr-val">1,420.99</p>
       <span class="up" style="font-size:11px;font-weight:700">+0.62%</span>
-      <p class="mr-comment">원/달러 환율이 1,422.72원으로 0.75% 오르며 사흘 만에 반등했습니다. 코스피가 급등하고 외국인이 2조 넘게 순매수한 날인데도 원화가 약세였다는 건, 이번 급등이 원화 강세를 동반한 전형적 '외국인 러시'는 아니었다는 뜻으로 볼 수 있습니다.</p>
+      <p class="mr-comment">원/달러 환율이 1,420.99원으로 +0.62% 올랐습니다. 외국인이 주식은 크게 샀지만 원화는 오히려 약세였던 만큼, 오늘의 매수세가 원화 자산 전체에 대한 신뢰보다는 반도체 업종에 국한된 선별적 베팅일 가능성이 있습니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">WTI 유가</p>
-      <p class="mr-val">$82.11</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-1.39%</span>
-      <p class="mr-comment">WTI 유가는 82.79달러로 0.58% 내렸습니다. 유가 하락은 기업 원가 부담을 줄여주는 요인이라 오늘 국내 증시의 위험자산 선호 분위기와 크게 어긋나지 않는 흐름입니다.</p>
+      <p class="mr-val">$81.22</p>
+      <span class="dn" style="font-size:11px;font-weight:700">-2.46%</span>
+      <p class="mr-comment">WTI 유가는 81.22달러로 -2.46% 하락했습니다. 기름값 하락은 기업 원가 부담을 줄여주는 요인으로, 오늘 물가 안도 분위기와 방향이 같습니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">미국채 10년물</p>
-      <p class="mr-val">4.68%</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-0.04%</span>
-      <p class="mr-comment">미국채 10년물 금리는 4.68%로 0.04%포인트 소폭 하락에 그쳤습니다. 국내 지수가 3.56% 급등한 것에 비하면 거의 반응이 없었던 셈이라, 이번 급등이 금리 환경 변화보다는 반도체 업종 개별 재료에 더 크게 기댄 것으로 볼 수 있습니다.</p>
+      <p class="mr-val">4.66%</p>
+      <span class="dn" style="font-size:11px;font-weight:700">-0.38%</span>
+      <p class="mr-comment">미국채 10년물은 4.66%로 -0.38% 내렸습니다. 금리가 진정되면서 성장주·반도체주에는 우호적인 환경이 만들어졌다고 볼 수 있습니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">국제 금</p>
-      <p class="mr-val">$4,440.10</p>
-      <span class="up" style="font-size:11px;font-weight:700">+0.71%</span>
-      <p class="mr-comment">국제 금은 4,432.6달러로 0.54% 올랐습니다. 안전자산인 금도 함께 오른 걸 보면, 오늘 위험자산 랠리가 시장 전체의 낙관보다는 반도체 쪽 재료에 쏠린 국지적 강세였을 가능성을 시사합니다.</p>
+      <p class="mr-val">$4,451.70</p>
+      <span class="up" style="font-size:11px;font-weight:700">+0.97%</span>
+      <p class="mr-comment">국제 금값은 4,451.7달러로 +0.97% 올랐습니다. 안전자산 선호가 같이 커진 셈인데, 그럼에도 주식시장이 함께 급등한 건 오늘 상승이 불안 회피보다는 개별 호재(반도체) 성격이 강했다는 뜻입니다.</p>
     </div>
   </div>
 
@@ -818,6 +902,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">반도체 대표주(생산)</span>
           <span class="sc-chg pos">+5.22%</span></div>
         <p class="sc-score">주도력 75.2점</p>
+        <p class="sc-strline"><span class="sc-str new">🆕 신규 주도 · 최근 17일 중 처음</span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -841,6 +926,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">소캠(SOCAMM)</span>
           <span class="sc-chg pos">+4.39%</span></div>
         <p class="sc-score">주도력 66.1점</p>
+        <p class="sc-strline"><span class="sc-str">📈 재등장 · 17일 중 <b>3일</b> 상위 · 평균 <b>2.7위</b></span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -869,6 +955,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">야놀자(Yanolja)</span>
           <span class="sc-chg pos">+7.97%</span></div>
         <p class="sc-score">주도력 55.8점</p>
+        <p class="sc-strline"><span class="sc-str new">🆕 신규 주도 · 최근 17일 중 처음</span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -896,6 +983,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">핵융합에너지</span>
           <span class="sc-chg pos">+4.43%</span></div>
         <p class="sc-score">주도력 42.4점</p>
+        <p class="sc-strline"><span class="sc-str new">🆕 신규 주도 · 최근 17일 중 처음</span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -923,6 +1011,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">스페이스X(SpaceX)</span>
           <span class="sc-chg pos">+4.30%</span></div>
         <p class="sc-score">주도력 35.1점</p>
+        <p class="sc-strline"><span class="sc-str">📈 재등장 · 17일 중 <b>2일</b> 상위 · 평균 <b>4.0위</b></span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -950,6 +1039,7 @@ a{color:inherit;text-decoration:none}
         <div class="sc-name-row"><span class="sc-name">인터넷 대표주</span>
           <span class="sc-chg pos">+3.25%</span></div>
         <p class="sc-score">주도력 34.4점</p>
+        <p class="sc-strline"><span class="sc-str">📈 재등장 · 17일 중 <b>2일</b> 상위 · 평균 <b>4.0위</b></span></p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -971,9 +1061,9 @@ a{color:inherit;text-decoration:none}
   <div class="silent-wrap">
     <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
     
-    <div class="si-item"><span class="si-lens">조용한 강세</span><span>코스피가 3.56%나 뛴 날, 코스닥은 0.29% 상승에 그치며 사실상 제자리였습니다. 코스닥 수급도 외국인 -1,363억, 기관 -1,154억으로 오히려 팔았고 개인만 2,567억을 받아냈습니다. 대형 반도체·AI 인프라 테마가 코스피에 집중되면서 자금이 코스닥으로 흘러가지 못한 셈입니다. 지수 급등의 온기가 시장 전체로 퍼지지 않았다는 뜻으로 읽을 수 있습니다.</span></div>
-    <div class="si-item"><span class="si-lens">짖지 않은 개</span><span>코스피가 3.56% 급등했는데도 선물시장 외국인은 오히려 504억 순매도했습니다. 현물에서 2조 넘게 사들인 것과는 결이 다른 움직임입니다. 진짜 방향성 있는 확신 매수라면 선물도 함께 사들이는 게 자연스러운데, 그 반응이 없었다는 건 아직 '확신'까지는 아니라는 신호로 해석할 수 있습니다. 프로그램매매 비차익거래도 -697억으로 순매도 우위였다는 점이 이 침묵을 뒷받침합니다.</span></div>
-    <div class="si-item"><span class="si-lens">다음 시나리오</span><span>만약 코스피가 6,800선 위에서 지지되고 선물시장 외국인이 순매수로 전환된다면(오늘 -504억) 현물·선물 동반 매수로 확신이 실린 자금이라는 신호로 볼 수 있습니다. 과거에도 현물 매수와 선물 매도가 엇갈렸다가 선물이 순매수로 돌아선 뒤 상승이 이어진 패턴이 있었습니다. 반대로 6,700선이 깨지고 선물 순매도가 확대되면 오늘의 급등이 단기 쏠림이었다는 쪽에 무게가 실립니다. 이는 예측이 아니라 관찰해야 할 갈림길입니다.</span></div>
+    <div class="si-item"><span class="si-lens">조용한 강세</span><span>코스닥 등락종목수 데이터(상승1·보합1·하락1)는 표본이 작지만, 실제로 코스닥은 +0.29%에 그쳐 코스피 +3.56%와 극명히 대비됩니다. 반면 삼성전기는 모건스탠리 최선호주 지정 소식에 12%대 급등(마감브리핑 기준)하며 반도체 대형주보다 오히려 부품·소부장 쪽에서 더 큰 반응이 나왔습니다. 삼화콘덴서(+17.39%)나 티에프이(+11.24%) 같은 MLCC·소캠 테마 종목들이 조용히 두 자릿수 상승을 기록한 점도 눈에 띕니다. 지수를 끌어올린 것은 삼성전자·SK하이닉스였지만, 실제 수익률은 그 옆 부품주에서 더 크게 났다는 뜻입니다.</span></div>
+    <div class="si-item"><span class="si-lens">짖지 않은 개</span><span>원/달러 환율은 1,420.99원으로 오히려 +0.62% 상승(원화 약세)했는데, 외국인이 코스피에서 2.11조원이나 순매수한 날치고는 다소 이례적으로 조용했습니다. 보통 외국인 대규모 매수는 원화 강세를 동반하는 경우가 많은데, 오늘은 환율이 되레 올랐다는 건 이 매수세가 원화 자산 전반에 대한 신뢰 회복이라기보다 반도체 업종 자체에 대한 선별적 베팅에 가깝다는 신호로 읽을 수 있습니다. 미국채 10년물도 -0.38%로 큰 움직임이 없었는데, 이는 오늘의 급등이 금리 발 매크로 이벤트가 아니라 개별 업종 재료(테마섹·CPI 안도)에 의한 것이었음을 뒷받침합니다.</span></div>
+    <div class="si-item"><span class="si-lens">다음 시나리오</span><span>만약 내일 외국인 순매수가 오늘(2.11조) 대비 절반 이상 유지되면서 코스닥 상승종목수 비율도 함께 늘어난다면, 쏠림이 아닌 폭넓은 반등으로 봐도 좋습니다. 반대로 삼성전자·SK하이닉스 거래대금(오늘 각각 949억·738억 아닌 백만 단위 큰 규모)만 유지되고 코스닥이 다시 하락 우위로 돌아서면, 오늘은 일회성 반도체 이벤트였던 것으로 판단할 수 있습니다. 과거에도 반도체 단일 업종 랠리 이후 코스닥이 따라붙지 못하면 며칠 안에 코스피 조정으로 이어진 사례가 있었습니다(예측은 아니며 관찰 대상일 뿐입니다).</span></div>
   </div>
 
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
@@ -1020,7 +1110,7 @@ a{color:inherit;text-decoration:none}
       <svg viewBox="0 0 700 240" preserveAspectRatio="none" style="width:100%;display:block"><rect x="470.7" y="16" width="221.3" height="216" fill="#e0c060" opacity=".07" rx="4"/><text x="476.7" y="228.0" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text><line x1="8" y1="184.48000000000002" x2="692" y2="184.48000000000002" stroke="#fff" stroke-opacity=".14"/><rect x="16.4" y="171.8" width="23.3" height="12.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="56.7" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="96.9" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="137.2" y="184.5" width="23.3" height="11.4" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="177.4" y="184.5" width="23.3" height="24.5" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="217.6" y="173.6" width="23.3" height="10.9" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="257.9" y="176.5" width="23.3" height="8.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="298.1" y="137.0" width="23.3" height="47.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="338.3" y="184.5" width="23.3" height="27.0" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="378.6" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="418.8" y="177.9" width="23.3" height="6.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="459.0" y="184.5" width="23.3" height="19.3" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="499.3" y="184.5" width="23.3" height="1.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="539.5" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="579.7" y="184.1" width="23.3" height="1.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="620.0" y="165.4" width="23.3" height="19.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="660.2" y="168.7" width="23.3" height="15.8" rx="1.5" fill="#C1432B" opacity="1"/><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 83.6 L671.9 158.6 L28.1 158.6 Z" fill="url(#fsgr)" opacity=".5"/><defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/><stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs><path d="M28.1 35.0 L68.4 35.2 L108.6 35.5 L148.8 38.7 L189.1 30.9 L229.3 19.4 L269.5 21.7 L309.8 21.5 L350.0 44.7 L390.2 48.8 L430.5 54.0 L470.7 51.4 L510.9 45.3 L551.2 41.8 L591.4 38.8 L631.6 40.5 L671.9 41.2" fill="none" stroke="#7fa8e8" stroke-width="1.8" stroke-dasharray="4 4" opacity=".45" stroke-linejoin="round"/><circle cx="671.9" cy="41.2" r="2.6" fill="#7fa8e8" opacity=".6"/><text x="664.9" y="52.2" text-anchor="end" font-size="8.5" fill="#7fa8e8" font-weight="700" opacity=".75">선물 −4,022억</text><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 83.6" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/><polygon points="470.7,126.3 510.9,128.7 510.9,126.3 470.7,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="510.9,128.7 551.2,136.5 551.2,126.3 510.9,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="551.2,136.5 591.4,135.9 591.4,126.3 551.2,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="591.4,135.9 631.6,107.3 631.6,126.3 591.4,126.3" fill="#C1432B" opacity=".30"/><polygon points="631.6,107.3 671.9,83.6 671.9,126.3 631.6,126.3" fill="#C1432B" opacity=".30"/><line x1="470.7" y1="126.3" x2="692" y2="126.3" stroke="#e0c060" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="4 3"/><circle cx="470.7" cy="126.3" r="2.6" fill="#e0c060" opacity=".8"/><text x="477.7" y="120.3" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".9">5일 전</text><line x1="645.9" y1="126.3" x2="645.9" y2="89.6" stroke="#ff8a6e" stroke-width="1.8"/><polygon points="645.9,83.6 641.4,90.6 650.4,90.6" fill="#ff8a6e"/><text x="638.9" y="107.9" text-anchor="end" font-size="9.5" fill="#ff8a6e" font-weight="800">5일 ▲ +5.03조</text><line x1="8" y1="35.0" x2="692" y2="35.0" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/><text x="12" y="31.0" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text><circle cx="671.9" cy="83.6" r="8" fill="#f0f0ee" opacity=".16"/><circle cx="671.9" cy="83.6" r="3.4" fill="#fff"/><text x="663.9" y="74.6" text-anchor="end" font-size="10.5" fill="#fff" font-weight="800">−5.72조</text></svg><div class="fs-x"><span>07/23</span><span>07/29</span><span>08/06</span><span>08/13</span></div><div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span><span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span><span><i class="l-rf"></i>5일 전 기준선</span></div>
       <p class="fs-read">최근 17거래일간 실탄이 <b>−5.72조</b> — 빠져나가는 흐름입니다. 다만 최근 5일은 <b>+5.03조</b>로 방향이 반대입니다 — 한 달 흐름과 이번 주 흐름이 엇갈리는 구간입니다.</p>
     </div>
-    <div class="fs-pattern"><p class="fp-h">🧠 오늘 수급, 과거엔 어땠나 · 최근 무엇이 달라졌나</p><p class="fp-line"><b>🟠 종목 장세</b> 조합은 기록상 1번째입니다 — 다음날 통계는 사례가 5번 이상 쌓인 뒤 제공합니다 <span class="fp-acc">(축적 중)</span>.</p><p class="fp-line"><b>외국인</b>은 최근 5일 <b>+2.64조</b>로 순매수 기조를 이어가며 강해졌습니다 (매수 3/5일). <b>기관</b>은 직전 5일 −1.75조 → 최근 5일 <b>+2.39조</b>로 <b class="fp-turn">순매도에서 순매수로 돌아섰습니다</b> (최근 매수 5/5일).</p><p class="fp-foot">기록(17일치)에 근거한 사실 정리이며, 미래 예측이나 매매 신호가 아닙니다. 데이터가 쌓일수록 정확해집니다.</p></div>
+    <div class="fs-pattern"><p class="fp-h">🧠 오늘 수급, 과거엔 어땠나 · 최근 무엇이 달라졌나</p><p class="fp-line"><b>🟠 종목 장세</b> 조합은 기록상 1번째입니다 — 다음날 통계는 사례가 5번 이상 쌓인 뒤 제공합니다 <span class="fp-acc">(축적 중)</span>.</p><div class="fp-detail"><div class="fp-sub"><span class="fp-who">외국인</span><span class="fp-body">오늘 <b>+2.11조</b> 순매수 — <b class="fp-hl">3일 연속 매수</b> · 최근 5일 <b>+2.64조</b> · 최근 5일 중 3일 매수</span></div><div class="fp-sub"><span class="fp-who">기관</span><span class="fp-body">오늘 <b>+6,834억</b> 순매수 — <b class="fp-hl fp-turn">최근 5일 매도 <span class="nw">→매수 전환</span></b> · 5일 흐름 −1.75조→<b>+2.39조</b> · 최근 5일 중 5일 매수</span></div></div><p class="fp-foot">기록(17일치)에 근거한 사실 정리이며, 미래 예측이나 매매 신호가 아닙니다. 데이터가 쌓일수록 정확해집니다.</p></div>
     <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
       선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
   </div>
@@ -1376,32 +1466,32 @@ a{color:inherit;text-decoration:none}
     <div class="tv-lead">
       <span class="tv-lead-badge">⭐ 오늘의 대표 · 삼프로TV</span>
       <p class="tv-lead-ch"><span class="tv-dot"></span>삼프로TV
-        · CPI 부합과 코어위브 실적 효과</p>
-      <p class="tv-title">CPI 예상치 부합 속 뉴욕증시 혼조, 반도체주 동반 강세</p>
-      <p class="tv-lead-body">미국 근원 CPI가 컨센서스에 정확히 부합하면서 9월 금리 동결 기대가 다소 높아졌다는 분석이 나왔습니다. 코어위브의 실적과 백로그 증가가 AI 인프라 수요 지속 신호로 해석되며 반도체·하드웨어 관련주 강세로 이어졌다는 점이 짚어졌습니다.</p>
-      <a class="tv-see" href="https://www.youtube.com/watch?v=nO5npWPNTYI" target="_blank">영상 보기 ↗</a>
+        · 선물 120일선 공방과 외국인 뉴페이스론</p>
+      <p class="tv-title">[8월 13일 마감시황] 삼전닉스 다음은 어디?</p>
+      <p class="tv-lead-body">선물 지수가 120일선 부근에서 위아래로 오간 뒤 옆으로 횡보한 흐름을 짚으며, 오늘 현물 수급이 선물보다 더 중요했다고 평가했습니다. 외국인이 흔들며 사는 기존 패턴과 달리 일방적으로 사들이는 새로운 매수 주체 가능성을 제기했고, 옵션 만기에서 콜 매도 포지션이 대거 청산된 정황도 짚었습니다.</p>
+      <a class="tv-see" href="https://www.youtube.com/watch?v=i0daARsLUF4" target="_blank">영상 보기 ↗</a>
     </div><div class="tv-others">
       <div class="tv-row-wrap">
         <div class="tv-row tv-clickable" onclick="toggleTV('tvbody0',this)">
           <span class="tv-ch">한국경제TV</span>
-          <span class="tv-angle">삼성전자·하이닉스 특별배당 선반영 기대</span>
+          <span class="tv-angle">옵션만기 변동성과 외국인 영속성 체크</span>
           <span class="tv-see-sm">보기 ▾</span>
         </div>
         <div class="tv-body-hidden" id="tvbody0">
-          <p class="tv-title">외인·기관 매수에 6,900선 근접, 배당 이벤트 선취매 논리</p>
-          <p class="tv-sum">삼성전자·SK하이닉스의 3분기 내 특별배당 발표 가능성이 주가에 선반영될 수 있다는 논리가 제시됐습니다. 배당·실적·미국 중간선거 등 굵직한 이벤트가 8월 말부터 순차적으로 대기하고 있다는 점이 강조됐습니다.</p>
-          <a class="tv-link-sm" href="https://www.youtube.com/watch?v=JSvs25UGrJI" target="_blank">영상 보기 ↗</a>
+          <p class="tv-title">옵션만기 급등 마감! 전문가들 "내일 외국인 매매 주의"</p>
+          <p class="tv-sum">옵션 만기일 특성상 장 막판 프로그램 매도가 나오며 상승폭이 둔화된 점을 지적하고, 외국인의 최근 매수세가 과거 대규모 매도 이후의 되돌림인지 추세 전환인지는 좀 더 지켜봐야 한다는 신중론을 폈습니다. 코스닥까지 함께 반등한 점을 순환매의 근거로 제시했습니다.</p>
+          <a class="tv-link-sm" href="https://www.youtube.com/watch?v=mUU46uw5XY4" target="_blank">영상 보기 ↗</a>
         </div>
       </div>
       <div class="tv-row-wrap">
         <div class="tv-row tv-clickable" onclick="toggleTV('tvbody1',this)">
           <span class="tv-ch">이데일리TV</span>
-          <span class="tv-angle">숏커버링과 삼성전기 최선호주 지목</span>
+          <span class="tv-angle">쇼트커버링 메커니즘 설명</span>
           <span class="tv-see-sm">보기 ▾</span>
         </div>
         <div class="tv-body-hidden" id="tvbody1">
-          <p class="tv-title">시총 6,000조 회복, 스페이스X 숏커버링, 삼성전기 목표가 상향</p>
-          <p class="tv-sum">유가증권시장 시가총액이 6,000조원을 회복했고, 스페이스X 관련주는 공매도 비중이 일주일 만에 34%에서 11%대로 급감하며 숏커버링 효과가 나타난 것으로 설명됐습니다. 모건스탠리가 삼성전기를 한국 기술주 최선호주로 지목하며 목표주가를 262만원으로 올린 점도 짚어졌습니다.</p>
+          <p class="tv-title">[파이널포인트] 오늘장 마감, 꼭 알아야 할 3가지</p>
+          <p class="tv-sum">스페이스X 관련주 급등의 배경으로 공매도 비중이 일주일 새 34%에서 11%로 급감한 점을 짚으며 쇼트커버링 현상을 설명했습니다. 삼성전기는 모건스탠리의 최선호주 지정과 목표주가 상향(256만→262만원)이 상승 재료였다고 정리했습니다.</p>
           <a class="tv-link-sm" href="https://www.youtube.com/watch?v=7bZYEDVNEm0" target="_blank">영상 보기 ↗</a>
         </div>
       </div></div>
@@ -1415,38 +1505,38 @@ a{color:inherit;text-decoration:none}
       <div class="disc-head"><span class="disc-name">솔루엠</span>
         <span class="stars">★★★★<span class="off">★</span></span></div>
       <p class="disc-note">유상증자결정(종속회사의주요경영사항)               <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 종속회사가 유상증자를 결정했다는 공시로, 자금조달 규모와 목적에 따라 모회사 지분가치에도 영향을 줄 수 있어 눈여겨볼 만합니다.</p>
     </a>
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001787" target="_blank">
       <div class="disc-head"><span class="disc-name">한중엔시에스</span>
         <span class="stars">★★★<span class="off">★★</span></span></div>
       <p class="disc-note">[기재정정]주요사항보고서(전환사채권발행결정) <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 전환사채 발행 내용이 정정된 공시로, 전환가액이나 물량 변경 여부에 따라 향후 주식 물량 부담이 달라질 수 있습니다.</p>
     </a>
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001551" target="_blank">
       <div class="disc-head"><span class="disc-name">성호전자</span>
         <span class="stars">★★★<span class="off">★★</span></span></div>
       <p class="disc-note">[첨부정정]주요사항보고서(전환사채권발행결정) <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 전환사채 발행 관련 내용이 두 차례 정정됐는데, 세부 조건이 자주 바뀐다는 점 자체가 확인이 필요한 신호입니다.</p>
     </a>
     <div class="hidden-block" id="moreDisc">
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001531" target="_blank">
       <div class="disc-head"><span class="disc-name">성호전자</span>
         <span class="stars">★★★<span class="off">★★</span></span></div>
       <p class="disc-note">[기재정정]주요사항보고서(전환사채권발행결정) <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 전환사채 발행 관련 내용이 두 차례 정정됐는데, 세부 조건이 자주 바뀐다는 점 자체가 확인이 필요한 신호입니다.</p>
     </a>
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001780" target="_blank">
       <div class="disc-head"><span class="disc-name">어보브반도체</span>
         <span class="stars">★★<span class="off">★★★</span></span></div>
       <p class="disc-note">주요사항보고서(자기주식처분결정) <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 자사주를 처분하기로 한 공시로, 처분 목적과 물량이 유통주식수 변화에 영향을 줄 수 있습니다.</p>
     </a>
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001778" target="_blank">
       <div class="disc-head"><span class="disc-name">코스모로보틱스</span>
         <span class="stars">★★<span class="off">★★★</span></span></div>
       <p class="disc-note">주식등의대량보유상황보고서(약식) <span class="disc-lnk">↗ 상세보기</span></p>
-      
+      <p class="disc-why">💡 대주주 지분 보유 상황이 약식으로 보고된 건으로, 대량 지분 변동 여부를 확인할 필요가 있습니다.</p>
     </a>
     <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001745" target="_blank">
       <div class="disc-head"><span class="disc-name">HL홀딩스</span>
@@ -1464,48 +1554,64 @@ a{color:inherit;text-decoration:none}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label"><small>이슈 밖 뉴스</small>🔥 놓치기 쉬운 것들 5건</p>
+  <p class="sec-label"><small>이슈 밖 뉴스</small>🔥 놓치기 쉬운 것들 7건</p>
   <div class="news-wrap">
     <div class="news-item">
       <span class="news-rank">1</span>
       <div class="news-body">
-        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0000049812&amp;office_id=648&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>LG, 영업이익률 25% 육박…전자 계열 호실적 낙수효과<span class="news-go">↗</span></a></p>
-        <p class="news-insight">LG그룹이 전자 계열사 호실적에 힘입어 영업이익률 25%에 근접했습니다. 계열사 실적 개선이 지주사 밸류에이션에도 긍정적 영향을 줄 수 있다는 분석입니다.</p>
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0002683691&amp;office_id=016&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-global">글로벌</span>금값 11% 급반등, '안전자산 회귀' 신호<span class="news-go">↗</span></a></p>
+        <p class="news-insight">8월 들어 하락하던 금값이 이달 11% 급등하며 다시 안전자산 선호 심리를 반영하고 있습니다. 국제 금은 오늘도 +0.97% 상승했습니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">2</span>
       <div class="news-body">
-        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0006351271&amp;office_id=018&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>브이티, 2분기 매출 1,317억원…유럽·중동 성장에 전년비 18% 증가<span class="news-go">↗</span></a></p>
-        <p class="news-insight">브이티가 유럽·중동 지역 성장에 힘입어 2분기 매출이 전년 대비 18% 늘었습니다. 해외 매출 비중 확대가 실적 성장의 주요 동력으로 꼽힙니다.</p>
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0005720911&amp;office_id=009&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-global">글로벌</span>노르웨이 국부펀드, 코스피 늘리고 특정 업종은 철수<span class="news-go">↗</span></a></p>
+        <p class="news-insight">세계 최대 국부펀드가 한국 증시 비중을 늘리는 한편 일부 업종에서는 투자를 줄인 것으로 나타났습니다. 장기 자금의 선별적 접근이 눈에 띕니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">3</span>
       <div class="news-body">
-        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0006351249&amp;office_id=018&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>덴티움, 얼라인과 법정 공방서 일단 승기…사외이사 직무 정지 기각<span class="news-go">↗</span></a></p>
-        <p class="news-insight">덴티움이 얼라인과의 법적 분쟁에서 사외이사 직무 정지 가처분이 기각되며 일단 유리한 고지를 점했습니다. 경영권 관련 리스크가 일부 해소된 모습입니다.</p>
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0014126815&amp;office_id=003&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-stock">특징주</span>대만 증시, 미 반도체 강세에 4일 연속 상승<span class="news-go">↗</span></a></p>
+        <p class="news-insight">대만 증시가 미국 반도체주 강세에 힘입어 4거래일 연속 오르며 1.11% 상승 마감했습니다. 한국과 유사한 반도체발 훈풍이 아시아 전반에 번진 모습입니다.</p>
       </div>
     </div></div><div class="hidden-block" id="moreNews"><div class="news-wrap" style="border:none;box-shadow:none;margin:0">
     <div class="news-item">
       <span class="news-rank">4</span>
       <div class="news-body">
-        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0005561292&amp;office_id=014&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>캑터스PE, 엔시트론 최대주주로…60억 베팅으로 M&A 성장판 노려<span class="news-go">↗</span></a></p>
-        <p class="news-insight">사모펀드 캑터스PE가 60억원을 투입해 엔시트론 최대주주에 올랐습니다. 향후 M&A를 통한 성장 전략이 관심사로 떠올랐습니다.</p>
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0000101623&amp;office_id=243&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-policy">정책</span>국내 레버리지 상품 변동성 확대에 해외 단일 레버까지 불똥<span class="news-go">↗</span></a></p>
+        <p class="news-insight">국내 변동성 관리 조치가 해외 단일 종목 레버리지 상품에도 영향을 미치고 있다는 지적이 나왔습니다. 관련 제도 정비 여부가 주목됩니다.</p>
       </div>
     </div>
     <div class="news-item">
       <span class="news-rank">5</span>
       <div class="news-body">
-        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0003121559&amp;office_id=119&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
-      <span class="news-tag nt-stock">특징주</span>다올투자증권, 상반기 순익 322억…6분기 연속 흑자<span class="news-go">↗</span></a></p>
-        <p class="news-insight">다올투자증권이 상반기 순이익 322억원을 기록하며 6분기 연속 흑자 흐름을 이어갔습니다. 실적 안정성이 부각되는 모습입니다.</p>
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0005720907&amp;office_id=009&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-stock">특징주</span>한국금융지주, KDB생명 인수해 '한국판 버크셔' 도전<span class="news-go">↗</span></a></p>
+        <p class="news-insight">7수 끝에 매각이 성사된 KDB생명을 한국금융지주가 품게 됐습니다. 증권·자산운용과의 시너지가 기대된다는 평가입니다.</p>
       </div>
-    </div></div></div><button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 뉴스 2개 더보기')">▾ 뉴스 2개 더보기</button><p class="news-foot">※ 제목을 누르면 해당 기사 원문으로 이동합니다. 위 코너에서 이미 다룬 사안은 제외하고 골랐습니다.</p>
+    </div>
+    <div class="news-item">
+      <span class="news-rank">6</span>
+      <div class="news-body">
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0000049826&amp;office_id=648&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-market">시황</span>대우건설, 파푸아뉴기니 최대 LNG 개발 프로젝트 수주<span class="news-go">↗</span></a></p>
+        <p class="news-insight">대우건설이 파푸아뉴기니 최대 규모 LNG 개발 사업을 따냈습니다. 해외 대형 수주 소식으로 건설업종 투자심리에 영향을 줄 수 있습니다.</p>
+      </div>
+    </div>
+    <div class="news-item">
+      <span class="news-rank">7</span>
+      <div class="news-body">
+        <p class="news-title"><a class="news-a" href="https://finance.naver.com/news/news_read.naver?article_id=0001963593&amp;office_id=057&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">
+      <span class="news-tag nt-policy">정책</span>서울 아파트값 상승세 둔화, 대통령 '부동산 거품' 경고<span class="news-go">↗</span></a></p>
+        <p class="news-insight">서울 아파트값 상승세가 주춤한 가운데 대통령이 부동산 거품을 방치할 수 없다고 언급했습니다. 추가 공급대책 실효성 논란도 이어지고 있습니다.</p>
+      </div>
+    </div></div></div><button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 뉴스 4개 더보기')">▾ 뉴스 4개 더보기</button><p class="news-foot">※ 제목을 누르면 해당 기사 원문으로 이동합니다. 위 코너에서 이미 다룬 사안은 제외하고 골랐습니다.</p>
 
   <p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>
   <div class="score-box">
@@ -1515,47 +1621,47 @@ a{color:inherit;text-decoration:none}
     <div class="score-row">
       <span class="score-mark sc-o">○</span>
       <div class="score-body">
-        <p class="score-item">①코스피 6,500선 유지·외국인 순매수 1.42조 이상이면 반등 지속</p>
-        <p class="score-why">코스피 6,813.34로 6,500선을 크게 웃돌고 외국인 2.11조(2.11조)으로 기준치를 상회했습니다.</p>
+        <p class="score-item">①코스피 6,500선 유지 & 외국인 순매수 절반 이상 지속 → 반등지속, 6,400 붕괴 시 쏠림해소</p>
+        <p class="score-why">코스피 6,813.34로 6,500선 훌쩍 상회, 외국인 순매수 2.11조원으로 절반 기준(1.42조) 크게 상회</p>
       </div>
     </div>
     <div class="score-row">
       <span class="score-mark sc-o">○</span>
       <div class="score-body">
-        <p class="score-item">②선물시장 외국인 순매수 전환 여부</p>
-        <p class="score-why">선물 외국인 -504억으로 여전히 순매도, 헤지성 자금 지속으로 해석됩니다.</p>
+        <p class="score-item">②선물시장 외국인 순매수 전환 시 확신, 순매도 지속 시 헤지성</p>
+        <p class="score-why">오늘 선물 외국인 -504억원으로 순매도 지속, 헤지성 자금 판단 유효</p>
       </div>
     </div>
     <div class="score-row">
       <span class="score-mark sc-o">○</span>
       <div class="score-body">
-        <p class="score-item">③코스닥 비차익거래 순매도 축소 여부</p>
-        <p class="score-why">코스닥 비차익거래 -1,086억으로 전일 -1,189억보다 축소되어 수급 안정 쪽입니다.</p>
+        <p class="score-item">③코스닥 비차익거래 순매도 축소 시 안정, 확대 시 이탈심화</p>
+        <p class="score-why">오늘 코스닥 비차익거래 -1,084억원으로 전일 기준(-1,189억원)보다 축소, 수급 안정 신호</p>
       </div>
     </div>
     <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
   </div>
 
   <p class="sec-label" id="watch"><small>내일의 관전 포인트</small>🗼 내일 이것만 보세요</p>
-  <div class="watch-item"><span>①코스피가 6,800선을 지키고 외국인 순매수가 오늘(2.11조)의 절반 이상 이어지면 상승 지속으로, 6,700선이 깨지면 단기 쏠림 해소로 봅니다.</span></div><div class="watch-item"><span>②선물시장 외국인이 순매수로 전환되면(오늘 -504억) 확신 있는 매수로, 순매도가 이어지면 헤지성 자금 지속으로 봅니다.</span></div><div class="watch-item"><span>③코스피 프로그램 비차익거래 순매도가 오늘(-697억)보다 축소되면 수급 안정으로, 확대되면 대형주 쏠림 심화로 봅니다.</span></div>
+  <div class="watch-item"><span>①코스피가 6,800선을 지키고 외국인 순매수가 오늘(2.11조원) 수준의 절반 이상 이어지면 반등 지속으로, 6,700선이 깨지면 쏠림 해소 국면으로 봅니다.</span></div><div class="watch-item"><span>②선물시장 외국인이 순매수로 전환되면(오늘 -504억원) 확신 있는 매수로, 순매도가 이어지면 헤지성 자금으로 봅니다.</span></div><div class="watch-item"><span>③코스닥 상승종목 비율이 오늘(주요 테마 평균 44%)보다 높아지면 온기 확산으로, 낮아지면 반도체 국한 랠리로 봅니다.</span></div>
 
   <p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>
   
   <div class="study-box">
-    <p class="study-no">📚 오늘 리포트에서 출제 · 매집갭</p>
-    <p class="study-src">📍 출처: 매집레이더 — 매집점수·반응점수 격차(매집갭)</p>
-    <p class="study-term">많이 사들였는데 왜 주가는 아직 안 올랐을까?</p>
-    <div class="study-step"><span class="study-k">개념</span><span>매집갭은 외국인·기관이 얼마나 크게 사모았는지를 뜻하는 '매집점수'와 실제 주가가 그만큼 반응했는지를 뜻하는 '반응점수'의 차이입니다. 장은 잔뜩 봐놨는데 아직 요리가 식탁에 안 올라온 상태와 비슷합니다.</span></div><div class="study-step"><span class="study-k">원리</span><span>①매집점수는 외국인·기관이 최근 며칠간 얼마나 꾸준히, 얼마나 크게 순매수했는지를 점수화한 것입니다. ②반응점수는 그 매수가 주가 상승으로 얼마나 이어졌는지를 봅니다. ③두 점수의 차이(매집갭)가 크면 수급은 쌓였는데 주가엔 아직 덜 반영됐다는 뜻이고, 갭이 작으면 이미 주가에 반영이 끝났다는 뜻입니다.</span></div><div class="study-step"><span class="study-k">오늘 연결</span><span>한화솔루션은 매집점수 99에 반응점수 64로 매집갭이 36이었고, TIGER 미국나스닥100은 매집점수 69에 반응점수는 15에 그쳐 매집갭이 54로 가장 컸습니다. 갭이 큰 쪽일수록 수급 대비 주가 반응이 아직 따라오지 못했다는 뜻입니다.</span></div>
-    <div class="study-memo">✏️ 한 줄 암기: 많이 사도 안 오르면, 아직 남은 힘이 있다는 뜻.</div>
+    <p class="study-no">📚 오늘 리포트에서 출제 · 헤지 동반 매수</p>
+    <p class="study-src">📍 출처: 돈의흐름 — 현물·선물 외국인 수급 엇갈림</p>
+    <p class="study-term">외국인이 주식은 사면서 선물은 왜 팔았을까?</p>
+    <div class="study-step"><span class="study-k">개념</span><span>헤지 동반 매수란 외국인이 현물(실제 주식)은 순매수하면서 동시에 선물은 순매도해 위험을 상쇄하는 매매 패턴입니다. 마치 우산을 챙기면서도 비가 안 올 걸 대비해 우비까지 함께 준비하는 것과 비슷합니다.</span></div><div class="study-step"><span class="study-k">원리</span><span>①현물만 사면 시장이 급락할 때 그대로 손실을 본다. ②선물을 팔아두면 지수가 떨어져도 선물에서 이익이 나 손실을 일부 메울 수 있다. ③그래서 확신이 100%가 아닐 때 기관·외국인은 현물 매수와 선물 매도를 함께 쓴다. ④이 조합은 '사긴 샀지만 아직 다 믿진 않는다'는 뜻으로 해석된다.</span></div><div class="study-step"><span class="study-k">오늘 연결</span><span>오늘 외국인은 코스피 현물을 2.11조원 순매수했지만, 선물시장에서는 504억원 순매도했습니다. 방향은 같은 상승 베팅이었지만 선물로 안전장치를 걸어둔 셈입니다.</span></div>
+    <div class="study-memo">✏️ 한 줄 암기: 사면서도 우산을 접지 않는 것이 헤지 동반 매수다.</div>
   </div>
-    <div class="hidden-block" id="moreStudy" style="margin-top:.6rem"><div class="study-step"><span class="study-k">역사에서</span><span>과거에도 기관·외국인의 매집이 먼저 쌓이고 주가는 뒤늦게 따라 오르는 사례가 종종 있었습니다. 수급이 주가에 선행하는 경우가 많다는 경험칙 때문에 이런 격차를 유심히 보는 투자자들이 있습니다. 다만 매집이 반드시 상승으로 이어지는 것은 아니라는 점도 함께 확인된 경험입니다.</span></div><div class="study-step"><span class="study-k">투자 적용</span><span>①매집갭이 크면서 '성격'이 상승 중인지 횡보인지 함께 본다. ②외국인 단독인지 기관 단독인지 쌍끌이인지 유형을 확인한다. ③시총대비 매집 규모가 의미 있는 수준인지(1% 안팎인지) 살핀다.</span></div><div class="study-step"><span class="study-k">더 깊이</span><span>매집갭이 크다고 무조건 오르는 것은 아닙니다. TIGER 미국나스닥100처럼 지수를 추종하는 ETF는 개별주와 성격이 달라 매집갭 해석을 그대로 적용하기 어렵습니다. 개별 종목과 지수 추종 상품을 구분해서 봐야 오해가 줄어듭니다.</span></div></div>
+    <div class="hidden-block" id="moreStudy" style="margin-top:.6rem"><div class="study-step"><span class="study-k">역사에서</span><span>2022년 금리 인상기에도 외국인이 저가 매수에 나서면서 동시에 선물 매도를 늘린 구간이 있었는데, 이후 단기 반등에 그치고 재차 조정받는 경우가 많았습니다. 확신에 찬 매수라면 선물도 함께 사들이는 경우가 일반적입니다.</span></div><div class="study-step"><span class="study-k">투자 적용</span><span>①현물과 선물 수급의 부호가 같은지 다른지 매일 확인한다. ②다르다면(헤지형) 추세 반전보다는 단기 되돌림으로 보수적으로 접근한다. ③다음날 선물 수급이 매수로 전환되는지를 확인 포인트로 삼는다.</span></div><div class="study-step"><span class="study-k">더 깊이</span><span>차익거래(현물-선물 가격차를 노린 기계적 매매)와 헤지는 다른 개념입니다. 차익거래는 방향성이 없는 반면, 헤지 동반 매수는 방향성 베팅(현물 매수)에 위험관리(선물 매도)를 얹은 것이라 방향성 자체는 있다는 점이 다릅니다.</span></div></div>
     <button class="more-btn" onclick="toggleMore('moreStudy',this,'▾ 심화 학습 더보기 (역사·투자 적용)')">▾ 심화 학습 더보기 (역사·투자 적용)</button>
 
   <!-- 오늘의 한 문장 (필사 코너) -->
   <p class="sec-label"><small>오늘의 한 문장</small>✍️ 오늘을 한 문장으로</p>
   <div class="quote-box">
     <div class="quote-mark">“</div>
-    <p class="quote-text">쏠린 만큼, 남겨진 자리도 크다.</p>
+    <p class="quote-text">지수가 웃는 날에도, 계좌는 웃지 않을 수 있다.</p>
     <p class="quote-sub">— 차트프로 관제탑, 2026.08.13</p>
   </div>
 
@@ -1563,7 +1669,7 @@ a{color:inherit;text-decoration:none}
 
   <div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p><div class="arch-grid"><a class="arch-link" href="report_20260812.html">8/12(수)</a><a class="arch-link" href="report_20260811.html">8/11(화)</a><a class="arch-link" href="report_20260810.html">8/10(월)</a><a class="arch-link" href="report_20260807.html">8/7(금)</a><a class="arch-link" href="report_20260806.html">8/6(목)</a><a class="arch-link" href="report_20260805.html">8/5(수)</a><a class="arch-link" href="report_20260804.html">8/4(화)</a></div><div class="hidden-block" id="moreArch" style="margin-top:6px"><div class="arch-grid"><a class="arch-link" href="report_20260803.html">8/3(월)</a><a class="arch-link" href="report_20260731.html">7/31(금)</a><a class="arch-link" href="report_20260730.html">7/30(목)</a><a class="arch-link" href="report_20260729.html">7/29(수)</a><a class="arch-link" href="report_20260728.html">7/28(화)</a><a class="arch-link" href="report_20260727.html">7/27(월)</a><a class="arch-link" href="report_20260725.html">7/25(토)</a></div></div><button class="more-btn" style="margin-top:8px;margin-bottom:0" onclick="toggleMore('moreArch',this,'▾ 이전 리포트 7개 더보기')">▾ 이전 리포트 7개 더보기</button></div>
 
-  <p class="foot">데이터: 2026.08.13 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.13-f]</span></p>
+  <p class="foot">데이터: 2026.08.13 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.13-g]</span></p>
 </div>
 <script>
 function toggleMore(id,btn,label){
