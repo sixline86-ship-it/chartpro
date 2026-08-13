@@ -80,6 +80,18 @@ jobs:
       - name: 패키지 설치
         if: steps.guard.outputs.run == 'yes'
         run: pip install -r requirements.txt
+      - name: 과거 발행물 정리 (archive 폴더로)
+        if: steps.guard.outputs.run == 'yes'
+        run: |
+          # 날짜별 원본(json)을 archive/ 로 모은다. 루트에 매일 쌓이면
+          # 정작 중요한 .py 파일이 묻히기 때문. HTML은 링크 보존을 위해 루트에 둔다.
+          mkdir -p archive
+          shopt -s nullglob
+          for f in data_*.json report_*.json; do
+            [ -f "$f" ] && git mv -f "$f" archive/ 2>/dev/null || mv -f "$f" archive/
+          done
+          echo "archive 파일 수: $(ls archive | wc -l)"
+
 
       # ── ① 숫자 수집 ──
       - name: 데이터 수집
@@ -113,7 +125,7 @@ jobs:
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
-          git add index.html data_*.json report_*.json report_*.html flow_history.json market_history.json thumb/*.png || true
+          git add -A archive index.html report_*.html flow_history.json market_history.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git pull --rebase --autostash || true
           git push
