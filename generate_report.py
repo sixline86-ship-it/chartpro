@@ -20,13 +20,44 @@ from datetime import datetime
 import anthropic  # pip install anthropic
 
 DATE = datetime.now().strftime("%Y%m%d")
-DATA_PATH = f"data_{DATE}.json"
-REPORT_PATH = f"report_{DATE}.json"
+# ── 파일 보관 위치 ──
+#   날짜별 원본(data_·report_ json)은 archive/ 폴더에 모은다.
+#   저장소 첫 화면에 매일 3개씩 쌓이면 정작 중요한 .py 파일이 묻히기 때문이다.
+#   ⚠️ report_*.html은 **루트에 그대로 둔다** — 이미 텔레그램·카톡으로 나간
+#      https://.../report_YYYYMMDD.html 링크가 전부 깨지기 때문이다.
+ARCHIVE = "archive"
+
+
+def apath(name):
+    """읽기용 경로 — archive/에 있으면 그것을, 없으면 루트를 쓴다(하위 호환)."""
+    p = os.path.join(ARCHIVE, name)
+    return p if os.path.exists(p) else name
+
+
+def asave(name):
+    """쓰기용 경로 — 항상 archive/ 아래. 폴더가 없으면 만든다."""
+    os.makedirs(ARCHIVE, exist_ok=True)
+    return os.path.join(ARCHIVE, name)
+
+
+def alist(pattern):
+    """archive/와 루트를 함께 훑어 파일명 목록을 준다(중복 제거)."""
+    names = set()
+    for d in (ARCHIVE, "."):
+        try:
+            names.update(f for f in os.listdir(d) if re.fullmatch(pattern, f))
+        except FileNotFoundError:
+            continue
+    return sorted(names)
+
+
+DATA_PATH = apath(f"data_{DATE}.json")
+REPORT_PATH = asave(f"report_{DATE}.json")
 
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.12-e"
+SCRIPT_VERSION = "v2026.08.13-d"
 
 # 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
 MAX_TOKENS_START = 16000
@@ -118,8 +149,13 @@ SYSTEM_PROMPT = """\
    금리 인하를 늦출 수 있다는 점이 부담입니다.")
 - 핵심편: 리포트 맨 위 "90초 브리핑". 바쁜 구독자가 이것만 읽어도 오늘을 이해하게 한다.
   {
-   "오늘의정의": "오늘은 '○○한 날'입니다 — 25자 이내. 작은따옴표 안에 오늘의 성격을 비유로.
-                 (예시 형태만 참고: '대장 혼자 뛴 날', '줄다리기가 팽팽한 날')",
+   "오늘의정의": "오늘은 '○○'인 날입니다 — 작은따옴표 안에 **일상에서 쓰는 짧은 비유어**를 넣는다.
+                 음식·날씨·생활 표현처럼 누구나 아는 것에서 빌려오면 좋다.
+                 (형태 예시만 참고, 그대로 쓰지 말 것: '겉바속촉', '빛 좋은 개살구',
+                  '태풍의 눈', '살얼음판') 25자 이내.",
+   "정의풀이": "바로 위 비유가 무슨 뜻이고 오늘 시장의 무엇과 닮았는지 **1문장**으로 풀어준다.
+              비유어를 모르는 사람도 이해되게. 예: \"겉은 바삭하고 속은 촉촉하다는 뜻으로,
+              지수는 멀쩡한데 안에서는 돈이 크게 오갔다는 말입니다.\"",
    "공감문구": "구독자 심정을 대변하는 한 줄. **20자 이내. 큰따옴표 포함.**
               ⚠️ 숫자·종목명·지수명·위로('괜찮다' 류) 절대 금지 — 감정만 담는다.",
    "왜그런가": "오늘의정의를 데이터 숫자로 설명. 2~3문장. 마지막 문장은 '이상한 게 아니라 ~' 처럼 안심 구조 권장",
@@ -138,11 +174,28 @@ SYSTEM_PROMPT = """\
            통념반전 / 시간축 늘리기 / 주체 바꿔보기 / 규모 재해석 / 침묵 신호",
    "뒤집어보기": "선택한 렌즈로 오늘의 통념적 해석 하나를 뒤집는 문단. 3~4문장.
                '보통은 ~라고 씁니다. 그런데 ~' 구조. 예측 아닌 관점 전환",
-   "내종목위로": "오늘 하락 종목이 다수/소수였는지 등락수 데이터로 한 문장 + 그게 뜻하는 바 한 문장.
-               등락수 데이터가 없으면 빈 문자열"
+   "내마음": {
+     "제목": "오늘 개인 투자자의 심정에 맞춘 코너 제목. **매일 달라야 한다.**
+            이모지 1개로 시작. 예시 형태만 참고: '😮‍💨 오늘 계좌가 파랗다면',
+            '🫠 다 오르는데 내 것만 안 올랐다면', '🤨 오늘 판 게 아까운 분들께'.
+            오늘 시장 상황(상승/하락/횡보/쏠림)에 맞춰 고른다.",
+     "본문": "3~4문장. **오늘 데이터에 근거한 위로**여야 한다.
+            ① 오늘 개인이 어떤 처지였는지 숫자로 짚고(등락 종목수·개인 수급 등)
+            ② '당신만 그런 게 아니다'를 사실로 보여주고
+            ③ 그래서 지금 무엇을 하면 되는지 담백하게 한 문장.
+            ⚠️ 금지: 뻔한 위로('힘내세요', '괜찮습니다'), 신파, 근거 없는 낙관,
+                    '오를 겁니다' 류 예측, 훈계조.
+            ⚠️ 필수: 짧고 임팩트 있게. 속이 시원해지는 사실 한 방이 백 마디 위로보다 낫다.
+            예시 톤: \"오늘 개인은 3.2조를 받아냈습니다. 파는 쪽이 아니라 사는 쪽에
+                     서 있었다는 뜻입니다. 문제는 방향이 아니라 시간입니다.\"",
+     "한줄": "본문을 한 문장으로 압축한 굵은 마무리. 15자 이내."
+   }
   }
   ⚠️ 핵심편의 모든 숫자는 입력 데이터에 있는 것만. 티저는 코드가 만들므로 쓰지 않는다.
 - 핵심이슈: 입력된 '뉴스원본' 제목들을 보고, 오늘 시장을 움직인 굵직한 이슈 3~4개를 뽑는다.
+  "태그"는 반드시 다음 6개 중 하나만 쓴다 (다른 단어 금지):
+   반도체 / 정책 / 수급 / 글로벌 / 실적 / 산업
+  ⚠️ 태그가 4개 모두 같으면 안 된다 — 성격이 다른 이슈를 고르라는 뜻이다.
   ⚠️ 각 이슈는 **완전히 다른 두 벌**로 쓴다. 이건 필수이며 위반은 명백한 오류다:
    · "내용"(핵심편용, 1~2문장) = **무슨 일이 있었나 + 오늘 주가에 준 영향.**
      사실 전달만. 배경 설명 금지.
@@ -292,7 +345,8 @@ SYSTEM_PROMPT = """\
   },
   "핵심편": {"오늘의정의": "...", "공감문구": "\"...\"", "왜그런가": "...",
            "세줄요약": ["...", "...", "..."], "수급특징": ["...", "...", "..."],
-           "수급왜": "...", "렌즈": "...", "뒤집어보기": "...", "내종목위로": "..."},
+           "수급왜": "...", "렌즈": "...", "뒤집어보기": "...",
+           "정의풀이": "...", "내마음": {"제목": "...", "본문": "...", "한줄": "..."}},
   "핵심이슈": [
     {"태그": "반도체", "내용": "핵심편용 1~2문장", "상세": "심층편용 2~3문장(내용과 다르게)",
      "관련링크": [{"제목": "원본 제목", "링크": "원본 링크 그대로"}]}
@@ -322,7 +376,7 @@ def load_previous_watchpoints():
     """가장 최근 발행분(어제 등)의 관전포인트를 불러온다.
     저장소에 report_YYYYMMDD.json 이 쌓이므로 그중 오늘 것을 뺀 최신 파일을 쓴다."""
     import glob
-    files = sorted(glob.glob("report_*.json"))
+    files = [apath(f) for f in alist(r"report_\d{8}\.json")]
     files = [f for f in files if DATE not in f]
     if not files:
         print("ℹ️ 이전 발행분이 없어 '어제의 채점표'는 생략됩니다.")
@@ -491,13 +545,13 @@ def recent_flip_lenses(일수=5):
     렌즈들 = []
     try:
         파일들 = sorted(
-            [f for f in os.listdir(".") if re.fullmatch(r"report_\d{8}\.json", f)],
+            alist(r"report_\d{8}\.json"),
             reverse=True)[:일수]
     except Exception:
         return 렌즈들
     for f in 파일들:
         try:
-            with open(f, encoding="utf-8") as fp:
+            with open(apath(f), encoding="utf-8") as fp:
                 핵 = (json.load(fp).get("해석글") or {}).get("핵심편") or {}
             t = (핵.get("렌즈") or "").strip()
             if t and t not in 렌즈들:
@@ -517,13 +571,13 @@ def recent_study_topics(일수=12):
     주제들 = []
     try:
         파일들 = sorted(
-            [f for f in os.listdir(".") if re.fullmatch(r"report_\d{8}\.json", f)],
+            alist(r"report_\d{8}\.json"),
             reverse=True)[:일수]
     except Exception:
         return 주제들
     for f in 파일들:
         try:
-            with open(f, encoding="utf-8") as fp:
+            with open(apath(f), encoding="utf-8") as fp:
                 공부 = (json.load(fp).get("해석글") or {}).get("오늘의_공부") or {}
             t = (공부.get("주제") or "").strip()
             if t and t not in 주제들:
