@@ -26,8 +26,10 @@ a{color:inherit;text-decoration:none}
 .top-bar{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}
 .rp-title{font-size:17px;font-weight:800}
 .badge{font-size:11px;color:var(--sub);background:var(--bg2);padding:3px 9px;border-radius:var(--rmd);border:.5px solid var(--line);height:fit-content}
-.sec-label{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.07em;text-transform:uppercase;margin:1.5rem 0 .7rem;display:flex;gap:6px}
-.sec-label::after{content:'';flex:1;height:.5px;background:var(--line);align-self:center}
+.sec-label{display:block;font-size:14.5px;font-weight:800;color:var(--ink);letter-spacing:-.01em;text-transform:none;margin:1.6rem 0 .7rem;line-height:1.35}
+.sec-label small{display:block;font-size:10px;font-weight:700;color:var(--sub);letter-spacing:.1em;margin-bottom:2px}
+.sec-label i{font-style:normal;font-weight:500;color:#a8aeb6;letter-spacing:0}
+.sec-label::after{content:'';display:block;height:.5px;background:var(--line);margin-top:.5rem}
 .up{color:var(--up);font-weight:600} .dn{color:var(--dn);font-weight:600} .smut{color:var(--sub)}
 
 /* ── 게이지 ── */
@@ -254,6 +256,7 @@ a{color:inherit;text-decoration:none}
 .ac-long{margin-top:1rem;border-top:.5px solid var(--line);padding-top:.85rem}
 .ac-long-t{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.2rem}
 .ac-long-s{font-size:10.5px;color:var(--sub);line-height:1.65;margin-bottom:.6rem}
+.ac-star2{display:block;margin-top:4px;font-size:9.5px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:2px 9px;width:fit-content}
 .ac-star{font-size:9px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:1px 7px;margin-left:4px}
 .rd-foot{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}
 
@@ -425,6 +428,9 @@ a{color:inherit;text-decoration:none}
 
 .qt .u{color:var(--up-soft)}
 
+.q90-stale{font-size:11.5px;line-height:1.7;color:#8a6d3b;background:#fcf6e3;border:.5px solid #e6d7a8;border-radius:var(--rmd);padding:.7rem .85rem;margin-bottom:.8rem}
+.q90-gloss{font-size:12px;color:#9aa0a8;line-height:1.7;margin:-.2rem 0 .6rem}
+.mine-f2{font-size:13px;font-weight:800;color:#fff;margin-top:.5rem}
 .q90-cut{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}
 
 
@@ -631,43 +637,43 @@ a{color:inherit;text-decoration:none}
     <span class="badge">2026.08.13 마감</span>
   </div>
 
-  <div class="q90"><div class="q90-top"><span class="q90-badge">⏱️ 90초 브리핑</span><span class="q90-sub">바쁘시면 여기까지만 읽으셔도 됩니다</span></div><p class="q90-def">'멈춘 지수, 바쁜 외국인'인 날</p><p class="q90-feel">"오늘 뭐 한 거지 싶은 하루"</p><p class="q90-why">코스피·코스닥 모두 등락률 0.00%로 지수는 완전히 멈췄지만, 외국인은 코스피에서 2.84조를 순매수하며 3일 연속 매수를 이어갔습니다. 지수만 보면 심심했지만 수급은 조용히 크게 움직였다는 뜻이라, 이상한 게 아니라 겉과 속이 다른 하루였습니다.</p><div class="q90-3"><div class="q3"><span class="q3-n">1</span><span>코스피 6,579.04, 코스닥 858.91 모두 보합(0.00%) 마감.</span></div><div class="q3"><span class="q3-n">2</span><span>코스닥 등락종목 상승1·보합1·하락1로 방향성이 갈렸다.</span></div><div class="q3"><span class="q3-n">3</span><span>외국인+기관 합산 순매수 3.36조로 20일 중 2위를 기록.</span></div></div><div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p><p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p><div class="i9"><span class="i9-t tg-semi">반도체</span><span>미국 반도체 업종 강세로 프리마켓에서 삼성전자가 3%, SK하이닉스가 4% 오른 것으로 전해지며 국내 반도체주에 대한 기대감이 커졌습니다.</span></div><div class="i9"><span class="i9-t tg-glo">글로벌</span><span>미국 CPI 둔화 소식에 아시아 증시가 이틀째 상승 출발할 것이라는 전망이 나왔지만, 정작 코스피는 보합(0.00%)에 그쳤습니다.</span></div><div class="i9"><span class="i9-t tg-sup">특징주</span><span>이달 초순 개인과 외국인이 코스피 방향을 두고 서로 반대 베팅을 한 것으로 나타나 수급 주체 간 시각차가 부각됐습니다.</span></div><div class="i9"><span class="i9-t tg-sup">특징주</span><span>증권가에서 JYP, SK오션플랜트, 카카오게임즈, 클래시스, 미래에셋증권 등 여러 종목의 목표주가를 잇달아 하향 조정했습니다.</span></div></div><div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p><p class="mny-sub">최근 20거래일과 비교했습니다</p><div class="mny-tiles"><div class="tile"><p class="tile-k">외국인</p><p class="tile-v b">+2.84조</p><p class="tile-s">17일 중 매수 2위</p></div><div class="tile"><p class="tile-k">기관</p><p class="tile-v b">+5,279억</p><p class="tile-s">5일 연속 매수</p></div><div class="tile"><p class="tile-k">개인</p><p class="tile-v s">−3.19조</p><p class="tile-s">17일 중 매도 2위</p></div></div><div class="mny-feat"><p class="mf"><span class="mf-i">1</span><span><b>외국인이 평소보다 크게 샀습니다.</b> 20일 평균은 하루 2.44조인데 오늘은 2.84조(2.84조)으로 20일 중 매수 2위 — 확신 있는 매수세로 볼 수 있습니다.</span></p><p class="mf"><span class="mf-i">2</span><span><b>개인과 외국인이 정반대로 움직였습니다.</b> 개인은 코스피에서 -3.19조을 순매도한 반면 외국인은 +2.84조을 순매수해, 두 주체의 방향이 뚜렷하게 엇갈렸습니다.</span></p><p class="mf"><span class="mf-i">3</span><span><b>기관은 평소보다 오히려 적게 샀습니다.</b> 20일 평균 8,781억 대비 오늘은 5,279억으로 순위 6/17에 그쳐, 외국인만큼 강한 매수 의지는 아니었습니다.</span></p></div><div class="mny-why"><p class="mw-h">🤔 왜 이렇게 움직였을까요</p><p class="mw-b">🤔 미국발 CPI 둔화 훈풍과 반도체 강세(삼성전자·SK하이닉스 프리마켓 급등) 소식이 국내 증시 대기 심리를 자극한 것으로 보입니다.<br><br>다만 지수 자체는 보합에 머물러, 기대감은 있었지만 실제 매수 강도가 지수를 밀어올릴 만큼은 아니었던 것으로 보입니다. 외국인의 현물 매수가 컸던 반면 선물에서는 매도를 유지한 점도 확신이 완전하지는 않았음을 보여줍니다.</p></div></div><div class="mine"><p class="mine-h">😮‍💨 오늘 내 종목이 내렸다면</p><p class="mine-b">코스닥은 상승 1, 보합 1, 하락 1로 정확히 3분의 1씩 갈렸습니다. 내 종목이 하락했다고 시장 전체가 나빴던 건 아니라는 뜻입니다.</p><div class="mine-split"><div class="ms"><p class="ms-k">거래량이 줄면서 내렸다면</p><p class="ms-v">파는 사람이 많은 게 아니라 <b style="color:#dfe3e8">사는 사람이 없는</b> 상태입니다. 관심이 잠시 다른 곳으로 갔을 가능성.</p></div><div class="ms"><p class="ms-k">거래량이 늘면서 내렸다면</p><p class="ms-v">실제로 <b style="color:#dfe3e8">물량이 나온</b> 것입니다. 이유가 있는지 아래 공시·뉴스를 확인해볼 자리입니다.</p></div></div><p class="mine-f">👉 이 둘은 성격이 완전히 다릅니다. 아래 <b>'오늘의 중요 공시'</b>에 내 종목이 있는지부터 보시는 게 가장 빠릅니다.</p></div><div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p><p class="qf-b">보통은 지수가 보합이면 '오늘은 별일 없었다'고 씁니다. 그런데 수급 주체를 바꿔서 보면, 외국인은 20일 중 2위 규모로 사들이고 개인은 3.19조를 던진 완전히 다른 하루였습니다. 지수라는 평균값 하나만 보면 놓치는 것이, 주체를 나눠보면 드러나는 셈입니다.</p></div><div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p><a class="qt" href="#acc"><span class="qt-tag">매집</span><span>5일·20일 랭킹 <b>동시 등재</b> ⭐ <span class="u">34종목</span>, 꼭 확인하세요</span><span class="qt-go">확인 ↓</span></a><a class="qt" href="#watch"><span class="qt-tag">관전</span><span>내일 아침, <b>이 숫자 하나</b>만 확인하세요</span><span class="qt-go">확인 ↓</span></a></div></div><p class="q90-cut" id="deep">— 여기까지가 90초. 아래 <b>정밀 관제</b>는 근거와 상세입니다 ↓ —</p>
+  <div class="q90"><div class="q90-top"><span class="q90-badge">⏱️ 90초 브리핑</span><span class="q90-sub">바쁘시면 여기까지만 읽으셔도 됩니다</span></div><p class="q90-def">'멈춘 지수, 바쁜 외국인'인 날</p><p class="q90-feel">"오늘 뭐 한 거지 싶은 하루"</p><p class="q90-why">코스피·코스닥 모두 등락률 0.00%로 지수는 완전히 멈췄지만, 외국인은 코스피에서 2.84조를 순매수하며 3일 연속 매수를 이어갔습니다. 지수만 보면 심심했지만 수급은 조용히 크게 움직였다는 뜻이라, 이상한 게 아니라 겉과 속이 다른 하루였습니다.</p><div class="q90-3"><div class="q3"><span class="q3-n">1</span><span>코스피 6,579.04, 코스닥 858.91 모두 보합(0.00%) 마감.</span></div><div class="q3"><span class="q3-n">2</span><span>코스닥 등락종목 상승1·보합1·하락1로 방향성이 갈렸다.</span></div><div class="q3"><span class="q3-n">3</span><span>외국인+기관 합산 순매수 3.36조로 20일 중 2위를 기록.</span></div></div><div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p><p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p><div class="i9"><span class="i9-t tg-semi">반도체</span><span>미국 반도체 업종 강세로 프리마켓에서 삼성전자가 3%, SK하이닉스가 4% 오른 것으로 전해지며 국내 반도체주에 대한 기대감이 커졌습니다.</span></div><div class="i9"><span class="i9-t tg-glo">글로벌</span><span>미국 CPI 둔화 소식에 아시아 증시가 이틀째 상승 출발할 것이라는 전망이 나왔지만, 정작 코스피는 보합(0.00%)에 그쳤습니다.</span></div><div class="i9"><span class="i9-t tg-sup">특징주</span><span>이달 초순 개인과 외국인이 코스피 방향을 두고 서로 반대 베팅을 한 것으로 나타나 수급 주체 간 시각차가 부각됐습니다.</span></div><div class="i9"><span class="i9-t tg-sup">특징주</span><span>증권가에서 JYP, SK오션플랜트, 카카오게임즈, 클래시스, 미래에셋증권 등 여러 종목의 목표주가를 잇달아 하향 조정했습니다.</span></div></div><div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p><p class="mny-sub">최근 20거래일과 비교했습니다</p><div class="mny-tiles"><div class="tile"><p class="tile-k">외국인</p><p class="tile-v b">+2.78조</p><p class="tile-s">17일 중 매수 3위</p></div><div class="tile"><p class="tile-k">기관</p><p class="tile-v s">−2,278억</p><p class="tile-s">평소의 0.3배</p></div><div class="tile"><p class="tile-k">개인</p><p class="tile-v s">−2.52조</p><p class="tile-s">17일 중 매도 3위</p></div></div><div class="mny-feat"><p class="mf"><span class="mf-i">1</span><span><b>외국인이 평소보다 크게 샀습니다.</b> 20일 평균은 하루 2.44조인데 오늘은 2.84조(2.84조)으로 20일 중 매수 2위 — 확신 있는 매수세로 볼 수 있습니다.</span></p><p class="mf"><span class="mf-i">2</span><span><b>개인과 외국인이 정반대로 움직였습니다.</b> 개인은 코스피에서 -3.19조을 순매도한 반면 외국인은 +2.84조을 순매수해, 두 주체의 방향이 뚜렷하게 엇갈렸습니다.</span></p><p class="mf"><span class="mf-i">3</span><span><b>기관은 평소보다 오히려 적게 샀습니다.</b> 20일 평균 8,781억 대비 오늘은 5,279억으로 순위 6/17에 그쳐, 외국인만큼 강한 매수 의지는 아니었습니다.</span></p></div><div class="mny-why"><p class="mw-h">🧭 왜 이렇게 움직였을까요</p><p class="mw-b">🤔 미국발 CPI 둔화 훈풍과 반도체 강세(삼성전자·SK하이닉스 프리마켓 급등) 소식이 국내 증시 대기 심리를 자극한 것으로 보입니다.<br><br>다만 지수 자체는 보합에 머물러, 기대감은 있었지만 실제 매수 강도가 지수를 밀어올릴 만큼은 아니었던 것으로 보입니다. 외국인의 현물 매수가 컸던 반면 선물에서는 매도를 유지한 점도 확신이 완전하지는 않았음을 보여줍니다.</p></div></div><div class="mine"><p class="mine-h">😮‍💨 오늘 내 종목이 내렸다면</p><p class="mine-b">코스닥은 상승 1, 보합 1, 하락 1로 정확히 3분의 1씩 갈렸습니다. 내 종목이 하락했다고 시장 전체가 나빴던 건 아니라는 뜻입니다.</p></div><div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p><p class="qf-b">보통은 지수가 보합이면 '오늘은 별일 없었다'고 씁니다. 그런데 수급 주체를 바꿔서 보면, 외국인은 20일 중 2위 규모로 사들이고 개인은 3.19조를 던진 완전히 다른 하루였습니다. 지수라는 평균값 하나만 보면 놓치는 것이, 주체를 나눠보면 드러나는 셈입니다.</p></div><div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p><a class="qt" href="#radar"><span class="qt-tag">레이더</span><span>거래량이 평소의 <span class="u">2배</span> 터진 종목이 나왔습니다</span><span class="qt-go">확인 ↓</span></a><a class="qt" href="#acc"><span class="qt-tag">매집</span><span>5일·20일 랭킹에 <b>동시에</b> 올라온 종목이 <span class="u">34개</span> 있습니다</span><span class="qt-go">확인 ↓</span></a><a class="qt" href="#watch"><span class="qt-tag">관전</span><span>내일 아침, <b>이 숫자 하나</b>만 확인하세요</span><span class="qt-go">확인 ↓</span></a></div></div><p class="q90-cut" id="deep">— 여기까지가 90초. 아래 <b>정밀 관제</b>는 근거와 상세입니다 ↓ —</p>
 
   
   <div class="gauge-box">
     <div class="gz-top">
-      <div class="gz-numwrap"><p class="gz-num">43</p><p class="gz-lab">보통 🌤️</p></div>
+      <div class="gz-numwrap"><p class="gz-num">64</p><p class="gz-lab">온기 🔥</p></div>
       <div class="gz-bodywrap">
         <p class="gz-title">📡 관제지수 (0~100) — 오늘 시장의 온도</p>
         <div class="gz-track">
           <div class="gz z1"></div><div class="gz z2"></div><div class="gz z3"></div><div class="gz z4"></div><div class="gz z5"></div>
-          <div class="gz-needle" style="left:43%"></div>
+          <div class="gz-needle" style="left:64%"></div>
         </div>
         <div class="gz-scale"><span>혹한</span><span>한파</span><span>보통</span><span>온기</span><span>과열</span></div>
       </div>
     </div>
     <p class="gz-oneline">📝 <b>한줄평:</b> 지수는 멈췄지만 외국인은 3.36조 쓸어담았다</p>
-    <div class="gz-badges"><span class="gz-badge">↔️ 코스피·코스닥 혼조</span><span class="gz-badge">🔵 시장 전반 하락 우위 (0%)</span><span class="gz-badge">💸 외인+기관 +3.36조 순매수</span></div>
+    <div class="gz-badges"><span class="gz-badge">📈 코스피·코스닥 동반 상승</span><span class="gz-badge">🔵 시장 전반 하락 우위 (36%)</span><span class="gz-badge">💸 외인+기관 +2.55조 순매수</span></div>
     <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
     <div class="hidden-block" id="gzDetail">
       <div class="gz-detail">
       <div class="gz-row">
         <span class="gz-el">지수 등락률</span>
-        <span class="gz-sc">50점</span>
+        <span class="gz-sc">72점</span>
         <span class="gz-w">가중 43%</span>
-        <span class="gz-ev">코스피 +0.00%, 코스닥 +0.00%</span>
+        <span class="gz-ev">코스피 +3.19%, 코스닥 +0.32%</span>
       </div>
       <div class="gz-row">
         <span class="gz-el">등락 종목 비율</span>
-        <span class="gz-sc">0점</span>
+        <span class="gz-sc">36점</span>
         <span class="gz-w">가중 36%</span>
-        <span class="gz-ev">주요 테마 평균 상승종목 0%</span>
+        <span class="gz-ev">주요 테마 평균 상승종목 36%</span>
       </div>
       <div class="gz-row">
         <span class="gz-el">외국인+기관 수급</span>
-        <span class="gz-sc">100점</span>
+        <span class="gz-sc">93점</span>
         <span class="gz-w">가중 21%</span>
-        <span class="gz-ev">외인+기관 +33,633억 순매수</span>
+        <span class="gz-ev">외인+기관 +25,521억 순매수</span>
       </div>
         <p class="gz-note">※ 각 요소를 0~100으로 환산해 가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>
       </div>
@@ -679,58 +685,58 @@ a{color:inherit;text-decoration:none}
     <p class="terrain-title">📊 오늘의 섹터 지형도 — 주도 6개 업종 등락률</p>
     <div class="bar-chart">
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">화폐/금융…</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(61.0% + 2px)">+5.2%</span><div class="bar pos" style="bottom:3.0%;height:58.0%"></div></div>
+        <p class="bar-name">반도체 대…</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">OLED(…</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(51.9% + 2px)">+4.4%</span><div class="bar pos" style="bottom:3.0%;height:48.9%"></div></div>
+        <p class="bar-name">소캠(SO…</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">반도체 장비</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(85.0% + 2px)">+7.3%</span><div class="bar pos" style="bottom:3.0%;height:82.0%"></div></div>
+        <p class="bar-name">야놀자(Y…</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">리모델링/…</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(54.5% + 2px)">+4.6%</span><div class="bar pos" style="bottom:3.0%;height:51.5%"></div></div>
+        <p class="bar-name">핵융합에너지</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">반도체 재…</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(52.4% + 2px)">+4.4%</span><div class="bar pos" style="bottom:3.0%;height:49.4%"></div></div>
+        <p class="bar-name">스페이스X…</p>
       </div>
       <div class="bar-col">
-        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(4.5% + 2px)">+0.0%</span><div class="bar pos" style="bottom:3.0%;height:1.5%"></div></div>
-        <p class="bar-name">구제역/광…</p>
+        <div class="bar-zone" style="--zero:97.0%"><span class="bar-val pos" style="bottom:calc(24.0% + 2px)">+1.9%</span><div class="bar pos" style="bottom:3.0%;height:21.0%"></div></div>
+        <p class="bar-name">HBM(고…</p>
       </div></div>
   </div>
 
-  <p class="sec-label">📊 지수 + 수급</p>
+  <p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
   <div class="idx-grid">
     <div class="idx-card2">
       <p class="ic-mkt">KOSPI</p>
-      <p class="ic-num">6,579.04</p>
-      <p class="ic-chg-up">보합 0.00%</p>
+      <p class="ic-num">6,788.69</p>
+      <p class="ic-chg-up">상승 3.19%</p>
       <div class="sup-grid">
-        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt up">+2.84조</p></div>
-        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt up">+5,279억</p></div>
-        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt dn">−3.19조</p></div>
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt up">+2.78조</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt dn">−2,278억</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt dn">−2.52조</p></div>
       </div>
     </div>
     <div class="idx-card2">
       <p class="ic-mkt">KOSDAQ</p>
-      <p class="ic-num">858.91</p>
-      <p class="ic-chg-up">보합 0.00%</p>
+      <p class="ic-num">861.63</p>
+      <p class="ic-chg-up">상승 0.32%</p>
       <div class="sup-grid">
-        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt dn">−1,623억</p></div>
-        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt dn">−1,459억</p></div>
-        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt up">+3,127억</p></div>
+        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt dn">−1,051억</p></div>
+        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt dn">−1,485억</p></div>
+        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt up">+2,601억</p></div>
       </div>
     </div>
   </div>
 
   <div class="today-market">💡 <b>오늘의 시장:</b> 코스피·코스닥 모두 보합 마감으로 지수만 보면 아무 일 없던 하루지만, 코스피에서 외국인이 2.84조 순매수하며 3일 연속 매수를 이어갔고 외국인+기관 합산으로는 3.36조가 들어왔습니다. 반면 개인은 코스피에서 3.19조를 순매도해 수급 주체 간 방향이 완전히 갈렸고, 코스닥은 상승·보합·하락이 1:1:1로 갈리며 등락 종목 비율 점수가 0점을 기록할 만큼 종목별 온도차가 컸습니다.</div>
 
-  <p class="sec-label">🔥 핵심 이슈 — 상세</p>
+  <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 왜, 어디로, 무엇을 볼까</p>
   <div class="issue-box">
     <div class="iss"><span class="itag">반도체</span>
       <span class="iss-text">미국 CPI 지표 둔화로 금리 인하 기대가 되살아나며 반도체를 포함한 기술주 전반에 매수세가 유입된 것이 배경입니다. 국내에서도 반도체 장비·재료 관련주로 관심이 이어질 수 있어 삼성전자·SK하이닉스 실적 및 외국인 수급과 연동해 움직일 가능성이 있습니다. 다음 거래일 프리마켓 상승분이 국내 개장가에 얼마나 반영되는지, 외국인의 반도체 대형주 순매수 지속 여부를 확인하면 됩니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0014124406&amp;office_id=003&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 美 반도체 강세…프리마켓서 삼성전자 3%↑SK하…</a></span></span></div>
@@ -741,20 +747,20 @@ a{color:inherit;text-decoration:none}
     <div class="iss"><span class="itag">특징주</span>
       <span class="iss-text">JYP는 트와이스·스트레이키즈 활동 공백 우려, SK오션플랜트는 해상풍력 프로젝트 지연, 카카오게임즈는 4분기 순손실 전망, 클래시스는 수익성 정상화 지연, 미래에셋증권은 스페이스X 관련 변수가 각각 하향 사유로 거론됐습니다. 실적 우려가 큰 종목군에서 목표가 하향이 동시다발적으로 나온 점이 특징이며, 게임·엔터·증권·2차전지 인접 업종 전반에 신중론이 번질 수 있습니다. 다음 실적 발표나 후속 리포트에서 목표가가 추가로 조정되는지 지켜볼 필요가 있습니다.<span class="iss-links"><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0006350719&amp;office_id=018&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 JYP, 트와이스 활동 불확실성·스키즈 군백기 …</a><a class="iss-link" href="https://finance.naver.com/news/news_read.naver?article_id=0005399363&amp;office_id=008&amp;mode=LSS2D&amp;type=0§ion_id=101§ion_id2=258§ion_id3=&amp;date=20260813&amp;page=1" target="_blank">📎 카카오게임즈, 4분기 순손실 전망…목표가 하향-…</a></span></span></div></div>
 
-  <p class="sec-label">🌐 환율 · 유가 · 금리</p>
+  <p class="sec-label"><small>환율 · 유가 · 금리</small>🌏 바깥 날씨</p>
   <div class="macro-row">
     
     <div class="mr-card">
       <p class="mr-label">원/달러 환율</p>
-      <p class="mr-val">1,416.92</p>
-      <span class="up" style="font-size:11px;font-weight:700">+0.34%</span>
+      <p class="mr-val">1,414.95</p>
+      <span class="up" style="font-size:11px;font-weight:700">+0.20%</span>
       <p class="mr-comment">원/달러 환율이 1,416.92원으로 0.34% 올랐습니다(원화 약세). 그런데도 외국인이 코스피에서 2.84조를 순매수해, 환율 부담이 매수 심리를 꺾지는 않은 하루였습니다.</p>
     </div>
     
     <div class="mr-card">
       <p class="mr-label">WTI 유가</p>
-      <p class="mr-val">$82.71</p>
-      <span class="dn" style="font-size:11px;font-weight:700">-0.59%</span>
+      <p class="mr-val">$82.92</p>
+      <span class="dn" style="font-size:11px;font-weight:700">-0.42%</span>
       <p class="mr-comment">WTI 유가가 82.71달러로 0.59% 내렸습니다. 기름값 하락은 기업 원가 부담을 줄여주는 방향이라 물가·금리 부담을 조금 덜어주는 요인입니다.</p>
     </div>
     
@@ -766,175 +772,171 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 
-  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  <p class="sec-label"><small>주도 섹터</small>🏆 오늘의 주인공 — 시장을 끌고 간 6개 업종</p>
   <p class="devnote">⚙️ <b>적용 조건</b> · 전체 테마 중 등락률 상위 20개를 1차 후보로 추림 → 강도40 + 거래대금35 + 확산도25 점수로 재정렬 → 상위 6개. 단, 앞 카드와 종목이 2개 이상 겹치면 제외</p>
   <div class="sector-grid">
     <div class="sector-card">
       <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">화폐/금융자동화기기(디지털화폐 등)</span>
-          <span class="sc-chg pos">+0.00%</span></div>
-        <p class="sc-score">주도력 50.0점</p>
+        <div class="sc-name-row"><span class="sc-name">반도체 대표주(생산)</span>
+          <span class="sc-chg pos">+5.17%</span></div>
+        <p class="sc-score">주도력 76.9점</p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
         
-        <div class="sc-row"><span class="sc-stock">누리플렉스</span>
-          <span class="sc-price">5,400</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">한네트</span>
-          <span class="sc-price">3,185</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">프리엠스</span>
-          <span class="sc-price">9,350</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">NICE인프라</span>
-          <span class="sc-price">3,330</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
+        <div class="sc-row"><span class="sc-stock">SK하이닉스</span>
+          <span class="sc-price">1,597,000</span>
+          <span class="sc-rate up">+6.18%</span>
+          <span class="sc-vol">5.62조</span></div>
+        <div class="sc-row"><span class="sc-stock">DB하이텍</span>
+          <span class="sc-price">100,400</span>
+          <span class="sc-rate up">+5.57%</span>
+          <span class="sc-vol">373억</span></div>
+        <div class="sc-row"><span class="sc-stock">삼성전자</span>
+          <span class="sc-price">266,000</span>
+          <span class="sc-rate up">+4.11%</span>
+          <span class="sc-vol">6.05조</span></div>
       </div>
     </div>
     <div class="sector-card">
       <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">OLED(유기 발광 다이오드)</span>
-          <span class="sc-chg pos">+0.00%</span></div>
-        <p class="sc-score">주도력 50.0점</p>
+        <div class="sc-name-row"><span class="sc-name">소캠(SOCAMM)</span>
+          <span class="sc-chg pos">+4.36%</span></div>
+        <p class="sc-score">주도력 64.9점</p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
         
-        <div class="sc-row"><span class="sc-stock">베셀</span>
-          <span class="sc-price">695</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">야스</span>
-          <span class="sc-price">7,240</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">브이원텍</span>
-          <span class="sc-price">3,860</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">예선테크</span>
-          <span class="sc-price">1,707</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
+        <div class="sc-row"><span class="sc-stock">티에프이</span>
+          <span class="sc-price">38,850</span>
+          <span class="sc-rate up">+11.96%</span>
+          <span class="sc-vol">83억</span></div>
+        <div class="sc-row"><span class="sc-stock">ISC</span>
+          <span class="sc-price">161,700</span>
+          <span class="sc-rate up">+8.38%</span>
+          <span class="sc-vol">272억</span></div>
+        <div class="sc-row"><span class="sc-stock">코리아써키트</span>
+          <span class="sc-price">67,400</span>
+          <span class="sc-rate up">+6.31%</span>
+          <span class="sc-vol">246억</span></div>
+        <div class="sc-row"><span class="sc-stock">SK하이닉스</span>
+          <span class="sc-price">1,597,000</span>
+          <span class="sc-rate up">+6.18%</span>
+          <span class="sc-vol">5.62조</span></div>
       </div>
     </div></div>
   <div class="hidden-block" id="moreSectors"><div class="sector-grid">
     <div class="sector-card">
       <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">반도체 장비</span>
-          <span class="sc-chg pos">+0.00%</span></div>
+        <div class="sc-name-row"><span class="sc-name">야놀자(Yanolja)</span>
+          <span class="sc-chg pos">+7.31%</span></div>
         <p class="sc-score">주도력 50.0점</p>
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
         
+        <div class="sc-row"><span class="sc-stock">아주IB투자</span>
+          <span class="sc-price">4,585</span>
+          <span class="sc-rate up">+29.89%</span>
+          <span class="sc-vol">302억</span></div>
+        <div class="sc-row"><span class="sc-stock">한화생명</span>
+          <span class="sc-price">5,020</span>
+          <span class="sc-rate up">+6.81%</span>
+          <span class="sc-vol">714억</span></div>
+        <div class="sc-row"><span class="sc-stock">그래디언트</span>
+          <span class="sc-price">11,740</span>
+          <span class="sc-rate up">+2.62%</span>
+          <span class="sc-vol">5억</span></div>
+        <div class="sc-row"><span class="sc-stock">한화투자증권</span>
+          <span class="sc-price">4,640</span>
+          <span class="sc-rate dn">-0.43%</span>
+          <span class="sc-vol">48억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">핵융합에너지</span>
+          <span class="sc-chg pos">+4.59%</span></div>
+        <p class="sc-score">주도력 46.4점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">삼화콘덴서</span>
+          <span class="sc-price">103,300</span>
+          <span class="sc-rate up">+17.39%</span>
+          <span class="sc-vol">3,996억</span></div>
+        <div class="sc-row"><span class="sc-stock">SFA</span>
+          <span class="sc-price">24,650</span>
+          <span class="sc-rate up">+5.34%</span>
+          <span class="sc-vol">39억</span></div>
+        <div class="sc-row"><span class="sc-stock">비츠로넥스텍</span>
+          <span class="sc-price">11,770</span>
+          <span class="sc-rate up">+4.25%</span>
+          <span class="sc-vol">31억</span></div>
+        <div class="sc-row"><span class="sc-stock">일진파워</span>
+          <span class="sc-price">13,060</span>
+          <span class="sc-rate up">+3.90%</span>
+          <span class="sc-vol">41억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">스페이스X(SpaceX)</span>
+          <span class="sc-chg pos">+4.40%</span></div>
+        <p class="sc-score">주도력 39.6점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">아주IB투자</span>
+          <span class="sc-price">4,585</span>
+          <span class="sc-rate up">+29.89%</span>
+          <span class="sc-vol">302억</span></div>
+        <div class="sc-row"><span class="sc-stock">미래에셋벤처투자</span>
+          <span class="sc-price">17,790</span>
+          <span class="sc-rate up">+9.75%</span>
+          <span class="sc-vol">1,135억</span></div>
+        <div class="sc-row"><span class="sc-stock">세아베스틸지주</span>
+          <span class="sc-price">43,400</span>
+          <span class="sc-rate up">+6.37%</span>
+          <span class="sc-vol">97억</span></div>
+        <div class="sc-row"><span class="sc-stock">켄코아에어로스페이스</span>
+          <span class="sc-price">11,840</span>
+          <span class="sc-rate up">+4.04%</span>
+          <span class="sc-vol">30억</span></div>
+      </div>
+    </div>
+    <div class="sector-card">
+      <div class="sc-head pos">
+        <div class="sc-name-row"><span class="sc-name">HBM(고대역폭메모리)</span>
+          <span class="sc-chg pos">+1.87%</span></div>
+        <p class="sc-score">주도력 36.9점</p>
+      </div>
+      <div class="sc-list">
+        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
+        
+        <div class="sc-row"><span class="sc-stock">윈팩</span>
+          <span class="sc-price">2,375</span>
+          <span class="sc-rate up">+28.03%</span>
+          <span class="sc-vol">38억</span></div>
+        <div class="sc-row"><span class="sc-stock">ISC</span>
+          <span class="sc-price">161,700</span>
+          <span class="sc-rate up">+8.38%</span>
+          <span class="sc-vol">272억</span></div>
         <div class="sc-row"><span class="sc-stock">제너셈</span>
-          <span class="sc-price">5,430</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">씨앤지하이테크</span>
-          <span class="sc-price">13,910</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">포인트엔지니어링</span>
-          <span class="sc-price">4,345</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">자비스</span>
-          <span class="sc-price">907</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-      </div>
-    </div>
-    <div class="sector-card">
-      <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">리모델링/인테리어</span>
-          <span class="sc-chg pos">+0.00%</span></div>
-        <p class="sc-score">주도력 50.0점</p>
-      </div>
-      <div class="sc-list">
-        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
-        
-        <div class="sc-row"><span class="sc-stock">파세코</span>
-          <span class="sc-price">5,760</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">유니드비티플러스</span>
-          <span class="sc-price">3,560</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">KCC글라스</span>
-          <span class="sc-price">25,050</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">조이웍스앤코</span>
-          <span class="sc-price">985</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-      </div>
-    </div>
-    <div class="sector-card">
-      <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">반도체 재료/부품</span>
-          <span class="sc-chg pos">+0.00%</span></div>
-        <p class="sc-score">주도력 50.0점</p>
-      </div>
-      <div class="sc-list">
-        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
-        
-        <div class="sc-row"><span class="sc-stock">램테크놀러지</span>
-          <span class="sc-price">2,915</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">이녹스첨단소재</span>
-          <span class="sc-price">22,500</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">케이엔제이</span>
-          <span class="sc-price">30,700</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">샘씨엔에스</span>
-          <span class="sc-price">15,030</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-      </div>
-    </div>
-    <div class="sector-card">
-      <div class="sc-head pos">
-        <div class="sc-name-row"><span class="sc-name">구제역/광우병 수혜</span>
-          <span class="sc-chg pos">+0.00%</span></div>
-        <p class="sc-score">주도력 50.0점</p>
-      </div>
-      <div class="sc-list">
-        <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
-        
-        <div class="sc-row"><span class="sc-stock">우진비앤지</span>
-          <span class="sc-price">2,690</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">정다운</span>
-          <span class="sc-price">2,290</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">하림</span>
-          <span class="sc-price">2,710</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
-        <div class="sc-row"><span class="sc-stock">동우팜투테이블</span>
-          <span class="sc-price">2,195</span>
-          <span class="sc-rate up">0.00%</span>
-          <span class="sc-vol">0백만</span></div>
+          <span class="sc-price">5,880</span>
+          <span class="sc-rate up">+8.29%</span>
+          <span class="sc-vol">18억</span></div>
+        <div class="sc-row"><span class="sc-stock">예스티</span>
+          <span class="sc-price">29,250</span>
+          <span class="sc-rate up">+6.75%</span>
+          <span class="sc-vol">109억</span></div>
       </div>
     </div></div></div>
   <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 (4개)')">▾ 주도 섹터 더보기 (4개)</button>
 
-  <p class="sec-label">🔍 프로의 시선</p>
+  <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   
   <div class="silent-wrap">
     <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
@@ -944,67 +946,135 @@ a{color:inherit;text-decoration:none}
     <div class="si-item"><span class="si-lens">다음 시나리오</span><span>만약 선물시장 외국인 포지션이 순매수로 전환된다면(오늘 -1,071억) 현물 매수에 확신이 더해지는 신호로 볼 수 있고, 과거에도 현물·선물이 같은 방향으로 정렬될 때 추세가 더 이어진 경우가 많았습니다. 반대로 코스닥 비차익거래 순매도(오늘 -1,189억)가 더 확대된다면 코스닥 개별 종목 이탈이 심화되는 국면으로 봐야 합니다. 이는 예언이 아니라 두 지표를 함께 관찰하기 위한 체크포인트입니다.</span></div>
   </div>
 
-  <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
+  <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   
   <div class="fs-box">
     <div class="fs-verdict">
       <div class="fs-ico pos"><svg width="26" height="26" viewBox="0 0 26 26"><path d="M13 22 V6 M13 6 l-7 7 M13 6 l7 7" stroke="#ff8a6e" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></div>
       <div class="fs-main">
         <p class="fs-k">오늘의 실탄 (외국인+기관이 실제 주식에 넣은 현금) <span class="fs-n">(17일치 기준)</span></p>
-        <div class="fs-row"><span class="fs-num pos">+3.36조</span><span class="fs-state pos">매수 우위 · 평소의 1.2배</span></div>
-        <div class="fs-chips"><span class="fs-chip good">🔴 지수형 매수</span><span class="fs-chip info">🎯 종목 선별형 — 바스켓 12%</span><span class="fs-chip warn">📅 옵션 만기 주간</span></div>
+        <div class="fs-row"><span class="fs-num pos">+2.55조</span><span class="fs-state pos">매수 우위 · 평소의 0.9배</span></div>
+        <div class="fs-chips"><span class="fs-chip warn">🟠 종목 장세</span><span class="fs-chip warn">🔀 바스켓은 반대 방향</span><span class="fs-chip good">🤝 선물도 같은 방향</span><span class="fs-chip warn">📅 옵션 만기 주간</span></div>
       </div>
     </div>
-    <div class="fs-temp"><p class="fs-temp-t">🌡️ 오늘 수급 온도 <span>최근 17거래일과 비교</span></p><div class="ft-row"><span class="ft-who">외국인</span><span class="ft-val b">+2.84조</span><span class="ft-avg">평소 24,405억 · 1.2배</span><span class="ft-bad"><i>17일 중 매수 2위</i></span></div><div class="ft-row"><span class="ft-who">기관</span><span class="ft-val b">+5,279억</span><span class="ft-avg">평소 8,781억 · 0.6배</span><span class="ft-bad"><i>5일 연속 매수</i></span></div><div class="ft-row"><span class="ft-who">개인</span><span class="ft-val s">−3.19조</span><span class="ft-avg">평소 28,103억 · 1.1배</span><span class="ft-bad"><i>17일 중 매도 2위</i></span></div><p class="ft-note">배지는 같은 방향(매수는 매수끼리) 상위 3위이거나 연속 흐름일 때만 붙습니다 — 붙은 날이 특별한 날입니다.</p></div>
+    <div class="fs-temp"><p class="fs-temp-t">🌡️ 오늘 수급 온도 <span>최근 17거래일과 비교</span></p><div class="ft-row"><span class="ft-who">외국인</span><span class="ft-val b">+2.78조</span><span class="ft-avg">평소 24,405억 · 1.1배</span><span class="ft-bad"><i>17일 중 매수 3위</i></span></div><div class="ft-row"><span class="ft-who">기관</span><span class="ft-val s">−2,278억</span><span class="ft-avg">평소 8,781억 · 0.3배</span><span class="ft-bad">&nbsp;</span></div><div class="ft-row"><span class="ft-who">개인</span><span class="ft-val s">−2.52조</span><span class="ft-avg">평소 28,103억 · 0.9배</span><span class="ft-bad"><i>17일 중 매도 3위</i></span></div><p class="ft-note">배지는 같은 방향(매수는 매수끼리) 상위 3위이거나 연속 흐름일 때만 붙습니다 — 붙은 날이 특별한 날입니다.</p></div>
     <div class="fs-checks">
       <p class="fs-checks-t">🔍 세 가지만 확인하면 됩니다</p>
       
       <div class="fs-ck">
         <div class="fs-ck-ico y">✓</div>
         <p class="fs-ck-q">돈이 들어왔나?<small>실탄 = 외국인+기관 현물</small></p>
-        <p class="fs-ck-a">들어왔습니다. 규모는 최근 16거래일 하루 평균(28,522억)과 <b>비슷한 수준</b>(1.2배)입니다.</p>
-        <p class="fs-ck-v pos">+3.36조<small>방향</small></p>
+        <p class="fs-ck-a">들어왔습니다. 규모는 최근 16거래일 하루 평균(28,522억)과 <b>비슷한 수준</b>(0.9배)입니다.</p>
+        <p class="fs-ck-v pos">+2.55조<small>방향</small></p>
       </div>
       <div class="fs-ck">
-        <div class="fs-ck-ico h">△</div>
+        <div class="fs-ck-ico y">✓</div>
         <p class="fs-ck-q">선물도 동의하나?<small>외국인 선물 방향</small></p>
-        <p class="fs-ck-a">선물은 반대 방향이지만 규모가 작습니다. <b>가벼운 헤지</b> 정도로 보고, 확신을 크게 깎지는 않습니다.</p>
-        <p class="fs-ck-v mid">−1,071억<small>확신</small></p>
+        <p class="fs-ck-a">현물과 선물이 같은 방향 — 확신이 실린 수급입니다.</p>
+        <p class="fs-ck-v pos">+2,311억<small>확신</small></p>
       </div>
       <div class="fs-ck">
         <div class="fs-ck-ico h">△</div>
         <p class="fs-ck-q">폭넓게 샀나?<small>비차익 ÷ 실탄</small></p>
-        <p class="fs-ck-a">바스켓 비중 <b>12%</b>로 거의 없습니다. 지수가 아니라 <b>골라잡은 종목</b>에 돈이 오간 날입니다.</p>
-        <p class="fs-ck-v mid">12%<small>비차익 +4,039억</small></p>
+        <p class="fs-ck-a">실탄은 유입인데 바스켓은 <b>반대로 −763억</b>입니다. 지수 전체와 개별 종목이 서로 다른 방향으로 움직인 날입니다.</p>
+        <p class="fs-ck-v mid">반대<small>비차익 −763억</small></p>
       </div>
     </div>
-    <p class="fs-combo"><b>🔴 지수형 매수</b> — 지수도 종목도 함께 오른 폭넓은 매수</p>
+    <p class="fs-combo"><b>🟠 종목 장세</b> — 개별은 사고 지수 바스켓은 판 날 — 종목별 편차가 큼</p>
     <p class="fs-warn">📅 옵션 만기 주간 — 오늘이 만기일입니다. 이 시기의 비차익은 <b>방향성 베팅이 아니라 만기 청산·롤오버에 따른 기계적 조정</b>일 수 있습니다. 다음 날 반대로 나올 수 있으니 폭 판정을 그대로 믿지 마십시오.</p>
     <div class="fs-cum">
       <div class="fs-cum-head">
         <span class="fs-cum-t">📈 실탄이 쌓이는 흐름 — 최근 17거래일</span>
-        <div class="fs-badges"><span class="fs-cb b5">최근 5일 +5.6조</span><span class="fs-cb b20">17일 누적 −5.15조</span></div>
+        <div class="fs-badges"><span class="fs-cb b5">최근 5일 +4.79조</span><span class="fs-cb b20">17일 누적 −5.96조</span></div>
       </div>
-      <svg viewBox="0 0 700 240" preserveAspectRatio="none" style="width:100%;display:block"><rect x="470.7" y="16" width="221.3" height="216" fill="#e0c060" opacity=".07" rx="4"/><text x="476.7" y="228.0" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text><line x1="8" y1="184.48000000000002" x2="692" y2="184.48000000000002" stroke="#fff" stroke-opacity=".14"/><rect x="16.4" y="171.8" width="23.3" height="12.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="56.7" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="96.9" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="137.2" y="184.5" width="23.3" height="11.4" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="177.4" y="184.5" width="23.3" height="24.5" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="217.6" y="173.6" width="23.3" height="10.9" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="257.9" y="176.5" width="23.3" height="8.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="298.1" y="137.0" width="23.3" height="47.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="338.3" y="184.5" width="23.3" height="27.0" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="378.6" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="418.8" y="177.9" width="23.3" height="6.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="459.0" y="184.5" width="23.3" height="19.3" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="499.3" y="184.5" width="23.3" height="1.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="539.5" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="579.7" y="184.1" width="23.3" height="1.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="620.0" y="165.4" width="23.3" height="19.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="660.2" y="165.4" width="23.3" height="19.0" rx="1.5" fill="#C1432B" opacity="1"/><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 78.7 L671.9 158.6 L28.1 158.6 Z" fill="url(#fsgr)" opacity=".5"/><defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/><stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs><path d="M28.1 35.0 L68.4 35.2 L108.6 35.5 L148.8 38.7 L189.1 30.9 L229.3 19.4 L269.5 21.7 L309.8 21.5 L350.0 44.7 L390.2 48.8 L430.5 54.0 L470.7 51.4 L510.9 45.3 L551.2 41.8 L591.4 38.8 L631.6 40.5 L671.9 42.1" fill="none" stroke="#7fa8e8" stroke-width="1.8" stroke-dasharray="4 4" opacity=".45" stroke-linejoin="round"/><circle cx="671.9" cy="42.1" r="2.6" fill="#7fa8e8" opacity=".6"/><text x="664.9" y="53.1" text-anchor="end" font-size="8.5" fill="#7fa8e8" font-weight="700" opacity=".75">선물 −4,589억</text><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 78.7" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/><polygon points="470.7,126.3 510.9,128.7 510.9,126.3 470.7,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="510.9,128.7 551.2,136.5 551.2,126.3 510.9,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="551.2,136.5 591.4,135.9 591.4,126.3 551.2,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="591.4,135.9 631.6,107.3 631.6,126.3 591.4,126.3" fill="#C1432B" opacity=".30"/><polygon points="631.6,107.3 671.9,78.7 671.9,126.3 631.6,126.3" fill="#C1432B" opacity=".30"/><line x1="470.7" y1="126.3" x2="692" y2="126.3" stroke="#e0c060" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="4 3"/><circle cx="470.7" cy="126.3" r="2.6" fill="#e0c060" opacity=".8"/><text x="477.7" y="120.3" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".9">5일 전</text><line x1="645.9" y1="126.3" x2="645.9" y2="84.7" stroke="#ff8a6e" stroke-width="1.8"/><polygon points="645.9,78.7 641.4,85.7 650.4,85.7" fill="#ff8a6e"/><text x="638.9" y="105.5" text-anchor="end" font-size="9.5" fill="#ff8a6e" font-weight="800">5일 ▲ +5.6조</text><line x1="8" y1="35.0" x2="692" y2="35.0" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/><text x="12" y="31.0" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text><circle cx="671.9" cy="78.7" r="8" fill="#f0f0ee" opacity=".16"/><circle cx="671.9" cy="78.7" r="3.4" fill="#fff"/><text x="663.9" y="69.7" text-anchor="end" font-size="10.5" fill="#fff" font-weight="800">−5.15조</text></svg><div class="fs-x"><span>07/23</span><span>07/29</span><span>08/06</span><span>08/13</span></div><div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span><span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span><span><i class="l-rf"></i>5일 전 기준선</span></div>
-      <p class="fs-read">최근 17거래일간 실탄이 <b>−5.15조</b> — 빠져나가는 흐름입니다. 다만 최근 5일은 <b>+5.6조</b>로 방향이 반대입니다 — 한 달 흐름과 이번 주 흐름이 엇갈리는 구간입니다.</p>
+      <svg viewBox="0 0 700 240" preserveAspectRatio="none" style="width:100%;display:block"><rect x="470.7" y="16" width="221.3" height="216" fill="#e0c060" opacity=".07" rx="4"/><text x="476.7" y="228.0" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".8">최근 5일</text><line x1="8" y1="184.48000000000002" x2="692" y2="184.48000000000002" stroke="#fff" stroke-opacity=".14"/><rect x="16.4" y="171.8" width="23.3" height="12.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="56.7" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="96.9" y="184.5" width="23.3" height="29.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="137.2" y="184.5" width="23.3" height="11.4" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="177.4" y="184.5" width="23.3" height="24.5" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="217.6" y="173.6" width="23.3" height="10.9" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="257.9" y="176.5" width="23.3" height="8.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="298.1" y="137.0" width="23.3" height="47.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="338.3" y="184.5" width="23.3" height="27.0" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="378.6" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="418.8" y="177.9" width="23.3" height="6.6" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="459.0" y="184.5" width="23.3" height="19.3" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="499.3" y="184.5" width="23.3" height="1.6" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="539.5" y="184.5" width="23.3" height="5.2" rx="1.5" fill="#2E6BD6" opacity="0.75"/><rect x="579.7" y="184.1" width="23.3" height="1.5" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="620.0" y="165.4" width="23.3" height="19.0" rx="1.5" fill="#C1432B" opacity="0.75"/><rect x="660.2" y="170.0" width="23.3" height="14.5" rx="1.5" fill="#C1432B" opacity="1"/><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 85.6 L671.9 158.6 L28.1 158.6 Z" fill="url(#fsgr)" opacity=".5"/><defs><linearGradient id="fsgr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#ff8a6e" stop-opacity=".45"/><stop offset="100%" stop-color="#ff8a6e" stop-opacity="0"/></linearGradient></defs><path d="M28.1 35.0 L68.4 35.2 L108.6 35.5 L148.8 38.7 L189.1 30.9 L229.3 19.4 L269.5 21.7 L309.8 21.5 L350.0 44.7 L390.2 48.8 L430.5 54.0 L470.7 51.4 L510.9 45.3 L551.2 41.8 L591.4 38.8 L631.6 40.5 L671.9 36.9" fill="none" stroke="#7fa8e8" stroke-width="1.8" stroke-dasharray="4 4" opacity=".45" stroke-linejoin="round"/><circle cx="671.9" cy="36.9" r="2.6" fill="#7fa8e8" opacity=".6"/><text x="664.9" y="47.9" text-anchor="end" font-size="8.5" fill="#7fa8e8" font-weight="700" opacity=".75">선물 −1,207억</text><path d="M28.1 16.0 L68.4 60.3 L108.6 104.7 L148.8 121.9 L189.1 158.6 L229.3 142.2 L269.5 130.2 L309.8 58.9 L350.0 99.5 L390.2 107.2 L430.5 97.3 L470.7 126.3 L510.9 128.7 L551.2 136.5 L591.4 135.9 L631.6 107.3 L671.9 85.6" fill="none" stroke="#f0f0ee" stroke-width="2.6" stroke-linejoin="round"/><polygon points="470.7,126.3 510.9,128.7 510.9,126.3 470.7,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="510.9,128.7 551.2,136.5 551.2,126.3 510.9,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="551.2,136.5 591.4,135.9 591.4,126.3 551.2,126.3" fill="#2E6BD6" opacity=".30"/><polygon points="591.4,135.9 631.6,107.3 631.6,126.3 591.4,126.3" fill="#C1432B" opacity=".30"/><polygon points="631.6,107.3 671.9,85.6 671.9,126.3 631.6,126.3" fill="#C1432B" opacity=".30"/><line x1="470.7" y1="126.3" x2="692" y2="126.3" stroke="#e0c060" stroke-opacity=".7" stroke-width="1.3" stroke-dasharray="4 3"/><circle cx="470.7" cy="126.3" r="2.6" fill="#e0c060" opacity=".8"/><text x="477.7" y="120.3" font-size="8.5" fill="#e0c060" font-weight="700" opacity=".9">5일 전</text><line x1="645.9" y1="126.3" x2="645.9" y2="91.6" stroke="#ff8a6e" stroke-width="1.8"/><polygon points="645.9,85.6 641.4,92.6 650.4,92.6" fill="#ff8a6e"/><text x="638.9" y="109.0" text-anchor="end" font-size="9.5" fill="#ff8a6e" font-weight="800">5일 ▲ +4.79조</text><line x1="8" y1="35.0" x2="692" y2="35.0" stroke="#fff" stroke-opacity=".10" stroke-dasharray="3 4"/><text x="12" y="31.0" font-size="8.5" fill="#767c86" font-weight="600">누적 0</text><circle cx="671.9" cy="85.6" r="8" fill="#f0f0ee" opacity=".16"/><circle cx="671.9" cy="85.6" r="3.4" fill="#fff"/><text x="663.9" y="76.6" text-anchor="end" font-size="10.5" fill="#fff" font-weight="800">−5.96조</text></svg><div class="fs-x"><span>07/23</span><span>07/29</span><span>08/06</span><span>08/13</span></div><div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span><span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span><span><i class="l-rf"></i>5일 전 기준선</span></div>
+      <p class="fs-read">최근 17거래일간 실탄이 <b>−5.96조</b> — 빠져나가는 흐름입니다. 다만 최근 5일은 <b>+4.79조</b>로 방향이 반대입니다 — 한 달 흐름과 이번 주 흐름이 엇갈리는 구간입니다.</p>
     </div>
     <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
       선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
   </div>
 
-  <p class="sec-label" id="radar">📡 실제 강세 레이더 — 오늘 새로 포착</p>
+  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>📡 오늘 불붙은 곳</p>
   
   <div class="rd-box">
     <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
       시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 거래량 2배 이상</b> 종목 중에서,
       회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
     <p class="devnote">⚙️ <b>적용 조건</b> · 시총 ≥ 5,000억 · 거래대금 ≥ 500억 · 상승 종목만 · 전일 대비 거래량 ≥ 2.0배 │ 점수 = 회전율×0.5 + 상승률×0.5 (각각 0~100 정규화) + 거래량 3.0배↑ 시 +15점 │ 추적 20거래일</p>
-    <p class="rd-empty">코스피 — 오늘 새로 포착된 종목이 없습니다.</p><p class="rd-empty">코스닥 — 오늘 새로 포착된 종목이 없습니다.</p>
+    
+    <div class="rd-market">
+      <p class="rd-mkt-name">📡 코스피</p>
+      
+      <div class="rd-row">
+        <span class="rd-rank">1</span>
+        <div class="rd-info">
+          <p class="rd-name">SK이터닉스<span class="rd-tag rd-re">🔄 2차 포착</span></p>
+          <p class="rd-meta">회전율 20.5% · 거래량 전일 <b>2.4배</b>
+            · 거래대금 3,941억 · 시총 1.9조</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">100</span>
+          <span class="rd-chg up">+7.02%</span>
+        </div>
+      </div>
+      <div class="rd-row">
+        <span class="rd-rank">2</span>
+        <div class="rd-info">
+          <p class="rd-name">한화생명<span class="rd-tag rd-boom">🔥 거래량 폭발</span></p>
+          <p class="rd-meta">회전율 1.6% · 거래량 전일 <b>4.1배</b>
+            · 거래대금 691억 · 시총 4.4조</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">15.0</span>
+          <span class="rd-chg up">+6.81%</span>
+        </div>
+      </div>
+    </div>
+    <div class="rd-market">
+      <p class="rd-mkt-name">📡 코스닥</p>
+      
+      <div class="rd-row">
+        <span class="rd-rank">1</span>
+        <div class="rd-info">
+          <p class="rd-name">PS일렉트로닉스<span class="rd-tag rd-boom">🔥 거래량 폭발</span></p>
+          <p class="rd-meta">회전율 40.9% · 거래량 전일 <b>10.5배</b>
+            · 거래대금 2,132억 · 시총 5,208억</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">100</span>
+          <span class="rd-chg up">+29.80%</span>
+        </div>
+      </div>
+      <div class="rd-row">
+        <span class="rd-rank">2</span>
+        <div class="rd-info">
+          <p class="rd-name">미래에셋벤처투자<span class="rd-tag rd-re">🔄 2차 포착</span><span class="rd-tag rd-boom">🔥 거래량 폭발</span></p>
+          <p class="rd-meta">회전율 11.4% · 거래량 전일 <b>6.8배</b>
+            · 거래대금 1,076억 · 시총 9,466억</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">32.2</span>
+          <span class="rd-chg up">+9.93%</span>
+        </div>
+      </div>
+      <div class="rd-row">
+        <span class="rd-rank">3</span>
+        <div class="rd-info">
+          <p class="rd-name">성호전자<span class="rd-tag rd-re">🔄 3차 포착</span></p>
+          <p class="rd-meta">회전율 5.2% · 거래량 전일 <b>2.1배</b>
+            · 거래대금 792억 · 시총 1.5조</p>
+        </div>
+        <div class="rd-nums">
+          <span class="rd-score">0.0</span>
+          <span class="rd-chg up">+5.87%</span>
+        </div>
+      </div>
+    </div>
     <p class="rd-foot">🔥 폭발 = 전일 대비 거래량 3배 이상 · 🔄 N차 포착 = 추적 중이던 종목의 재점화.
       점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>
 
-  <p class="sec-label" id="acc">🐢 매집 레이더 — 조용히 쌓이는 돈</p>
+  <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
   
   <div class="rd-box">
     <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
@@ -1024,27 +1094,27 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">한화솔루션<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 2일 · 기 5일
-              · 시총 8.0조 · 누적 +1,013억</p>
+              · 시총 8.1조 · 누적 +1,013억</p>
           </div>
-          <span class="ac-val">1.262%</span>
+          <span class="ac-val">1.246%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">2</span>
           <div class="ac-info">
             <p class="ac-name">TIGER 미국나스닥100<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 5일 · 기 0일
-              · 시총 11.5조 · 누적 +1,002억</p>
+              · 시총 11.6조 · 누적 +1,002억</p>
           </div>
-          <span class="ac-val">0.867%</span>
+          <span class="ac-val">0.862%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">3</span>
           <div class="ac-info">
             <p class="ac-name">SK이노베이션<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
             <p class="ac-meta">외 5일 · 기 3일
-              · 시총 20.7조 · 누적 +1,329억</p>
+              · 시총 20.5조 · 누적 +1,329억</p>
           </div>
-          <span class="ac-val">0.642%</span>
+          <span class="ac-val">0.65%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">4</span>
@@ -1060,9 +1130,9 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">대우건설<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 0일 · 기 5일
-              · 시총 7.3조 · 누적 +382억</p>
+              · 시총 7.5조 · 누적 +382억</p>
           </div>
-          <span class="ac-val">0.521%</span>
+          <span class="ac-val">0.509%</span>
         </div>
       </div>
       <div class="ac-col">
@@ -1074,45 +1144,45 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">티에스이<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 0일 · 기 5일
-              · 시총 2.8조 · 누적 +356억</p>
+              · 시총 2.9조 · 누적 +356억</p>
           </div>
-          <span class="ac-val">1.286%</span>
+          <span class="ac-val">1.231%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">2</span>
           <div class="ac-info">
             <p class="ac-name">실리콘투<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 2일 · 기 4일
-              · 시총 3.0조 · 누적 +237억</p>
+              · 시총 2.7조 · 누적 +237억</p>
           </div>
-          <span class="ac-val">0.8%</span>
+          <span class="ac-val">0.889%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">3</span>
           <div class="ac-info">
             <p class="ac-name">파마리서치<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
             <p class="ac-meta">외 3일 · 기 3일
-              · 시총 4.2조 · 누적 +300억</p>
+              · 시총 4.4조 · 누적 +300억</p>
           </div>
-          <span class="ac-val">0.707%</span>
+          <span class="ac-val">0.685%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">4</span>
           <div class="ac-info">
             <p class="ac-name">보로노이<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 0일 · 기 4일
-              · 시총 3.2조 · 누적 +201억</p>
+              · 시총 3.4조 · 누적 +201억</p>
           </div>
-          <span class="ac-val">0.622%</span>
+          <span class="ac-val">0.59%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">5</span>
           <div class="ac-info">
-            <p class="ac-name">로보티즈<span class="ac-tag ac-solo">💼 기관 단독</span></p>
-            <p class="ac-meta">외 1일 · 기 4일
-              · 시총 3.6조 · 누적 +164억</p>
+            <p class="ac-name">휴젤<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
+            <p class="ac-meta">외 5일 · 기 2일
+              · 시총 3.3조 · 누적 +147억</p>
           </div>
-          <span class="ac-val">0.452%</span>
+          <span class="ac-val">0.448%</span>
         </div>
       </div>
     </div>
@@ -1130,34 +1200,34 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">SK텔레콤<span class="ac-tag ac-solo">💼 기관 단독</span></p>
             <p class="ac-meta">외 5일 · 기 14일
-              · 시총 18.9조 · 누적 +4,312억</p>
+              · 시총 19.7조 · 누적 +4,312억</p>
           </div>
-          <span class="ac-val">2.286%</span>
+          <span class="ac-val">2.187%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">2</span>
           <div class="ac-info">
             <p class="ac-name">SK이노베이션<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
             <p class="ac-meta">외 13일 · 기 15일
-              · 시총 20.7조 · 누적 +4,327억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 20.5조 · 누적 +4,327억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
-          <span class="ac-val">2.091%</span>
+          <span class="ac-val">2.115%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">3</span>
           <div class="ac-info">
             <p class="ac-name">아모레퍼시픽<span class="ac-tag ac-both">🤝 쌍끌이</span></p>
             <p class="ac-meta">외 15일 · 기 12일
-              · 시총 7.9조 · 누적 +1,454억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 7.8조 · 누적 +1,454억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
-          <span class="ac-val">1.831%</span>
+          <span class="ac-val">1.859%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">4</span>
           <div class="ac-info">
             <p class="ac-name">삼양식품<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 16일 · 기 7일
-              · 시총 9.1조 · 누적 +1,486억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 9.1조 · 누적 +1,486억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
           <span class="ac-val">1.639%</span>
         </div>
@@ -1166,9 +1236,9 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">키움증권<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 18일 · 기 3일
-              · 시총 7.8조 · 누적 +1,135억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 7.8조 · 누적 +1,135억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
-          <span class="ac-val">1.447%</span>
+          <span class="ac-val">1.462%</span>
         </div></div>
         <div class="ac-col"><p class="ac-col-t">📊 코스닥 · 20일</p>
         <div class="ac-row">
@@ -1176,9 +1246,9 @@ a{color:inherit;text-decoration:none}
           <div class="ac-info">
             <p class="ac-name">실리콘투<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 14일 · 기 10일
-              · 시총 3.0조 · 누적 +365억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 2.7조 · 누적 +365억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
-          <span class="ac-val">1.231%</span>
+          <span class="ac-val">1.368%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">2</span>
@@ -1187,25 +1257,25 @@ a{color:inherit;text-decoration:none}
             <p class="ac-meta">외 14일 · 기 6일
               · 시총 2.2조 · 누적 +206억</p>
           </div>
-          <span class="ac-val">0.923%</span>
+          <span class="ac-val">0.924%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">3</span>
           <div class="ac-info">
             <p class="ac-name">휴젤<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 16일 · 기 7일
-              · 시총 3.4조 · 누적 +185억 <span class="ac-star">⭐ 단기도 등재</span></p>
+              · 시총 3.3조 · 누적 +185억<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span></p>
           </div>
-          <span class="ac-val">0.551%</span>
+          <span class="ac-val">0.564%</span>
         </div>
         <div class="ac-row">
           <span class="ac-rank">4</span>
           <div class="ac-info">
             <p class="ac-name">케어젠<span class="ac-tag ac-solo">💼 외국인 단독</span></p>
             <p class="ac-meta">외 14일 · 기 9일
-              · 시총 3.5조 · 누적 +88억</p>
+              · 시총 3.4조 · 누적 +88억</p>
           </div>
-          <span class="ac-val">0.255%</span>
+          <span class="ac-val">0.257%</span>
         </div></div>
       </div>
     </div>
@@ -1216,22 +1286,48 @@ a{color:inherit;text-decoration:none}
       포함될 수 있습니다. 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>
 
-  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  <p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
   <div class="pending">⏳ 오늘 마감 브리핑 영상을 찾지 못했습니다</div>
 
-  <p class="sec-label">📋 오늘의 중요 공시</p>
+  <p class="sec-label"><small>오늘의 중요 공시</small>📋 놓치면 아까운 공시</p>
   <div class="disc-box">
     
-    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260812000890" target="_blank">
-      <div class="disc-head"><span class="disc-name">젬백스</span>
-        <span class="stars">★★★★<span class="off">★</span></span></div>
-      <p class="disc-note">[기재정정]주요사항보고서(유상증자결정) <span class="disc-lnk">↗ 상세보기</span></p>
-      <p class="disc-why">💡 정정된 유상증자 결정 공시로, 자금 조달 규모나 목적이 바뀌었을 수 있어 세부 내용에 따라 주가 변동 가능성이 있습니다.</p>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813000978" target="_blank">
+      <div class="disc-head"><span class="disc-name">아진전자부품</span>
+        <span class="stars">★★<span class="off">★★★</span></span></div>
+      <p class="disc-note">주식등의대량보유상황보고서(약식) <span class="disc-lnk">↗ 상세보기</span></p>
+      
     </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813000970" target="_blank">
+      <div class="disc-head"><span class="disc-name">레이</span>
+        <span class="stars">★★<span class="off">★★★</span></span></div>
+      <p class="disc-note">주식등의대량보유상황보고서(일반) <span class="disc-lnk">↗ 상세보기</span></p>
+      
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813000912" target="_blank">
+      <div class="disc-head"><span class="disc-name">에스엠벡셀</span>
+        <span class="stars">★★<span class="off">★★★</span></span></div>
+      <p class="disc-note">주식등의대량보유상황보고서(일반) <span class="disc-lnk">↗ 상세보기</span></p>
+      
+    </a>
+    <div class="hidden-block" id="moreDisc">
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813000905" target="_blank">
+      <div class="disc-head"><span class="disc-name">대한과학</span>
+        <span class="stars">★★<span class="off">★★★</span></span></div>
+      <p class="disc-note">주식등의대량보유상황보고서(일반) <span class="disc-lnk">↗ 상세보기</span></p>
+      
+    </a>
+    <a class="disc-row" href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813000894" target="_blank">
+      <div class="disc-head"><span class="disc-name">이노진</span>
+        <span class="stars">★★<span class="off">★★★</span></span></div>
+      <p class="disc-note">주식등의대량보유상황보고서(일반) <span class="disc-lnk">↗ 상세보기</span></p>
+      
+    </a></div>
+    <button class="more-btn dark" onclick="toggleMore('moreDisc',this,'▾ 공시 2개 더보기')">▾ 공시 2개 더보기</button>
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🔥 이슈 밖 뉴스 8건 — 놓치기 쉬운 것들</p>
+  <p class="sec-label"><small>이슈 밖 뉴스</small>🔥 놓치기 쉬운 것들 8건</p>
   <div class="news-wrap">
     <div class="news-item">
       <span class="news-rank">1</span>
@@ -1298,7 +1394,7 @@ a{color:inherit;text-decoration:none}
       </div>
     </div></div></div><button class="more-btn" onclick="toggleMore('moreNews',this,'▾ 뉴스 5개 더보기')">▾ 뉴스 5개 더보기</button><p class="news-foot">※ 제목을 누르면 해당 기사 원문으로 이동합니다. 위 코너에서 이미 다룬 사안은 제외하고 골랐습니다.</p>
 
-  <p class="sec-label">✅ 어제의 채점표</p>
+  <p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>
   <div class="score-box">
     <p class="score-head">📋 어제 예고한 관전포인트를 오늘 결과로 채점했습니다
       <span class="score-tally">1 / 3 적중</span></p>
@@ -1327,10 +1423,10 @@ a{color:inherit;text-decoration:none}
     <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
   </div>
 
-  <p class="sec-label" id="watch">🗼 내일의 관전 포인트</p>
+  <p class="sec-label" id="watch"><small>내일의 관전 포인트</small>🗼 내일 이것만 보세요</p>
   <div class="watch-item"><span>①코스피가 6,579선을 유지하고 외국인 순매수가 오늘(2.84조)의 절반 이상 이어지면 매수세 지속으로, 6,400선 아래로 밀리면 쏠림 해소 신호로 봅니다.</span></div><div class="watch-item"><span>②선물시장 외국인이 순매수로 전환되면(오늘 -1,071억) 확신 있는 매수로, 순매도가 계속되면 헤지성 자금으로 판단합니다.</span></div><div class="watch-item"><span>③코스닥 비차익거래 순매도(오늘 -1,189억)가 축소되면 수급 안정, 확대되면 개별 종목 이탈 심화로 봅니다.</span></div>
 
-  <p class="sec-label">📚 오늘의 공부</p>
+  <p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>
   
   <div class="study-box">
     <p class="study-no">📚 오늘 리포트에서 출제 · 현물-선물 엇갈린 포지션이 왜 '헤지'로 읽히는가</p>
@@ -1343,7 +1439,7 @@ a{color:inherit;text-decoration:none}
     <button class="more-btn" onclick="toggleMore('moreStudy',this,'▾ 심화 학습 더보기 (역사·투자 적용)')">▾ 심화 학습 더보기 (역사·투자 적용)</button>
 
   <!-- 오늘의 한 문장 (필사 코너) -->
-  <p class="sec-label">✍️ 오늘의 한 문장</p>
+  <p class="sec-label"><small>오늘의 한 문장</small>✍️ 오늘을 한 문장으로</p>
   <div class="quote-box">
     <div class="quote-mark">“</div>
     <p class="quote-text">지수가 잠잠할수록, 그 밑에서 오가는 돈의 방향을 봐야 한다.</p>
@@ -1352,7 +1448,7 @@ a{color:inherit;text-decoration:none}
 
   <div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p><div class="arch-grid"><a class="arch-link" href="report_20260812.html">8/12(수)</a><a class="arch-link" href="report_20260811.html">8/11(화)</a><a class="arch-link" href="report_20260810.html">8/10(월)</a><a class="arch-link" href="report_20260807.html">8/7(금)</a><a class="arch-link" href="report_20260806.html">8/6(목)</a><a class="arch-link" href="report_20260805.html">8/5(수)</a><a class="arch-link" href="report_20260804.html">8/4(화)</a></div><div class="hidden-block" id="moreArch" style="margin-top:6px"><div class="arch-grid"><a class="arch-link" href="report_20260803.html">8/3(월)</a><a class="arch-link" href="report_20260731.html">7/31(금)</a><a class="arch-link" href="report_20260730.html">7/30(목)</a><a class="arch-link" href="report_20260729.html">7/29(수)</a><a class="arch-link" href="report_20260728.html">7/28(화)</a><a class="arch-link" href="report_20260727.html">7/27(월)</a><a class="arch-link" href="report_20260725.html">7/25(토)</a></div></div><button class="more-btn" style="margin-top:8px;margin-bottom:0" onclick="toggleMore('moreArch',this,'▾ 이전 리포트 7개 더보기')">▾ 이전 리포트 7개 더보기</button></div>
 
-  <p class="foot">데이터: 2026.08.13 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.12-e]</span></p>
+  <p class="foot">데이터: 2026.08.13 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[v2026.08.13-d]</span></p>
 </div>
 <script>
 function toggleMore(id,btn,label){
