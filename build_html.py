@@ -9,7 +9,7 @@ import os
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.12-e"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-c"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -478,7 +478,8 @@ def one_news_item(idx, item):
 def news_title(핵심뉴스):
     """섹션 제목. 개수가 매일 5~8개로 달라지므로 제목도 따라 움직인다."""
     n = len(핵심뉴스 or [])
-    return f"이슈 밖 뉴스 {n}건 — 놓치기 쉬운 것들" if n else "이슈 밖 뉴스"
+    return f"놓치기 쉬운 것들 {n}건" if n else "놓치기 쉬운 것들"
+
 
 
 def build_news(핵심뉴스):
@@ -674,7 +675,7 @@ def build_accumulation(매집, 설정=None):
             return "".join(
                 행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
                   f' · 누적 +{_fmt_eok(s.get("합산"))}'
-                  + (' <span class="ac-star">⭐ 단기도 등재</span>' if s["종목명"] in 단기이름 else ""))
+                  + ('' if s["종목명"] not in 단기이름 else "") + ('<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span>' if s["종목명"] in 단기이름 else ""))
                 for i, s in enumerate(목록, 1))
         중기블록 = f'''
     <div class="ac-long">
@@ -886,7 +887,8 @@ def build_core(핵심편, data, 해석):
         f'<div class="q3"><span class="q3-n">{i}</span><span>{줄}</span></div>'
         for i, 줄 in enumerate((핵심편.get("세줄요약") or [])[:3], 1))
 
-    태그색 = {"반도체": "tg-semi", "글로벌": "tg-glo", "정책": "tg-pol", "수급": "tg-sup"}
+    태그색 = {"반도체": "tg-semi", "글로벌": "tg-glo", "정책": "tg-pol",
+            "수급": "tg-sup", "실적": "tg-semi", "산업": "tg-glo"}
     이슈들 = "".join(
         f'<div class="i9"><span class="i9-t {태그색.get(it.get("태그"), "tg-sup")}">{it.get("태그","")}</span>'
         f'<span>{it.get("내용","")}</span></div>'
@@ -899,47 +901,80 @@ def build_core(핵심편, data, 해석):
         f'<p class="mf"><span class="mf-i">{i}</span><span>{t}</span></p>'
         for i, t in enumerate((핵심편.get("수급특징") or [])[:3], 1))
     왜 = 핵심편.get("수급왜") or ""
-    왜블록 = (f'<div class="mny-why"><p class="mw-h">🤔 왜 이렇게 움직였을까요</p>'
+    왜블록 = (f'<div class="mny-why"><p class="mw-h">🧭 왜 이렇게 움직였을까요</p>'
              f'<p class="mw-b">{왜}</p></div>') if 왜 else ""
 
-    위로 = 핵심편.get("내종목위로") or ""
-    위로P = f'<p class="mine-b">{위로}</p>' if 위로 else ''
-    내종목 = ('<div class="mine"><p class="mine-h">😮\u200d💨 오늘 내 종목이 내렸다면</p>'
-            + 위로P +
-            '<div class="mine-split">'
-            '<div class="ms"><p class="ms-k">거래량이 줄면서 내렸다면</p><p class="ms-v">파는 사람이 많은 게 아니라 <b style="color:#dfe3e8">사는 사람이 없는</b> 상태입니다. 관심이 잠시 다른 곳으로 갔을 가능성.</p></div>'
-            '<div class="ms"><p class="ms-k">거래량이 늘면서 내렸다면</p><p class="ms-v">실제로 <b style="color:#dfe3e8">물량이 나온</b> 것입니다. 이유가 있는지 아래 공시·뉴스를 확인해볼 자리입니다.</p></div>'
-            '</div>'
-            '<p class="mine-f">👉 이 둘은 성격이 완전히 다릅니다. 아래 <b>\'오늘의 중요 공시\'</b>에 내 종목이 있는지부터 보시는 게 가장 빠릅니다.</p></div>')
-
+    # ── 내 마음 코너 (매일 다른 제목·본문 — Claude 생성) ──
+    마음 = 핵심편.get("내마음") or {}
+    if isinstance(마음, str):          # 구버전 호환
+        마음 = {"본문": 마음}
+    본문 = 마음.get("본문") or 핵심편.get("내종목위로") or ""
+    제목 = 마음.get("제목") or "😮‍💨 오늘 내 종목이 내렸다면"
+    한줄 = 마음.get("한줄") or ""
+    내종목 = ""
+    if 본문:
+        내종목 = ('<div class="mine">'
+                + f'<p class="mine-h">{제목}</p>'
+                + f'<p class="mine-b">{본문}</p>'
+                + (f'<p class="mine-f2">{한줄}</p>' if 한줄 else '')
+                + '</div>')
     뒤집 = 핵심편.get("뒤집어보기") or ""
     뒤집블록 = (f'<div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p>'
               f'<p class="qf-b">{뒤집}</p></div>') if 뒤집 else ""
 
+    # ── 티저 (기계) ──
+    #   ⚠️ 개수 자랑은 희소성을 죽인다. "34종목 확인하세요"는 아무도 안 본다.
+    #      그래서 **가장 강한 신호 하나**만 골라 그 이유를 말한다.
     강세 = data.get("강세레이더") or {}
     신규 = 강세.get("신규") or {}
-    신규수 = sum(len(v or []) for v in 신규.values()) if isinstance(신규, dict) else 0
+    전체신규 = [s for v in (신규.values() if isinstance(신규, dict) else []) for s in (v or [])]
     매집 = data.get("매집레이더") or {}
-    단기이름 = {s.get("종목명") for s in (매집.get("종목") or [])}
-    별수 = sum(1 for s in (매집.get("중기종목") or []) if s.get("종목명") in 단기이름)
+    단기 = 매집.get("종목") or []
+    단기이름 = {s.get("종목명") for s in 단기}
+    별종목 = [s for s in (매집.get("중기종목") or []) if s.get("종목명") in 단기이름]
+
     티저들 = []
-    if 신규수:
-        티저들.append(('#radar', '레이더', f'오늘 새로 포착된 종목 <span class="u">{신규수}개</span>, 꼭 확인하세요'))
-    if 별수:
-        티저들.append(('#acc', '매집', f'5일·20일 랭킹 <b>동시 등재</b> ⭐ <span class="u">{별수}종목</span>, 꼭 확인하세요'))
-    elif 매집.get("종목"):
-        티저들.append(('#acc', '매집', f'며칠째 큰돈이 쌓이는 <span class="u">{min(5, len(매집["종목"]))}종목</span>, 꼭 확인하세요'))
+    # 1) 강세 — 점수 최고 1종목만, 종목명 대신 '무엇이 특별한가'로
+    if 전체신규:
+        top = max(전체신규, key=lambda s: s.get("강세점수") or 0)
+        배수 = top.get("배수")
+        티저들.append(('#radar', '레이더',
+                     f'거래량이 평소의 <span class="u">{배수:.0f}배</span> 터진 종목이 나왔습니다'
+                     if 배수 else '오늘 새로 불붙은 종목이 있습니다'))
+    # 2) 매집 — ⭐ 동시 등재만. 없으면 1위 한 종목의 '기간'을 말한다
+    if 별종목:
+        n = len(별종목)
+        티저들.append(('#acc', '매집',
+                     f'5일·20일 랭킹에 <b>동시에</b> 올라온 종목이 '
+                     + (f'<span class="u">{n}개</span> 있습니다' if n > 1 else '있습니다')))
+    elif 단기:
+        top = 단기[0]
+        일수 = max(top.get("외인일수") or 0, top.get("기관일수") or 0)
+        티저들.append(('#acc', '매집',
+                     f'5일 중 <span class="u">{일수}일</span>을 연달아 사들인 곳이 있습니다'
+                     if 일수 else '조용히 돈이 쌓이는 곳이 있습니다'))
+    # 3) 관전 — 항상
     티저들.append(('#watch', '관전', '내일 아침, <b>이 숫자 하나</b>만 확인하세요'))
     티저HTML = "".join(
         f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span><span>{txt}</span>'
         f'<span class="qt-go">확인 ↓</span></a>' for h, t, txt in 티저들[:3])
 
+    # ⚠️ 장 마감 전(09:00~15:30) 또는 개장 전에 돌면 지수·섹터가 전부 0%로 잡힌다.
+    #    데이터가 아니라 실행 시각의 문제이므로, 조용히 넘기지 말고 명시한다.
+    지 = ((data.get("지수수급") or {}).get("지수") or {})
+    _r = lambda k: str((지.get(k) or {}).get("등락률") or "").replace("%", "")
+    장전 = _r("코스피") in ("0.00", "0", "") and _r("코스닥") in ("0.00", "0", "")
+    장전경고 = ('<p class="q90-stale">⚠️ 이 리포트는 <b>장 마감 전</b>에 만들어졌습니다 — '
+              '지수·섹터·레이더 수치가 아직 반영되지 않았습니다. '
+              '정식 리포트는 장 마감 후 발행분을 확인해 주세요.</p>') if 장전 else ''
+
     공감 = 핵심편.get("공감문구") or ""
     왜그런가 = 핵심편.get("왜그런가") or ""
-    return ('<div class="q90"><div class="q90-top">'
+    return (장전경고 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘시면 여기까지만 읽으셔도 됩니다</span></div>'
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
+            + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
             + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
             + (f'<p class="q90-why">{왜그런가}</p>' if 왜그런가 else '')
             + f'<div class="q90-3">{삼줄}</div>'
@@ -1523,8 +1558,10 @@ a{{color:inherit;text-decoration:none}}
 .top-bar{{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}}
 .rp-title{{font-size:17px;font-weight:800}}
 .badge{{font-size:11px;color:var(--sub);background:var(--bg2);padding:3px 9px;border-radius:var(--rmd);border:.5px solid var(--line);height:fit-content}}
-.sec-label{{font-size:11px;font-weight:600;color:var(--sub);letter-spacing:.07em;text-transform:uppercase;margin:1.5rem 0 .7rem;display:flex;gap:6px}}
-.sec-label::after{{content:'';flex:1;height:.5px;background:var(--line);align-self:center}}
+.sec-label{{display:block;font-size:14.5px;font-weight:800;color:var(--ink);letter-spacing:-.01em;text-transform:none;margin:1.6rem 0 .7rem;line-height:1.35}}
+.sec-label small{{display:block;font-size:10px;font-weight:700;color:var(--sub);letter-spacing:.1em;margin-bottom:2px}}
+.sec-label i{{font-style:normal;font-weight:500;color:#a8aeb6;letter-spacing:0}}
+.sec-label::after{{content:'';display:block;height:.5px;background:var(--line);margin-top:.5rem}}
 .up{{color:var(--up);font-weight:600}} .dn{{color:var(--dn);font-weight:600}} .smut{{color:var(--sub)}}
 
 /* ── 게이지 ── */
@@ -1750,6 +1787,7 @@ a{{color:inherit;text-decoration:none}}
 .ac-long{{margin-top:1rem;border-top:.5px solid var(--line);padding-top:.85rem}}
 .ac-long-t{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.2rem}}
 .ac-long-s{{font-size:10.5px;color:var(--sub);line-height:1.65;margin-bottom:.6rem}}
+.ac-star2{{display:block;margin-top:4px;font-size:9.5px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:2px 9px;width:fit-content}}
 .ac-star{{font-size:9px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:1px 7px;margin-left:4px}}
 .rd-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}}
 
@@ -1921,6 +1959,9 @@ a{{color:inherit;text-decoration:none}}
 
 .qt .u{{color:var(--up-soft)}}
 
+.q90-stale{{font-size:11.5px;line-height:1.7;color:#8a6d3b;background:#fcf6e3;border:.5px solid #e6d7a8;border-radius:var(--rmd);padding:.7rem .85rem;margin-bottom:.8rem}}
+.q90-gloss{{font-size:12px;color:#9aa0a8;line-height:1.7;margin:-.2rem 0 .6rem}}
+.mine-f2{{font-size:13px;font-weight:800;color:#fff;margin-top:.5rem}}
 .q90-cut{{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}}
 
 
@@ -2133,7 +2174,7 @@ a{{color:inherit;text-decoration:none}}
 
   {build_terrain(data.get('주도섹터'))}
 
-  <p class="sec-label">📊 지수 + 수급</p>
+  <p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
   <div class="idx-grid">
     <div class="idx-card2">
       <p class="ic-mkt">KOSPI</p>
@@ -2159,57 +2200,57 @@ a{{color:inherit;text-decoration:none}}
 
   <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
 
-  <p class="sec-label">🔥 핵심 이슈 — 상세</p>
+  <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 왜, 어디로, 무엇을 볼까</p>
   {build_issues(해석.get('핵심이슈'))}
 
-  <p class="sec-label">🌐 환율 · 유가 · 금리</p>
+  <p class="sec-label"><small>환율 · 유가 · 금리</small>🌏 바깥 날씨</p>
   <div class="macro-row">
     {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
     {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''))}
     {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
   </div>
 
-  <p class="sec-label">🏆 주도 섹터 — 오늘 가장 강했던 6개 업종</p>
+  <p class="sec-label"><small>주도 섹터</small>🏆 오늘의 주인공 — 시장을 끌고 간 6개 업종</p>
   {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
             f"{(data.get('설정') or {}).get('주도섹터',{}).get('가중치','?')} 점수로 재정렬 → "
             f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
 
-  <p class="sec-label">🔍 프로의 시선</p>
+  <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
 
-  <p class="sec-label">💰 수급 관제신호 — 오늘 큰돈은 어느 쪽으로 움직였나</p>
+  <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
-  <p class="sec-label" id="radar">📡 실제 강세 레이더 — 오늘 새로 포착</p>
+  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>📡 오늘 불붙은 곳</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
-  <p class="sec-label" id="acc">🐢 매집 레이더 — 조용히 쌓이는 돈</p>
+  <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
-  <p class="sec-label">📺 마감 브리핑 — 방송사별 관점</p>
+  <p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
   {build_briefings(해석.get('마감브리핑'))}
 
-  <p class="sec-label">📋 오늘의 중요 공시</p>
+  <p class="sec-label"><small>오늘의 중요 공시</small>📋 놓치면 아까운 공시</p>
   <div class="disc-box">
     {build_disclosures(data.get('공시'), 해석.get('공시해설'))}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label">🔥 {news_title(해석.get('핵심뉴스'))}</p>
+  <p class="sec-label"><small>이슈 밖 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
   {build_news(해석.get('핵심뉴스'))}
 
-  {f'<p class="sec-label">✅ 어제의 채점표</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
+  {f'<p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
 
-  <p class="sec-label" id="watch">🗼 내일의 관전 포인트</p>
+  <p class="sec-label" id="watch"><small>내일의 관전 포인트</small>🗼 내일 이것만 보세요</p>
   {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
 
-  <p class="sec-label">📚 오늘의 공부</p>
+  <p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>
   {build_study(오늘의공부)}
 
   <!-- 오늘의 한 문장 (필사 코너) -->
-  <p class="sec-label">✍️ 오늘의 한 문장</p>
+  <p class="sec-label"><small>오늘의 한 문장</small>✍️ 오늘을 한 문장으로</p>
   <div class="quote-box">
     <div class="quote-mark">“</div>
     <p class="quote-text">{오늘의문장}</p>
