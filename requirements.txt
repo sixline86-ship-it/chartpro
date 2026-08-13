@@ -5,3 +5,4 @@ lxml
 html5lib
 anthropic
 yfinance
+Pillow
