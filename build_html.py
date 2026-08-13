@@ -6,16 +6,48 @@
 
 import json
 import os
+import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-c"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-d"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
 DATE = datetime.now().strftime("%Y%m%d")
-DATA_PATH = f"data_{DATE}.json"
-REPORT_PATH = f"report_{DATE}.json"
+# ── 파일 보관 위치 ──
+#   날짜별 원본(data_·report_ json)은 archive/ 폴더에 모은다.
+#   저장소 첫 화면에 매일 3개씩 쌓이면 정작 중요한 .py 파일이 묻히기 때문이다.
+#   ⚠️ report_*.html은 **루트에 그대로 둔다** — 이미 텔레그램·카톡으로 나간
+#      https://.../report_YYYYMMDD.html 링크가 전부 깨지기 때문이다.
+ARCHIVE = "archive"
+
+
+def apath(name):
+    """읽기용 경로 — archive/에 있으면 그것을, 없으면 루트를 쓴다(하위 호환)."""
+    p = os.path.join(ARCHIVE, name)
+    return p if os.path.exists(p) else name
+
+
+def asave(name):
+    """쓰기용 경로 — 항상 archive/ 아래. 폴더가 없으면 만든다."""
+    os.makedirs(ARCHIVE, exist_ok=True)
+    return os.path.join(ARCHIVE, name)
+
+
+def alist(pattern):
+    """archive/와 루트를 함께 훑어 파일명 목록을 준다(중복 제거)."""
+    names = set()
+    for d in (ARCHIVE, "."):
+        try:
+            names.update(f for f in os.listdir(d) if re.fullmatch(pattern, f))
+        except FileNotFoundError:
+            continue
+    return sorted(names)
+
+
+DATA_PATH = apath(f"data_{DATE}.json")
+REPORT_PATH = apath(f"report_{DATE}.json")
 OUT_PATH = f"report_{DATE}.html"
 
 # collect_data.py 와 동일한 사전(설명 붙이기용). 여기서도 참조.
