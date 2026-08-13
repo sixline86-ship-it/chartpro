@@ -103,6 +103,9 @@ jobs:
         run: |
           python build_html.py
           cp report_$(date +%Y%m%d).html index.html
+      - name: 공유 썸네일 생성
+        run: python make_thumb.py
+
 
       # ── ④ 자동 커밋 → Pages 배포 ──
       - name: 자동 커밋 & 배포
@@ -110,7 +113,7 @@ jobs:
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
-          git add index.html data_*.json report_*.json report_*.html flow_history.json || true
+          git add index.html data_*.json report_*.json report_*.html flow_history.json market_history.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git pull --rebase --autostash || true
           git push
