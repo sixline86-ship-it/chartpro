@@ -25,7 +25,26 @@ name: 관제탑 일일 발행
 on:
   # (1) 수동 실행 버튼 — Actions 탭에서 "Run workflow"
   #     수동 실행은 중복 방지 장치를 무시하고 무조건 다시 만든다(재발행용)
+  #
+  #     ⚠️ 돈이 드는 건 Claude API 호출뿐이다(1회 약 수백원).
+  #        디자인·문구만 고쳐서 확인할 때는 아래 두 옵션을 기본값 그대로 두면
+  #        기존 해석글을 재사용하므로 **과금이 0원**이고 텔레그램도 안 나간다.
   workflow_dispatch:
+    inputs:
+      claude:
+        description: 'Claude 해석글'
+        type: choice
+        default: '재사용 (무료 — 화면 확인용)'
+        options:
+          - '재사용 (무료 — 화면 확인용)'
+          - '새로 생성 (과금 — 정식 발행용)'
+      telegram:
+        description: '텔레그램 발송'
+        type: choice
+        default: '보내지 않음 (테스트)'
+        options:
+          - '보내지 않음 (테스트)'
+          - '보냄 (정식 발행)'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   schedule:
@@ -102,14 +121,27 @@ jobs:
         run: python collect_data.py
 
       # ── ② 해석글 생성 (실패해도 다음 단계로) ──
+      # 💰 유일하게 돈이 드는 단계.
+      #    수동 실행에서 '재사용'을 고르면 통째로 건너뛰고 기존 해석글을 그대로 쓴다.
       - name: 해석글 생성 (Claude)
-        if: steps.guard.outputs.run == 'yes'
+        if: >-
+          steps.guard.outputs.run == 'yes' &&
+          (github.event_name != 'workflow_dispatch' ||
+           startsWith(inputs.claude, '새로 생성'))
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python generate_report.py
 
       # ── ③ HTML 생성 ──
+      - name: 이번 실행 모드 안내
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "🔘 수동 실행 — Claude: ${{ inputs.claude }} / 텔레그램: ${{ inputs.telegram }}"
+          else
+            echo "⏰ 자동 실행 — 정식 발행 (Claude 생성 + 텔레그램 발송)"
+          fi
+
       - name: 리포트 HTML 생성
         if: steps.guard.outputs.run == 'yes'
         run: |
@@ -131,8 +163,12 @@ jobs:
           git push
 
       # ── ⑤ 텔레그램 알림 ──
+      # 📮 텔레그램 자체는 무료지만, 테스트 알림이 구독자에게 가면 안 된다.
       - name: 텔레그램 알림 전송
-        if: steps.guard.outputs.run == 'yes'
+        if: >-
+          steps.guard.outputs.run == 'yes' &&
+          (github.event_name != 'workflow_dispatch' ||
+           startsWith(inputs.telegram, '보냄'))
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
