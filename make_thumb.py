@@ -17,7 +17,7 @@ from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
 
-SCRIPT_VERSION = "v2026.08.13-d"
+SCRIPT_VERSION = "v2026.08.13-e"
 DATE = datetime.now().strftime("%Y%m%d")
 
 W, H = 1200, 630
@@ -34,6 +34,20 @@ FALLBACKS = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 ]
+
+
+ARCHIVE = "archive"
+
+
+def apath(name):
+    """읽기용 경로 — archive/에 있으면 그것을, 없으면 루트를 쓴다(하위 호환).
+
+    ⚠️ v-13-d에서 날짜별 json을 archive/로 옮겼는데 make_thumb만 이 변경을
+       안 따라가서, report_YYYYMMDD.json을 루트에서 못 찾아 폴백 문구
+       "오늘의 시장 관제 리포트"로 빈 썸네일을 만들던 사고가 있었다(08-13).
+    """
+    p = os.path.join(ARCHIVE, name)
+    return p if os.path.exists(p) else name
 
 
 def ensure_font(name):
@@ -77,14 +91,18 @@ def font(name, size):
 
 def load_texts():
     한줄, 공감 = None, None
+    경로 = apath(f"report_{DATE}.json")      # archive/ 우선, 없으면 루트
     try:
-        with open(f"report_{DATE}.json", encoding="utf-8") as f:
+        with open(경로, encoding="utf-8") as f:
             d = json.load(f)
         해석 = d.get("해석글") or {}
         한줄 = 해석.get("한줄평")
         공감 = (해석.get("핵심편") or {}).get("공감문구")
-    except Exception:
-        pass
+    except Exception as e:
+        # ⚠️ 조용히 넘기면 빈 껍데기 썸네일이 만들어져도 아무도 모른다(실측 사고).
+        #    반드시 로그로 드러내 다음 사람이 원인을 즉시 알 수 있게 한다.
+        print(f"   ⚠️ 썸네일 글 재료를 못 읽었습니다({type(e).__name__}: {경로}) "
+              f"— 폴백 문구로 대체합니다")
     if not 한줄:
         한줄 = "오늘의 시장 관제 리포트"
     return 한줄.strip(), (공감 or "").strip()
