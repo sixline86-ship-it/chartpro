@@ -20,9 +20,40 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.12-e"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.13-d"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
+
+# ── 파일 보관 위치 ──
+#   날짜별 원본(data_·report_ json)은 archive/ 폴더에 모은다.
+#   저장소 첫 화면에 매일 3개씩 쌓이면 정작 중요한 .py 파일이 묻히기 때문이다.
+#   ⚠️ report_*.html은 **루트에 그대로 둔다** — 이미 텔레그램·카톡으로 나간
+#      https://.../report_YYYYMMDD.html 링크가 전부 깨지기 때문이다.
+ARCHIVE = "archive"
+
+
+def apath(name):
+    """읽기용 경로 — archive/에 있으면 그것을, 없으면 루트를 쓴다(하위 호환)."""
+    p = os.path.join(ARCHIVE, name)
+    return p if os.path.exists(p) else name
+
+
+def asave(name):
+    """쓰기용 경로 — 항상 archive/ 아래. 폴더가 없으면 만든다."""
+    os.makedirs(ARCHIVE, exist_ok=True)
+    return os.path.join(ARCHIVE, name)
+
+
+def alist(pattern):
+    """archive/와 루트를 함께 훑어 파일명 목록을 준다(중복 제거)."""
+    names = set()
+    for d in (ARCHIVE, "."):
+        try:
+            names.update(f for f in os.listdir(d) if re.fullmatch(pattern, f))
+        except FileNotFoundError:
+            continue
+    return sorted(names)
+
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
 
@@ -488,7 +519,7 @@ def backfill_flow_history(이력):
     """
     있는날 = {x.get("날짜") for x in 이력}
     추가 = 0
-    for f in sorted(os.listdir(".")):
+    for f in alist(r"data_\d{8}\.json"):
         m = re.fullmatch(r"data_(\d{8})\.json", f)
         if not m:
             continue
@@ -496,7 +527,7 @@ def backfill_flow_history(이력):
         if ymd in 있는날:
             continue
         try:
-            with open(f, encoding="utf-8") as fp:
+            with open(apath(f), encoding="utf-8") as fp:
                 d = json.load(fp)
         except Exception:
             continue
@@ -708,7 +739,7 @@ def update_market_history(지수수급, 파생, 게이지, 등락수):
     # ── 최초 1회 백필: 과거 data_*.json에서 복원 가능한 필드만 ──
     있는날 = {x.get("날짜") for x in 본체["일별"]}
     추가 = 0
-    for f in sorted(os.listdir(".")):
+    for f in alist(r"data_\d{8}\.json"):
         m = re.fullmatch(r"data_(\d{8})\.json", f)
         if not m:
             continue
@@ -717,7 +748,7 @@ def update_market_history(지수수급, 파생, 게이지, 등락수):
         if 키 in 있는날:
             continue
         try:
-            with open(f, encoding="utf-8") as fp:
+            with open(apath(f), encoding="utf-8") as fp:
                 d = json.load(fp)
         except Exception:
             continue
@@ -1494,7 +1525,7 @@ def collect_strength_radar():
 def _load_prev_tracking():
     """직전 발행분에서 추적 목록을 불러온다."""
     import glob
-    files = sorted(glob.glob("data_*.json"))
+    files = [apath(f) for f in alist(r"data_\d{8}\.json")]
     files = [f for f in files if DATE not in f]
     if not files:
         return []
@@ -1694,6 +1725,16 @@ def collect_briefings():
 if __name__ == "__main__":
     print(f"=== {DATE} 데이터 수집 시작 | collect_data {SCRIPT_VERSION} ===\n")
 
+    # ⚠️ 장 마감(15:30) 전에 돌리면 지수·주도섹터·강세레이더가 전부 0%로 잡힌다.
+    #    데이터 버그가 아니라 실행 시각 문제라서, 눈에 띄게 경고만 남기고 진행한다.
+    _now = datetime.now()
+    if _now.hour * 100 + _now.minute < 1540:
+        print("=" * 62)
+        print("⚠️  경고: 지금은 장 마감(15:30) 전입니다.")
+        print("    지수·주도섹터·강세레이더가 0%/0종목으로 수집됩니다.")
+        print("    정식 리포트는 15:40 이후에 실행하세요.")
+        print("=" * 62 + "\n")
+
     공시 = collect_dart()
     지수수급 = collect_index_and_flow()
     테마결과 = collect_themes_and_gauge()
@@ -1736,7 +1777,7 @@ if __name__ == "__main__":
         "마감브리핑": 마감브리핑,
     }
 
-    경로 = f"data_{DATE}.json"
+    경로 = asave(f"data_{DATE}.json")
     with open(경로, "w", encoding="utf-8") as f:
         json.dump(전체, f, ensure_ascii=False, indent=2)
     print(f"\n🎉 완료! → {경로}")
