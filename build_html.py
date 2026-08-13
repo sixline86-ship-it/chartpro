@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-d"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-e"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -636,6 +636,26 @@ def build_radar(강세레이더, 설정=None):
 
 
 # ── 5일 매집 레이더 (시총대비 + 아직 안 오른 매집) ──
+def _acc_star_names(매집):
+    """매집 레이더에서 '5일 TOP5 ∩ 20일 TOP5' 종목명만 뽑는다.
+
+    ⚠️ 반드시 '화면에 실제로 뜨는 TOP5'끼리 비교해야 한다.
+       조건을 통과한 후보 전체(수십 종목)끼리 비교하면 겹침이 부풀려진다
+       (실측: 후보 70개 vs 50개를 그대로 비교하면 겹침 34개라는 과장된
+       숫자가 나온 적이 있다 — 화면엔 각 5개씩만 보이는데도).
+    """
+    매집 = 매집 or {}
+    def top5(리스트, 시장):
+        후보 = [x for x in (리스트 or []) if x.get("시장") == 시장]
+        후보 = sorted(후보, key=lambda x: x.get("시총대비") or 0, reverse=True)[:5]
+        return {x["종목명"] for x in 후보}
+    단기 = 매집.get("종목") or []
+    중기 = 매집.get("중기종목") or []
+    단기TOP = top5(단기, "코스피") | top5(단기, "코스닥")
+    중기TOP = top5(중기, "코스피") | top5(중기, "코스닥")
+    return 단기TOP & 중기TOP
+
+
 def build_accumulation(매집, 설정=None):
     if not 매집:
         return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
@@ -696,9 +716,9 @@ def build_accumulation(매집, 설정=None):
     # ── 중기(20일) 매집 — 같은 데이터 응답에서 나온 긴 호흡 랭킹 ──
     중기 = 매집.get("중기종목") or []
     중기블록 = ""
+    별명단 = _acc_star_names(매집)   # 5일 TOP5 ∩ 20일 TOP5 (화면 기준. 후보 전체 기준 아님)
     if 중기:
         중기간 = 매집.get("중기기간", 20)
-        단기이름 = {s["종목명"] for s in 종목}
         def 중기랭킹(시장):
             목록 = [x for x in 중기 if x.get("시장") == 시장]
             목록 = sorted(목록, key=lambda x: x.get("시총대비") or 0, reverse=True)[:5]
@@ -707,7 +727,7 @@ def build_accumulation(매집, 설정=None):
             return "".join(
                 행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
                   f' · 누적 +{_fmt_eok(s.get("합산"))}'
-                  + ('' if s["종목명"] not in 단기이름 else "") + ('<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span>' if s["종목명"] in 단기이름 else ""))
+                  + ('<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span>' if s["종목명"] in 별명단 else ""))
                 for i, s in enumerate(목록, 1))
         중기블록 = f'''
     <div class="ac-long">
@@ -957,13 +977,18 @@ def build_core(핵심편, data, 해석):
     # ── 티저 (기계) ──
     #   ⚠️ 개수 자랑은 희소성을 죽인다. "34종목 확인하세요"는 아무도 안 본다.
     #      그래서 **가장 강한 신호 하나**만 골라 그 이유를 말한다.
+    #   ⚠️ 매집 티저의 "N종목" 버그: ⭐표시가 화면에 실제로 뜨는 TOP5가 아니라
+    #      조건만 통과한 후보 전체(수십 종목)를 비교해서 "34종목" 같은 부풀려진
+    #      숫자가 나왔었다. _acc_star_names()로 화면 기준(TOP5×TOP5)만 쓰도록 고쳤고,
+    #      숫자를 자랑하는 대신 "왜 봐야 하는지"로 문구를 다시 썼다.
     강세 = data.get("강세레이더") or {}
     신규 = 강세.get("신규") or {}
     전체신규 = [s for v in (신규.values() if isinstance(신규, dict) else []) for s in (v or [])]
     매집 = data.get("매집레이더") or {}
     단기 = 매집.get("종목") or []
-    단기이름 = {s.get("종목명") for s in 단기}
-    별종목 = [s for s in (매집.get("중기종목") or []) if s.get("종목명") in 단기이름]
+    중기 = 매집.get("중기종목") or []
+    별명단 = _acc_star_names(매집)
+    별종목 = [s for s in 중기 if s.get("종목명") in 별명단]
 
     티저들 = []
     # 1) 강세 — 점수 최고 1종목만, 종목명 대신 '무엇이 특별한가'로
@@ -973,17 +998,26 @@ def build_core(핵심편, data, 해석):
         티저들.append(('#radar', '레이더',
                      f'거래량이 평소의 <span class="u">{배수:.0f}배</span> 터진 종목이 나왔습니다'
                      if 배수 else '오늘 새로 불붙은 종목이 있습니다'))
-    # 2) 매집 — ⭐ 동시 등재만. 없으면 1위 한 종목의 '기간'을 말한다
+    # 2) 매집 — ⭐(5일+20일 동시) 최우선, 그다음 20일 최장연속, 마지막 5일 연속
+    #    종목명은 노출하지 않는다(추천으로 읽힐 위험) — 대신 "왜 지금 봐야 하는지"를 구체적으로.
     if 별종목:
-        n = len(별종목)
+        기간 = 매집.get("중기기간", 20)
         티저들.append(('#acc', '매집',
-                     f'5일·20일 랭킹에 <b>동시에</b> 올라온 종목이 '
-                     + (f'<span class="u">{n}개</span> 있습니다' if n > 1 else '있습니다')))
+                     f'5일도, {기간}일도 <b>동시에</b> 사들인 종목 — 오늘의 매집 1순위, 꼭 확인하세요'))
+    elif 중기:
+        top = max(중기, key=lambda s: max(s.get("외인일수") or 0, s.get("기관일수") or 0))
+        주체 = "외국인" if (top.get("외인일수") or 0) >= (top.get("기관일수") or 0) else "기관"
+        일수 = max(top.get("외인일수") or 0, top.get("기관일수") or 0)
+        기간 = 매집.get("중기기간", 20)
+        티저들.append(('#acc', '매집',
+                     f'{기간}일 중 <span class="u">{일수}일</span>, {주체}이 꾸준히 사들인 종목 — 꼭 확인하세요'
+                     if 일수 else '조용히 오래 쌓이는 곳이 있습니다'))
     elif 단기:
-        top = 단기[0]
+        top = max(단기, key=lambda s: max(s.get("외인일수") or 0, s.get("기관일수") or 0))
+        주체 = "외국인" if (top.get("외인일수") or 0) >= (top.get("기관일수") or 0) else "기관"
         일수 = max(top.get("외인일수") or 0, top.get("기관일수") or 0)
         티저들.append(('#acc', '매집',
-                     f'5일 중 <span class="u">{일수}일</span>을 연달아 사들인 곳이 있습니다'
+                     f'5일 중 <span class="u">{일수}일</span>, {주체}이 연달아 사들인 종목 — 꼭 확인하세요'
                      if 일수 else '조용히 돈이 쌓이는 곳이 있습니다'))
     # 3) 관전 — 항상
     티저들.append(('#watch', '관전', '내일 아침, <b>이 숫자 하나</b>만 확인하세요'))
@@ -1004,7 +1038,7 @@ def build_core(핵심편, data, 해석):
     왜그런가 = 핵심편.get("왜그런가") or ""
     return (장전경고 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
-            '<span class="q90-sub">바쁘시면 여기까지만 읽으셔도 됩니다</span></div>'
+            '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
             + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
@@ -1018,7 +1052,7 @@ def build_core(핵심편, data, 해석):
             + 내종목 + 뒤집블록
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
             + '</div>'
-            + '<p class="q90-cut" id="deep">— 여기까지가 90초. 아래 <b>정밀 관제</b>는 근거와 상세입니다 ↓ —</p>')
+            + '<p class="q90-cut" id="deep">— 핵심편은 여기까지입니다. 지금부터는 근거와 상세를 담은 <b>심층편</b>입니다 ↓ —</p>')
 
 
 def temp_inline():
@@ -1690,14 +1724,14 @@ a{{color:inherit;text-decoration:none}}
 .pending{{background:var(--bg2);border:.5px dashed var(--line);border-radius:var(--rmd);padding:.9rem 1rem;font-size:11.5px;color:var(--sub);margin-bottom:1rem;line-height:1.7;text-align:center}}
 
 /* 핵심 이슈 */
-.issue-box{{background:var(--bg2);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}}
-.iss{{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid var(--line);line-height:1.65}}
+.issue-box{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:.9rem 1.1rem;margin-bottom:1rem}}
+.iss{{display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.08);line-height:1.65}}
 .iss:last-child{{border-bottom:none;padding-bottom:0}}
 .iss-links{{display:block;margin-top:3px}}
-.iss-link{{font-size:9.5px;color:#8a86c8;text-decoration:none;font-weight:600;margin-right:8px}}
+.iss-link{{font-size:9.5px;color:#9fb4e0;text-decoration:none;font-weight:600;margin-right:8px}}
 .iss-link:hover{{text-decoration:underline}}
 .itag{{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:2px;background:#E6F1FB;color:#0C447C}}
-.iss-text{{font-size:12.5px;color:var(--ink)}}
+.iss-text{{font-size:12.5px;color:#dfe3e8}}
 
 /* 핵심 뉴스 */
 .news-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:.6rem}}
@@ -1724,16 +1758,16 @@ a{{color:inherit;text-decoration:none}}
 .arch-link{{font-size:11.5px;font-weight:600;color:var(--ink);background:var(--bg);border:.5px solid var(--line);border-radius:99px;padding:5px 12px;text-decoration:none;font-variant-numeric:tabular-nums;white-space:nowrap}}
 .arch-link:hover{{background:#23262b;color:#fff;border-color:#23262b}}
 .arch-empty{{font-size:11px;color:var(--sub)}}
-.silent-wrap{{background:#F4F2FA;border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}}
-.silent-head{{font-size:12.5px;font-weight:800;color:#3C3489;margin-bottom:.6rem}}
-.si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid #e0dcf0;font-size:12.5px;line-height:1.75;color:#33305e}}
+.silent-wrap{{background:linear-gradient(180deg,#23262b,#2c3038);border-radius:var(--rlg);padding:.95rem 1.05rem;margin-bottom:1rem}}
+.silent-head{{font-size:12.5px;font-weight:800;color:#c9c4f0;margin-bottom:.6rem}}
+.si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.08);font-size:12.5px;line-height:1.75;color:#dfe3e8}}
 .si-item:last-child{{border-bottom:none;padding-bottom:0}}
-.si-lens{{font-size:10px;font-weight:700;background:#E3DFF5;color:#3C3489;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.si-lens{{font-size:10px;font-weight:700;background:rgba(255,255,255,.12);color:#c9c4f0;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
 .study-src{{font-size:10.5px;font-weight:600;color:#5b8a2a;background:#dcebc8;display:inline-block;padding:2px 9px;border-radius:99px;margin:2px 0 6px}}
 .study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
 .hidden-block{{display:none}} .hidden-block.open{{display:block}}
 .more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
-.macro-row{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:1rem}}
+.macro-row{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:1rem}}
 .mr-card{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .9rem}}
 .mr-label{{font-size:11px;color:var(--sub);margin-bottom:3px}}
 .mr-val{{font-size:15px;font-weight:700;color:var(--sub)}}
@@ -1893,7 +1927,7 @@ a{{color:inherit;text-decoration:none}}
 
 .iss90-s{{font-size:11px;color:#8a909a;margin-bottom:.7rem}}
 
-.i9{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13px;line-height:1.7;color:#dfe3e8}}
+.i9{{display:flex;align-items:flex-start;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13px;line-height:1.7;color:#dfe3e8}}
 
 .i9:last-child{{border-bottom:none;padding-bottom:0}}
 
@@ -2235,11 +2269,12 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 왜, 어디로, 무엇을 볼까</p>
   {build_issues(해석.get('핵심이슈'))}
 
-  <p class="sec-label"><small>환율 · 유가 · 금리</small>🌏 바깥 날씨</p>
+  <p class="sec-label"><small>환율 · 유가 · 금리 · 금</small>🌏 바깥 날씨</p>
   <div class="macro-row">
     {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
     {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''))}
     {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
+    {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
   </div>
 
   <p class="sec-label"><small>주도 섹터</small>🏆 오늘의 주인공 — 시장을 끌고 간 6개 업종</p>
