@@ -1,5 +1,5 @@
 # ============================================================
-# notify_telegram.py  (v2026.07.24-f)
+# notify_telegram.py  (v2026.08.12-a)
 # ------------------------------------------------------------
 # 리포트가 발행된 뒤, 텔레그램으로 완성 알림을 보낸다.
 #   - 오늘 report_YYYYMMDD.json 에서 관제지수·한줄평을 읽어
@@ -13,10 +13,16 @@ import requests
 from datetime import datetime
 
 DATE = datetime.now().strftime("%Y%m%d")
-REPORT_PATH = f"report_{DATE}.json"
+REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
+               if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
+               else f"report_{DATE}.json")
 
-# 배포된 리포트 주소 (매일 같은 주소, 내용만 갱신됨)
+# 배포된 리포트 주소
+#   ⚠️ index.html(고정 주소)이 아니라 **날짜별 페이지**로 보낸다.
+#   텔레그램·카톡은 같은 URL의 미리보기를 캐싱해서, 고정 주소로 보내면
+#   어제의 썸네일·제목이 그대로 뜬다. 날짜가 다르면 캐시가 원천적으로 안 생긴다.
 SITE_URL = "https://sixline86-ship-it.github.io/chartpro/"
+REPORT_URL = f"{SITE_URL}report_{DATE}.html"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -43,7 +49,7 @@ def build_message():
     if 한줄:
         줄.append(f"💬 {한줄}")
     줄.append("")
-    줄.append(f"👉 {SITE_URL}")
+    줄.append(f"👉 {REPORT_URL}")
     return "\n".join(줄)
 
 
@@ -56,8 +62,11 @@ def main():
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-            data={"chat_id": CHAT_ID, "text": msg,
-                  "disable_web_page_preview": False},
+            json={"chat_id": CHAT_ID, "text": msg,
+                  # 미리보기를 크게 + 본문 위에 — 썸네일이 카드의 주인공이 되게
+                  "link_preview_options": {"url": REPORT_URL,
+                                           "prefer_large_media": True,
+                                           "show_above_text": True}},
             timeout=15,
         )
         if r.status_code == 200:
