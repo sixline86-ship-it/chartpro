@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-j"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.14-k2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
@@ -362,7 +362,8 @@ def collect_themes_and_gauge():
     상승테마 = sum(1 for c in 유효 if c[2] is not None and c[2] > 0)
     시장확산 = (상승테마 / len(유효) * 100) if 유효 else 50.0
 
-    return {"주도섹터": 주도6, "확산도_시장평균": round(시장확산, 1)}
+    return {"주도섹터": 주도6, "확산도_시장평균": round(시장확산, 1),
+            "테마후보": 유효}   # 격자(collect_account_grid)가 재활용한다
 
 
 # ============================================================
@@ -1752,6 +1753,268 @@ def collect_briefings():
 
 
 # ============================================================
+# 계좌 좌표 격자 (테마 10 + 기타) × (시총 3단계)     [v-k 신규]
+# ------------------------------------------------------------
+# 왜 만드나:
+#   "코스피는 올랐는데 내 종목은 왜 안 올랐나"의 답을 그림 한 장으로 준다.
+#   개인은 자기 종목의 시총 순위는 몰라도 '무슨 테마인지'는 안다.
+#   그래서 세로=테마, 가로=크기 두 축을 함께 준다.
+#
+# 시총 구분을 '금액'이 아니라 '순위'로 하는 이유:
+#   금액 기준(예: 10조 이상=대형)은 시장이 오르면 대형주 수가 저절로 늘어난다.
+#   1년 뒤 오늘과 비교할 때 대형주의 정의 자체가 달라져 시계열 비교가 깨진다.
+#   순위 기준이면 각 층의 종목 수가 항상 100/200/나머지로 고정된다.
+# ============================================================
+
+GRID_대형_끝 = 100        # 통합 시총 1~100위
+GRID_중형_끝 = 300        # 101~300위 / 301위 이하는 소형
+GRID_시총페이지 = 12      # 시장별 크롤 페이지 수(50종목/페이지) → 시장당 600종목
+GRID_최소종목 = 3         # 한 칸에 이보다 적으면 '표본 부족'(—) 처리
+GRID_테마상세 = 2         # 슬롯 하나당 상세를 열어볼 네이버 테마 개수
+
+# 테마 슬롯 9개 — 네이버 테마명에 아래 키워드가 들어가면 그 슬롯으로 본다.
+# ⚠️ 이 목록은 한 번 정하면 함부로 바꾸지 않는다. 바꾸면 과거 격자와 비교가 깨진다.
+GRID_슬롯 = [
+    ("반도체",          ["반도체", "HBM", "파운드리", "메모리", "웨이퍼", "소부장"]),
+    ("2차전지·소재",     ["2차전지", "이차전지", "전고체", "양극재", "음극재", "리튬", "폐배터리"]),
+    ("조선·기계·방산",   ["조선", "방산", "우주", "항공", "기계", "무기"]),
+    ("전력·신재생·원전", ["원자력", "원전", "전력", "태양광", "풍력", "전선", "변압기", "수소", "신재생"]),
+    ("바이오·제약",      ["제약", "바이오", "의료", "백신", "임플란트", "비만", "치료제"]),
+    ("자동차·부품",      ["자동차", "타이어", "자율주행", "전기차"]),
+    ("AI·소프트웨어",    ["인공지능", "AI", "클라우드", "데이터센터", "로봇", "소프트웨어", "보안"]),
+    ("인터넷·게임·엔터", ["게임", "엔터", "미디어", "콘텐츠", "웹툰", "음원", "영화"]),
+    ("금융·지주",        ["은행", "증권", "보험", "지주", "금융"]),
+]
+GRID_신규슬롯 = "신규 주도"   # 10번째 칸 — 어느 슬롯에도 안 걸린 테마 중 오늘 최강
+                              # ⚠️ 이모지를 쓰지 않는다 — 일부 환경에서 □로 깨진다
+
+
+def _grid_is_excluded(이름):
+    """우선주·스팩·리츠·ETF성 종목은 격자에서 뺀다(평균을 왜곡한다)."""
+    if not 이름:
+        return True
+    if re.search(r"(우|우B|1우|2우B|3우B)$", 이름):
+        return True
+    for k in ("스팩", "리츠", "홀딩스스팩", "기업인수목적"):
+        if k in 이름:
+            return True
+    return False
+
+
+def collect_marketcap_universe(pages=GRID_시총페이지):
+    """코스피·코스닥 전 종목의 (종목명 → 시총·등락률)을 모아 시총 순위를 매긴다.
+
+    반환: {종목명: {"시총": 억원, "등락률": %, "층": "대형"/"중형"/"소형", "순위": n}}
+    """
+    종목들 = []
+    for 시장, sosok in (("코스피", "0"), ("코스닥", "1")):
+        for page in range(1, pages + 1):
+            try:
+                r = requests.get("https://finance.naver.com/sise/sise_market_sum.naver",
+                                 headers=HEADERS, params={"sosok": sosok, "page": str(page)},
+                                 timeout=12)
+                r.encoding = "euc-kr"
+                tables = read_html_safe(r.text)
+            except Exception as e:
+                print(f"  ⚠️ 시총 {시장} p{page} 실패: {type(e).__name__}")
+                break
+
+            표 = None
+            for t in tables:
+                cols = " ".join(str(c) for c in t.columns)
+                if "종목명" in cols and "시가총액" in cols:
+                    표 = t
+                    break
+            if 표 is None:
+                break
+
+            표 = 표.dropna(subset=["종목명"])
+            빈페이지 = True
+            for _, row in 표.iterrows():
+                이름 = clean_name(row.get("종목명", ""))
+                시총 = to_num(row.get("시가총액"))
+                등락 = to_num(row.get("등락률"))
+                if not 이름 or 시총 is None or 등락 is None:
+                    continue
+                if _grid_is_excluded(이름):
+                    continue
+                빈페이지 = False
+                종목들.append({"종목명": 이름, "시장": 시장, "시총": 시총, "등락률": 등락})
+            if 빈페이지:
+                break
+
+    # 코스피·코스닥 통합 순위 (테마는 시장을 가리지 않으므로 합쳐서 줄 세운다)
+    종목들.sort(key=lambda x: x["시총"], reverse=True)
+    유니버스 = {}
+    for i, s in enumerate(종목들, start=1):
+        층 = "대형" if i <= GRID_대형_끝 else ("중형" if i <= GRID_중형_끝 else "소형")
+        s["순위"] = i
+        s["층"] = 층
+        유니버스[s["종목명"]] = s
+    print(f"📐 시총 유니버스 {len(유니버스)}종목 "
+          f"(대형 {sum(1 for v in 유니버스.values() if v['층']=='대형')} / "
+          f"중형 {sum(1 for v in 유니버스.values() if v['층']=='중형')} / "
+          f"소형 {sum(1 for v in 유니버스.values() if v['층']=='소형')})")
+    return 유니버스
+
+
+def _grid_theme_members(번호):
+    """네이버 테마 상세에서 구성 종목명만 뽑는다."""
+    이름들 = []
+    try:
+        dres = requests.get("https://finance.naver.com/sise/sise_group_detail.naver",
+                            headers=HEADERS, params={"type": "theme", "no": 번호}, timeout=12)
+        dres.encoding = "euc-kr"
+        soup = BeautifulSoup(dres.text, "html.parser")
+        for a in soup.select("a[href*='code=']"):
+            nm = clean_name(a.get_text(strip=True))
+            if nm and not _grid_is_excluded(nm):
+                이름들.append(nm)
+    except Exception as e:
+        print(f"  ⚠️ 테마 상세 {번호} 실패: {type(e).__name__}")
+    return list(dict.fromkeys(이름들))
+
+
+def collect_account_grid(테마후보):
+    """테마 10칸(+기타) × 시총 3층 격자를 만든다.
+
+    테마후보: collect_themes_and_gauge()가 모은 [(테마명, 번호, 등락률), ...] 전체 목록
+    """
+    유니버스 = collect_marketcap_universe()
+    if not 유니버스:
+        print("⚠️ 시총 유니버스 수집 실패 — 격자 생략")
+        return {}
+
+    유효 = [c for c in (테마후보 or []) if c[2] is not None and not math.isnan(c[2])]
+    유효.sort(key=lambda x: x[2], reverse=True)
+
+    슬롯멤버 = {}     # 슬롯명 → set(종목명)
+    슬롯테마 = {}     # 슬롯명 → [쓰인 네이버 테마명]
+    사용된번호 = set()
+
+    for 슬롯명, 키워드들 in GRID_슬롯:
+        매칭 = [c for c in 유효 if any(k.lower() in c[0].lower() for k in 키워드들)]
+        멤버 = set()
+        쓴테마 = []
+        for 테마명, 번호, _ in 매칭[:GRID_테마상세]:
+            멤버 |= set(_grid_theme_members(번호))
+            쓴테마.append(테마명)
+            사용된번호.add(번호)
+        if 멤버:
+            슬롯멤버[슬롯명] = 멤버
+            슬롯테마[슬롯명] = 쓴테마
+
+    # 🆕 신규 슬롯 — 위 9칸 어디에도 안 걸린 테마 중 오늘 가장 강한 것 1개
+    for 테마명, 번호, _ in 유효:
+        if 번호 in 사용된번호:
+            continue
+        if any(any(k.lower() in 테마명.lower() for k in kws) for _, kws in GRID_슬롯):
+            continue
+        멤버 = set(_grid_theme_members(번호))
+        if len(멤버) >= GRID_최소종목:
+            슬롯멤버[GRID_신규슬롯] = 멤버
+            슬롯테마[GRID_신규슬롯] = [테마명]
+            break
+
+    # ── 격자 계산 ──
+    분류됨 = set()
+    행들 = []
+    for 슬롯명 in [s for s, _ in GRID_슬롯] + [GRID_신규슬롯]:
+        멤버 = 슬롯멤버.get(슬롯명)
+        if not 멤버:
+            continue
+        칸 = {}
+        전체값 = []
+        for 층 in ("대형", "중형", "소형"):
+            값들 = [유니버스[n]["등락률"] for n in 멤버
+                    if n in 유니버스 and 유니버스[n]["층"] == 층]
+            칸[층] = ({"등락률": round(sum(값들) / len(값들), 2), "종목수": len(값들)}
+                     if len(값들) >= GRID_최소종목 else {"등락률": None, "종목수": len(값들)})
+            전체값 += 값들
+        if not 전체값:
+            continue
+        분류됨 |= {n for n in 멤버 if n in 유니버스}
+        행들.append({
+            "테마": 슬롯명,
+            "네이버테마": 슬롯테마.get(슬롯명, []),
+            "칸": 칸,
+            "전체": round(sum(전체값) / len(전체값), 2),
+            "종목수": len(전체값),
+        })
+
+    # ── 기타 — 어느 테마에도 안 걸린 종목 (빠지면 "내 종목이 없는데?"가 된다) ──
+    나머지 = [v for n, v in 유니버스.items() if n not in 분류됨]
+    if len(나머지) >= GRID_최소종목:
+        칸 = {}
+        for 층 in ("대형", "중형", "소형"):
+            값들 = [v["등락률"] for v in 나머지 if v["층"] == 층]
+            칸[층] = ({"등락률": round(sum(값들) / len(값들), 2), "종목수": len(값들)}
+                     if len(값들) >= GRID_최소종목 else {"등락률": None, "종목수": len(값들)})
+        행들.append({
+            "테마": "기타",
+            "네이버테마": [],
+            "칸": 칸,
+            "전체": round(sum(v["등락률"] for v in 나머지) / len(나머지), 2),
+            "종목수": len(나머지),
+        })
+
+    행들.sort(key=lambda r: r["전체"], reverse=True)
+
+    # ── 크기 전체 (스파크라인 원료) ──
+    크기전체 = {}
+    for 층 in ("대형", "중형", "소형"):
+        값들 = [v["등락률"] for v in 유니버스.values() if v["층"] == 층]
+        크기전체[층] = round(sum(값들) / len(값들), 2) if 값들 else None
+
+    격차 = None
+    if 크기전체["대형"] is not None and 크기전체["소형"] is not None:
+        격차 = round(크기전체["대형"] - 크기전체["소형"], 2)
+
+    결과 = {
+        "행": 행들,
+        "크기전체": 크기전체,
+        "크기프리미엄": 격차,          # 대형 − 소형. 양수면 대형 쏠림
+        "기준": {"대형": f"1~{GRID_대형_끝}위", "중형": f"{GRID_대형_끝+1}~{GRID_중형_끝}위",
+                "소형": f"{GRID_중형_끝+1}위 이하", "최소종목": GRID_최소종목},
+        "유니버스종목수": len(유니버스),
+    }
+    print(f"🧭 계좌 좌표 격자 {len(행들)}행 · 크기 프리미엄 {격차}%p")
+    update_strata_history(결과)
+    return 결과
+
+
+def update_strata_history(격자):
+    """대형·중형·소형 일별 등락과 크기 프리미엄을 영구 누적한다.
+
+    ⚠️ 오늘 저장하지 않으면 오늘 하루는 영영 복구할 수 없다.
+       스파크라인 3줄과 크기 프리미엄 추이가 전부 여기서 나온다.
+    """
+    경로 = "strata_history.json"
+    이력 = []
+    try:
+        if os.path.exists(경로):
+            with open(경로, encoding="utf-8") as f:
+                이력 = json.load(f) or []
+    except Exception:
+        이력 = []
+
+    한줄 = {
+        "날짜": DATE,
+        "대형": 격자.get("크기전체", {}).get("대형"),
+        "중형": 격자.get("크기전체", {}).get("중형"),
+        "소형": 격자.get("크기전체", {}).get("소형"),
+        "크기프리미엄": 격자.get("크기프리미엄"),
+    }
+    이력 = [r for r in 이력 if r.get("날짜") != DATE]   # 같은 날 재실행이면 덮어씀
+    이력.append(한줄)
+    이력.sort(key=lambda r: r.get("날짜", ""))
+
+    with open(경로, "w", encoding="utf-8") as f:
+        json.dump(이력, f, ensure_ascii=False, indent=2)
+    print(f"💾 strata_history.json {len(이력)}일치 누적")
+
+
+# ============================================================
 # 메인
 # ============================================================
 if __name__ == "__main__":
@@ -1779,6 +2042,7 @@ if __name__ == "__main__":
     update_market_history(지수수급, 파생, 게이지, 등락수)
     강세레이더 = collect_strength_radar()
     매집레이더 = collect_accumulation_radar()
+    계좌격자 = collect_account_grid(테마결과.get("테마후보"))
     마감브리핑 = collect_briefings()
 
     전체 = {
@@ -1794,6 +2058,7 @@ if __name__ == "__main__":
         "강세레이더": 강세레이더,
         "매집레이더": 매집레이더,
         "등락종목수": 등락수,
+        "계좌격자": 계좌격자,
         "설정": {
             "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
                    "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
