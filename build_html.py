@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-g"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.13-j"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -888,6 +888,89 @@ def build_briefings(마감브리핑):
   </div>'''
 
 
+def build_story_bridge():
+    """'지금까지의 줄거리' — 오늘을 최근 며칠 흐름과 잇는 한 줄 서사(연속극).
+
+    채점표·프로의판단과 정보가 겹치지 않게, 여기서는 '흐름의 연속성'만 짧게 짚는다.
+    기준: 어제(1일) + 최대 5일. 20/60일은 '이야기'가 아니라 통계라 여기선 안 쓴다.
+    전부 규칙 기반(코드) — flow_history를 읽어 가장 강한 서사 한 줄을 만든다.
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
+    except Exception:
+        return ""
+    if len(h) < 3:
+        return ""
+    오늘, 어제 = h[-1], h[-2]
+
+    def 연속(key):
+        n, sign = 0, None
+        for r in reversed(h):
+            v = r.get(key)
+            if v is None or v == 0:
+                break
+            s = v >= 0
+            if sign is None:
+                sign = s
+            if s != sign:
+                break
+            n += 1
+        return n, ("매수" if sign else "매도")
+
+    # 각 조각은 '연결형'(~며)으로 쓰고, 마지막에 종결한다.
+    조각 = []
+
+    # ① 어제→오늘 방향 전환 (가장 극적)
+    실오, 실어 = 오늘.get("실탄", 0), 어제.get("실탄", 0)
+    전환 = (실어 >= 0) != (실오 >= 0)
+    if 전환:
+        조각.append(f'어제 <b>{_flow_amt(실어)}</b>였던 실탄이 오늘 <b>{_flow_amt(실오)}</b>로 '
+                    f'<b class="st-turn">하루 만에 방향을 틀었으며</b>')
+    else:
+        # ② 연속 흐름 (며칠째)
+        외n, 외방 = 연속("외현")
+        기n, 기방 = 연속("기관")
+        best = max((외n, "외국인", 외방), (기n, "기관", 기방))
+        if best[0] >= 3:
+            조각.append(f'<b>{best[1]}</b>이 <b>{best[0]}일째</b> {best[2]}를 이어가며')
+
+    # ③ 5일 내 바닥 반등 (희망 서사)
+    누적, acc = [], 0
+    for r in h:
+        acc += r.get("실탄", 0)
+        누적.append(acc)
+    저점i = 누적.index(min(누적))
+    흐른 = len(h) - 1 - 저점i
+    바닥조각 = None
+    if 0 < 흐른 <= 8 and 누적[저점i] < 0 <= 누적[-1]:
+        from datetime import datetime
+        try:
+            d = datetime.strptime(h[저점i]["날짜"], "%Y%m%d")
+            바닥조각 = f'{d.month}/{d.day} 바닥을 찍은 실탄이 <b>{흐른}일째 쌓이는 중</b>'
+        except Exception:
+            pass
+
+    # 조립: 연결형 조각(들) + 종결형(바닥조각 우선, 없으면 연결형을 종결로)
+    앞 = " ".join(조각)
+    if 바닥조각:
+        본문 = (앞 + " " if 앞 else "") + 바닥조각 + "입니다"
+    elif 앞:
+        # 연결형 어미(~며/~으며)를 종결로 교체
+        본문 = 앞.rstrip()
+        for 연결, 종결 in (("이어가며", "이어가고 있습니다"),
+                          ("틀었으며", "틀었습니다")):
+            if 본문.endswith(연결):
+                본문 = 본문[:-len(연결)] + 종결
+                break
+        else:
+            본문 += "입니다"
+    else:
+        return ""
+    return (f'<div class="story-bridge"><span class="st-ic">🎬</span>'
+            f'<span class="st-txt"><b>지금까지의 줄거리</b> — {본문}.</span></div>')
+
+
 # ── 어제의 채점표 ──
 def build_scorecard(채점표, 어제날짜=""):
     if not 채점표:
@@ -1099,10 +1182,12 @@ def _head_icon(코등, 링색, 이모, 관제점수=None, 관제구간=None, 태
         def dot(pos, color):
             on = (켜 == pos)
             bg = color if on else "#333"
-            glow = f';box-shadow:0 0 9px {color}' if on else ''
-            return f'<div class="hi-dot" style="background:{bg}{glow}"></div>'
+            cls = "hi-dot on" if on else "hi-dot"
+            style = f'background:{bg};--gc:{color}' if on else f'background:{bg}'
+            return f'<div class="{cls}" style="{style}"></div>'
+        # 위→아래: 초록 · 황색 · 적색
         return ('<div class="hi-light">'
-                + dot("red", RED) + dot("yellow", YEL) + dot("green", GRN)
+                + dot("green", GRN) + dot("yellow", YEL) + dot("red", RED)
                 + '</div>')
 
     if st == "shield":
@@ -1393,6 +1478,16 @@ def build_core(핵심편, data, 해석):
                 + f'<p class="mine-b">{본문}</p>'
                 + (f'<p class="mine-f2">{한줄}</p>' if 한줄 else '')
                 + '</div>')
+    # 핵심편 디버전스 콜아웃 — 가장 중요한 신호 1개만(경계>안심>관찰 순 우선)
+    _divs = detect_divergences(data)
+    핵심디버전스 = ""
+    if _divs:
+        _order = {"warn": 0, "good": 1, "watch": 2}
+        _top = sorted(_divs, key=lambda x: _order.get(x[0], 9))[0]
+        _g, _ic, _t, _dd = _top
+        핵심디버전스 = (f'<div class="q90-dv dv-{_g}"><span class="q90-dv-ic">{_ic}</span>'
+                     f'<span class="q90-dv-t"><b>{_t}</b> — 심층편 &lt;오늘 프로의 판단&gt;에서 자세히</span></div>')
+
     뒤집 = 핵심편.get("뒤집어보기") or ""
     뒤집블록 = (f'<div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p>'
               f'<p class="qf-b">{뒤집}</p></div>') if 뒤집 else ""
@@ -1512,7 +1607,7 @@ def build_core(핵심편, data, 해석):
             + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
             + f'<div class="mny-tiles">{타일HTML}</div>'
             + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
-            + 내종목 + 뒤집블록
+            + 내종목 + 뒤집블록 + 핵심디버전스
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
             + 내일대응
             + '</div>'
@@ -1631,6 +1726,182 @@ def _flow_amt(v):
         t = f"{a/10000:.2f}".rstrip("0").rstrip(".")
         return f"{s}{t}조"
     return f"{s}{a:,.0f}억"
+
+
+def detect_divergences(data):
+    """지수·수급의 '엇갈림(디버전스)'을 규칙 기반으로 포착한다.
+
+    엇갈림은 반전의 씨앗이다. 각 신호를 ⚠️경계 / 👀관찰 / ✅안심 3단계로 분류해
+    '단정'이 아니라 '지금 이걸 주목하라'는 판단 힌트로 준다.
+    최대 60일 범위에서 기간은 신호마다 자동 선택(5·20일 등).
+    """
+    지 = ((data.get("지수수급") or {}).get("지수")) or {}
+    코수 = ((data.get("지수수급") or {}).get("코스피_수급")) or {}
+
+    def f(v):
+        try: return float(str(v).replace(",", "").replace("%", ""))
+        except (TypeError, ValueError): return None
+
+    코등 = f((지.get("코스피") or {}).get("등락률"))
+    닥등 = f((지.get("코스닥") or {}).get("등락률"))
+    외 = f(코수.get("외국인")); 기 = f(코수.get("기관계"))
+    실탄오늘 = (외 + 기) if (외 is not None and 기 is not None) else None
+
+    h = load_json("flow_history.json") or []
+    h = [x for x in h if isinstance(x, dict) and x.get("실탄") is not None]
+    h20 = h[-20:]
+    실탄20 = sum(x.get("실탄") or 0 for x in h20) if h20 else None
+    외20 = sum(x.get("외현") or 0 for x in h20) if h20 else None
+
+    signals = []   # (등급, 아이콘, 제목, 설명)
+
+    # ① 지수 상승 vs 20일 실탄 유출 (고점 경계)
+    if 코등 is not None and 코등 > 0.3 and 실탄20 is not None and 실탄20 < 0 and len(h20) >= 8:
+        signals.append((
+            "warn", "⚠️",
+            "지수는 오르는데, 큰돈은 빠지는 중",
+            f"코스피가 <b>{코등:+.1f}%</b> 올랐지만 최근 {len(h20)}일 실탄은 "
+            f"<b>{_flow_amt(실탄20)}</b> 빠져나갔습니다. 외국인·기관이 아니라 개인이 밀어올린 "
+            f"상승일 수 있어, <b>지속력은 지켜봐야</b> 합니다."))
+
+    # ② 오늘 외국인 매수 vs 20일 누적 매도 (바닥 전환 초기)
+    if 외 is not None and 외 > 0 and 외20 is not None and 외20 < 0 and len(h20) >= 8:
+        signals.append((
+            "good", "✅",
+            "외국인이 이제 막 돌아서는 신호",
+            f"오늘 외국인은 <b>{_flow_amt(외)}</b> 샀지만 최근 {len(h20)}일 누적은 아직 "
+            f"<b>{_flow_amt(외20)}</b> 매도입니다. <b>추세가 바뀌기 시작하는 초입</b>일 수 있어, "
+            f"매수가 며칠 더 이어지는지가 관건입니다."))
+
+    # ③ 코스피 vs 코스닥 격차 (쏠림/양극화)
+    if 코등 is not None and 닥등 is not None:
+        갭 = 코등 - 닥등
+        if 코등 > 0.5 and 닥등 < 0:
+            signals.append((
+                "warn", "⚠️",
+                "대형주만 웃고 중소형주는 소외",
+                f"코스피는 <b>{코등:+.1f}%</b>인데 코스닥은 <b>{닥등:+.1f}%</b>입니다. "
+                f"돈이 일부 대형주에만 몰린 <b>쏠림 장세</b>라, 지수만 보고 '좋았다'고 "
+                f"느끼면 실제 체감과 어긋납니다."))
+        elif abs(갭) >= 1.5:
+            signals.append((
+                "watch", "👀",
+                "코스피와 코스닥이 서로 다른 방향",
+                f"두 지수 격차가 <b>{abs(갭):.1f}%p</b>로 큽니다. 시장 안에서 "
+                f"자금이 한쪽으로 이동 중일 수 있으니 어느 쪽이 이기는지 지켜보십시오."))
+
+    # ④ 실탄 20일 유출인데 5일은 유입 (흐름 반전 조짐)
+    실탄5 = sum(x.get("실탄") or 0 for x in h[-5:]) if len(h) >= 5 else None
+    if (실탄20 is not None and 실탄5 is not None and len(h) >= 10
+            and 실탄20 < 0 < 실탄5 and abs(실탄5) > abs(실탄20) * 0.3):
+        signals.append((
+            "good", "✅",
+            "한 달 흐름은 유출, 이번 주는 유입",
+            f"최근 {len(h20)}일 실탄은 <b>{_flow_amt(실탄20)}</b> 빠졌지만 최근 5일은 "
+            f"<b>{_flow_amt(실탄5)}</b> 들어왔습니다. <b>큰 흐름이 바뀌는 변곡</b>일 수 있습니다."))
+
+    return signals
+
+
+def _alignment_verdict(data):
+    """엇갈림이 없을 때 — 지수·수급이 '정렬'됐는지 판정해 안심 판단을 준다.
+
+    엇갈림 없음 = 정보 없음이 아니라 '방향이 선명하다'는 판단 재료.
+    (등급, 아이콘, 제목, 설명) 하나를 돌려준다. 전부 규칙 기반(코드).
+    """
+    def f(v):
+        try: return float(str(v).replace(",", "").replace("%", ""))
+        except (TypeError, ValueError): return None
+    지 = ((data.get("지수수급") or {}).get("지수")) or {}
+    코수 = ((data.get("지수수급") or {}).get("코스피_수급")) or {}
+    코등 = f((지.get("코스피") or {}).get("등락률"))
+    외 = f(코수.get("외국인")); 기 = f(코수.get("기관계"))
+    실탄 = (외 + 기) if (외 is not None and 기 is not None) else None
+    if 코등 is None or 실탄 is None:
+        return None
+
+    지수양 = 코등 > 0.2
+    지수음 = 코등 < -0.2
+    수급양 = 실탄 > 0
+    수급음 = 실탄 < 0
+
+    if 지수양 and 수급양:
+        return ("good", "✅", "지수도 수급도 매수로 정렬",
+                f"코스피 <b>{코등:+.1f}%</b> 상승에 실탄도 <b>{_flow_amt(실탄)}</b> 순매수 — "
+                f"방향이 <b>한 곳으로 정렬</b>됐습니다. 엇갈림 없는 <b>선명한 상승</b>이라, "
+                f"이런 날은 추세를 믿고 따라가되 과열만 경계하면 됩니다.")
+    if 지수음 and 수급음:
+        return ("warn", "🔻", "지수도 수급도 매도로 정렬",
+                f"코스피 <b>{코등:+.1f}%</b> 하락에 실탄도 <b>{_flow_amt(실탄)}</b> 순매도 — "
+                f"되돌림 신호 없이 <b>방향이 아래로 일치</b>했습니다. 반등 근거가 약한 날이라 "
+                f"무리한 저점매수는 신중히, 흐름이 꺾이는 신호를 먼저 확인하는 편이 낫습니다.")
+    # 지수와 실탄이 애매(보합권)하거나 부분 정렬 — 중립 안심
+    return ("watch", "🌤️", "큰 엇갈림 없이 방향이 정리된 하루",
+            f"코스피 <b>{코등:+.1f}%</b>, 실탄 <b>{_flow_amt(실탄)}</b> — 오늘은 지수와 수급이 "
+            f"크게 어긋나지 않았습니다. <b>급한 판단이 필요 없는 날</b>이니, 다음 신호가 나올 때까지 "
+            f"기존 관점을 유지하며 지켜봐도 좋습니다.")
+
+
+def build_divergence_block(data, 해석=None, 제목="⚡ 오늘 프로의 판단"):
+    """오늘 프로의 판단 — 감지는 코드, 전망·대응 서술은 Claude(있으면).
+
+    · 엇갈림 감지(detect_divergences)는 항상 코드가 한다 → 재사용 모드에서도 최신.
+    · Claude가 생성한 '오늘의판단'(전망·대응)이 있으면 각 신호에 붙여 심도를 더한다.
+      없으면(재사용 등) 코드가 만든 현황 설명만으로도 성립한다.
+    """
+    sigs = detect_divergences(data)
+    판단 = ((해석 or {}).get("오늘의판단")) or []
+
+    # 엇갈림이 없는 조용한 날 — 숨기지 않고 '정렬됨 = 선명한 추세'로 안심 판단을 준다.
+    if not sigs:
+        v = _alignment_verdict(data)
+        if not v:
+            return ""
+        등급, 아이콘, 제, 설 = v
+        # 조용한 날에도 Claude 판단이 있으면(드묾) 첫 항목의 전망·대응을 얹는다.
+        전망대응 = ""
+        j = 판단[0] if 판단 and isinstance(판단[0], dict) else None
+        if j:
+            for k, cls in (("맥락", "dv-ctx"), ("전망", "dv-fc"), ("대응", "dv-fc dv-act")):
+                val = (j.get(k) or "").strip()
+                if val:
+                    키 = f'<span class="dv-fc-k">{k}</span>' if k != "맥락" else ""
+                    전망대응 += f'<p class="{cls}">{키}{val}</p>'
+        foot = ('엇갈림이 없다는 것도 하나의 신호입니다 — 방향이 선명한 날입니다. '
+                '단정이나 매매 신호가 아닙니다.')
+        return (f'<div class="dv-wrap"><p class="dv-h">{제목}</p>'
+                f'<div class="dv-row dv-{등급}"><div class="dv-ic">{아이콘}</div>'
+                f'<div class="dv-body"><p class="dv-t">{제}</p><p class="dv-d">{설}</p>'
+                f'{전망대응}</div></div>'
+                f'<p class="dv-foot">{foot}</p></div>')
+
+    rows = []
+    for idx, (등급, 아이콘, 제, 설) in enumerate(sigs):
+        전망대응 = ""
+        j = 판단[idx] if idx < len(판단) and isinstance(판단[idx], dict) else None
+        if j:
+            제 = j.get("제목") or 제
+            맥락 = (j.get("맥락") or "").strip()
+            전망 = (j.get("전망") or "").strip()
+            대응 = (j.get("대응") or "").strip()
+            부분 = ""
+            if 맥락:
+                부분 += f'<p class="dv-ctx">{맥락}</p>'
+            if 전망:
+                부분 += f'<p class="dv-fc"><span class="dv-fc-k">전망</span>{전망}</p>'
+            if 대응:
+                부분 += f'<p class="dv-fc dv-act"><span class="dv-fc-k">대응</span>{대응}</p>'
+            전망대응 = 부분
+        rows.append(
+            f'<div class="dv-row dv-{등급}"><div class="dv-ic">{아이콘}</div>'
+            f'<div class="dv-body"><p class="dv-t">{제}</p><p class="dv-d">{설}</p>'
+            f'{전망대응}</div></div>')
+
+    foot = ('프로가 지금 시장을 어떻게 읽고 무엇을 지켜보는지 짚어드립니다. '
+            '전망은 조건부 관찰이며, 단정이나 매매 신호가 아닙니다.')
+    return (f'<div class="dv-wrap"><p class="dv-h">{제목}</p>'
+            + "".join(rows)
+            + f'<p class="dv-foot">{foot}</p></div>')
 
 
 def flow_pattern_analysis():
@@ -2044,7 +2315,105 @@ def build_flow_signal(파생, 지수수급):
         범례 = ('<div class="fs-leg"><span><i class="l-sp"></i>현물 누적(실탄)</span>'
               '<span><i class="l-fu"></i>외국인 선물 누적 · 방향 참고</span>'
               '<span><i class="l-rf"></i>5일 전 기준선</span></div>') if len(선물있는) >= 2 else ""
-        그래프HTML = (f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
+        # ── 코스피 미니 캔들 (실탄 차트 위, 같은 날짜축 공유) ──
+        #   ⚠️ flow_history의 '코스피등락'은 최근 며칠만 백필돼 있어(2일치) 차트가 짧게 나온다.
+        #      그래서 market_history.json의 '코스피 종가'(17일 온전)를 날짜로 매칭해 쓴다.
+        #   실탄 차트와 X좌표(X(i))를 그대로 공유해 날짜가 정확히 맞물린다.
+        코스피HTML = ""
+        종가맵 = {}
+        try:
+            _mh = load_json("market_history.json") or {}
+            for r in (_mh.get("일별") or []):
+                날 = str(r.get("날짜", "")).replace("-", "")   # 2026-08-13 → 20260813
+                if 날 and r.get("코스피") is not None:
+                    종가맵[날] = float(r.get("코스피"))
+        except Exception:
+            pass
+        종가들 = [종가맵.get(str(x.get("날짜"))) for x in 표시]
+        유효 = [v for v in 종가들 if v is not None]
+        # 캔들 데이터(시·고·저·종): 표시(flow_history)에 있으면 수집.
+        #   20일 이상 온전히 쌓이면 흐름선(A) → 진짜 캔들(B)로 자동 전환한다.
+        ohlc = []
+        for x in 표시:
+            시, 고, 저, 종 = x.get("시가"), x.get("고가"), x.get("저가"), x.get("종가")
+            if None not in (시, 고, 저, 종):
+                try:
+                    ohlc.append((float(시), float(고), float(저), float(종)))
+                except (TypeError, ValueError):
+                    ohlc.append(None)
+            else:
+                ohlc.append(None)
+        캔들가능 = sum(1 for o in ohlc if o is not None) >= 20
+        if len(유효) >= 2:
+            KW, KH = W0, 96
+            KPT, KPB = 10, 6
+            KPH = KH - KPT - KPB
+            # 스케일: 캔들이면 고가·저가까지 포함해 잡는다
+            if 캔들가능:
+                _vals = [o[j] for o in ohlc if o for j in (1, 2)]
+                KMIN, KMAX = min(_vals), max(_vals)
+            else:
+                KMIN, KMAX = min(유효), max(유효)
+            kspan = (KMAX - KMIN) or 1
+            KY = lambda val: KPT + KPH * (1 - (val - KMIN) / kspan)
+            kg = []
+            if 캔들가능:
+                # ── 진짜 캔들 (B) : 몸통=시가~종가, 꼬리=고가~저가 ──
+                for i, o in enumerate(ohlc):
+                    if o is None:
+                        continue
+                    시, 고, 저, 종 = o
+                    상승 = 종 >= 시
+                    색 = "#C1432B" if 상승 else "#2E6BD6"
+                    op = 1 if i == n-1 else .82
+                    # 꼬리(고가~저가)
+                    kg.append(f'<line x1="{X(i):.1f}" y1="{KY(고):.1f}" x2="{X(i):.1f}" y2="{KY(저):.1f}" '
+                              f'stroke="{색}" stroke-width="1" opacity="{op}"/>')
+                    # 몸통(시가~종가)
+                    상, 하 = (종, 시) if 상승 else (시, 종)
+                    kg.append(f'<rect x="{X(i)-BW*0.4:.1f}" y="{KY(상):.1f}" width="{BW*0.8:.1f}" '
+                              f'height="{max(1.2, abs(KY(시)-KY(종))):.1f}" fill="{색}" opacity="{op}"/>')
+            else:
+                # ── 흐름선 (A) : 시고저 부족 → 종가 봉 + 종가선 ──
+                prev = None
+                for i, v in enumerate(종가들):
+                    if v is None:
+                        prev = None
+                        continue
+                    y_now = KY(v)
+                    if prev is not None:
+                        y_prev = KY(prev)
+                        top, bot = min(y_now, y_prev), max(y_now, y_prev)
+                        색 = "#C1432B" if v >= prev else "#2E6BD6"
+                        kg.append(f'<rect x="{X(i)-BW*0.35:.1f}" y="{top:.1f}" width="{BW*0.7:.1f}" '
+                                  f'height="{max(1.5, bot-top):.1f}" rx="1" fill="{색}" opacity="{1 if i==n-1 else .7}"/>')
+                    prev = v
+                seg, segs = [], []
+                for i, v in enumerate(종가들):
+                    if v is None:
+                        if seg: segs.append(seg); seg = []
+                    else:
+                        seg.append((i, v))
+                if seg: segs.append(seg)
+                for s in segs:
+                    k선 = " ".join(f'{"L" if j else "M"}{X(i):.1f} {KY(v):.1f}' for j, (i, v) in enumerate(s))
+                    kg.append(f'<path d="{k선}" fill="none" stroke="#f0c65a" stroke-width="2" stroke-linejoin="round" opacity=".95"/>')
+            # 오늘 끝점 + 종가 라벨
+            마지막 = [(i, v) for i, v in enumerate(종가들) if v is not None][-1]
+            kg.append(f'<circle cx="{X(마지막[0]):.1f}" cy="{KY(마지막[1]):.1f}" r="3.2" fill="#f0c65a"/>')
+            kg.append(f'<text x="{X(마지막[0])-7:.1f}" y="{KY(마지막[1])-7:.1f}" text-anchor="end" '
+                      f'font-size="9.5" fill="#f0c65a" font-weight="800">{마지막[1]:,.0f}</text>')
+            첫값 = 유효[0]
+            누계등락 = (유효[-1] / 첫값 - 1) * 100
+            kg.append(f'<text x="{X(마지막[0]):.1f}" y="{KH-1:.1f}" text-anchor="end" font-size="8.5" fill="#9aa0a8" font-weight="700">{누계등락:+.1f}%</text>')
+            코스피HTML = (f'<p class="fs-chart-t">📈 코스피 지수 {"캔들" if 캔들가능 else "흐름"} — 최근 {len(유효)}일</p>'
+                        + f'<svg viewBox="0 0 {KW} {KH}" preserveAspectRatio="none" style="width:100%;display:block">'
+                        + "".join(kg) + '</svg>'
+                        + '<div class="fs-chart-div"></div>'
+                        + f'<p class="fs-chart-t">📊 실탄이 쌓이는 흐름 — 최근 {min(n,20)}일</p>')
+
+        그래프HTML = (코스피HTML
+                     + f'<svg viewBox="0 0 {W0} {H0}" preserveAspectRatio="none" style="width:100%;display:block">'
                      + "".join(g) + f'</svg><div class="fs-x">{축}</div>{범례}')
 
         # ── 판독문 (규칙 기반) ──
@@ -2089,11 +2458,9 @@ def build_flow_signal(파생, 지수수급):
     </div>
     {f'<p class="fs-combo"><b>{조합[1]}</b> — {조합[2]}</p>' if 조합 else ''}
     {f'<p class="fs-warn">{만기배지} — {만기설명}</p>' if 만기배지 else ''}
+    <div class="fs-splittitle">📊 지수와 수급, 나란히 보기 <span>— 최근 {min(N,20)}거래일</span></div>
     <div class="fs-cum">
-      <div class="fs-cum-head">
-        <span class="fs-cum-t">📈 실탄이 쌓이는 흐름 — 최근 {min(N,20)}거래일</span>
-        {배지HTML}
-      </div>
+      <div class="fs-cum-head">{배지HTML}</div>
       {그래프HTML}
       {판독HTML}
     </div>
@@ -2179,7 +2546,7 @@ a{{color:inherit;text-decoration:none}}
 .top-bar{{display:flex;justify-content:space-between;padding-bottom:1rem;border-bottom:.5px solid var(--line);margin-bottom:.9rem}}
 .rp-title{{font-size:17px;font-weight:800}}
 .badge{{font-size:11px;color:var(--sub);background:var(--bg2);padding:3px 9px;border-radius:var(--rmd);border:.5px solid var(--line);height:fit-content}}
-.sec-label{{display:block;font-size:14.5px;font-weight:800;color:var(--ink);letter-spacing:-.01em;text-transform:none;margin:1.6rem 0 .7rem;line-height:1.35}}
+.sec-label{{display:block;font-size:17.5px;font-weight:800;color:var(--ink);letter-spacing:-.01em;text-transform:none;margin:1.6rem 0 .7rem;line-height:1.35}}
 .sec-label small{{display:block;font-size:10px;font-weight:700;color:var(--sub);letter-spacing:.1em;margin-bottom:2px}}
 .sec-label i{{font-style:normal;font-weight:500;color:#a8aeb6;letter-spacing:0}}
 .sec-label::after{{content:'';display:block;height:.5px;background:var(--line);margin-top:.5rem}}
@@ -2417,6 +2784,11 @@ a{{color:inherit;text-decoration:none}}
 .ac-star{{font-size:9px;font-weight:800;color:#b8860b;background:#fdf3d8;border-radius:99px;padding:1px 7px;margin-left:4px}}
 .rd-foot{{font-size:9.5px;color:var(--sub);line-height:1.6;margin-top:.5rem;padding-top:.7rem;border-top:.5px solid var(--line)}}
 
+.story-bridge{{display:flex;gap:9px;align-items:flex-start;margin:1rem 0;padding:.85rem 1rem;background:linear-gradient(90deg,rgba(91,155,255,.1),rgba(91,155,255,.03));border-left:3px solid #5b9bff;border-radius:9px}}
+.story-bridge .st-ic{{font-size:16px;flex-shrink:0;line-height:1.4}}
+.story-bridge .st-txt{{font-size:12.5px;color:var(--ink);line-height:1.7;word-break:keep-all}}
+.story-bridge .st-txt b{{color:var(--ink);font-weight:800}}
+.story-bridge .st-turn{{color:#e0813a!important}}
 /* ── 어제의 채점표 ── */
 .score-box{{background:#FBFAF8;border:.5px solid var(--line);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem}}
 .score-head{{font-size:12px;font-weight:800;color:var(--ink);margin-bottom:.7rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
@@ -2488,6 +2860,8 @@ a{{color:inherit;text-decoration:none}}
 .hi-gauge-c{{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:14px}}
 .hi-light{{display:flex;flex-direction:column;gap:5px;flex-shrink:0;padding:6px 5px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);border-radius:10px}}
 .hi-light .hi-dot{{width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.25)}}
+.hi-light .hi-dot.on{{background:var(--gc);animation:hiblink 1.5s ease-in-out infinite}}
+@keyframes hiblink{{0%,100%{{box-shadow:0 0 18px var(--gc),0 0 6px var(--gc);opacity:1;transform:scale(1.12)}}50%{{box-shadow:0 0 2px var(--gc);opacity:.32;transform:scale(1)}}}}
 .hi-shield{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
 .hi-arrow{{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}}
 .hi-badge{{width:46px;height:46px;border-radius:11px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#20242b}}
@@ -2625,7 +2999,7 @@ a{{color:inherit;text-decoration:none}}
 
 .mine{{background:rgba(143,180,238,.09);border:.5px solid rgba(143,180,238,.22);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}}
 
-.mine-h{{font-size:12.5px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}}
+.mine-h{{font-size:15.5px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}}
 
 .mine-b{{font-size:13px;color:#dfe3e8;line-height:1.8}}
 
@@ -2644,7 +3018,7 @@ a{{color:inherit;text-decoration:none}}
 
 .q90-flip{{background:rgba(224,192,96,.07);border-left:3px solid #e0c060;padding:.9rem 1rem;margin-top:.8rem}}
 
-.qf-h{{font-size:12px;font-weight:800;color:#e0c060;margin-bottom:.45rem}}
+.qf-h{{font-size:15.5px;font-weight:800;color:#e0c060;margin-bottom:.45rem}}
 
 .qf-b{{font-size:13.5px;color:#dfe3e8;line-height:1.8}}
 
@@ -2652,7 +3026,7 @@ a{{color:inherit;text-decoration:none}}
 
 .q90-tease{{margin-top:1rem;padding-top:.9rem;border-top:.5px solid rgba(255,255,255,.1)}}
 
-.qt-h{{font-size:12.5px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}}
+.qt-h{{font-size:15.5px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}}
 
 .qt{{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13.5px;color:#fff;line-height:1.6;font-weight:700}}
 
@@ -2676,7 +3050,7 @@ a{{color:inherit;text-decoration:none}}
 .deep-t2{{font-size:14px;color:#e8e6e2;font-weight:800;margin-top:2px}}
 .deep-t2 b{{color:#e0c060}}
 .tmr{{margin-top:1rem;padding:.9rem 1rem;background:linear-gradient(180deg,#2b2f37,#242830);border-radius:12px;border-left:4px solid #e0c060}}
-.tmr-h{{font-size:13px;font-weight:800;color:#e0c060;margin-bottom:6px}}
+.tmr-h{{font-size:15.5px;font-weight:800;color:#e0c060;margin-bottom:6px}}
 .tmr-b{{font-size:13px;color:#e8e6e2;line-height:1.7}}
 
 
@@ -2777,7 +3151,9 @@ a{{color:inherit;text-decoration:none}}
 .ft-bad i{{font-style:normal;font-size:9.5px;font-weight:800;color:#d8dce2;background:rgba(255,255,255,.07);border:.5px solid rgba(255,255,255,.13);border-radius:99px;padding:2px 8px;white-space:nowrap}}
 .ft-note{{font-size:9.5px;color:#7d838c;line-height:1.6;margin-top:.45rem}}
 .fs-cum{{padding-top:.95rem}}
-.fs-cum-head{{display:flex;align-items:baseline;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:.2rem}}
+.fs-splittitle{{margin:1.1rem -1.1rem .6rem;padding:.7rem 1.1rem;background:linear-gradient(90deg,rgba(224,192,96,.16),rgba(224,192,96,.04));color:#f0dfa8;font-size:13px;font-weight:800;letter-spacing:-.01em;border-top:1px solid rgba(224,192,96,.25);border-bottom:1px solid rgba(224,192,96,.25)}}
+.fs-splittitle span{{color:#b0a880;font-weight:600;font-size:11px}}
+.fs-cum-head{{display:flex;align-items:baseline;justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:.4rem}}
 .fs-cum-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em}}
 .fs-badges{{display:flex;gap:6px;flex-wrap:wrap}}
 .fs-cb{{font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;font-variant-numeric:tabular-nums}}
@@ -2796,7 +3172,35 @@ a{{color:inherit;text-decoration:none}}
 .fs-building{{background:rgba(255,255,255,.04);border:.5px dashed rgba(255,255,255,.16);border-radius:var(--rmd);padding:1.1rem;text-align:center;font-size:11px;color:#9aa0a8;margin-top:.4rem}}
 .fs-foot{{font-size:9.5px;color:#8a909a;line-height:1.7;margin-top:.8rem;border-top:.5px solid rgba(255,255,255,.08);padding-top:.6rem}}
 .fs-pattern{{margin-top:.9rem;padding:.9rem 1rem;background:rgba(224,192,96,.06);border:1px solid rgba(224,192,96,.2);border-radius:10px}}
-.fp-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.6rem}}
+.fp-h{{font-size:15.5px;font-weight:800;color:#e0c060;margin-bottom:.6rem}}
+.fs-chart-div{{height:1px;background:rgba(255,255,255,.1);margin:3px 0 5px}}
+.fs-chart-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:2px 0 4px;letter-spacing:.02em}}
+.dv-wrap{{margin-top:1rem;padding:1rem 1.05rem;background:linear-gradient(180deg,#24262e,#2c2f38);border-radius:12px;border:1px solid rgba(255,255,255,.08)}}
+.dv-h{{font-size:14px;font-weight:800;color:#f0efec;margin-bottom:.7rem}}
+.dv-row{{display:flex;gap:10px;padding:9px 0;border-bottom:.5px solid rgba(255,255,255,.07)}}
+.dv-row:last-of-type{{border-bottom:0}}
+.dv-ic{{flex-shrink:0;font-size:16px;width:24px;text-align:center;line-height:1.4}}
+.dv-body{{flex:1}}
+.dv-t{{font-size:12.5px;font-weight:800;color:#fff;margin-bottom:2px;word-break:keep-all}}
+.dv-d{{font-size:11.5px;color:#c3c8ce;line-height:1.65;word-break:keep-all}}
+.dv-d b{{color:#fff;font-weight:700}}
+.dv-ctx{{font-size:11.5px;color:#aeb4bd;line-height:1.65;margin-top:5px;font-style:italic;word-break:keep-all}}
+.dv-warn .dv-t{{color:#ffcf8a}} .dv-warn{{border-left:3px solid #e0a020;padding-left:8px;margin-left:-11px}}
+.dv-good .dv-t{{color:#8ee6a8}} .dv-good{{border-left:3px solid #4ade80;padding-left:8px;margin-left:-11px}}
+.dv-watch .dv-t{{color:#a8c8f0}} .dv-watch{{border-left:3px solid #5b9bff;padding-left:8px;margin-left:-11px}}
+.dv-foot{{font-size:9.5px;color:#8a909a;line-height:1.6;margin-top:.6rem}}
+.dv-fc{{font-size:11.5px;line-height:1.65;margin-top:6px;padding-left:10px;border-left:2px solid rgba(255,255,255,.12);color:#c3c8ce;word-break:keep-all}}
+.dv-fc-k{{display:inline-block;font-size:9.5px;font-weight:800;color:#20242b;background:#c8ccd2;border-radius:4px;padding:1px 6px;margin-right:6px;vertical-align:1px}}
+.dv-fc b{{color:#fff;font-weight:700}}
+.dv-act{{border-left-color:rgba(224,192,96,.5)}}
+.dv-act .dv-fc-k{{background:#e0c060}}
+.q90-dv{{display:flex;align-items:center;gap:8px;margin-top:.7rem;padding:9px 11px;border-radius:9px;background:rgba(255,255,255,.05)}}
+.q90-dv-ic{{font-size:15px;flex-shrink:0}}
+.q90-dv-t{{font-size:12px;color:#dfe3e8;line-height:1.5;word-break:keep-all}}
+.q90-dv-t b{{color:#fff}}
+.q90-dv.dv-warn{{background:rgba(224,160,32,.12);border:1px solid rgba(224,160,32,.3)}}
+.q90-dv.dv-good{{background:rgba(74,222,128,.1);border:1px solid rgba(74,222,128,.3)}}
+.q90-dv.dv-watch{{background:rgba(91,155,255,.1);border:1px solid rgba(91,155,255,.3)}}
 .fp-line{{font-size:12px;color:#dfe3e8;line-height:1.75;margin-bottom:.5rem}}
 .fp-line b{{color:#fff;font-weight:800}}
 .fp-turn{{color:#ff8a6e!important}}
@@ -2953,6 +3357,7 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
+  {build_divergence_block(data, 해석)}
 
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
@@ -2976,6 +3381,8 @@ a{{color:inherit;text-decoration:none}}
   {build_news(해석.get('핵심뉴스'))}
 
   {f'<p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
+
+  {build_story_bridge()}
 
   <p class="sec-label" id="watch"><small>내일의 관전 포인트</small>🗼 내일 이것만 보세요</p>
   {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
