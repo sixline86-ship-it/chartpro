@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-j"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k2"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -1404,6 +1404,489 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
     return ""   # 알 수 없는 스타일
 
 
+# ============================================================
+# 계좌 좌표 격자 · 사건명 · 오늘 딱 N개     [v-k 신규]
+# ============================================================
+
+GRID_최소종목 = 3
+
+
+def _grid_cell_color(v):
+    """등락률 → 배경색. 지수 관례(빨강=상승/파랑=하락)를 따른다.
+    색 진하기는 절대값 구간으로 4단계. 색만으로 구분하지 않도록 숫자를 항상 함께 쓴다."""
+    if v is None:
+        return "transparent"
+    a = abs(v)
+    op = 0.55 if a >= 3 else (0.42 if a >= 2 else (0.28 if a >= 1 else (0.18 if a >= 0.5 else 0.10)))
+    hexcol = "#e24b4a" if v >= 0 else "#378add"
+    return f"{hexcol}{int(op*255):02x}"
+
+
+def _load_strata_history(days=20):
+    """strata_history.json에서 최근 N일치를 읽는다(스파크라인 원료)."""
+    try:
+        with open(apath("strata_history.json"), encoding="utf-8") as f:
+            rows = json.load(f) or []
+    except Exception:
+        return []
+    rows = [r for r in rows if isinstance(r, dict) and r.get("날짜")]
+    rows.sort(key=lambda r: r.get("날짜", ""))
+    return rows[-days:]
+
+
+def _spark_svg(vals, w=120, h=22):
+    """숫자 목록 → 아주 작은 꺾은선 SVG. 값이 3개 미만이면 빈 문자열."""
+    vs = [v for v in vals if isinstance(v, (int, float))]
+    if len(vs) < 3:
+        return ""
+    lo, hi = min(vs), max(vs)
+    rng = (hi - lo) or 1.0
+    step = w / max(1, len(vs) - 1)
+    pts = " ".join(f"{i*step:.1f},{h - 3 - (v-lo)/rng*(h-6):.1f}" for i, v in enumerate(vs))
+    끝색 = "#e24b4a" if vs[-1] >= 0 else "#378add"
+    return (f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="vertical-align:middle">'
+            f'<polyline points="{pts}" fill="none" stroke="{끝색}" stroke-width="1.6" '
+            f'stroke-linejoin="round" opacity=".85"/></svg>')
+
+
+def build_account_grid(격자):
+    """계좌 좌표 격자 — 테마(세로) × 시총 3단계(가로).
+
+    "코스피는 올랐는데 내 종목은 왜 안 올랐나"의 답을 5초에 준다.
+    가로로 읽으면 같은 테마 안의 대형·소형 격차, 세로로 읽으면 오늘의 주인공.
+    """
+    if not 격자 or not 격자.get("행"):
+        return ""
+
+    기준 = 격자.get("기준") or {}
+    행들 = 격자.get("행") or []
+    크기 = 격자.get("크기전체") or {}
+    프리미엄 = 격자.get("크기프리미엄")
+
+    머리 = ('<tr><th style="text-align:left;padding:6px 8px;font-size:12.5px;color:#9aa0aa;font-weight:600">테마</th>'
+            + "".join(f'<th style="padding:6px 4px;font-size:12px;color:#9aa0aa;font-weight:600;text-align:center">'
+                      f'{층}<br><span style="font-size:10.5px;opacity:.7">{기준.get(층,"")}</span></th>'
+                      for 층 in ("대형", "중형", "소형"))
+            + '<th style="padding:6px 8px;font-size:12.5px;color:#e8eaee;font-weight:700;text-align:center">전체</th></tr>')
+
+    몸 = []
+    for r in 행들:
+        칸들 = []
+        for 층 in ("대형", "중형", "소형"):
+            c = (r.get("칸") or {}).get(층) or {}
+            v = c.get("등락률")
+            if v is None:
+                칸들.append('<td style="padding:7px 4px;text-align:center;font-size:12.5px;'
+                            'color:#6b7280;background:#ffffff08;border-radius:4px">—</td>')
+            else:
+                칸들.append(f'<td style="padding:7px 4px;text-align:center;font-size:13px;'
+                            f'color:#e8eaee;background:{_grid_cell_color(v)};border-radius:4px">'
+                            f'{v:+.1f}</td>')
+        전 = r.get("전체")
+        if isinstance(전, (int, float)):
+            전칸 = (f'<td style="padding:7px 8px;text-align:center;font-size:13.5px;font-weight:700;'
+                   f'color:#e8eaee;background:{_grid_cell_color(전)};border-radius:4px">{전:+.2f}</td>')
+        else:
+            전칸 = '<td style="padding:7px 8px;text-align:center;font-size:13px;color:#6b7280">—</td>'
+        몸.append('<tr>'
+                  f'<td style="padding:7px 8px;font-size:13px;color:#d5d9e0;white-space:nowrap">'
+                  f'{r.get("테마","")}</td>'
+                  + "".join(칸들) + 전칸 + '</tr>')
+
+    # ── 크기 전체 + 20일 스파크라인 3줄 (수위 항로를 여기에 흡수) ──
+    이력 = _load_strata_history()
+    스파크 = []
+    for 층 in ("대형", "중형", "소형"):
+        v = 크기.get(층)
+        sv = _spark_svg([r.get(층) for r in 이력])
+        스파크.append(
+            f'<div style="display:flex;align-items:center;gap:8px;min-width:0">'
+            f'<span style="font-size:12.5px;color:#9aa0aa;width:32px;flex:none">{층}</span>'
+            f'<span style="font-size:14px;font-weight:700;width:52px;flex:none;'
+            f'color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
+            f'{v:+.2f}</span>{sv}</div>' if isinstance(v, (int, float)) else "")
+
+    프리 = ""
+    if isinstance(프리미엄, (int, float)):
+        추이 = [r.get("크기프리미엄") for r in 이력 if isinstance(r.get("크기프리미엄"), (int, float))]
+        평균 = (sum(추이) / len(추이)) if len(추이) >= 5 else None
+        비교 = (f' · 최근 {len(추이)}일 평균 {평균:+.1f}%p' if 평균 is not None else " · 추이 축적 중")
+        방향 = "대형 쏠림" if 프리미엄 > 0 else "소형 우위"
+        프리 = (f'<p style="margin:10px 0 0;font-size:12.5px;color:#c9ced6">'
+                f'크기 프리미엄 <b style="color:#f0c65a">{프리미엄:+.2f}%p</b> '
+                f'({방향}){비교}</p>')
+
+    return ('<div style="background:#161a22;border:1px solid #232a36;border-radius:14px;'
+            'padding:14px 14px 12px;margin:0 0 14px">'
+            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 계좌 좌표</p>'
+            '<p style="margin:0 0 10px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
+            '오늘 내 종목은 어디에 있었나</p>'
+            '<div style="overflow-x:auto">'
+            f'<table style="width:100%;border-collapse:separate;border-spacing:3px;min-width:330px">'
+            f'{머리}{"".join(몸)}</table></div>'
+            '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #232a36;'
+            'display:flex;flex-direction:column;gap:5px">'
+            + "".join(스파크) + '</div>' + 프리
+            + '<p style="margin:8px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
+            '가로선 = 최근 20거래일 추이 · 한 칸에 종목이 '
+            f'{GRID_최소종목}개 미만이면 —로 둡니다 · 한 종목이 여러 테마에 들어갈 수 있습니다</p>'
+            '</div>')
+
+
+def build_headline(해석):
+    """오늘의 사건명 — 리포트 최상단 제목.
+
+    이름이 붙으면 그날 시장이 기억되고, 아카이브가 목차가 된다.
+    근거가 없으면 조용히 생략한다(제목만 그럴듯한 것을 막기 위해).
+    """
+    제목 = (해석.get("사건명") or "").strip()
+    if not 제목:
+        return ""
+    제목 = 제목.strip("〈〉<>").strip()
+    if not 제목:
+        return ""
+    return ('<div style="margin:0 0 12px">'
+            '<p style="margin:0 0 4px;font-size:11.5px;color:#8b93a0;letter-spacing:.08em;font-weight:700">'
+            'TODAY</p>'
+            f'<p style="margin:0;font-size:21px;font-weight:800;color:#20242c;line-height:1.35">'
+            f'〈{제목}〉</p></div>')
+
+
+def build_top_picks(해석):
+    """오늘 딱 N개 — 핵심편 최상단.
+
+    개수는 고정이 아니다. 그날 실제로 중요한 것만 담기 때문에 2~4개로 달라진다.
+    마지막 항목은 반드시 '내일 볼 것'이라 리포트가 닫히지 않고 열린다.
+    """
+    항목 = 해석.get("오늘딱N") or []
+    항목 = [str(x).strip() for x in 항목 if str(x).strip()][:4]
+    if len(항목) < 2:
+        return ""
+    한글수 = {2: "두", 3: "세", 4: "네"}.get(len(항목), "세")
+    줄 = "".join(
+        f'<li style="margin:0 0 7px;padding-left:24px;position:relative;font-size:14.5px;'
+        f'line-height:1.55;color:#e8eaee">'
+        f'<span style="position:absolute;left:0;top:1px;width:17px;height:17px;border-radius:5px;'
+        f'background:#2a3140;color:#f0c65a;font-size:11px;font-weight:700;display:inline-flex;'
+        f'align-items:center;justify-content:center">{i}</span>{t}</li>'
+        for i, t in enumerate(항목, start=1))
+    return ('<div style="background:#12161d;border:1px solid #f0c65a33;border-left:3px solid #f0c65a;'
+            'border-radius:0 12px 12px 0;padding:13px 14px;margin:0 0 14px">'
+            f'<p style="margin:0 0 9px;font-size:13.5px;font-weight:700;color:#f0c65a">'
+            f'오늘 시장에서 딱 {한글수} 가지만 보십시오</p>'
+            f'<ul style="margin:0;padding:0;list-style:none">{줄}</ul></div>')
+
+
+# ============================================================
+# 수급 변속기 · 관제 레이더 · 경사선 · 포착 항로     [v-k2 신규]
+# ============================================================
+
+RADAR_R = 130          # 레이더 반지름(px)
+RADAR_슬롯 = 12        # 각도 슬롯 수 (30도 간격)
+
+
+# ── 1. 수급 변속기 ───────────────────────────────────────────
+def build_flow_gearbox():
+    """수급의 '속도 변화'를 6단계로 판정한다.
+
+    방향(사느냐 파느냐)은 누구나 안다. 힘이 세지는지 약해지는지는 아무도 안 알려준다.
+    꼭지와 바닥은 방향보다 속도가 먼저 꺾인다 — 그래서 1차 차분을 본다.
+    """
+    try:
+        with open(apath("flow_history.json"), encoding="utf-8") as f:
+            rows = json.load(f) or []
+    except Exception:
+        return ""
+    vals = [r.get("실탄") for r in rows if isinstance(r.get("실탄"), (int, float))]
+    if len(vals) < 4:
+        return ""
+    최근 = vals[-4:]
+    오늘 = 최근[-1]
+    차분 = [최근[i + 1] - 최근[i] for i in range(len(최근) - 1)]
+    오름 = sum(1 for d in 차분 if d > 0)
+    내림 = sum(1 for d in 차분 if d < 0)
+    어제 = 최근[-2]
+
+    if 오늘 > 0 and 어제 <= 0:
+        상태, 색, 설명 = "매수 전환", "#4ade80", "팔던 흐름이 사는 쪽으로 돌아섰습니다"
+    elif 오늘 < 0 and 어제 >= 0:
+        상태, 색, 설명 = "매도 전환", "#a78bfa", "사던 흐름이 파는 쪽으로 돌아섰습니다"
+    elif 오늘 > 0 and 오름 >= 2:
+        상태, 색, 설명 = "매수 가속", "#4ade80", "사는 힘이 점점 세지고 있습니다"
+    elif 오늘 > 0 and 내림 >= 2:
+        상태, 색, 설명 = "매수 감속", "#86efac", "여전히 사지만 힘은 빠지는 중입니다"
+    elif 오늘 < 0 and 내림 >= 2:
+        상태, 색, 설명 = "매도 가속", "#a78bfa", "파는 힘이 점점 세지고 있습니다"
+    elif 오늘 < 0 and 오름 >= 2:
+        상태, 색, 설명 = "매도 감속", "#c4b5fd", "여전히 팔지만 힘은 빠지는 중입니다"
+    else:
+        상태, 색, 설명 = "속도 유지", "#9aa0aa", "흐름의 세기에 큰 변화가 없습니다"
+
+    막대 = []
+    최대 = max(abs(v) for v in 최근) or 1
+    for v in 최근:
+        h = max(4, int(abs(v) / 최대 * 34))
+        c = "#4ade80" if v >= 0 else "#a78bfa"
+        막대.append(f'<div style="width:26px;display:flex;flex-direction:column;'
+                    f'align-items:center;justify-content:flex-end;height:40px">'
+                    f'<div style="width:16px;height:{h}px;background:{c};border-radius:3px"></div></div>')
+
+    수치 = " → ".join(f'{v/10000:+.1f}조' if abs(v) >= 10000 else f'{int(v):+,}억' for v in 최근)
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:12px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">수급 변속기</p>'
+            f'<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:{색}">{상태}</p>'
+            f'<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:7px">{"".join(막대)}</div>'
+            f'<p style="margin:0;font-size:12.5px;color:#c9ced6">{설명}</p>'
+            f'<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">최근 4거래일 실탄 {수치}</p>'
+            '</div>')
+
+
+# ── 2. 섹터 주도력 이력 (레이더 원료) ─────────────────────────
+def _sector_scores(days=6):
+    """archive/data_*.json에서 날짜별 {테마명: 주도력점수}를 읽는다.
+
+    ⚠️ 한계: 저장된 것은 그날 TOP6뿐이다. TOP6 밖 섹터는 점수가 없어
+       '권외'로 처리한다. 전 테마 저장이 시작되면 정확도가 올라간다.
+    """
+    out = []
+    for f in sorted(alist(r"data_\d{8}\.json"))[-days:]:
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+            m = {}
+            for s in (d.get("주도섹터") or []):
+                nm, sc = s.get("테마명"), s.get("주도력점수")
+                if nm and isinstance(sc, (int, float)):
+                    m[nm] = float(sc)
+            if m:
+                out.append((d.get("날짜", f[5:13]), m))
+        except Exception:
+            continue
+    return out
+
+
+def _radar_slots(이름들):
+    """테마명을 12개 고정 각도 슬롯에 배정한다.
+
+    이름 해시로 정하므로 같은 섹터는 매일 같은 자리에 온다
+    (매일 자리가 바뀌면 '내 섹터 찾기'가 안 된다).
+    """
+    쓴슬롯, 배정 = set(), {}
+    for nm in 이름들:
+        s = sum(ord(c) for c in nm) % RADAR_슬롯
+        for k in range(RADAR_슬롯):
+            c = (s + k) % RADAR_슬롯
+            if c not in 쓴슬롯:
+                쓴슬롯.add(c); 배정[nm] = c; break
+    return 배정
+
+
+def _polar(cx, cy, score, slot):
+    """주도력 점수 → 좌표. 점수가 높을수록 중심(관제탑)에 가깝다."""
+    import math as _m
+    r = (100 - max(0.0, min(100.0, score))) / 100 * RADAR_R
+    a = _m.radians(slot * (360 / RADAR_슬롯) - 90)
+    return cx + r * _m.cos(a), cy + r * _m.sin(a)
+
+
+def build_sector_radar():
+    """관제 레이더(일간) — 중심에 가까울수록 주도력이 강하다. 화살표는 전날 대비 이동."""
+    이력 = _sector_scores(2)
+    if not 이력:
+        return ""
+    오늘날, 오늘맵 = 이력[-1]
+    어제맵 = 이력[-2][1] if len(이력) >= 2 else {}
+    이름들 = list(오늘맵.keys()) + [n for n in 어제맵 if n not in 오늘맵]
+    if not 이름들:
+        return ""
+    배정 = _radar_slots(이름들)
+    cx, cy = 175, 175
+    권외 = 25.0                      # TOP6 밖이면 점수 미상 → 바깥쪽으로 둔다
+
+    링 = "".join(f'<circle cx="{cx}" cy="{cy}" r="{RADAR_R*k/4:.0f}" fill="none" '
+                 f'stroke="#2a3140" stroke-width="1"/>' for k in (1, 2, 3, 4))
+    축 = ""
+    for s in range(RADAR_슬롯):
+        x, y = _polar(cx, cy, 0, s)
+        축 += f'<line x1="{cx}" y1="{cy}" x2="{x:.0f}" y2="{y:.0f}" stroke="#232a36" stroke-width="1"/>'
+
+    점, 라벨 = "", ""
+    최대접근 = (None, -999)
+    최대이탈 = (None, -999)
+    for nm in 이름들:
+        s = 배정[nm]
+        오 = 오늘맵.get(nm, 권외)
+        어 = 어제맵.get(nm, 권외)
+        nx, ny = _polar(cx, cy, 오, s)
+        ox, oy = _polar(cx, cy, 어, s)
+        변화 = 오 - 어
+        색 = "#4ade80" if 변화 > 2 else ("#5b9bff" if 변화 < -2 else "#8b93a0")
+        if abs(변화) > 2:
+            점 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
+                   f'stroke="{색}" stroke-width="2" opacity=".75"/>')
+        점 += f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="5.5" fill="{색}"/>'
+        lx, ly = _polar(cx, cy, -22, s)
+        anc = "middle" if abs(lx - cx) < 20 else ("start" if lx > cx else "end")
+        짧 = re.sub(r"[\(（].*", "", nm).strip() or nm
+        라벨 += (f'<text x="{lx:.0f}" y="{ly+4:.0f}" text-anchor="{anc}" font-size="11.5" '
+                 f'fill="#9aa0aa">{짧[:7]}</text>')
+        if 변화 > 최대접근[1]:
+            최대접근 = (f"{nm} {어:.0f} → {오:.0f}", 변화)
+        if -변화 > 최대이탈[1]:
+            최대이탈 = (f"{nm} {어:.0f} → {오:.0f}", -변화)
+
+    패널 = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
+            f'<p style="margin:2px 0 10px;font-size:13.5px;font-weight:700;color:#4ade80">'
+            f'{최대접근[0] or "—"}</p>'
+            f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
+            f'<p style="margin:2px 0 0;font-size:13.5px;font-weight:700;color:#5b9bff">'
+            f'{최대이탈[0] or "—"}</p>')
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:12px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">관제 레이더</p>'
+            '<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            '오늘 관제탑에 가까워진 섹터</p>'
+            '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
+            f'<svg width="350" height="350" viewBox="0 0 350 350" style="flex:none;max-width:100%">'
+            f'{링}{축}<circle cx="{cx}" cy="{cy}" r="3" fill="#f0c65a"/>{점}{라벨}</svg>'
+            f'<div style="flex:1;min-width:150px">{패널}</div></div>'
+            '<p style="margin:8px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
+            '중심에 가까울수록 주도력이 강합니다 · 선 = 전날 대비 이동 · '
+            '전날 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
+
+
+# ── 3. 경사선 (테마별 대형→중형→소형) ────────────────────────
+def build_slope_chart(격자):
+    """대형에서 소형으로 가는 경사선. 열 줄이 모두 우하향이면 '크기가 수익을 갈랐다'는 뜻."""
+    행들 = [r for r in (격자 or {}).get("행", [])
+            if all(isinstance((r.get("칸") or {}).get(t, {}).get("등락률"), (int, float))
+                   for t in ("대형", "중형", "소형"))]
+    if len(행들) < 4:
+        return ""
+    행들 = sorted(행들, key=lambda r: r["전체"], reverse=True)
+    강조 = 행들[:3] + 행들[-3:]
+    나머지 = 행들[3:-3]
+
+    vs = [v for r in 행들 for v in (r["칸"]["대형"]["등락률"], r["칸"]["중형"]["등락률"],
+                                    r["칸"]["소형"]["등락률"])]
+    lo, hi = min(vs), max(vs)
+    rng = (hi - lo) or 1.0
+    W, H, T, B = 520, 300, 40, 40
+    X = {"대형": 150, "중형": 300, "소형": 450}
+    def Y(v): return T + (hi - v) / rng * (H - T - B)
+
+    선 = ""
+    for r in 나머지:
+        p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
+        선 += f'<polyline points="{p}" fill="none" stroke="#4a5260" stroke-width="1.5" opacity=".55"/>'
+    for i, r in enumerate(행들[:3] + 행들[-3:]):
+        c = "#ff6b4a" if i < 3 else "#5b9bff"
+        p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
+        선 += f'<polyline points="{p}" fill="none" stroke="{c}" stroke-width="2.5" stroke-linejoin="round"/>'
+        for t in ("대형", "중형", "소형"):
+            선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="4" fill="{c}"/>'
+        y0 = Y(r["칸"]["대형"]["등락률"])
+        선 += (f'<text x="140" y="{y0+4:.0f}" text-anchor="end" font-size="12" fill="#c9ced6">'
+               f'{r["테마"][:7]}</text>')
+
+    축 = "".join(f'<line x1="{X[t]}" y1="{T-10}" x2="{X[t]}" y2="{H-B+10}" stroke="#232a36" '
+                 f'stroke-width="1"/><text x="{X[t]}" y="{T-18}" text-anchor="middle" '
+                 f'font-size="12" fill="#9aa0aa">{t}</text>' for t in X)
+    영 = (f'<line x1="140" y1="{Y(0):.0f}" x2="470" y2="{Y(0):.0f}" stroke="#3a4150" '
+          f'stroke-width="1" stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
+
+    하향 = sum(1 for r in 행들 if r["칸"]["대형"]["등락률"] > r["칸"]["소형"]["등락률"])
+    결론 = (f'{len(행들)}개 테마 중 <b style="color:#f0c65a">{하향}개</b>가 우하향 — '
+            + ("오늘은 테마보다 크기가 수익을 갈랐습니다" if 하향 >= len(행들) * 0.7
+               else "테마별로 크기 효과가 갈렸습니다"))
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:12px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">크기 경사선</p>'
+            '<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            '대형에서 소형으로 갈 때 무슨 일이</p>'
+            '<div style="overflow-x:auto">'
+            f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">'
+            f'{축}{영}{선}</svg></div>'
+            f'<p style="margin:6px 0 0;font-size:12.5px;color:#c9ced6">{결론}</p>'
+            '<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">'
+            '빨강 = 상위 3테마 · 파랑 = 하위 3테마 · 회색 = 나머지</p></div>')
+
+
+# ── 4. 포착 항로 (레이더 성적) ───────────────────────────────
+def build_capture_path(개월=1):
+    """강세 레이더가 포착한 종목들이 그 뒤 실제로 걸어간 길.
+
+    ⚠️ 성과 표시가 아니라 **지표 성능 공시**다. 최저 사례도 반드시 함께 낸다.
+    """
+    일수 = 22 if 개월 == 1 else 66
+    파일들 = sorted(alist(r"data_\d{8}\.json"))[-일수:]
+    if len(파일들) < 3:
+        return ""
+    쌍 = {}          # (종목,포착일) → (경과, 이후등락) 최신값
+    for f in 파일들:
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                tr = ((json.load(fp).get("강세레이더") or {}).get("추적")) or []
+        except Exception:
+            continue
+        for t in tr:
+            g, r = t.get("경과"), t.get("이후등락")
+            if isinstance(g, int) and isinstance(r, (int, float)):
+                쌍[(t.get("종목명"), t.get("포착일"))] = (g, r, t.get("종목명"))
+    if len(쌍) < 5:
+        return ""
+
+    별 = {}
+    for (g, r, nm) in 쌍.values():
+        별.setdefault(g, []).append(r)
+    최종 = [(v[1], v[2]) for v in 쌍.values()]
+    평균 = sum(r for r, _ in 최종) / len(최종)
+    승률 = sum(1 for r, _ in 최종 if r > 0) / len(최종) * 100
+    중앙 = sorted(r for r, _ in 최종)[len(최종) // 2]
+    최고 = max(최종, key=lambda x: x[0])
+    최저 = min(최종, key=lambda x: x[0])
+
+    Ds = sorted(d for d in 별 if d >= 0)
+    if len(Ds) < 3:
+        return ""
+    곡선 = [(d, sum(별[d]) / len(별[d])) for d in Ds]
+    vs = [v for _, v in 곡선]
+    lo, hi = min(vs + [0]), max(vs + [0])
+    rng = (hi - lo) or 1.0
+    W, H = 520, 200
+    def PX(d): return 60 + (d - Ds[0]) / max(1, (Ds[-1] - Ds[0])) * 420
+    def PY(v): return 30 + (hi - v) / rng * 130
+
+    선 = " ".join(f"{PX(d):.0f},{PY(v):.0f}" for d, v in 곡선)
+    영 = f'<line x1="55" y1="{PY(0):.0f}" x2="485" y2="{PY(0):.0f}" stroke="#3a4150" stroke-dasharray="4 4"/>'
+    눈 = "".join(f'<text x="{PX(d):.0f}" y="185" text-anchor="middle" font-size="11" '
+                 f'fill="#6f7784">D+{d}</text>' for d in Ds[::max(1, len(Ds)//5)])
+
+    라벨 = "1개월" if 개월 == 1 else "3개월"
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:12px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">포착 항로</p>'
+            f'<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            f'레이더가 잡은 종목들, 그 뒤 {라벨}</p>'
+            '<div style="overflow-x:auto">'
+            f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">{영}'
+            f'<polyline points="{선}" fill="none" stroke="#d85a30" stroke-width="3" '
+            f'stroke-linejoin="round"/>{눈}</svg></div>'
+            f'<p style="margin:6px 0 0;font-size:13px;color:#e8eaee">'
+            f'포착 {len(최종)}종목 · 평균 <b>{평균:+.1f}%</b> · 중앙값 {중앙:+.1f}% · 승률 {승률:.0f}%</p>'
+            f'<p style="margin:4px 0 0;font-size:12.5px;color:#c9ced6">'
+            f'최고 {최고[1]} {최고[0]:+.1f}% · 최저 {최저[1]} {최저[0]:+.1f}%</p>'
+            '<p style="margin:6px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
+            '포착은 추천이 아니라 <b>지표 성능 공시</b>입니다 · 틀린 사례도 지우지 않습니다 · '
+            f'표본 {len(최종)}종목{"(30 미만이라 승률이 크게 흔들릴 수 있습니다)" if len(최종) < 30 else ""}<br>'
+            '⚠️ 곡선의 각 지점은 <b>서로 다른 종목 묶음</b>의 평균입니다 — '
+            '한 무리를 20일 따라간 곡선이 아니라, 그날그날 D+N을 지나던 종목들의 평균입니다</p>'
+            '</div>')
+
+
 def build_core(핵심편, data, 해석):
     """핵심편 '90초 브리핑' — 리포트 최상단.
 
@@ -1593,9 +2076,18 @@ def build_core(핵심편, data, 해석):
 
     공감 = 핵심편.get("공감문구") or ""
     왜그런가 = 핵심편.get("왜그런가") or ""
-    return (장전경고 + '<div class="q90"><div class="q90-top">'
+    사건명블록 = build_headline(해석)
+    딱N블록 = build_top_picks(해석)
+    격자블록 = build_account_grid(data.get("계좌격자"))
+    격자블록 += build_flow_gearbox()
+    격자블록 += build_sector_radar()
+    격자블록 += build_slope_chart(data.get("계좌격자"))
+    격자블록 += build_capture_path(1)
+
+    return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
+            + 딱N블록 + 격자블록
             + 지수스트립
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
