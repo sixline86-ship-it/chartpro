@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.13-f"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.13-j"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
@@ -145,11 +145,20 @@ def collect_index_and_flow():
                 if item.get(k) not in (None, ""):
                     대금 = item.get(k)
                     break
+            def _pick(*keys):
+                for k in keys:
+                    if item.get(k) not in (None, ""):
+                        return item.get(k)
+                return None
             out[item["stockName"]] = {
                 "종가": item["closePrice"],
                 "등락방향": item["compareToPreviousPrice"]["text"],
                 "등락률": item["fluctuationsRatio"],
                 "거래대금": 대금,
+                # 캔들용 시·고·저 (네이버 API 키가 버전마다 달라 후보를 폭넓게 탐색)
+                "시가": _pick("openPrice", "openVal", "marketPrice"),
+                "고가": _pick("highPrice", "highVal", "highPriceOfDay"),
+                "저가": _pick("lowPrice", "lowVal", "lowPriceOfDay"),
             }
             # ⚠️ 진단: 첫 항목의 사용 가능한 필드명을 한 번 찍어둔다.
             #    거래대금이 안 잡히면 이 로그를 보고 정확한 키를 연결할 수 있다.
@@ -518,27 +527,45 @@ def backfill_flow_history(이력):
      비차익은 '오늘의 바스켓 비중'에만 쓰이므로 그래프에는 지장이 없다)
     한 번 메워지면 그 뒤로는 매일 한 줄씩 정상 누적된다.
     """
-    있는날 = {x.get("날짜") for x in 이력}
-    추가 = 0
+    def _f(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    기존 = {x.get("날짜"): x for x in 이력}
+    추가 = 보강 = 0
     for f in alist(r"data_\d{8}\.json"):
         m = re.fullmatch(r"data_(\d{8})\.json", f)
         if not m:
             continue
         ymd = m.group(1)
-        if ymd in 있는날:
-            continue
         try:
             with open(apath(f), encoding="utf-8") as fp:
                 d = json.load(fp)
         except Exception:
             continue
 
-        def _f(v):
-            try:
-                return float(str(v).replace(",", ""))
-            except (TypeError, ValueError):
-                return None
+        코 = ((d.get("지수수급") or {}).get("지수") or {}).get("코스피", {})
+        코등락 = _f(코.get("등락률"))
+        # 캔들용 시·고·저·종 (data에 있으면 가져온다 — 없으면 None)
+        ohlc = {k: _f(코.get(v)) for k, v in
+                (("시가", "시가"), ("고가", "고가"), ("저가", "저가"), ("종가", "종가"))}
 
+        # ── 이미 있는 날짜: 빈 필드만 보강 (코스피등락·시고저) ──
+        if ymd in 기존:
+            row = 기존[ymd]
+            채움 = False
+            if row.get("코스피등락") is None and 코등락 is not None:
+                row["코스피등락"] = 코등락; 채움 = True
+            for k, v in ohlc.items():
+                if v is not None and row.get(k) is None:
+                    row[k] = v; 채움 = True
+            if 채움:
+                보강 += 1
+            continue
+
+        # ── 없는 날짜: 새로 복원 ──
         코수 = ((d.get("지수수급") or {}).get("코스피_수급")) or {}
         외현, 기관 = _f(코수.get("외국인")), _f(코수.get("기관계"))
         if 외현 is None or 기관 is None:
@@ -551,15 +578,15 @@ def backfill_flow_history(이력):
             조합p = {(True, True): "지수형매수", (True, False): "종목장세",
                     (False, True): "지수만방어", (False, False): "지수형매도"}[
                     (실탄p > 0, 비차익p > 0)]
-        이력.append({"날짜": ymd, "외현": 외현, "기관": 기관,
-                    "외선": _f((파생.get("선물수급") or {}).get("외국인")),
-                    "비차익": 비차익p, "실탄": 실탄p,
-                    "코스피등락": _f(((d.get("지수수급") or {}).get("지수") or {})
-                                    .get("코스피", {}).get("등락률")),
-                    "조합": 조합p})
+        새행 = {"날짜": ymd, "외현": 외현, "기관": 기관,
+               "외선": _f((파생.get("선물수급") or {}).get("외국인")),
+               "비차익": 비차익p, "실탄": 실탄p,
+               "코스피등락": 코등락, "조합": 조합p}
+        새행.update({k: v for k, v in ohlc.items() if v is not None})
+        이력.append(새행)
         추가 += 1
-    if 추가:
-        print(f"   📦 과거 리포트에서 {추가}일치를 복원했습니다.")
+    if 추가 or 보강:
+        print(f"   📦 과거 복원: 신규 {추가}일 · 빈 필드 보강 {보강}일")
     return 이력
 
 
@@ -599,7 +626,8 @@ def update_flow_history(지수수급, 파생):
         print("⚠️ 현물 수급 미확보 — flow_history에 오늘을 기록하지 않습니다.")
         return 이력
 
-    코등락 = _f(((지수수급 or {}).get("지수") or {}).get("코스피", {}).get("등락률"))
+    코 = ((지수수급 or {}).get("지수") or {}).get("코스피", {})
+    코등락 = _f(코.get("등락률"))
     실탄값 = round(외현 + 기관)
     # 조합 태그: 나중에 "올해 🟠 종목 장세 며칠, 그때 지수는?" 통계의 원료.
     # 부호만으로 복원 가능하지만, 기준이 바뀌어도 그날의 판정이 보존되도록 저장해둔다.
@@ -610,7 +638,10 @@ def update_flow_history(지수수급, 파생):
                (실탄값 > 0, 비차익 > 0)]
     오늘 = {"날짜": DATE, "외현": 외현, "기관": 기관,
            "외선": 외선, "비차익": 비차익,
-           "실탄": 실탄값, "코스피등락": 코등락, "조합": 조합}
+           "실탄": 실탄값, "코스피등락": 코등락, "조합": 조합,
+           # 캔들용 시·고·저·종 (있을 때만 — 20일 쌓이면 build_html이 캔들로 전환)
+           "시가": _f(코.get("시가")), "고가": _f(코.get("고가")),
+           "저가": _f(코.get("저가")), "종가": _f(코.get("종가"))}
     이력 = [x for x in 이력 if x.get("날짜") != DATE]      # 재발행 시 덮어쓰기
     이력.append(오늘)
     이력 = backfill_flow_history(이력)                    # 빈 과거 날짜 메우기
