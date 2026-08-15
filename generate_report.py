@@ -57,7 +57,7 @@ REPORT_PATH = asave(f"report_{DATE}.json")
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.14-k2"
+SCRIPT_VERSION = "v2026.08.14-k3"
 
 # 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
 MAX_TOKENS_START = 16000
@@ -844,7 +844,12 @@ def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
     if MODEL in ("claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"):
         kwargs["output_config"] = {"effort": "low"}
 
-    response = client.messages.create(**kwargs)
+    # ⚠️ max_tokens가 크면(재시도로 32,000+까지 올라갈 수 있음) SDK가
+    #    "10분 넘게 걸릴 수 있는 요청은 스트리밍 필수"라며 ValueError를 던진다.
+    #    (2026.08.14 실제 발행 실패 원인 — 1차 16,000자 잘림 → 2차 32,000 재시도에서 발생)
+    #    스트리밍으로 받으면 같은 Message 객체를 그대로 얻으면서 이 제한을 피한다.
+    with client.messages.stream(**kwargs) as stream:
+        response = stream.get_final_message()
 
     # ⚠️ 답변이 중간에 끊겼으면 한도를 올려 다시 시도한다.
     #    (예전엔 같은 한도로 재시도해서 똑같이 실패했다 — 무의미한 재시도)
