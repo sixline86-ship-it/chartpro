@@ -1,6 +1,6 @@
 {
   "날짜": "20260815",
-  "버전_collect": "v2026.08.14-k4",
+  "버전_collect": "v2026.08.14-k5",
   "공시": [],
   "지수수급": {
     "지수": {
@@ -248,6 +248,10 @@
   },
   "뉴스원본": [
     {
+      "제목": "삼전닉스 역대급 실적인데…주주환원 정책에 쏠리는 눈, 얼마나 풀까",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005721476&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
+    },
+    {
       "제목": "부동산 대책에도 집값은 글쎄…\"은행·건설주는 훈풍\" [주末머니]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005803515&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
@@ -318,10 +322,6 @@
     {
       "제목": "이란, 美호르무즈 소유권 주장에 \"과거에도, 앞으로도 우리 땅\"",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005803475&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "서학개미, 다시 반도체 베팅…이틀간 9천억 원 넘게 사들여",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000896039&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     }
   ],
   "매크로": {
@@ -3391,7 +3391,7 @@
         ],
         "칸": {
           "대형": {
-            "등락률": 4.99,
+            "등락률": 5.0,
             "종목수": 12
           },
           "중형": {
