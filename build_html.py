@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k8"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k9"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -1505,14 +1505,13 @@ GRID_최소종목 = 3
 #     같은 색을 흐리게/진하게만 하면 사람 눈은 인접 두 단계를 못 가른다.
 #     그래서 밝기와 채도를 함께 움직이는 **실색 5단계**로 바꿨다.
 #     배경(#161a22)에 미리 섞어둔 값이라 겹침·투명도 문제가 없다.
-#  ⚠️ v-k8: 명도만 조절하는 방식은 한계가 뚜렷했다.
-#     같은 빨강을 밝기만 바꾸면 인접 단계가 계속 비슷해 보인다.
-#     그래서 **색상(Hue)까지 함께 이동**시킨다.
-#       상승: 무채색 → 자주 → 빨강 → 주황 → 노랑(형광)
-#       하락: 무채색 → 남색 → 파랑 → 하늘 → 청록(형광)
-#     이러면 밝기가 비슷해도 '색 자체'가 달라 한눈에 단계가 갈린다.
-GRID_RAMP_UP = ["#262a31", "#6b2544", "#b32f36", "#e8622a", "#ffb020"]   # 0→강
-GRID_RAMP_DN = ["#1e222a", "#243a6b", "#2464bd", "#2a9fe0", "#3ae0d0"]
+#  ⚠️ v-k9: 색상(Hue)까지 돌리니 너무 요란했다 → 붉은 계열로 복귀.
+#     대신 명도 폭을 최대로 벌린다: 거의 검정에 가까운 자주부터
+#     프로젝트 표준 상승색(#ff6b4a)까지 5단계.
+#     같은 계열이라도 단계 간 밝기 차를 크게 두면 구분이 된다.
+#     하락도 같은 원리로 남색 → 표준 하락색(#5b9bff).
+GRID_RAMP_UP = ["#2a2e35", "#5e2028", "#992b2a", "#d13a2c", "#ff6b4a"]   # 0→강
+GRID_RAMP_DN = ["#252a33", "#1f3550", "#255c8f", "#2e7fc7", "#5b9bff"]
 GRID_STEPS = (0.5, 1.0, 2.0, 3.0)     # 이 값들을 경계로 5칸
 
 
@@ -1536,14 +1535,13 @@ def _grid_cell_color(v):
 def _grid_text_style(v):
     """강도에 따라 글자색을 바꾼다.
 
-    ⚠️ 램프 상단(주황·노랑 / 하늘·청록)은 배경이 밝아서 흰 글씨가 안 읽힌다.
-       그래서 3~4단계는 **어두운 글자**로 뒤집는다(명암 대비 확보).
+    ⚠️ 최상단(#ff6b4a·#5b9bff)은 배경이 밝아 흰 글씨가 흐려진다 → 어두운 글자로 뒤집는다.
     """
     if v is None:
         return "color:#6b7280;font-weight:500"
     s = _grid_step(v)
-    색 = ["#98a0ac", "#e6d0da", "#ffffff", "#2a1a08", "#2a1f04"][s]
-    굵 = [500, 700, 800, 900, 900][s]
+    색 = ["#8f96a2", "#e3bcbc", "#ffffff", "#ffffff", "#2a0f06"][s]
+    굵 = [500, 700, 800, 800, 900][s]
     return f"color:{색};font-weight:{굵}"
 
 
@@ -1589,8 +1587,8 @@ def build_account_grid(격자):
     프리미엄 = 격자.get("크기프리미엄")
 
     # 열 폭 고정 — 테마 칸을 넉넉히 주고 나머지를 균등 분배해야 모바일에서 안 깨진다.
-    콜 = ('<colgroup><col style="width:29%"><col style="width:17.75%">'
-          '<col style="width:17.75%"><col style="width:17.75%"><col style="width:17.75%"></colgroup>')
+    콜 = ('<colgroup><col style="width:33%"><col style="width:16.75%">'
+          '<col style="width:16.75%"><col style="width:16.75%"><col style="width:16.75%"></colgroup>')
 
     def _짧은기준(층):
         """'301위 이하' 같은 긴 라벨은 좁은 칸에서 옆 칸과 겹친다 → 숫자만 남긴다."""
@@ -1637,11 +1635,14 @@ def build_account_grid(격자):
         # ⚠️ 화살표가 혼자 다음 줄로 떨어지던 문제:
         #    테마명을 '·'에서 접히게 해뒀는데 화살표를 그냥 뒤에 붙이면
         #    마지막 조각과 분리될 수 있다. 마지막 조각과 화살표를 한 덩어리로 묶는다.
-        _조각 = str(r.get("테마", "")).split("·")
-        _앞 = "".join(f"{x}·<wbr>" for x in _조각[:-1])
-        테마명 = (_앞 + f'<span style="white-space:nowrap">{_조각[-1]}'
-                 f'<span style="color:#e0c060;font-size:9px">&nbsp;▾</span></span>')
-        테마명_평 = _앞 + f'<span style="white-space:nowrap">{_조각[-1]}</span>'
+        # ⚠️ 긴 테마명이 두 줄로 접히면 그 행만 두꺼워져 표가 들쭉날쭉해진다.
+        #    → 한 줄 고정(넘치면 …로 자름). 전체 이름은 눌렀을 때 헤더에서 볼 수 있다.
+        _풀 = str(r.get("테마", ""))
+        테마명 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
+                 f'white-space:nowrap">{_풀}</span>'
+                 f'<span style="color:#e0c060;font-size:9px;flex:none">&nbsp;▾</span>')
+        테마명_평 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
+                   f'white-space:nowrap">{_풀}</span>')
 
         펼칠것 = []
         for 층 in ("대형", "중형", "소형"):
@@ -1658,12 +1659,22 @@ def build_account_grid(격자):
                 f'margin:2px 4px 2px 0;border-radius:6px;background:#1b2230;'
                 f'border:1px solid #2a3446;color:#dfe3e9;font-weight:600">'
                 f'{x.get("명","")} '
-                f'<b style="color:{"#4ade80" if (x.get("등") or 0) >= 0 else "#5b9bff"}">'
+                f'<b style="color:{"#ff6b4a" if (x.get("등") or 0) >= 0 else "#5b9bff"}">'
                 f'{(x.get("등") or 0):+.1f}%</b></span>' for x in 목록)
+            # ⚠️ "1종목 중 상위"처럼 말이 안 되는 문구가 나오던 문제:
+            #    전체 종목수와 화면에 보이는 개수가 같으면 '중 상위'가 아니라 전부다.
+            #    표본이 GRID_최소종목 미만이라 격자에 —로 나온 칸도 따로 알려준다.
+            총 = 칸.get("종목수") or len(목록)
+            if 총 < GRID_최소종목:
+                꼬리 = f'{총}종목 (표본이 적어 격자에는 —로 표시)'
+            elif 총 > len(목록):
+                꼬리 = f'{총}종목 중 상위 {len(목록)}개'
+            else:
+                꼬리 = f'{총}종목 전부'
             펼칠것.append(
                 f'<div style="margin:6px 0 0"><span style="font-size:10.5px;color:#8b93a0;'
                 f'font-weight:700">{층}</span> '
-                f'<span style="font-size:10px;color:#6f7784">{칸.get("종목수",0)}종목 중 상위</span>'
+                f'<span style="font-size:10px;color:#6f7784">{꼬리}</span>'
                 f'<div style="margin-top:4px">{칩}</div></div>')
         접힘 = ""
         if 펼칠것:
@@ -1675,13 +1686,14 @@ def build_account_grid(격자):
                     f'{r.get("테마","")} 구성 종목 '
                     f'<span style="color:#6f7784;font-weight:600">· 다시 누르면 닫힙니다</span></p>'
                     f'{"".join(펼칠것)}</td></tr>')
-            테마셀 = (f'<td onclick="gtog(\'{rid}\')" style="padding:7px 3px 7px 2px;'
-                    f'font-size:11.5px;color:#d5d9e0;line-height:1.3;word-break:keep-all;'
-                    f'overflow-wrap:anywhere;cursor:pointer;-webkit-tap-highlight-color:transparent">'
-                    f'{테마명}</td>')
+            테마셀 = (f'<td onclick="gtog(\'{rid}\')" title="{_풀}" '
+                    f'style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
+                    f'cursor:pointer;-webkit-tap-highlight-color:transparent">'
+                    f'<span style="display:flex;align-items:center">{테마명}</span></td>')
         else:
-            테마셀 = (f'<td style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
-                    f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명_평}</td>')
+            테마셀 = (f'<td title="{_풀}" style="padding:7px 3px 7px 2px;font-size:11.5px;'
+                    f'color:#d5d9e0"><span style="display:flex;align-items:center">'
+                    f'{테마명_평}</span></td>')
         몸.append('<tr>' + 테마셀 + "".join(칸들) + 전칸 + '</tr>' + 접힘)
 
     # ── 표 맨 아래 '20일 추이' 행 — 격자 열과 세로로 줄을 맞춘다 ──
@@ -1747,17 +1759,14 @@ def build_account_grid(격자):
               '📖 이렇게 보세요</p>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
               '<b style="color:#9aa0aa">가로로 읽으면</b> — 같은 테마라도 대형·중형·소형 중 '
-              '어디가 올랐는지 보입니다. 내 종목 크기 칸이 <b style="color:#e8622a">주황·노랑</b>이면 '
+              '어디가 올랐는지 보입니다. 내 종목 크기 칸이 <b style="color:#ff6b4a">밝은 빨강</b>이면 '
               '그 흐름을 세게 탄 것입니다.<br>'
               '<b style="color:#9aa0aa">세로로 읽으면</b> — 오늘 어느 테마가 주인공이었는지 보입니다. '
               '맨 오른쪽 <b style="color:#9aa0aa">전체</b>는 그 테마의 평균이고, '
               '<b style="color:#9aa0aa">위에서부터 높은 순</b>으로 줄 세워져 있습니다.<br>'
-              '<b style="color:#9aa0aa">색</b> — 오른 칸은 '
-              '<b style="color:#6b2544">자주</b> → <b style="color:#b32f36">빨강</b> → '
-              '<b style="color:#e8622a">주황</b> → <b style="color:#ffb020">노랑</b> 순으로 '
-              '많이 오른 것이고, 내린 칸은 '
-              '<b style="color:#2464bd">파랑</b> → <b style="color:#3ae0d0">청록</b> 순으로 '
-              '많이 내린 것입니다. 회색은 거의 안 움직인 칸입니다.<br>'
+              '<b style="color:#9aa0aa">색</b> — 빨강이 <b style="color:#ff6b4a">밝고 선명할수록</b> '
+              '많이 오른 칸, 파랑이 <b style="color:#5b9bff">밝을수록</b> 많이 내린 칸입니다. '
+              '회색은 거의 안 움직인 칸입니다.<br>'
               '<b style="color:#9aa0aa">맨 아래 줄</b> — 그 크기(대형·중형·소형)의 시장 전체 평균과 '
               '최근 20거래일 추이선입니다. 위 표와 열이 맞춰져 있습니다.'
               '</p></div>'
@@ -2116,8 +2125,10 @@ def build_slope_chart(격자):
     # ⚠️ 예전엔 520px 고정폭이라 모바일에서 가로로 밀어야 다 보였다.
     #    좌표계를 340폭으로 줄이고 SVG를 width:100%로 두면
     #    좁은 화면엔 딱 맞고 넓은 화면에선 비율대로 커진다(글자도 함께).
-    W, H, T, B = 340, 250, 34, 30
-    X = {"대형": 66, "중형": 192, "소형": 318}
+    # 섹터명이 잘리지 않게 왼쪽 라벨 자리를 넉넉히(≈94px) 주고,
+    # 전체 폭을 360으로 늘려 오른쪽 끝까지 그래프가 닿게 한다.
+    W, H, T, B = 360, 250, 34, 30
+    X = {"대형": 100, "중형": 220, "소형": 340}
     def Y(v): return T + (hi - v) / rng * (H - T - B)
 
     선 = ""
@@ -2131,13 +2142,14 @@ def build_slope_chart(격자):
         for t in ("대형", "중형", "소형"):
             선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="3.4" fill="{c}"/>'
         y0 = Y(r["칸"]["대형"]["등락률"])
-        선 += (f'<text x="60" y="{y0+3:.0f}" text-anchor="end" font-size="8.5" '
-               f'fill="#c9ced6">{r["테마"][:5]}</text>')
+        # 이름을 자르지 않는다. 글자도 키우고 한 줄로 둔다.
+        선 += (f'<text x="94" y="{y0+3.5:.0f}" text-anchor="end" font-size="10.5" '
+               f'fill="#d5d9e0">{r["테마"]}</text>')
 
     축 = "".join(f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
                  f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
                  f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
-    영 = (f'<line x1="62" y1="{Y(0):.0f}" x2="332" y2="{Y(0):.0f}" stroke="#3a4150" '
+    영 = (f'<line x1="96" y1="{Y(0):.0f}" x2="352" y2="{Y(0):.0f}" stroke="#3a4150" '
           f'stroke-width="1" stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
 
     하향 = sum(1 for r in 행들 if r["칸"]["대형"]["등락률"] > r["칸"]["소형"]["등락률"])
