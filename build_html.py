@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k6"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k7"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -1505,8 +1505,12 @@ GRID_최소종목 = 3
 #     같은 색을 흐리게/진하게만 하면 사람 눈은 인접 두 단계를 못 가른다.
 #     그래서 밝기와 채도를 함께 움직이는 **실색 5단계**로 바꿨다.
 #     배경(#161a22)에 미리 섞어둔 값이라 겹침·투명도 문제가 없다.
-GRID_RAMP_UP = ["#2c2529", "#4a2b2d", "#7d3532", "#b03f34", "#e04a36"]   # 0→강
-GRID_RAMP_DN = ["#1d2430", "#22344c", "#284a75", "#2d61a3", "#337ad6"]
+#  ⚠️ v-k7: 5단계여도 인접 두 칸이 비슷해 보인다는 지적 → 대비를 더 벌렸다.
+#     ① 0단계를 거의 무채색으로 낮춰 "거의 안 움직인 칸"이 확실히 죽어 보이게
+#     ② 최고 단계를 형광에 가깝게 올려 "오늘의 주인공"이 튀어나오게
+#     ③ 중간 단계 간격을 균등이 아니라 넓게 — 사람 눈은 밝기 차이를 로그로 느낀다
+GRID_RAMP_UP = ["#23262c", "#5a2a2b", "#96322e", "#cf3f2f", "#ff5436"]   # 0→강
+GRID_RAMP_DN = ["#1b1f27", "#1f3550", "#255083", "#2a6fbe", "#3a90f5"]
 GRID_STEPS = (0.5, 1.0, 2.0, 3.0)     # 이 값들을 경계로 5칸
 
 
@@ -1624,10 +1628,44 @@ def build_account_grid(격자):
         #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
         #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
         테마명 = str(r.get("테마", "")).replace("·", "·<wbr>")
-        몸.append('<tr>'
-                  f'<td style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
-                  f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명}</td>'
-                  + "".join(칸들) + 전칸 + '</tr>')
+        rid = f"gr{len(몸)}"
+        # 테마명을 누르면 그 줄의 종목이 바로 아래에 펼쳐진다.
+        #   숫자만 보면 "그래서 어떤 종목?"이 남는데, 그 답을 한 번의 탭으로 준다.
+        펼칠것 = []
+        for 층 in ("대형", "중형", "소형"):
+            칸 = (r.get("칸") or {}).get(층) or {}
+            목록 = 칸.get("종목") or []
+            if not 목록:
+                continue
+            칩 = "".join(
+                f'<span style="display:inline-block;font-size:11px;padding:3px 7px;margin:2px 3px 2px 0;'
+                f'border-radius:5px;background:{_grid_cell_color(x.get("등"))};'
+                f'{_grid_text_style(x.get("등"))}">{x.get("명","")} '
+                f'<b>{(x.get("등") or 0):+.1f}</b></span>' for x in 목록)
+            펼칠것.append(
+                f'<div style="margin:5px 0 0"><span style="font-size:10.5px;color:#8b93a0;'
+                f'font-weight:700">{층}</span> '
+                f'<span style="font-size:10px;color:#6f7784">{칸.get("종목수",0)}종목 중 상위</span>'
+                f'<div style="margin-top:3px">{칩}</div></div>')
+        접힘 = ""
+        if 펼칠것:
+            접힘 = (f'<tr id="{rid}" style="display:none"><td colspan="5" '
+                    f'style="padding:8px 6px 12px;background:#0f131a;border-radius:6px">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
+                    f'<span style="font-size:11.5px;color:#e0c060;font-weight:700">'
+                    f'{r.get("테마","")} 구성 종목</span>'
+                    f'<button onclick="gtog(\'{rid}\')" style="background:#232a36;border:none;'
+                    f'color:#c9ced6;font-size:12px;font-weight:700;border-radius:5px;'
+                    f'padding:3px 9px;cursor:pointer">✕ 닫기</button></div>'
+                    f'{"".join(펼칠것)}</td></tr>')
+            테마셀 = (f'<td onclick="gtog(\'{rid}\')" style="padding:7px 3px 7px 2px;'
+                    f'font-size:11.5px;color:#d5d9e0;line-height:1.3;word-break:keep-all;'
+                    f'overflow-wrap:anywhere;cursor:pointer;-webkit-tap-highlight-color:transparent">'
+                    f'{테마명}<span style="color:#e0c060;font-size:9px"> ▾</span></td>')
+        else:
+            테마셀 = (f'<td style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
+                    f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명}</td>')
+        몸.append('<tr>' + 테마셀 + "".join(칸들) + 전칸 + '</tr>' + 접힘)
 
     # ── 표 맨 아래 '20일 추이' 행 — 격자 열과 세로로 줄을 맞춘다 ──
     #   예전엔 표 밖에 대형/중형/소형이 세로 3줄로 쌓여 있어서
@@ -1681,6 +1719,10 @@ def build_account_grid(격자):
             # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
             f'<table style="width:100%;border-collapse:separate;border-spacing:2px;'
             f'table-layout:fixed">{콜}{머리}{"".join(몸)}{꼬리}</table>'
+            '<script>function gtog(id){var e=document.getElementById(id);'
+            'if(e)e.style.display=(e.style.display==="none"?"table-row":"none");}</script>'
+            '<p style="margin:7px 0 0;font-size:11px;color:#e0c060">'
+            '👆 테마 이름을 누르면 그 줄의 종목이 펼쳐집니다</p>'
             + 범례 + 프리
             + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
@@ -1742,7 +1784,7 @@ def build_top_picks(해석):
         for i, t in enumerate(항목, start=1))
     return ('<div style="background:#12161d;border:1px solid #f0c65a33;border-left:3px solid #f0c65a;'
             'border-radius:0 12px 12px 0;padding:13px 14px;margin:0 0 14px">'
-            f'<p style="margin:0 0 9px;font-size:13.5px;font-weight:700;color:#f0c65a">'
+            f'<p style="margin:0 0 9px;font-size:16.5px;font-weight:800;color:#f0c65a">'
             f'오늘 시장에서 딱 {한글수} 가지만 보십시오</p>'
             f'<ul style="margin:0;padding:0;list-style:none">{줄}</ul></div>')
 
@@ -2014,6 +2056,21 @@ def build_sector_radar():
               '<b style="color:#9aa0aa">속 빈 점 → 꽉 찬 점</b>으로 이어진 선이 '
               '어제 자리에서 오늘 자리까지 움직인 거리입니다. 선이 길수록 하루 사이 변화가 큽니다.'
               '</p></div>'
+            + '<div style="margin:8px 0 0;padding:9px 10px;background:#141c1e;'
+              'border-radius:8px;border:1px solid #1e3238">'
+              '<p style="margin:0 0 5px;font-size:11.5px;color:#22d3ee;font-weight:700">'
+              '🔗 내 계좌 좌표와 함께 보면</p>'
+              '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
+              '두 그림은 <b style="color:#9aa0aa">같은 하루를 다른 축으로</b> 본 것입니다.<br>'
+              '<b style="color:#9aa0aa">계좌 좌표</b>는 "얼마나 올랐나"(금액·등락률)를, '
+              '<b style="color:#9aa0aa">관제 레이더</b>는 "얼마나 시장을 끌었나"(거래대금·확산도까지 합친 주도력)를 봅니다.<br>'
+              '그래서 <b style="color:#e04a36">좌표는 빨간데 레이더에서는 바깥</b>이면 — '
+              '올랐지만 <b style="color:#9aa0aa">돈이 붙지 않은 상승</b>이라 오래가기 어렵습니다.<br>'
+              '반대로 <b style="color:#4ade80">레이더는 안쪽인데 좌표는 옅다</b>면 — '
+              '아직 덜 올랐는데 <b style="color:#9aa0aa">돈이 먼저 들어오는</b> 자리일 수 있습니다.<br>'
+              '<b style="color:#9aa0aa">둘 다 강하면</b> 오늘의 진짜 주인공, '
+              '<b style="color:#9aa0aa">둘 다 약하면</b> 굳이 쫓을 이유가 없는 자리입니다.'
+              '</p></div>'
             + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
             '어제 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
 
@@ -2034,8 +2091,11 @@ def build_slope_chart(격자):
                                     r["칸"]["소형"]["등락률"])]
     lo, hi = min(vs), max(vs)
     rng = (hi - lo) or 1.0
-    W, H, T, B = 520, 300, 40, 40
-    X = {"대형": 150, "중형": 300, "소형": 450}
+    # ⚠️ 예전엔 520px 고정폭이라 모바일에서 가로로 밀어야 다 보였다.
+    #    좌표계를 340폭으로 줄이고 SVG를 width:100%로 두면
+    #    좁은 화면엔 딱 맞고 넓은 화면에선 비율대로 커진다(글자도 함께).
+    W, H, T, B = 340, 250, 34, 30
+    X = {"대형": 112, "중형": 210, "소형": 305}
     def Y(v): return T + (hi - v) / rng * (H - T - B)
 
     선 = ""
@@ -2047,15 +2107,15 @@ def build_slope_chart(격자):
         p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
         선 += f'<polyline points="{p}" fill="none" stroke="{c}" stroke-width="2.5" stroke-linejoin="round"/>'
         for t in ("대형", "중형", "소형"):
-            선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="4" fill="{c}"/>'
+            선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="3.4" fill="{c}"/>'
         y0 = Y(r["칸"]["대형"]["등락률"])
-        선 += (f'<text x="140" y="{y0+4:.0f}" text-anchor="end" font-size="12" fill="#c9ced6">'
-               f'{r["테마"][:7]}</text>')
+        선 += (f'<text x="104" y="{y0+3:.0f}" text-anchor="end" font-size="9.5" '
+               f'fill="#c9ced6">{r["테마"][:6]}</text>')
 
-    축 = "".join(f'<line x1="{X[t]}" y1="{T-10}" x2="{X[t]}" y2="{H-B+10}" stroke="#232a36" '
-                 f'stroke-width="1"/><text x="{X[t]}" y="{T-18}" text-anchor="middle" '
-                 f'font-size="12" fill="#9aa0aa">{t}</text>' for t in X)
-    영 = (f'<line x1="140" y1="{Y(0):.0f}" x2="470" y2="{Y(0):.0f}" stroke="#3a4150" '
+    축 = "".join(f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
+                 f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
+                 f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
+    영 = (f'<line x1="106" y1="{Y(0):.0f}" x2="322" y2="{Y(0):.0f}" stroke="#3a4150" '
           f'stroke-width="1" stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
 
     하향 = sum(1 for r in 행들 if r["칸"]["대형"]["등락률"] > r["칸"]["소형"]["등락률"])
@@ -2068,9 +2128,9 @@ def build_slope_chart(격자):
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">크기 경사선</p>'
             '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '대형에서 소형으로 갈 때 무슨 일이</p>'
-            '<div style="overflow-x:auto">'
-            f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">'
-            f'{축}{영}{선}</svg></div>'
+            f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+            f'style="width:100%;max-width:520px;height:auto;display:block">'
+            f'{축}{영}{선}</svg>'
             f'<p style="margin:6px 0 0;font-size:12.5px;color:#c9ced6">{결론}</p>'
             '<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">'
             '빨강 = 상위 3테마 · 파랑 = 하위 3테마 · 회색 = 나머지</p></div>')
@@ -2117,13 +2177,15 @@ def build_capture_path(개월=1):
     vs = [v for _, v in 곡선]
     lo, hi = min(vs + [0]), max(vs + [0])
     rng = (hi - lo) or 1.0
-    W, H = 520, 200
-    def PX(d): return 60 + (d - Ds[0]) / max(1, (Ds[-1] - Ds[0])) * 420
-    def PY(v): return 30 + (hi - v) / rng * 130
+    # 경사선과 같은 이유로 340폭 좌표계 — 모바일에서 가로 스크롤 없이 한눈에.
+    W, H = 340, 175
+    def PX(d): return 40 + (d - Ds[0]) / max(1, (Ds[-1] - Ds[0])) * 280
+    def PY(v): return 26 + (hi - v) / rng * 112
 
     선 = " ".join(f"{PX(d):.0f},{PY(v):.0f}" for d, v in 곡선)
-    영 = f'<line x1="55" y1="{PY(0):.0f}" x2="485" y2="{PY(0):.0f}" stroke="#3a4150" stroke-dasharray="4 4"/>'
-    눈 = "".join(f'<text x="{PX(d):.0f}" y="185" text-anchor="middle" font-size="11" '
+    영 = (f'<line x1="36" y1="{PY(0):.0f}" x2="324" y2="{PY(0):.0f}" stroke="#3a4150" '
+         f'stroke-dasharray="4 4"/>')
+    눈 = "".join(f'<text x="{PX(d):.0f}" y="162" text-anchor="middle" font-size="10" '
                  f'fill="#6f7784">D+{d}</text>' for d in Ds[::max(1, len(Ds)//5)])
 
     라벨 = "1개월" if 개월 == 1 else "3개월"
@@ -2132,10 +2194,10 @@ def build_capture_path(개월=1):
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">포착 항로</p>'
             f'<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             f'레이더가 잡은 종목들, 그 뒤 {라벨}</p>'
-            '<div style="overflow-x:auto">'
-            f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">{영}'
-            f'<polyline points="{선}" fill="none" stroke="#d85a30" stroke-width="3" '
-            f'stroke-linejoin="round"/>{눈}</svg></div>'
+            f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+            f'style="width:100%;max-width:520px;height:auto;display:block">{영}'
+            f'<polyline points="{선}" fill="none" stroke="#d85a30" stroke-width="2.6" '
+            f'stroke-linejoin="round"/>{눈}</svg>'
             f'<p style="margin:6px 0 0;font-size:13px;color:#e8eaee">'
             f'포착 {len(최종)}종목 · 평균 <b>{평균:+.1f}%</b> · 중앙값 {중앙:+.1f}% · 승률 {승률:.0f}%</p>'
             f'<p style="margin:4px 0 0;font-size:12.5px;color:#c9ced6">'
@@ -3778,7 +3840,7 @@ a{{color:inherit;text-decoration:none}}
 
 .mny-why{{margin-top:.9rem;background:rgba(224,192,96,.1);border-radius:6px;padding:.75rem .85rem}}
 
-.mw-h{{font-size:15px;font-weight:800;color:#e0c060;margin-bottom:.35rem}}
+.mw-h{{font-size:16.5px;font-weight:800;color:#e0c060;margin-bottom:.35rem}}
 
 .mw-b{{font-size:13px;color:#fff;line-height:1.75;font-weight:600}}
 
