@@ -1,6 +1,6 @@
 {
   "날짜": "20260815",
-  "버전_collect": "v2026.08.14-k2",
+  "버전_collect": "v2026.08.14-k4",
   "공시": [],
   "지수수급": {
     "지수": {
@@ -248,6 +248,10 @@
   },
   "뉴스원본": [
     {
+      "제목": "\"장중 26% 폭등\"...5만원→1만4000원 급락했던 백종원 회사, 갑자기 무슨 일 [주주클럽]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005562002&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
+    },
+    {
       "제목": "백종원 드디어 일냈다…폭락하던 더본, 13% 급등 왜? [줍줍리포트]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004652075&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
@@ -318,14 +322,6 @@
     {
       "제목": "폭락한 '삼전닉스'에 \"매수 구간 진입\" or \"추가 하락\"... 어떤 말을 믿어야 할까[인치범의 주식 투자 부트캠프]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005561965&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "사람 피부 스킨부스터 시장 커진다…관련 기업 실적 '껑충'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000049864&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "中, 장쩌민 탄생 100주년 기념주화 발행…금·은화 등 4종",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016252943&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     }
   ],
   "매크로": {
