@@ -20,6 +20,95 @@ from datetime import datetime
 import anthropic  # pip install anthropic
 
 DATE = datetime.now().strftime("%Y%m%d")
+
+# ── 거래일 계산 (v-k5 신규) ──────────────────────────────
+#  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
+#  실제로 2026-08-14(금) 리포트의 다음 거래일은 8/17(월)이 아니라 **8/18(화)**였다.
+#  (8/15 광복절이 토요일 → 8/17 월요일이 대체공휴일 → 증시 휴장)
+#  주말은 코드가 확실히 알 수 있지만 공휴일은 표가 필요하다.
+#
+#  ⚠️ 연 1회 갱신 필요: 아래 표에 새해 휴장일을 추가하지 않으면
+#     주말만 반영되고 공휴일은 놓친다(로그에 경고가 뜬다).
+KRX_HOLIDAYS = {
+    2026: {
+        "20260101",                                     # 신정
+        "20260216", "20260217", "20260218",             # 설날 연휴
+        "20260302",                                     # 삼일절 대체(3/1 일요일)
+        "20260501",                                     # 근로자의 날
+        "20260505",                                     # 어린이날
+        "20260525",                                     # 부처님오신날 대체(5/24 일요일)
+        "20260603",                                     # 지방선거
+        "20260717",                                     # 제헌절(2026년 재지정)
+        "20260817",                                     # 광복절 대체(8/15 토요일)
+        "20260924", "20260925",                         # 추석 연휴(9/26은 토요일)
+        "20261005",                                     # 개천절 대체(10/3 토요일)
+        "20261009",                                     # 한글날
+        "20261225",                                     # 성탄절
+        "20261231",                                     # 연말 폐장(KRX 관행)
+    },
+}
+
+_요일한글 = ("월", "화", "수", "목", "금", "토", "일")
+
+
+def is_trading_day(d):
+    """datetime.date → 장이 열리는 날인가."""
+    if d.weekday() >= 5:                 # 토·일
+        return False
+    표 = KRX_HOLIDAYS.get(d.year)
+    if 표 is None:
+        return True                      # 표가 없으면 주말만 반영 (아래에서 경고)
+    return d.strftime("%Y%m%d") not in 표
+
+
+def next_trading_day(base):
+    """base(datetime.date) 다음의 첫 거래일. 최대 20일까지만 찾는다."""
+    from datetime import timedelta
+    d = base
+    for _ in range(20):
+        d = d + timedelta(days=1)
+        if is_trading_day(d):
+            return d
+    return base
+
+
+def trading_day_context(today):
+    """프롬프트·화면에 넣을 날짜 표현을 한 번에 만든다.
+
+    반환 예)
+      {"오늘": "2026-08-14(금)", "다음거래일": "2026-08-18(화)",
+       "다음거래일표현": "화요일(8/18)", "휴장안내": "8/17(월)은 광복절 대체공휴일로 휴장입니다",
+       "오늘휴장": False}
+    """
+    from datetime import timedelta
+    nxt = next_trading_day(today)
+    간격 = (nxt - today).days
+    if 간격 == 1:
+        표현 = "내일"
+    else:
+        표현 = f"{_요일한글[nxt.weekday()]}요일({nxt.month}/{nxt.day})"
+
+    # 중간에 낀 '평일인데 쉬는 날'만 안내한다(주말은 굳이 설명할 필요 없음).
+    쉬는평일 = []
+    d = today + timedelta(days=1)
+    while d < nxt:
+        if d.weekday() < 5:
+            쉬는평일.append(f"{d.month}/{d.day}({_요일한글[d.weekday()]})")
+        d += timedelta(days=1)
+    휴장안내 = (f"{', '.join(쉬는평일)}은(는) 공휴일로 증시가 열리지 않습니다"
+              if 쉬는평일 else "")
+
+    표없음 = KRX_HOLIDAYS.get(today.year) is None
+    return {
+        "오늘": f"{today:%Y-%m-%d}({_요일한글[today.weekday()]})",
+        "오늘요일": f"{_요일한글[today.weekday()]}요일",
+        "다음거래일": f"{nxt:%Y-%m-%d}({_요일한글[nxt.weekday()]})",
+        "다음거래일표현": 표현,
+        "휴장안내": 휴장안내,
+        "오늘휴장": not is_trading_day(today),
+        "휴장표없음": 표없음,
+    }
+
 # ── 파일 보관 위치 ──
 #   날짜별 원본(data_·report_ json)은 archive/ 폴더에 모은다.
 #   저장소 첫 화면에 매일 3개씩 쌓이면 정작 중요한 .py 파일이 묻히기 때문이다.
@@ -57,7 +146,7 @@ REPORT_PATH = asave(f"report_{DATE}.json")
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.14-k4"
+SCRIPT_VERSION = "v2026.08.14-k5"
 
 # 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
 MAX_TOKENS_START = 16000
@@ -89,6 +178,15 @@ SYSTEM_PROMPT = """\
    · 10,000억 미만이면 '억' 단위로 쓴다. (예: 8,500억)
    · 입력 데이터의 수급 숫자는 '억원' 단위이므로, 위 규칙에 따라 변환해서 쓴다.
    · 이 규칙은 채점표·프로의시선·돈의흐름 등 모든 항목에 동일하게 적용된다.
+
+7. ⚠️ **'내일'이라는 말을 함부로 쓰지 않는다** — 다음 거래일 표기 규칙.
+   · 입력 데이터의 `거래일정.다음거래일표현` 값을 **그대로** 쓴다.
+     그 값이 "내일"이면 "내일"이라 쓰고, "화요일(8/18)"이면 "화요일(8/18)"이라 쓴다.
+   · 금요일이나 연휴 직전에는 다음 거래일이 내일이 아니다.
+     "내일 확인하세요"라고 쓰면 **틀린 안내**가 된다.
+   · `거래일정.휴장안내`에 값이 있으면, 관전포인트나 대응 항목 중 **한 곳에서만**
+     자연스럽게 한 번 언급한다. 모든 항목에 반복해 넣지 않는다.
+   · 채점표는 '어제'가 아니라 '직전 거래일'을 뜻한다 — 연휴 뒤라면 그 점을 감안해 쓴다.
 
 각 항목 작성 지침:
 - 한줄평: 오늘 시장의 특징을 한 문장(공백 포함 40자 이내)으로 압축. 관제지수 옆에 붙는 짧은 총평.
@@ -802,6 +900,11 @@ def recent_headlines(일수=14):
 
 def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
     슬림 = slim_data(data)
+    # 다음 거래일 정보 — Claude가 '내일'을 잘못 쓰지 않도록 계산해서 넘긴다(전역규칙 7).
+    try:
+        슬림["거래일정"] = trading_day_context(datetime.now().date())
+    except Exception as e:
+        print(f"   ⚠️ 거래일 계산 실패({type(e).__name__}) — '내일' 표현이 부정확할 수 있습니다")
     최근주제 = recent_study_topics()
     최근렌즈 = recent_flip_lenses()
     if 최근렌즈:
@@ -1031,6 +1134,22 @@ def verify_news_links(글, data_원본):
 
 if __name__ == "__main__":
     print(f"=== {DATE} 해석 글 생성 | generate_report {SCRIPT_VERSION} | 모델 {MODEL} ===\n")
+
+    # 거래일 상태를 먼저 알린다 — '내일' 오표기와 휴장일 발행을 사람이 바로 알아채도록.
+    try:
+        _tc = trading_day_context(datetime.now().date())
+        print(f"🗓️ 오늘 {_tc['오늘']} · 다음 거래일 {_tc['다음거래일']} "
+              f"(글에는 '{_tc['다음거래일표현']}'으로 표기됩니다)")
+        if _tc["휴장안내"]:
+            print(f"   📌 {_tc['휴장안내']}")
+        if _tc["오늘휴장"]:
+            print("   ⚠️ 오늘은 증시 휴장일입니다 — 수집된 숫자는 직전 거래일과 같을 수 있습니다.")
+        if _tc["휴장표없음"]:
+            print(f"   ⚠️ {datetime.now().year}년 휴장일 표가 없습니다(KRX_HOLIDAYS). "
+                  f"주말만 반영되어 공휴일을 놓칠 수 있습니다.")
+        print()
+    except Exception as e:
+        print(f"⚠️ 거래일 계산 건너뜀({type(e).__name__})\n")
 
     data = load_data()
     어제 = load_previous_watchpoints()
