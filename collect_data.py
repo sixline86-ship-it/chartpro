@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k6"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.14-k7"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
@@ -1771,6 +1771,7 @@ GRID_중형_끝 = 300        # 101~300위 / 301위 이하는 소형
 GRID_시총페이지 = 12      # 시장별 크롤 페이지 수(50종목/페이지) → 시장당 600종목
 GRID_최소종목 = 3         # 한 칸에 이보다 적으면 '표본 부족'(—) 처리
 GRID_테마상세 = 2         # 슬롯 하나당 상세를 열어볼 네이버 테마 개수
+GRID_칸종목수 = 6         # 한 칸에서 화면에 펼쳐 보여줄 상위 종목 수
 
 # 테마 슬롯 9개 — 네이버 테마명에 아래 키워드가 들어가면 그 슬롯으로 본다.
 # ⚠️ 이 목록은 한 번 정하면 함부로 바꾸지 않는다. 바꾸면 과거 격자와 비교가 깨진다.
@@ -1926,10 +1927,18 @@ def collect_account_grid(테마후보):
         칸 = {}
         전체값 = []
         for 층 in ("대형", "중형", "소형"):
-            값들 = [유니버스[n]["등락률"] for n in 멤버
-                    if n in 유니버스 and 유니버스[n]["층"] == 층]
-            칸[층] = ({"등락률": round(sum(값들) / len(값들), 2), "종목수": len(값들)}
-                     if len(값들) >= GRID_최소종목 else {"등락률": None, "종목수": len(값들)})
+            항목 = [(n, 유니버스[n]["등락률"]) for n in 멤버
+                   if n in 유니버스 and 유니버스[n]["층"] == 층]
+            값들 = [v for _, v in 항목]
+            # 등락률 높은 순 상위 몇 개의 '이름'까지 저장한다.
+            #   화면에서 테마를 눌렀을 때 "그래서 어떤 종목이었나"를 바로 보여주기 위함.
+            #   (예전엔 등락률·종목수만 저장해 숫자만 있고 실체가 없었다)
+            상위 = sorted(항목, key=lambda x: x[1], reverse=True)[:GRID_칸종목수]
+            칸[층] = ({"등락률": round(sum(값들) / len(값들), 2), "종목수": len(값들),
+                     "종목": [{"명": n, "등": round(v, 2)} for n, v in 상위]}
+                     if len(값들) >= GRID_최소종목 else
+                     {"등락률": None, "종목수": len(값들),
+                      "종목": [{"명": n, "등": round(v, 2)} for n, v in 상위]})
             전체값 += 값들
         if not 전체값:
             continue
