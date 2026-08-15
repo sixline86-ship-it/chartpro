@@ -10,7 +10,96 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k4"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k5"   # ⬅ 버전 표시
+
+# ── 거래일 계산 (v-k5 신규) ──────────────────────────────
+#  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
+#  실제로 2026-08-14(금) 리포트의 다음 거래일은 8/17(월)이 아니라 **8/18(화)**였다.
+#  (8/15 광복절이 토요일 → 8/17 월요일이 대체공휴일 → 증시 휴장)
+#  주말은 코드가 확실히 알 수 있지만 공휴일은 표가 필요하다.
+#
+#  ⚠️ 연 1회 갱신 필요: 아래 표에 새해 휴장일을 추가하지 않으면
+#     주말만 반영되고 공휴일은 놓친다(로그에 경고가 뜬다).
+KRX_HOLIDAYS = {
+    2026: {
+        "20260101",                                     # 신정
+        "20260216", "20260217", "20260218",             # 설날 연휴
+        "20260302",                                     # 삼일절 대체(3/1 일요일)
+        "20260501",                                     # 근로자의 날
+        "20260505",                                     # 어린이날
+        "20260525",                                     # 부처님오신날 대체(5/24 일요일)
+        "20260603",                                     # 지방선거
+        "20260717",                                     # 제헌절(2026년 재지정)
+        "20260817",                                     # 광복절 대체(8/15 토요일)
+        "20260924", "20260925",                         # 추석 연휴(9/26은 토요일)
+        "20261005",                                     # 개천절 대체(10/3 토요일)
+        "20261009",                                     # 한글날
+        "20261225",                                     # 성탄절
+        "20261231",                                     # 연말 폐장(KRX 관행)
+    },
+}
+
+_요일한글 = ("월", "화", "수", "목", "금", "토", "일")
+
+
+def is_trading_day(d):
+    """datetime.date → 장이 열리는 날인가."""
+    if d.weekday() >= 5:                 # 토·일
+        return False
+    표 = KRX_HOLIDAYS.get(d.year)
+    if 표 is None:
+        return True                      # 표가 없으면 주말만 반영 (아래에서 경고)
+    return d.strftime("%Y%m%d") not in 표
+
+
+def next_trading_day(base):
+    """base(datetime.date) 다음의 첫 거래일. 최대 20일까지만 찾는다."""
+    from datetime import timedelta
+    d = base
+    for _ in range(20):
+        d = d + timedelta(days=1)
+        if is_trading_day(d):
+            return d
+    return base
+
+
+def trading_day_context(today):
+    """프롬프트·화면에 넣을 날짜 표현을 한 번에 만든다.
+
+    반환 예)
+      {"오늘": "2026-08-14(금)", "다음거래일": "2026-08-18(화)",
+       "다음거래일표현": "화요일(8/18)", "휴장안내": "8/17(월)은 광복절 대체공휴일로 휴장입니다",
+       "오늘휴장": False}
+    """
+    from datetime import timedelta
+    nxt = next_trading_day(today)
+    간격 = (nxt - today).days
+    if 간격 == 1:
+        표현 = "내일"
+    else:
+        표현 = f"{_요일한글[nxt.weekday()]}요일({nxt.month}/{nxt.day})"
+
+    # 중간에 낀 '평일인데 쉬는 날'만 안내한다(주말은 굳이 설명할 필요 없음).
+    쉬는평일 = []
+    d = today + timedelta(days=1)
+    while d < nxt:
+        if d.weekday() < 5:
+            쉬는평일.append(f"{d.month}/{d.day}({_요일한글[d.weekday()]})")
+        d += timedelta(days=1)
+    휴장안내 = (f"{', '.join(쉬는평일)}은(는) 공휴일로 증시가 열리지 않습니다"
+              if 쉬는평일 else "")
+
+    표없음 = KRX_HOLIDAYS.get(today.year) is None
+    return {
+        "오늘": f"{today:%Y-%m-%d}({_요일한글[today.weekday()]})",
+        "오늘요일": f"{_요일한글[today.weekday()]}요일",
+        "다음거래일": f"{nxt:%Y-%m-%d}({_요일한글[nxt.weekday()]})",
+        "다음거래일표현": 표현,
+        "휴장안내": 휴장안내,
+        "오늘휴장": not is_trading_day(today),
+        "휴장표없음": 표없음,
+    }
+
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -1411,15 +1500,41 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
 GRID_최소종목 = 3
 
 
+#  등락 강도 5단계 색 램프 (v-k5)
+#  ⚠️ 예전 방식(같은 빨강의 투명도만 조절)은 "전부 오른 날"에 거의 구분이 안 됐다.
+#     같은 색을 흐리게/진하게만 하면 사람 눈은 인접 두 단계를 못 가른다.
+#     그래서 밝기와 채도를 함께 움직이는 **실색 5단계**로 바꿨다.
+#     배경(#161a22)에 미리 섞어둔 값이라 겹침·투명도 문제가 없다.
+GRID_RAMP_UP = ["#2c2529", "#4a2b2d", "#7d3532", "#b03f34", "#e04a36"]   # 0→강
+GRID_RAMP_DN = ["#1d2430", "#22344c", "#284a75", "#2d61a3", "#337ad6"]
+GRID_STEPS = (0.5, 1.0, 2.0, 3.0)     # 이 값들을 경계로 5칸
+
+
+def _grid_step(v):
+    """등락률 → 0~4 강도 단계."""
+    a = abs(v)
+    for i, t in enumerate(GRID_STEPS):
+        if a < t:
+            return i
+    return 4
+
+
 def _grid_cell_color(v):
     """등락률 → 배경색. 지수 관례(빨강=상승/파랑=하락)를 따른다.
-    색 진하기는 절대값 구간으로 4단계. 색만으로 구분하지 않도록 숫자를 항상 함께 쓴다."""
+    색만으로 구분하지 않도록 숫자를 항상 함께 쓰고, 강한 칸일수록 글자도 밝아진다."""
     if v is None:
         return "transparent"
-    a = abs(v)
-    op = 0.55 if a >= 3 else (0.42 if a >= 2 else (0.28 if a >= 1 else (0.18 if a >= 0.5 else 0.10)))
-    hexcol = "#e24b4a" if v >= 0 else "#378add"
-    return f"{hexcol}{int(op*255):02x}"
+    return (GRID_RAMP_UP if v >= 0 else GRID_RAMP_DN)[_grid_step(v)]
+
+
+def _grid_text_style(v):
+    """강도에 따라 글자 밝기·굵기를 함께 움직인다 — 색약이어도 단계가 읽히게."""
+    if v is None:
+        return "color:#6b7280;font-weight:500"
+    s = _grid_step(v)
+    색 = ["#98a0ac", "#b9c0ca", "#d8dde4", "#f0f3f7", "#ffffff"][s]
+    굵 = [500, 600, 700, 800, 800][s]
+    return f"color:{색};font-weight:{굵}"
 
 
 def _load_strata_history(days=20):
@@ -1491,14 +1606,19 @@ def build_account_grid(격자):
                             'color:#6b7280;background:#ffffff08;border-radius:4px">—</td>')
             else:
                 칸들.append(f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
-                            f'color:#e8eaee;background:{_grid_cell_color(v)};border-radius:4px">'
-                            f'{v:+.1f}</td>')
+                            f'background:{_grid_cell_color(v)};border-radius:4px;'
+                            f'{_grid_text_style(v)}">{v:+.1f}</td>')
         전 = r.get("전체")
         if isinstance(전, (int, float)):
-            전칸 = (f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;font-weight:700;'
-                   f'color:#e8eaee;background:{_grid_cell_color(전)};border-radius:4px">{전:+.1f}</td>')
+            # '전체'는 그 줄의 요약이다. 같은 색 램프를 쓰되 금색 테두리로 감싸
+            # "이 칸은 성격이 다르다(합계)"를 눈으로 알게 한다.
+            전칸 = (f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
+                   f'background:{_grid_cell_color(전)};border-radius:4px;'
+                   f'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.55);'
+                   f'{_grid_text_style(전)}">{전:+.1f}</td>')
         else:
-            전칸 = '<td style="padding:7px 2px;text-align:center;font-size:12px;color:#6b7280">—</td>'
+            전칸 = ('<td style="padding:7px 2px;text-align:center;font-size:12px;color:#6b7280;'
+                   'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.35);border-radius:4px">—</td>')
         # 모바일(가로 360px)에서 표가 잘리지 않게: 테마명은 '·' 뒤에서 줄바꿈을 허용한다.
         #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
         #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
@@ -1508,18 +1628,41 @@ def build_account_grid(격자):
                   f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명}</td>'
                   + "".join(칸들) + 전칸 + '</tr>')
 
-    # ── 크기 전체 + 20일 스파크라인 3줄 (수위 항로를 여기에 흡수) ──
+    # ── 표 맨 아래 '20일 추이' 행 — 격자 열과 세로로 줄을 맞춘다 ──
+    #   예전엔 표 밖에 대형/중형/소형이 세로 3줄로 쌓여 있어서
+    #   "이게 위 표의 어느 열 이야기인지" 눈으로 잇기가 어려웠다.
+    #   표 안의 행으로 넣으면 열이 자동으로 정렬된다.
     이력 = _load_strata_history()
-    스파크 = []
+    꼬리칸 = []
     for 층 in ("대형", "중형", "소형"):
         v = 크기.get(층)
-        sv = _spark_svg([r.get(층) for r in 이력])
-        스파크.append(
-            f'<div style="display:flex;align-items:center;gap:8px;min-width:0">'
-            f'<span style="font-size:12.5px;color:#9aa0aa;width:32px;flex:none">{층}</span>'
-            f'<span style="font-size:14px;font-weight:700;width:52px;flex:none;'
-            f'color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
-            f'{v:+.2f}</span>{sv}</div>' if isinstance(v, (int, float)) else "")
+        sv = _spark_svg([r.get(층) for r in 이력], w=64, h=18)
+        값HTML = (f'<span style="font-size:12px;font-weight:800;'
+                  f'color:{"#e04a36" if (v or 0) >= 0 else "#337ad6"}">{v:+.2f}</span>'
+                  ) if isinstance(v, (int, float)) else '<span style="color:#6b7280">—</span>'
+        꼬리칸.append(f'<td style="padding:8px 1px 2px;text-align:center;vertical-align:top">'
+                    f'<div>{값HTML}</div><div style="line-height:0">{sv}</div></td>')
+    꼬리 = ('<tr><td style="padding:8px 3px 2px 2px;font-size:10.5px;color:#8b93a0;'
+            'line-height:1.3;vertical-align:top">시장<br>평균<br>'
+            '<span style="font-size:9.5px;opacity:.75">20일 추이</span></td>'
+            + "".join(꼬리칸)
+            + '<td style="padding:8px 1px 2px;text-align:center;vertical-align:top">'
+              '<span style="font-size:10px;color:#6f7784">—</span></td></tr>')
+
+    # ── 색 강도 범례 (색만으로 못 읽는 사람을 위해 숫자 경계를 같이 보여준다) ──
+    def _칩(색, 라벨):
+        return (f'<span style="display:inline-flex;align-items:center;gap:3px;font-size:9.5px;'
+                f'color:#7d848f"><span style="width:11px;height:11px;border-radius:2px;'
+                f'background:{색};display:inline-block"></span>{라벨}</span>')
+    범례 = ('<div style="display:flex;flex-wrap:wrap;gap:7px;margin:9px 0 0;'
+            'padding-top:8px;border-top:1px solid #1e2531">'
+            + _칩(GRID_RAMP_DN[4], "−3%↓") + _칩(GRID_RAMP_DN[2], "−1%") 
+            + _칩(GRID_RAMP_UP[0], "0%") + _칩(GRID_RAMP_UP[2], "+1%")
+            + _칩(GRID_RAMP_UP[4], "+3%↑")
+            + '<span style="font-size:9.5px;color:#7d848f">· '
+              '<span style="display:inline-block;width:11px;height:11px;border-radius:2px;'
+              'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.7);vertical-align:-2px"></span> '
+              '금색 테두리 = 그 줄의 평균</span></div>')
 
     프리 = ""
     if isinstance(프리미엄, (int, float)):
@@ -1538,10 +1681,8 @@ def build_account_grid(격자):
             '오늘 내 종목은 어디에 있었나</p>'
             # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
             f'<table style="width:100%;border-collapse:separate;border-spacing:2px;'
-            f'table-layout:fixed">{콜}{머리}{"".join(몸)}</table>'
-            '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #232a36;'
-            'display:flex;flex-direction:column;gap:5px">'
-            + "".join(스파크) + '</div>' + 프리
+            f'table-layout:fixed">{콜}{머리}{"".join(몸)}{꼬리}</table>'
+            + 범례 + 프리
             + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
               '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
@@ -1551,8 +1692,10 @@ def build_account_grid(격자):
               '어디가 올랐는지 보입니다. 내 종목 크기 칸이 빨간색이면 그 흐름에 올라탄 것입니다.<br>'
               '<b style="color:#9aa0aa">세로로 읽으면</b> — 오늘 어느 테마가 주인공이었는지 보입니다. '
               '맨 오른쪽 <b style="color:#9aa0aa">전체</b> 칸이 그 테마의 평균입니다.<br>'
-              '<b style="color:#9aa0aa">색</b> — 빨강은 오른 칸, 파랑은 내린 칸이고 진할수록 폭이 큽니다.<br>'
-              '<b style="color:#9aa0aa">맨 아래 가로선</b> — 대형·중형·소형의 최근 20거래일 추이입니다.'
+              '<b style="color:#9aa0aa">색</b> — 빨강은 오른 칸, 파랑은 내린 칸입니다. '
+              '진할수록 폭이 크고, 글자도 함께 밝아집니다.<br>'
+              '<b style="color:#9aa0aa">맨 아래 줄</b> — 그 크기(대형·중형·소형)의 시장 전체 평균과 '
+              '최근 20거래일 추이선입니다. 위 표와 열이 맞춰져 있습니다.'
               '</p></div>'
             + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
             f'한 칸에 종목이 {GRID_최소종목}개 미만이면 —로 둡니다 · '
@@ -1625,9 +1768,11 @@ def build_flow_gearbox():
     except Exception:
         return ""
     vals = [r.get("실탄") for r in rows if isinstance(r.get("실탄"), (int, float))]
+    # 5거래일 = 한 주. 4일이면 주 단위 흐름이 잘려 "이번 주 어땠나"가 안 읽힌다.
+    #   (이력이 5일에 못 미치면 있는 만큼 쓰되, 최소 4일은 있어야 속도 변화를 판정한다)
     if len(vals) < 4:
         return ""
-    최근 = vals[-4:]
+    최근 = vals[-5:]
     오늘 = 최근[-1]
     차분 = [최근[i + 1] - 최근[i] for i in range(len(최근) - 1)]
     오름 = sum(1 for d in 차분 if d > 0)
@@ -1665,7 +1810,13 @@ def build_flow_gearbox():
             f'<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:{색}">{상태}</p>'
             f'<div style="display:flex;gap:6px;align-items:flex-end;margin-bottom:7px">{"".join(막대)}</div>'
             f'<p style="margin:0;font-size:12.5px;color:#c9ced6">{설명}</p>'
-            f'<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">최근 4거래일 실탄 {수치}</p>'
+            f'<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">'
+            f'최근 {len(최근)}거래일 실탄 {수치}</p>'
+            '<p style="margin:5px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
+            '💡 <b style="color:#8b93a0">실탄</b>이란 코스피에서 '
+            '<b style="color:#8b93a0">외국인 + 기관</b>이 순매수한 금액의 합계입니다. '
+            '개인은 이 둘의 거울(반대편)이라 더하면 정보가 지워져 제외했고, '
+            '선물·비차익은 단위가 달라 합치지 않습니다.</p>'
             '</div>')
 
 
@@ -1832,7 +1983,18 @@ def build_sector_radar():
             '오늘 관제탑에 가까워진 섹터</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
             f'<svg width="350" height="300" viewBox="0 25 350 300" style="flex:none;max-width:100%">'
-            f'{링}{축}<circle cx="{cx}" cy="{cy}" r="4" fill="#f0c65a"/>'
+            f'{링}{축}'
+            # 중심(관제탑)은 섹터 점과 절대 헷갈리면 안 된다.
+            #   '제자리' 점이 금색이라 중심도 금색이면 구분이 안 됐다 →
+            #   흰색 조준 마커(십자 + 이중 원)로 바꿔 "여기가 목표 지점"임을 분명히 한다.
+            f'<circle cx="{cx}" cy="{cy}" r="10" fill="none" stroke="#ffffff" '
+            f'stroke-width="1.2" opacity=".45"/>'
+            f'<line x1="{cx-14}" y1="{cy}" x2="{cx+14}" y2="{cy}" stroke="#ffffff" '
+            f'stroke-width="1" opacity=".4"/>'
+            f'<line x1="{cx}" y1="{cy-14}" x2="{cx}" y2="{cy+14}" stroke="#ffffff" '
+            f'stroke-width="1" opacity=".4"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="4.5" fill="#ffffff" '
+            f'stroke="#0f131a" stroke-width="1.2"/>'
             f'{자취}{점}{라벨}</svg>'
             f'<div style="flex:1;min-width:150px">{패널}</div></div>'
             + 변동표
@@ -1841,7 +2003,7 @@ def build_sector_radar():
               '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
               '📖 이렇게 보세요</p>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
-              '<b style="color:#9aa0aa">가운데 금색 점이 관제탑</b>입니다. 섹터 점이 여기에 '
+              '<b style="color:#9aa0aa">가운데 흰색 조준점이 관제탑</b>입니다. 섹터 점이 여기에 '
               '<b style="color:#9aa0aa">가까울수록 오늘 시장을 세게 끌고 갔다</b>는 뜻이고, '
               '바깥에 있을수록 뒤로 밀렸다는 뜻입니다.<br>'
               '<b style="color:#4ade80">초록 ▲</b> 어제보다 안쪽으로 들어옴 (달아오르는 중) · '
@@ -1992,6 +2154,12 @@ def build_core(핵심편, data, 해석):
     """
     if not 핵심편:
         return ""
+    # 금요일·연휴 직전에는 "내일"이 틀린 말이 된다 → 실제 다음 거래일로 표기.
+    try:
+        _NEXT_LABEL = trading_day_context(
+            datetime.strptime(data.get("날짜") or DATE, "%Y%m%d").date())["다음거래일표현"]
+    except Exception:
+        _NEXT_LABEL = "내일"
     지수수급 = data.get("지수수급") or {}
     코수 = 지수수급.get("코스피_수급") or {}
     rows = _load_market_history()
@@ -2159,7 +2327,7 @@ def build_core(핵심편, data, 해석):
         except Exception:
             _seed = 0
         pick = 후보들[_seed % len(후보들)]
-        내일대응 = (f'<div class="tmr"><p class="tmr-h">🌅 내일장, 이것만 기억하세요</p>'
+        내일대응 = (f'<div class="tmr"><p class="tmr-h">🌅 {_NEXT_LABEL}장, 이것만 기억하세요</p>'
                    f'<p class="tmr-b">{pick}</p></div>')
 
     # ⚠️ 장 마감 전(09:00~15:30) 또는 개장 전에 돌면 지수·섹터가 전부 0%로 잡힌다.
@@ -3091,6 +3259,27 @@ def build_html(data, report):
     오늘의공부 = 해석.get("오늘의_공부", "")
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
 
+    # ── 다음 거래일 라벨 ──
+    #   금요일·연휴 직전에는 "내일"이 틀린 말이 된다. 화면 제목도 데이터에 맞춘다.
+    #   (예: 금요일 리포트 → "🌅 화요일(8/18)장, 이것만 기억하세요")
+    try:
+        _tc = trading_day_context(datetime.strptime(data["날짜"], "%Y%m%d").date())
+        _NEXT_LABEL = _tc["다음거래일표현"]
+        _휴장안내 = _tc["휴장안내"]
+        _오늘휴장 = _tc["오늘휴장"]
+    except Exception:
+        _NEXT_LABEL, _휴장안내, _오늘휴장 = "내일", "", False
+
+    # 휴장일에 돌리면 수집값이 직전 거래일과 같다 — 조용히 넘기지 않고 명시한다.
+    휴장배너 = ('<div style="margin:0 0 12px;padding:10px 12px;background:#2a2118;'
+              'border:1px solid #5a4520;border-radius:10px">'
+              '<p style="margin:0;font-size:12.5px;color:#f0c65a;font-weight:700">'
+              '📅 오늘은 증시 휴장일입니다</p>'
+              '<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+              '장이 열리지 않아 아래 수치는 <b>직전 거래일과 동일</b>합니다. '
+              f'다음 거래일은 <b style="color:#f0c65a">{_NEXT_LABEL}</b>입니다.</p></div>'
+              ) if _오늘휴장 else ''
+
     # ── 공유 카드(OG) — 같은 문장이 세 번 겹치던 문제를 역할 분담으로 해결 ──
     #   og:title = 한줄평 (카드 흰 글씨)  /  og:description = 날짜만 (회색 글씨)
     #   og:image = 매일 새로 생성되는 썸네일 PNG (make_thumb.py)
@@ -3734,12 +3923,13 @@ a{{color:inherit;text-decoration:none}}
 .fs-temp{{padding:.2rem 0 .75rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
 .fs-temp-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;letter-spacing:.04em;margin-bottom:.45rem}}
 .fs-temp-t span{{font-weight:600;color:#8a909a;letter-spacing:0}}
-.ft-row{{display:grid;grid-template-columns:48px 92px 1fr auto;gap:9px;align-items:baseline;padding:5px 0}}
+.ft-row{{display:grid;grid-template-columns:minmax(38px,48px) minmax(64px,92px) 1fr auto;gap:9px;align-items:baseline;padding:5px 0}}
 .ft-who{{font-size:11.5px;font-weight:700;color:#9aa0a8}}
 .ft-val{{font-size:14.5px;font-weight:800;font-variant-numeric:tabular-nums}}
 .ft-val.b{{color:#ff9a80}} .ft-val.s{{color:#8fb4ee}}
 .ft-avg{{font-size:10px;color:#7d838c;font-weight:600;white-space:nowrap}}
-.ft-bad i{{font-style:normal;font-size:9.5px;font-weight:800;color:#d8dce2;background:rgba(255,255,255,.07);border:.5px solid rgba(255,255,255,.13);border-radius:99px;padding:2px 8px;white-space:nowrap}}
+.ft-bad i{{font-style:normal;font-size:9.5px;font-weight:800;color:#d8dce2;background:rgba(255,255,255,.07);border:.5px solid rgba(255,255,255,.13);border-radius:99px;padding:2px 8px;display:inline-block;word-break:keep-all;line-height:1.45}}
+.ft-bad{{min-width:0;text-align:right}}
 .ft-note{{font-size:9.5px;color:#7d838c;line-height:1.6;margin-top:.45rem}}
 .fs-cum{{padding-top:.95rem}}
 .fs-splittitle{{margin:1.1rem -1.1rem .6rem;padding:.7rem 1.1rem;background:linear-gradient(90deg,rgba(224,192,96,.16),rgba(224,192,96,.04));color:#f0dfa8;font-size:13px;font-weight:800;letter-spacing:-.01em;border-top:1px solid rgba(224,192,96,.25);border-bottom:1px solid rgba(224,192,96,.25)}}
@@ -3886,6 +4076,12 @@ a{{color:inherit;text-decoration:none}}
   .sc-cols,.sc-row{{grid-template-columns:1.2fr 62px 50px 52px;font-size:10.5px}}
   .bar-name{{font-size:8px}}
 }}
+/* 340px 이하 (iPhone SE 1세대 등 초소형) — 배지를 한 줄 아래로 내려 넘침을 없앤다 */
+@media (max-width:340px){{
+  .ft-row{{grid-template-columns:minmax(34px,44px) minmax(58px,80px) 1fr;gap:6px}}
+  .ft-bad{{grid-column:1 / -1;text-align:left;margin-top:2px}}
+  .ft-avg{{white-space:normal}}
+}}
 </style>
 </head>
 <body>
@@ -3895,6 +4091,7 @@ a{{color:inherit;text-decoration:none}}
     <span class="badge">{날짜} 마감</span>
   </div>
 
+  {휴장배너}
   {build_core(해석.get('핵심편'), data, 해석)}
 
   <div class="deep-wrap">
@@ -3981,7 +4178,7 @@ a{{color:inherit;text-decoration:none}}
 
   {build_story_bridge()}
 
-  <p class="sec-label" id="watch"><small>내일의 관전 포인트</small>🗼 내일 이것만 보세요</p>
+  <p class="sec-label" id="watch"><small>{_NEXT_LABEL}의 관전 포인트</small>🗼 {_NEXT_LABEL} 이것만 보세요</p>
   {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
 
   <p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>
