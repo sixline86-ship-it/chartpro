@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k7"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k8"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -1505,12 +1505,14 @@ GRID_최소종목 = 3
 #     같은 색을 흐리게/진하게만 하면 사람 눈은 인접 두 단계를 못 가른다.
 #     그래서 밝기와 채도를 함께 움직이는 **실색 5단계**로 바꿨다.
 #     배경(#161a22)에 미리 섞어둔 값이라 겹침·투명도 문제가 없다.
-#  ⚠️ v-k7: 5단계여도 인접 두 칸이 비슷해 보인다는 지적 → 대비를 더 벌렸다.
-#     ① 0단계를 거의 무채색으로 낮춰 "거의 안 움직인 칸"이 확실히 죽어 보이게
-#     ② 최고 단계를 형광에 가깝게 올려 "오늘의 주인공"이 튀어나오게
-#     ③ 중간 단계 간격을 균등이 아니라 넓게 — 사람 눈은 밝기 차이를 로그로 느낀다
-GRID_RAMP_UP = ["#23262c", "#5a2a2b", "#96322e", "#cf3f2f", "#ff5436"]   # 0→강
-GRID_RAMP_DN = ["#1b1f27", "#1f3550", "#255083", "#2a6fbe", "#3a90f5"]
+#  ⚠️ v-k8: 명도만 조절하는 방식은 한계가 뚜렷했다.
+#     같은 빨강을 밝기만 바꾸면 인접 단계가 계속 비슷해 보인다.
+#     그래서 **색상(Hue)까지 함께 이동**시킨다.
+#       상승: 무채색 → 자주 → 빨강 → 주황 → 노랑(형광)
+#       하락: 무채색 → 남색 → 파랑 → 하늘 → 청록(형광)
+#     이러면 밝기가 비슷해도 '색 자체'가 달라 한눈에 단계가 갈린다.
+GRID_RAMP_UP = ["#262a31", "#6b2544", "#b32f36", "#e8622a", "#ffb020"]   # 0→강
+GRID_RAMP_DN = ["#1e222a", "#243a6b", "#2464bd", "#2a9fe0", "#3ae0d0"]
 GRID_STEPS = (0.5, 1.0, 2.0, 3.0)     # 이 값들을 경계로 5칸
 
 
@@ -1532,12 +1534,16 @@ def _grid_cell_color(v):
 
 
 def _grid_text_style(v):
-    """강도에 따라 글자 밝기·굵기를 함께 움직인다 — 색약이어도 단계가 읽히게."""
+    """강도에 따라 글자색을 바꾼다.
+
+    ⚠️ 램프 상단(주황·노랑 / 하늘·청록)은 배경이 밝아서 흰 글씨가 안 읽힌다.
+       그래서 3~4단계는 **어두운 글자**로 뒤집는다(명암 대비 확보).
+    """
     if v is None:
         return "color:#6b7280;font-weight:500"
     s = _grid_step(v)
-    색 = ["#98a0ac", "#b9c0ca", "#d8dde4", "#f0f3f7", "#ffffff"][s]
-    굵 = [500, 600, 700, 800, 800][s]
+    색 = ["#98a0ac", "#e6d0da", "#ffffff", "#2a1a08", "#2a1f04"][s]
+    굵 = [500, 700, 800, 900, 900][s]
     return f"color:{색};font-weight:{굵}"
 
 
@@ -1627,44 +1633,55 @@ def build_account_grid(격자):
         # 모바일(가로 360px)에서 표가 잘리지 않게: 테마명은 '·' 뒤에서 줄바꿈을 허용한다.
         #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
         #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
-        테마명 = str(r.get("테마", "")).replace("·", "·<wbr>")
         rid = f"gr{len(몸)}"
-        # 테마명을 누르면 그 줄의 종목이 바로 아래에 펼쳐진다.
-        #   숫자만 보면 "그래서 어떤 종목?"이 남는데, 그 답을 한 번의 탭으로 준다.
+        # ⚠️ 화살표가 혼자 다음 줄로 떨어지던 문제:
+        #    테마명을 '·'에서 접히게 해뒀는데 화살표를 그냥 뒤에 붙이면
+        #    마지막 조각과 분리될 수 있다. 마지막 조각과 화살표를 한 덩어리로 묶는다.
+        _조각 = str(r.get("테마", "")).split("·")
+        _앞 = "".join(f"{x}·<wbr>" for x in _조각[:-1])
+        테마명 = (_앞 + f'<span style="white-space:nowrap">{_조각[-1]}'
+                 f'<span style="color:#e0c060;font-size:9px">&nbsp;▾</span></span>')
+        테마명_평 = _앞 + f'<span style="white-space:nowrap">{_조각[-1]}</span>'
+
         펼칠것 = []
         for 층 in ("대형", "중형", "소형"):
             칸 = (r.get("칸") or {}).get(층) or {}
             목록 = 칸.get("종목") or []
             if not 목록:
                 continue
+            # 칩은 격자 램프를 쓰지 않는다.
+            #   칸 색은 '평균의 강도'를 보여주는 용도라 개별 종목까지 같은 색으로 칠하면
+            #   전부 붉은 덩어리가 되어 종목명이 안 읽힌다.
+            #   → 배경은 읽기 좋은 어두운 회색 고정, 등락률 숫자에만 색을 준다.
             칩 = "".join(
-                f'<span style="display:inline-block;font-size:11px;padding:3px 7px;margin:2px 3px 2px 0;'
-                f'border-radius:5px;background:{_grid_cell_color(x.get("등"))};'
-                f'{_grid_text_style(x.get("등"))}">{x.get("명","")} '
-                f'<b>{(x.get("등") or 0):+.1f}</b></span>' for x in 목록)
+                f'<span style="display:inline-block;font-size:11.5px;padding:4px 8px;'
+                f'margin:2px 4px 2px 0;border-radius:6px;background:#1b2230;'
+                f'border:1px solid #2a3446;color:#dfe3e9;font-weight:600">'
+                f'{x.get("명","")} '
+                f'<b style="color:{"#4ade80" if (x.get("등") or 0) >= 0 else "#5b9bff"}">'
+                f'{(x.get("등") or 0):+.1f}%</b></span>' for x in 목록)
             펼칠것.append(
-                f'<div style="margin:5px 0 0"><span style="font-size:10.5px;color:#8b93a0;'
+                f'<div style="margin:6px 0 0"><span style="font-size:10.5px;color:#8b93a0;'
                 f'font-weight:700">{층}</span> '
                 f'<span style="font-size:10px;color:#6f7784">{칸.get("종목수",0)}종목 중 상위</span>'
-                f'<div style="margin-top:3px">{칩}</div></div>')
+                f'<div style="margin-top:4px">{칩}</div></div>')
         접힘 = ""
         if 펼칠것:
+            # 닫기 버튼은 없앤다 — 테마명을 다시 누르면 닫히므로 중복이고,
+            # 버튼이 있으면 "눌러야 닫힌다"고 오해하게 된다.
             접힘 = (f'<tr id="{rid}" style="display:none"><td colspan="5" '
-                    f'style="padding:8px 6px 12px;background:#0f131a;border-radius:6px">'
-                    f'<div style="display:flex;justify-content:space-between;align-items:center">'
-                    f'<span style="font-size:11.5px;color:#e0c060;font-weight:700">'
-                    f'{r.get("테마","")} 구성 종목</span>'
-                    f'<button onclick="gtog(\'{rid}\')" style="background:#232a36;border:none;'
-                    f'color:#c9ced6;font-size:12px;font-weight:700;border-radius:5px;'
-                    f'padding:3px 9px;cursor:pointer">✕ 닫기</button></div>'
+                    f'style="padding:9px 8px 12px;background:#0f131a;border-radius:6px">'
+                    f'<p style="margin:0;font-size:11.5px;color:#e0c060;font-weight:700">'
+                    f'{r.get("테마","")} 구성 종목 '
+                    f'<span style="color:#6f7784;font-weight:600">· 다시 누르면 닫힙니다</span></p>'
                     f'{"".join(펼칠것)}</td></tr>')
             테마셀 = (f'<td onclick="gtog(\'{rid}\')" style="padding:7px 3px 7px 2px;'
                     f'font-size:11.5px;color:#d5d9e0;line-height:1.3;word-break:keep-all;'
                     f'overflow-wrap:anywhere;cursor:pointer;-webkit-tap-highlight-color:transparent">'
-                    f'{테마명}<span style="color:#e0c060;font-size:9px"> ▾</span></td>')
+                    f'{테마명}</td>')
         else:
             테마셀 = (f'<td style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
-                    f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명}</td>')
+                    f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명_평}</td>')
         몸.append('<tr>' + 테마셀 + "".join(칸들) + 전칸 + '</tr>' + 접힘)
 
     # ── 표 맨 아래 '20일 추이' 행 — 격자 열과 세로로 줄을 맞춘다 ──
@@ -1730,12 +1747,17 @@ def build_account_grid(격자):
               '📖 이렇게 보세요</p>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
               '<b style="color:#9aa0aa">가로로 읽으면</b> — 같은 테마라도 대형·중형·소형 중 '
-              '어디가 올랐는지 보입니다. 내 종목 크기 칸이 빨간색이면 그 흐름에 올라탄 것입니다.<br>'
+              '어디가 올랐는지 보입니다. 내 종목 크기 칸이 <b style="color:#e8622a">주황·노랑</b>이면 '
+              '그 흐름을 세게 탄 것입니다.<br>'
               '<b style="color:#9aa0aa">세로로 읽으면</b> — 오늘 어느 테마가 주인공이었는지 보입니다. '
               '맨 오른쪽 <b style="color:#9aa0aa">전체</b>는 그 테마의 평균이고, '
               '<b style="color:#9aa0aa">위에서부터 높은 순</b>으로 줄 세워져 있습니다.<br>'
-              '<b style="color:#9aa0aa">색</b> — 빨강은 오른 칸, 파랑은 내린 칸입니다. '
-              '진할수록 폭이 크고, 글자도 함께 밝아집니다.<br>'
+              '<b style="color:#9aa0aa">색</b> — 오른 칸은 '
+              '<b style="color:#6b2544">자주</b> → <b style="color:#b32f36">빨강</b> → '
+              '<b style="color:#e8622a">주황</b> → <b style="color:#ffb020">노랑</b> 순으로 '
+              '많이 오른 것이고, 내린 칸은 '
+              '<b style="color:#2464bd">파랑</b> → <b style="color:#3ae0d0">청록</b> 순으로 '
+              '많이 내린 것입니다. 회색은 거의 안 움직인 칸입니다.<br>'
               '<b style="color:#9aa0aa">맨 아래 줄</b> — 그 크기(대형·중형·소형)의 시장 전체 평균과 '
               '최근 20거래일 추이선입니다. 위 표와 열이 맞춰져 있습니다.'
               '</p></div>'
@@ -2095,7 +2117,7 @@ def build_slope_chart(격자):
     #    좌표계를 340폭으로 줄이고 SVG를 width:100%로 두면
     #    좁은 화면엔 딱 맞고 넓은 화면에선 비율대로 커진다(글자도 함께).
     W, H, T, B = 340, 250, 34, 30
-    X = {"대형": 112, "중형": 210, "소형": 305}
+    X = {"대형": 66, "중형": 192, "소형": 318}
     def Y(v): return T + (hi - v) / rng * (H - T - B)
 
     선 = ""
@@ -2109,13 +2131,13 @@ def build_slope_chart(격자):
         for t in ("대형", "중형", "소형"):
             선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="3.4" fill="{c}"/>'
         y0 = Y(r["칸"]["대형"]["등락률"])
-        선 += (f'<text x="104" y="{y0+3:.0f}" text-anchor="end" font-size="9.5" '
-               f'fill="#c9ced6">{r["테마"][:6]}</text>')
+        선 += (f'<text x="60" y="{y0+3:.0f}" text-anchor="end" font-size="8.5" '
+               f'fill="#c9ced6">{r["테마"][:5]}</text>')
 
     축 = "".join(f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
                  f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
                  f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
-    영 = (f'<line x1="106" y1="{Y(0):.0f}" x2="322" y2="{Y(0):.0f}" stroke="#3a4150" '
+    영 = (f'<line x1="62" y1="{Y(0):.0f}" x2="332" y2="{Y(0):.0f}" stroke="#3a4150" '
           f'stroke-width="1" stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
 
     하향 = sum(1 for r in 행들 if r["칸"]["대형"]["등락률"] > r["칸"]["소형"]["등락률"])
