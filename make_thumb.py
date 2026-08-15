@@ -17,7 +17,7 @@ from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
 
-SCRIPT_VERSION = "v2026.08.14-k5"
+SCRIPT_VERSION = "v2026.08.14-k6"
 DATE = datetime.now().strftime("%Y%m%d")
 
 W, H = 1200, 630
@@ -89,6 +89,48 @@ def font(name, size):
     return ImageFont.load_default()
 
 
+def _numeric_fallback():
+    """해석글이 없을 때 쓰는 '숫자로 만든' 제목.
+
+    ⚠️ 예전에는 '오늘의 시장 관제 리포트'라는 고정 문구를 썼다.
+       그러면 카톡·텔레그램 미리보기가 매일 똑같아 보여서, 구독자 입장에선
+       "어제 거 아닌가?" 싶고 열어볼 이유가 사라진다.
+       Claude 해석글이 실패해도 파이썬이 계산한 숫자는 항상 있으므로
+       그 숫자로 최소한의 '오늘다움'을 만든다. (숫자는 기계가 — 프로젝트 원칙)
+    """
+    try:
+        with open(apath(f"data_{DATE}.json"), encoding="utf-8") as f:
+            d = json.load(f)
+    except Exception:
+        return "오늘의 시장 관제 리포트", ""
+    지수 = (d.get("지수수급") or {}).get("지수") or {}
+    코 = 지수.get("코스피") or {}
+    관 = (d.get("관제지수") or {})
+
+    def _num(v):
+        """'2.42', '6,977.94' 같은 문자열도 숫자로 — 수집 데이터는 문자열 저장이다."""
+        if isinstance(v, (int, float)):
+            return float(v)
+        try:
+            return float(str(v).replace(",", "").replace("%", "").strip())
+        except Exception:
+            return None
+
+    등 = _num(코.get("등락률"))
+    if 등 is None:
+        return "오늘의 시장 관제 리포트", ""
+    # 수집기가 부호를 빼고 방향을 따로 주는 경우가 있어 방향으로 부호를 복원한다.
+    if 코.get("등락방향") == "하락" and 등 > 0:
+        등 = -등
+    방향 = "오른" if 등 > 0 else ("내린" if 등 < 0 else "제자리인")
+    제목 = f"코스피 {등:+.2f}%, {방향} 하루"
+    if 관.get("점수") is not None:
+        부제 = f"관제지수 {관.get('점수')} {관.get('구간') or ''}".strip()
+    else:
+        부제 = f"종가 {코.get('종가')}" if 코.get("종가") else ""
+    return 제목, 부제
+
+
 def load_texts():
     한줄, 공감 = None, None
     경로 = apath(f"report_{DATE}.json")      # archive/ 우선, 없으면 루트
@@ -102,9 +144,11 @@ def load_texts():
         # ⚠️ 조용히 넘기면 빈 껍데기 썸네일이 만들어져도 아무도 모른다(실측 사고).
         #    반드시 로그로 드러내 다음 사람이 원인을 즉시 알 수 있게 한다.
         print(f"   ⚠️ 썸네일 글 재료를 못 읽었습니다({type(e).__name__}: {경로}) "
-              f"— 폴백 문구로 대체합니다")
+              f"— 오늘 수치로 만든 폴백 문구를 씁니다")
     if not 한줄:
-        한줄 = "오늘의 시장 관제 리포트"
+        한줄, 대체부제 = _numeric_fallback()
+        공감 = 공감 or 대체부제
+        print(f"   📌 폴백 제목: {한줄}")
     return 한줄.strip(), (공감 or "").strip()
 
 
