@@ -64,6 +64,10 @@ concurrency:
 # ⭐ GitHub 서버는 기본 UTC라 한국보다 9시간 느리다. 한국시간으로 맞춘다.
 env:
   TZ: Asia/Seoul
+  # 🔔 회원(구독자)에게 실제로 발송을 시작하면 'true'로 바꾸세요.
+  #    true = 해석글 생성 실패 시 텔레그램 발송을 막습니다(깨진 내용이 회원에게 안 감).
+  #    false(지금) = 실패해도 그대로 보냅니다 — 테스트 중이라 본인이 직접 눈으로 확인하려는 용도.
+  TELEGRAM_SKIP_ON_FAIL: 'false'
 
 jobs:
   publish:
@@ -82,12 +86,17 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "run=yes" >> $GITHUB_OUTPUT
             echo "🔘 수동 실행 — 중복 확인을 건너뛰고 새로 만듭니다."
-          elif [ -f "report_${TODAY}.html" ]; then
+          elif [ -f "archive/report_${TODAY}.json" ]; then
+            # ⚠️ 예전엔 report_*.html 존재 여부로 판단했다.
+            #    문제: 해석글(Claude) 생성이 실패해도 build_html.py는 html을 만들어버려서,
+            #    한 번 실패하면 오늘 남은 재시도(2~4차)가 전부 "이미 발행됨"으로 착각하고
+            #    스스로 건너뛰었다 — 하루 종일 깨진 리포트가 방치되는 원인.
+            #    그래서 기준을 "해석글(json)까지 성공적으로 만들어졌는가"로 바꾼다.
             echo "run=no" >> $GITHUB_OUTPUT
-            echo "⏭️ report_${TODAY}.html 이 이미 있습니다. 이번 시도는 건너뜁니다."
+            echo "⏭️ 오늘 해석글까지 정상 완료된 발행이 이미 있습니다. 이번 시도는 건너뜁니다."
           else
             echo "run=yes" >> $GITHUB_OUTPUT
-            echo "▶️ 오늘 첫 발행을 시작합니다."
+            echo "▶️ 오늘 아직 정상 발행 전입니다 — 이번 시도를 진행합니다(재시도 포함)."
           fi
 
       - name: 파이썬 준비
@@ -150,6 +159,23 @@ jobs:
       - name: 공유 썸네일 생성
         run: python make_thumb.py
 
+      # ── 안전장치: 해석글 실패 시 텔레그램만 스킵 ──
+      #   사이트(Pages)는 "숫자만으로도 발행" 원칙대로 그대로 올라간다(로직문서 원칙).
+      #   단, 구독자에게 나가는 텔레그램은 "충전 후 자동 생성" 같은 문구가
+      #   그대로 노출되면 안 되므로 여기서 막는다.
+      - name: 해석글 성공 여부 확인
+        id: interp_check
+        if: steps.guard.outputs.run == 'yes'
+        run: |
+          TODAY=$(date +%Y%m%d)
+          if [ -f "archive/report_${TODAY}.json" ]; then
+            echo "ok=yes" >> "$GITHUB_OUTPUT"
+            echo "✅ 해석글 확인됨 — 텔레그램 정상 발송"
+          else
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+            echo "❌ 해석글 없음 — 텔레그램 발송을 건너뜁니다. (사이트는 숫자만으로 발행됨)"
+            echo "   👉 Actions 탭에서 '해석글 생성 (Claude)' 스텝 로그의 원인을 확인하세요."
+          fi
 
       # ── ④ 자동 커밋 → Pages 배포 ──
       - name: 자동 커밋 & 배포
@@ -162,11 +188,24 @@ jobs:
           git pull --rebase --autostash || true
           git push
 
+      # ── Pages 배포 전파 대기 ──
+      #   git push 직후 바로 텔레그램을 보내면, GitHub Pages가 아직 새 페이지를
+      #   배포 중일 수 있다(수십 초 소요). 그 틈에 텔레그램이 링크를 미리 크롤링하면
+      #   옛 버전이나 "썸네일 없음" 상태를 그대로 캐시해버려 나중에도 안 바뀐다.
+      - name: Pages 배포 대기
+        if: >-
+          steps.guard.outputs.run == 'yes' &&
+          (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
+          (github.event_name != 'workflow_dispatch' ||
+           startsWith(inputs.telegram, '보냄'))
+        run: sleep 45
+
       # ── ⑤ 텔레그램 알림 ──
       # 📮 텔레그램 자체는 무료지만, 테스트 알림이 구독자에게 가면 안 된다.
       - name: 텔레그램 알림 전송
         if: >-
           steps.guard.outputs.run == 'yes' &&
+          (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
         continue-on-error: true
