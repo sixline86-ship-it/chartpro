@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k5"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k6"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -1610,15 +1610,16 @@ def build_account_grid(격자):
                             f'{_grid_text_style(v)}">{v:+.1f}</td>')
         전 = r.get("전체")
         if isinstance(전, (int, float)):
-            # '전체'는 그 줄의 요약이다. 같은 색 램프를 쓰되 금색 테두리로 감싸
-            # "이 칸은 성격이 다르다(합계)"를 눈으로 알게 한다.
-            전칸 = (f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
-                   f'background:{_grid_cell_color(전)};border-radius:4px;'
-                   f'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.55);'
-                   f'{_grid_text_style(전)}">{전:+.1f}</td>')
+            # '전체'는 이미 내림차순 정렬돼 있어 색 농담이 순서와 같은 말을 반복한다.
+            #   → 배경 채움을 빼고 숫자 부호 색(빨강/파랑)만 남긴다.
+            #     금색 왼쪽 선으로 "여기부터는 요약"임만 표시.
+            부호색 = "#e04a36" if 전 >= 0 else "#337ad6"
+            전칸 = (f'<td style="padding:7px 2px;text-align:center;font-size:13px;'
+                   f'font-weight:800;color:{부호색};'
+                   f'border-left:2px solid rgba(240,198,90,.5)">{전:+.1f}</td>')
         else:
             전칸 = ('<td style="padding:7px 2px;text-align:center;font-size:12px;color:#6b7280;'
-                   'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.35);border-radius:4px">—</td>')
+                   'border-left:2px solid rgba(240,198,90,.3)">—</td>')
         # 모바일(가로 360px)에서 표가 잘리지 않게: 테마명은 '·' 뒤에서 줄바꿈을 허용한다.
         #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
         #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
@@ -1660,9 +1661,7 @@ def build_account_grid(격자):
             + _칩(GRID_RAMP_UP[0], "0%") + _칩(GRID_RAMP_UP[2], "+1%")
             + _칩(GRID_RAMP_UP[4], "+3%↑")
             + '<span style="font-size:9.5px;color:#7d848f">· '
-              '<span style="display:inline-block;width:11px;height:11px;border-radius:2px;'
-              'box-shadow:inset 0 0 0 1.5px rgba(240,198,90,.7);vertical-align:-2px"></span> '
-              '금색 테두리 = 그 줄의 평균</span></div>')
+              '맨 오른쪽 <b style="color:#9aa0aa">전체</b>는 높은 순으로 정렬돼 있습니다</span></div>')
 
     프리 = ""
     if isinstance(프리미엄, (int, float)):
@@ -1691,7 +1690,8 @@ def build_account_grid(격자):
               '<b style="color:#9aa0aa">가로로 읽으면</b> — 같은 테마라도 대형·중형·소형 중 '
               '어디가 올랐는지 보입니다. 내 종목 크기 칸이 빨간색이면 그 흐름에 올라탄 것입니다.<br>'
               '<b style="color:#9aa0aa">세로로 읽으면</b> — 오늘 어느 테마가 주인공이었는지 보입니다. '
-              '맨 오른쪽 <b style="color:#9aa0aa">전체</b> 칸이 그 테마의 평균입니다.<br>'
+              '맨 오른쪽 <b style="color:#9aa0aa">전체</b>는 그 테마의 평균이고, '
+              '<b style="color:#9aa0aa">위에서부터 높은 순</b>으로 줄 세워져 있습니다.<br>'
               '<b style="color:#9aa0aa">색</b> — 빨강은 오른 칸, 파랑은 내린 칸입니다. '
               '진할수록 폭이 크고, 글자도 함께 밝아집니다.<br>'
               '<b style="color:#9aa0aa">맨 아래 줄</b> — 그 크기(대형·중형·소형)의 시장 전체 평균과 '
@@ -1979,22 +1979,24 @@ def build_sector_radar():
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">관제 레이더</p>'
-            '<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '오늘 관제탑에 가까워진 섹터</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
             f'<svg width="350" height="300" viewBox="0 25 350 300" style="flex:none;max-width:100%">'
             f'{링}{축}'
             # 중심(관제탑)은 섹터 점과 절대 헷갈리면 안 된다.
-            #   '제자리' 점이 금색이라 중심도 금색이면 구분이 안 됐다 →
-            #   흰색 조준 마커(십자 + 이중 원)로 바꿔 "여기가 목표 지점"임을 분명히 한다.
-            f'<circle cx="{cx}" cy="{cy}" r="10" fill="none" stroke="#ffffff" '
-            f'stroke-width="1.2" opacity=".45"/>'
-            f'<line x1="{cx-14}" y1="{cy}" x2="{cx+14}" y2="{cy}" stroke="#ffffff" '
-            f'stroke-width="1" opacity=".4"/>'
-            f'<line x1="{cx}" y1="{cy-14}" x2="{cx}" y2="{cy+14}" stroke="#ffffff" '
-            f'stroke-width="1" opacity=".4"/>'
-            f'<circle cx="{cx}" cy="{cy}" r="4.5" fill="#ffffff" '
-            f'stroke="#0f131a" stroke-width="1.2"/>'
+            #   섹터 점이 쓰는 색(금색=제자리 / 초록=접근 / 보라=이탈)과 겹치지 않는
+            #   청록(#22d3ee)을 중심 전용으로 배정하고, 모양도 조준 마커로 다르게 한다.
+            f'<circle cx="{cx}" cy="{cy}" r="13" fill="none" stroke="#22d3ee" '
+            f'stroke-width="1.3" opacity=".5"/>'
+            f'<line x1="{cx-17}" y1="{cy}" x2="{cx+17}" y2="{cy}" stroke="#22d3ee" '
+            f'stroke-width="1.1" opacity=".45"/>'
+            f'<line x1="{cx}" y1="{cy-17}" x2="{cx}" y2="{cy+17}" stroke="#22d3ee" '
+            f'stroke-width="1.1" opacity=".45"/>'
+            f'<circle cx="{cx}" cy="{cy}" r="5.5" fill="#22d3ee" '
+            f'stroke="#0f131a" stroke-width="1.5"/>'
+            f'<text x="{cx}" y="{cy+26}" text-anchor="middle" font-size="9.5" '
+            f'fill="#22d3ee" font-weight="700" opacity=".9">관제탑</text>'
             f'{자취}{점}{라벨}</svg>'
             f'<div style="flex:1;min-width:150px">{패널}</div></div>'
             + 변동표
@@ -2003,7 +2005,7 @@ def build_sector_radar():
               '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
               '📖 이렇게 보세요</p>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
-              '<b style="color:#9aa0aa">가운데 흰색 조준점이 관제탑</b>입니다. 섹터 점이 여기에 '
+              '<b style="color:#22d3ee">가운데 청록색 조준점이 관제탑</b>입니다. 섹터 점이 여기에 '
               '<b style="color:#9aa0aa">가까울수록 오늘 시장을 세게 끌고 갔다</b>는 뜻이고, '
               '바깥에 있을수록 뒤로 밀렸다는 뜻입니다.<br>'
               '<b style="color:#4ade80">초록 ▲</b> 어제보다 안쪽으로 들어옴 (달아오르는 중) · '
@@ -2064,7 +2066,7 @@ def build_slope_chart(격자):
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">크기 경사선</p>'
-            '<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '대형에서 소형으로 갈 때 무슨 일이</p>'
             '<div style="overflow-x:auto">'
             f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">'
@@ -2128,7 +2130,7 @@ def build_capture_path(개월=1):
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">포착 항로</p>'
-            f'<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
+            f'<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             f'레이더가 잡은 종목들, 그 뒤 {라벨}</p>'
             '<div style="overflow-x:auto">'
             f'<svg width="520" height="{H}" viewBox="0 0 {W} {H}" style="min-width:480px">{영}'
@@ -3292,7 +3294,12 @@ def build_html(data, report):
     _d = data["날짜"]
     _요일 = "월화수목금토일"[datetime.strptime(_d, "%Y%m%d").weekday()]
     og_desc = f"{int(_d[4:6])}월 {int(_d[6:])}일 ({_요일}) 마감 · 차트프로 관제탑"
-    og_img = f"https://sixline86-ship-it.github.io/chartpro/thumb/{_d}.png"
+    # ⚠️ 캐시 대응: 텔레그램·카톡은 링크를 처음 열어본 순간의 미리보기를 저장해두고
+    #    한동안 다시 안 가져온다. 같은 날 다시 발행하면 이미지 파일은 바뀌었는데
+    #    미리보기는 옛 그림 그대로다. 이미지 주소 뒤에 빌드 시각을 붙여
+    #    "다른 파일"로 보이게 하면 다시 가져올 확률이 올라간다.
+    _ver = datetime.now().strftime("%H%M")
+    og_img = f"https://sixline86-ship-it.github.io/chartpro/thumb/{_d}.png?v={_d}{_ver}"
     og_url = f"https://sixline86-ship-it.github.io/chartpro/report_{_d}.html"
 
     return f"""<!DOCTYPE html>
@@ -3628,7 +3635,7 @@ a{{color:inherit;text-decoration:none}}
 .ix-bf{{position:absolute;top:0;bottom:0;border-radius:4px}}
 .ix-bv{{width:100px;text-align:right;font-size:13.5px;font-weight:900;flex-shrink:0;line-height:1.05}}
 .ix-bv small{{font-size:10px;color:#9aa0a8;font-weight:600;display:block;margin-top:5px;word-break:keep-all;line-height:1.4}}
-.ix-scale{{display:flex;justify-content:space-between;font-size:8.5px;color:#6b7078;padding-left:57px}}
+.ix-scale{{display:flex;justify-content:space-between;font-size:8.5px;color:#6b7078;padding-left:57px;padding-right:109px}}
 .ix-flow{{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}}
 .ix-flow-k{{font-size:11px;color:#9aa0a8;font-weight:700}}
 .ix-flow-v{{font-size:14.5px;font-weight:900}}
@@ -3716,7 +3723,7 @@ a{{color:inherit;text-decoration:none}}
 
 .iss90{{background:rgba(255,255,255,.045);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}}
 
-.iss90-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
+.iss90-h{{font-size:17px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
 
 .iss90-s{{font-size:11px;color:#8a909a;margin-bottom:.7rem}}
 
@@ -3741,7 +3748,7 @@ a{{color:inherit;text-decoration:none}}
 
 .mny{{background:rgba(0,0,0,.25);border-radius:var(--rmd);padding:.95rem 1rem 1rem;margin-top:.8rem}}
 
-.mny-h{{font-size:12.5px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
+.mny-h{{font-size:17px;font-weight:800;color:#e0c060;margin-bottom:.15rem}}
 
 .mny-sub{{font-size:11px;color:#8a909a;margin-bottom:.8rem}}
 
@@ -3771,7 +3778,7 @@ a{{color:inherit;text-decoration:none}}
 
 .mny-why{{margin-top:.9rem;background:rgba(224,192,96,.1);border-radius:6px;padding:.75rem .85rem}}
 
-.mw-h{{font-size:11.5px;font-weight:800;color:#e0c060;margin-bottom:.35rem}}
+.mw-h{{font-size:15px;font-weight:800;color:#e0c060;margin-bottom:.35rem}}
 
 .mw-b{{font-size:13px;color:#fff;line-height:1.75;font-weight:600}}
 
@@ -3779,7 +3786,7 @@ a{{color:inherit;text-decoration:none}}
 
 .mine{{background:rgba(143,180,238,.09);border:.5px solid rgba(143,180,238,.22);border-radius:var(--rmd);padding:.9rem 1rem;margin-top:.8rem}}
 
-.mine-h{{font-size:15.5px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}}
+.mine-h{{font-size:17px;font-weight:800;color:var(--dn-soft);margin-bottom:.5rem}}
 
 .mine-b{{font-size:13px;color:#dfe3e8;line-height:1.8}}
 
@@ -3798,7 +3805,7 @@ a{{color:inherit;text-decoration:none}}
 
 .q90-flip{{background:rgba(224,192,96,.07);border-left:3px solid #e0c060;padding:.9rem 1rem;margin-top:.8rem}}
 
-.qf-h{{font-size:15.5px;font-weight:800;color:#e0c060;margin-bottom:.45rem}}
+.qf-h{{font-size:17px;font-weight:800;color:#e0c060;margin-bottom:.45rem}}
 
 .qf-b{{font-size:13.5px;color:#dfe3e8;line-height:1.8}}
 
@@ -3806,7 +3813,7 @@ a{{color:inherit;text-decoration:none}}
 
 .q90-tease{{margin-top:1rem;padding-top:.9rem;border-top:.5px solid rgba(255,255,255,.1)}}
 
-.qt-h{{font-size:15.5px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}}
+.qt-h{{font-size:17px;font-weight:800;color:var(--up-soft);margin-bottom:.6rem}}
 
 .qt{{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:.5px solid rgba(255,255,255,.07);font-size:13.5px;color:#fff;line-height:1.6;font-weight:700}}
 
@@ -3830,7 +3837,7 @@ a{{color:inherit;text-decoration:none}}
 .deep-t2{{font-size:14px;color:#e8e6e2;font-weight:800;margin-top:2px}}
 .deep-t2 b{{color:#e0c060}}
 .tmr{{margin-top:1rem;padding:.9rem 1rem;background:linear-gradient(180deg,#2b2f37,#242830);border-radius:12px;border-left:4px solid #e0c060}}
-.tmr-h{{font-size:15.5px;font-weight:800;color:#e0c060;margin-bottom:6px}}
+.tmr-h{{font-size:17px;font-weight:800;color:#e0c060;margin-bottom:6px}}
 .tmr-b{{font-size:13px;color:#e8e6e2;line-height:1.7}}
 
 
@@ -3957,7 +3964,7 @@ a{{color:inherit;text-decoration:none}}
 .fs-chart-div{{height:1px;background:rgba(255,255,255,.1);margin:3px 0 5px}}
 .fs-chart-t{{font-size:10.5px;font-weight:700;color:#c8ccd2;margin:2px 0 4px;letter-spacing:.02em}}
 .dv-wrap{{margin-top:1rem;padding:1rem 1.05rem;background:linear-gradient(180deg,#24262e,#2c2f38);border-radius:12px;border:1px solid rgba(255,255,255,.08)}}
-.dv-h{{font-size:14px;font-weight:800;color:#f0efec;margin-bottom:.7rem}}
+.dv-h{{font-size:16px;font-weight:800;color:#f0efec;margin-bottom:.7rem}}
 .dv-row{{display:flex;gap:10px;padding:9px 0;border-bottom:.5px solid rgba(255,255,255,.07)}}
 .dv-row:last-of-type{{border-bottom:0}}
 .dv-ic{{flex-shrink:0;font-size:16px;width:24px;text-align:center;line-height:1.4}}
