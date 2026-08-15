@@ -248,6 +248,18 @@
   },
   "뉴스원본": [
     {
+      "제목": "부동산 대책에도 집값은 글쎄…\"은행·건설주는 훈풍\" [주末머니]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005803515&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
+    },
+    {
+      "제목": "박정원 두산 회장 상반기 보수 455억…재계 총수 '1위'",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001155492&office_id=417&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
+    },
+    {
+      "제목": "2경 굴리는 '큰손' 韓주식 쓸어담아…개미들은 아직 모르는 '한 수'?[주末머니]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005803511&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
+    },
+    {
       "제목": "\"장중 26% 폭등\"...5만원→1만4000원 급락했던 백종원 회사, 갑자기 무슨 일 [주주클럽]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005562002&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
@@ -284,7 +296,7 @@
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000049865&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
     {
-      "제목": "\"AI주 이제 팔아야 하나\" 딥시크 변심에 '깜짝'…내용 뜯어봤더니[주末머니]",
+      "제목": "\"AI주 너무 비싼 거 아냐?\" 했는데…딥시크 가격 인상 뜯어보니 '반전'[주末머니]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005803488&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
     {
@@ -310,18 +322,6 @@
     {
       "제목": "서학개미, 다시 반도체 베팅…이틀간 9천억 원 넘게 사들여",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000896039&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "서학개미 '반도체 3배 속슬' 다시 사들여…이틀간 9천억 베팅",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000101718&office_id=243&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "AI에 잡아먹힌다더니...월가가 다시 베팅을 시작했다 [빈난새의 빈틈없이마켓]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005321208&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
-    },
-    {
-      "제목": "폭락한 '삼전닉스'에 \"매수 구간 진입\" or \"추가 하락\"... 어떤 말을 믿어야 할까[인치범의 주식 투자 부트캠프]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005561965&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     }
   ],
   "매크로": {
@@ -3391,7 +3391,7 @@
         ],
         "칸": {
           "대형": {
-            "등락률": 5.0,
+            "등락률": 4.99,
             "종목수": 12
           },
           "중형": {
