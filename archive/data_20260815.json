@@ -1,6 +1,6 @@
 {
   "날짜": "20260815",
-  "버전_collect": "v2026.08.14-k8",
+  "버전_collect": "v2026.08.14-k9",
   "공시": [],
   "지수수급": {
     "지수": {
@@ -252,7 +252,7 @@
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002684401&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
     {
-      "제목": "줄줄이 마이너스인데…\"거꾸로 넣었더니\" 나홀로 웃었다 [투자톡]",
+      "제목": "줄줄이 마이너스인데…\"거꾸로 넣었더니\" 나홀로 웃은 정체 [투자톡]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005321261&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260815&page=1"
     },
     {
@@ -3634,7 +3634,7 @@
                 "등": 9.82
               },
               {
-                "명": "앤로보틱스",
+                "명": "하이젠알앤엠",
                 "등": 8.27
               }
             ]
