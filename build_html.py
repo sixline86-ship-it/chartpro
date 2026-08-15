@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k2"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.14-k4"   # ⬅ 버전 표시
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
@@ -1463,11 +1463,22 @@ def build_account_grid(격자):
     크기 = 격자.get("크기전체") or {}
     프리미엄 = 격자.get("크기프리미엄")
 
-    머리 = ('<tr><th style="text-align:left;padding:6px 8px;font-size:12.5px;color:#9aa0aa;font-weight:600">테마</th>'
-            + "".join(f'<th style="padding:6px 4px;font-size:12px;color:#9aa0aa;font-weight:600;text-align:center">'
-                      f'{층}<br><span style="font-size:10.5px;opacity:.7">{기준.get(층,"")}</span></th>'
+    # 열 폭 고정 — 테마 칸을 넉넉히 주고 나머지를 균등 분배해야 모바일에서 안 깨진다.
+    콜 = ('<colgroup><col style="width:29%"><col style="width:17.75%">'
+          '<col style="width:17.75%"><col style="width:17.75%"><col style="width:17.75%"></colgroup>')
+
+    def _짧은기준(층):
+        """'301위 이하' 같은 긴 라벨은 좁은 칸에서 옆 칸과 겹친다 → 숫자만 남긴다."""
+        t = str(기준.get(층, "")).strip()
+        t = t.replace("위 이하", "~").replace("위 이상", "~").replace("위", "")
+        return t.replace(" ", "")
+    머리 = ('<tr><th style="text-align:left;padding:6px 3px 6px 2px;font-size:12px;'
+            'color:#9aa0aa;font-weight:600">테마</th>'
+            + "".join(f'<th style="padding:6px 1px;font-size:11.5px;color:#9aa0aa;font-weight:600;text-align:center">'
+                      f'{층}<br><span style="font-size:9.5px;opacity:.7;white-space:nowrap">'
+                      f'{_짧은기준(층)}</span></th>'
                       for 층 in ("대형", "중형", "소형"))
-            + '<th style="padding:6px 8px;font-size:12.5px;color:#e8eaee;font-weight:700;text-align:center">전체</th></tr>')
+            + '<th style="padding:6px 1px;font-size:12px;color:#e8eaee;font-weight:700;text-align:center">전체</th></tr>')
 
     몸 = []
     for r in 행들:
@@ -1476,21 +1487,25 @@ def build_account_grid(격자):
             c = (r.get("칸") or {}).get(층) or {}
             v = c.get("등락률")
             if v is None:
-                칸들.append('<td style="padding:7px 4px;text-align:center;font-size:12.5px;'
+                칸들.append('<td style="padding:7px 2px;text-align:center;font-size:12px;'
                             'color:#6b7280;background:#ffffff08;border-radius:4px">—</td>')
             else:
-                칸들.append(f'<td style="padding:7px 4px;text-align:center;font-size:13px;'
+                칸들.append(f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
                             f'color:#e8eaee;background:{_grid_cell_color(v)};border-radius:4px">'
                             f'{v:+.1f}</td>')
         전 = r.get("전체")
         if isinstance(전, (int, float)):
-            전칸 = (f'<td style="padding:7px 8px;text-align:center;font-size:13.5px;font-weight:700;'
-                   f'color:#e8eaee;background:{_grid_cell_color(전)};border-radius:4px">{전:+.2f}</td>')
+            전칸 = (f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;font-weight:700;'
+                   f'color:#e8eaee;background:{_grid_cell_color(전)};border-radius:4px">{전:+.1f}</td>')
         else:
-            전칸 = '<td style="padding:7px 8px;text-align:center;font-size:13px;color:#6b7280">—</td>'
+            전칸 = '<td style="padding:7px 2px;text-align:center;font-size:12px;color:#6b7280">—</td>'
+        # 모바일(가로 360px)에서 표가 잘리지 않게: 테마명은 '·' 뒤에서 줄바꿈을 허용한다.
+        #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
+        #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
+        테마명 = str(r.get("테마", "")).replace("·", "·<wbr>")
         몸.append('<tr>'
-                  f'<td style="padding:7px 8px;font-size:13px;color:#d5d9e0;white-space:nowrap">'
-                  f'{r.get("테마","")}</td>'
+                  f'<td style="padding:7px 3px 7px 2px;font-size:11.5px;color:#d5d9e0;'
+                  f'line-height:1.3;word-break:keep-all;overflow-wrap:anywhere">{테마명}</td>'
                   + "".join(칸들) + 전칸 + '</tr>')
 
     # ── 크기 전체 + 20일 스파크라인 3줄 (수위 항로를 여기에 흡수) ──
@@ -1521,15 +1536,27 @@ def build_account_grid(격자):
             '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 계좌 좌표</p>'
             '<p style="margin:0 0 10px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
             '오늘 내 종목은 어디에 있었나</p>'
-            '<div style="overflow-x:auto">'
-            f'<table style="width:100%;border-collapse:separate;border-spacing:3px;min-width:330px">'
-            f'{머리}{"".join(몸)}</table></div>'
+            # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
+            f'<table style="width:100%;border-collapse:separate;border-spacing:2px;'
+            f'table-layout:fixed">{콜}{머리}{"".join(몸)}</table>'
             '<div style="margin-top:12px;padding-top:10px;border-top:1px solid #232a36;'
             'display:flex;flex-direction:column;gap:5px">'
             + "".join(스파크) + '</div>' + 프리
-            + '<p style="margin:8px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
-            '가로선 = 최근 20거래일 추이 · 한 칸에 종목이 '
-            f'{GRID_최소종목}개 미만이면 —로 둡니다 · 한 종목이 여러 테마에 들어갈 수 있습니다</p>'
+            + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+              'border-radius:8px;border:1px solid #1e2531">'
+              '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
+              '📖 이렇게 보세요</p>'
+              '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
+              '<b style="color:#9aa0aa">가로로 읽으면</b> — 같은 테마라도 대형·중형·소형 중 '
+              '어디가 올랐는지 보입니다. 내 종목 크기 칸이 빨간색이면 그 흐름에 올라탄 것입니다.<br>'
+              '<b style="color:#9aa0aa">세로로 읽으면</b> — 오늘 어느 테마가 주인공이었는지 보입니다. '
+              '맨 오른쪽 <b style="color:#9aa0aa">전체</b> 칸이 그 테마의 평균입니다.<br>'
+              '<b style="color:#9aa0aa">색</b> — 빨강은 오른 칸, 파랑은 내린 칸이고 진할수록 폭이 큽니다.<br>'
+              '<b style="color:#9aa0aa">맨 아래 가로선</b> — 대형·중형·소형의 최근 20거래일 추이입니다.'
+              '</p></div>'
+            + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
+            f'한 칸에 종목이 {GRID_최소종목}개 미만이면 —로 둡니다 · '
+            '한 종목이 여러 테마에 들어갈 수 있습니다</p>'
             '</div>')
 
 
@@ -1711,7 +1738,11 @@ def build_sector_radar():
         x, y = _polar(cx, cy, 0, s)
         축 += f'<line x1="{cx}" y1="{cy}" x2="{x:.0f}" y2="{y:.0f}" stroke="#232a36" stroke-width="1"/>'
 
-    점, 라벨 = "", ""
+    # ⚠️ 색 규칙(v-k4): 회색 점은 어두운 배경에서 거의 안 보였다.
+    #    "제자리"도 오늘 주도권을 쥐고 있으면 봐야 하므로, 무채색 대신
+    #    금색(유지)을 주고 접근=초록 / 이탈=보라로 대비를 키운다.
+    #    (수급 색 규칙과 동일 계열: 좋아짐=초록, 빠짐=보라)
+    점, 라벨, 자취 = "", "", ""
     최대접근 = (None, -999)
     최대이탈 = (None, -999)
     for nm in 이름들:
@@ -1721,27 +1752,78 @@ def build_sector_radar():
         nx, ny = _polar(cx, cy, 오, s)
         ox, oy = _polar(cx, cy, 어, s)
         변화 = 오 - 어
-        색 = "#4ade80" if 변화 > 2 else ("#5b9bff" if 변화 < -2 else "#8b93a0")
+        if 변화 > 2:
+            색, 표식 = "#4ade80", "▲"      # 관제탑에 가까워짐
+        elif 변화 < -2:
+            색, 표식 = "#a78bfa", "▼"      # 멀어짐
+        else:
+            색, 표식 = "#f0c65a", "="      # 제자리 — 금색으로 또렷하게
+        # 어제 자리는 속 빈 점으로, 오늘까지의 이동은 화살표 선으로 남긴다.
         if abs(변화) > 2:
-            점 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
-                   f'stroke="{색}" stroke-width="2" opacity=".75"/>')
-        점 += f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="5.5" fill="{색}"/>'
-        lx, ly = _polar(cx, cy, -22, s)
+            자취 += (f'<circle cx="{ox:.0f}" cy="{oy:.0f}" r="3.2" fill="none" '
+                     f'stroke="{색}" stroke-width="1.4" opacity=".55"/>')
+            자취 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
+                     f'stroke="{색}" stroke-width="2.4" opacity=".8"/>')
+        # 점을 키우고 어두운 테두리를 둘러 배경과 확실히 분리한다.
+        점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="7" fill="{색}" '
+               f'stroke="#0f131a" stroke-width="1.6"/>')
+        lx, ly = _polar(cx, cy, -8, s)
         anc = "middle" if abs(lx - cx) < 20 else ("start" if lx > cx else "end")
+        # 라벨이 그림 밖으로 잘리지 않게: 이름을 줄이고 x를 안쪽으로 붙든다.
+        #   (긴 이름은 아래 '어제 대비 움직임' 표에서 전체를 볼 수 있다)
         짧 = re.sub(r"[\(（].*", "", nm).strip() or nm
-        라벨 += (f'<text x="{lx:.0f}" y="{ly+4:.0f}" text-anchor="{anc}" font-size="11.5" '
-                 f'fill="#9aa0aa">{짧[:7]}</text>')
+        짧 = re.sub(r"\s*대표주$", "", 짧).strip() or 짧
+        짧 = 짧[:5]
+        lx = min(max(lx, 30), 320)
+        라벨 += (f'<text x="{lx:.0f}" y="{ly+4:.0f}" text-anchor="{anc}" font-size="11" '
+                 f'fill="#c9ced6" font-weight="600">{짧}'
+                 f'<tspan fill="{색}" font-size="10.5"> {표식}</tspan></text>')
         if 변화 > 최대접근[1]:
             최대접근 = (f"{nm} {어:.0f} → {오:.0f}", 변화)
         if -변화 > 최대이탈[1]:
             최대이탈 = (f"{nm} {어:.0f} → {오:.0f}", -변화)
 
-    패널 = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
-            f'<p style="margin:2px 0 10px;font-size:13.5px;font-weight:700;color:#4ade80">'
-            f'{최대접근[0] or "—"}</p>'
-            f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
-            f'<p style="margin:2px 0 0;font-size:13.5px;font-weight:700;color:#5b9bff">'
-            f'{최대이탈[0] or "—"}</p>')
+    # ── 어제 대비 움직임 표 (숫자로도 확인 가능하게) ──
+    변동행 = []
+    for nm in sorted(이름들, key=lambda n: -(오늘맵.get(n, 권외) - 어제맵.get(n, 권외))):
+        오 = 오늘맵.get(nm, 권외)
+        어 = 어제맵.get(nm, 권외)
+        변화 = 오 - 어
+        if abs(변화) < 0.5:
+            c, 화 = "#f0c65a", "= 제자리"
+        elif 변화 > 0:
+            c, 화 = "#4ade80", f"▲ {변화:.0f} 가까워짐"
+        else:
+            c, 화 = "#a78bfa", f"▼ {abs(변화):.0f} 멀어짐"
+        신규 = " 🆕" if (nm not in 어제맵 and nm in 오늘맵) else ""
+        변동행.append(
+            f'<div style="display:flex;justify-content:space-between;gap:8px;'
+            f'padding:4px 0;border-bottom:1px solid #1b212c">'
+            f'<span style="font-size:11.5px;color:#c9ced6">{re.sub(r"[（(].*", "", nm).strip()[:9]}{신규}</span>'
+            f'<span style="font-size:11.5px;font-weight:700;color:{c};white-space:nowrap">{화}</span></div>')
+    변동표 = ('<div style="margin:10px 0 0;padding-top:8px;border-top:1px solid #232a36">'
+              '<p style="margin:0 0 4px;font-size:11.5px;color:#8b93a0;font-weight:700">'
+              '📊 어제 대비 움직임</p>' + "".join(변동행) + '</div>') if 변동행 else ""
+
+    # ⚠️ 모든 섹터가 제자리인 날(휴장 등 데이터 동일)에 "정유 65 → 65"가
+    #    접근·이탈 양쪽에 뜨면 의미 없는 정보다. 실제 이동이 있을 때만 표시한다.
+    if 최대접근[1] > 0.5:
+        접근HTML = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
+                    f'<p style="margin:2px 0 10px;font-size:13.5px;font-weight:700;color:#4ade80">'
+                    f'{최대접근[0]}</p>')
+    else:
+        접근HTML = ('<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
+                    '<p style="margin:2px 0 10px;font-size:13px;font-weight:700;color:#6f7784">'
+                    '오늘은 없음</p>')
+    if 최대이탈[1] > 0.5:
+        이탈HTML = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
+                    f'<p style="margin:2px 0 0;font-size:13.5px;font-weight:700;color:#a78bfa">'
+                    f'{최대이탈[0]}</p>')
+    else:
+        이탈HTML = ('<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
+                    '<p style="margin:2px 0 0;font-size:13px;font-weight:700;color:#6f7784">'
+                    '오늘은 없음</p>')
+    패널 = 접근HTML + 이탈HTML
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
@@ -1749,12 +1831,27 @@ def build_sector_radar():
             '<p style="margin:0 0 8px;font-size:16px;font-weight:800;color:#f2f4f7">'
             '오늘 관제탑에 가까워진 섹터</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
-            f'<svg width="350" height="350" viewBox="0 0 350 350" style="flex:none;max-width:100%">'
-            f'{링}{축}<circle cx="{cx}" cy="{cy}" r="3" fill="#f0c65a"/>{점}{라벨}</svg>'
+            f'<svg width="350" height="300" viewBox="0 25 350 300" style="flex:none;max-width:100%">'
+            f'{링}{축}<circle cx="{cx}" cy="{cy}" r="4" fill="#f0c65a"/>'
+            f'{자취}{점}{라벨}</svg>'
             f'<div style="flex:1;min-width:150px">{패널}</div></div>'
-            '<p style="margin:8px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
-            '중심에 가까울수록 주도력이 강합니다 · 선 = 전날 대비 이동 · '
-            '전날 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
+            + 변동표
+            + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+              'border-radius:8px;border:1px solid #1e2531">'
+              '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
+              '📖 이렇게 보세요</p>'
+              '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
+              '<b style="color:#9aa0aa">가운데 금색 점이 관제탑</b>입니다. 섹터 점이 여기에 '
+              '<b style="color:#9aa0aa">가까울수록 오늘 시장을 세게 끌고 갔다</b>는 뜻이고, '
+              '바깥에 있을수록 뒤로 밀렸다는 뜻입니다.<br>'
+              '<b style="color:#4ade80">초록 ▲</b> 어제보다 안쪽으로 들어옴 (달아오르는 중) · '
+              '<b style="color:#a78bfa">보라 ▼</b> 바깥으로 밀림 (식는 중) · '
+              '<b style="color:#f0c65a">금색 =</b> 어제와 비슷한 자리<br>'
+              '<b style="color:#9aa0aa">속 빈 점 → 꽉 찬 점</b>으로 이어진 선이 '
+              '어제 자리에서 오늘 자리까지 움직인 거리입니다. 선이 길수록 하루 사이 변화가 큽니다.'
+              '</p></div>'
+            + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
+            '어제 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
 
 
 # ── 3. 경사선 (테마별 대형→중형→소형) ────────────────────────
@@ -2078,16 +2175,16 @@ def build_core(핵심편, data, 해석):
     왜그런가 = 핵심편.get("왜그런가") or ""
     사건명블록 = build_headline(해석)
     딱N블록 = build_top_picks(해석)
-    격자블록 = build_account_grid(data.get("계좌격자"))
-    격자블록 += build_flow_gearbox()
-    격자블록 += build_sector_radar()
-    격자블록 += build_slope_chart(data.get("계좌격자"))
-    격자블록 += build_capture_path(1)
+    # ⚠️ 배치 원칙(v-k4): 핵심편은 "오늘은 어떤 하루였나(헤더)" → "왜 그랬나(정의·공감·왜)"
+    #    → "수급으로 확인" → "그래서 내 계좌는 어디에(좌표·레이더)" 순서로 읽힌다.
+    #    · 수급 변속기는 수급 타일 바로 밑(같은 맥락)으로 이동
+    #    · 경사선·포착 항로는 분석 성격이 짙어 심층편으로 이동
+    격자블록 = build_account_grid(data.get("계좌격자")) + build_sector_radar()
+    변속기블록 = build_flow_gearbox()
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
-            + 딱N블록 + 격자블록
             + 지수스트립
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
@@ -2098,8 +2195,10 @@ def build_core(핵심편, data, 해석):
             + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
             + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
             + f'<div class="mny-tiles">{타일HTML}</div>'
+            + 변속기블록
             + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
-            + 내종목 + 뒤집블록 + 핵심디버전스
+            + 격자블록
+            + 내종목 + 뒤집블록 + 딱N블록 + 핵심디버전스
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
             + 내일대응
             + '</div>'
@@ -3846,6 +3945,12 @@ a{{color:inherit;text-decoration:none}}
             f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
+
+  <p class="sec-label"><small>크기별 경사</small>📐 대형이 끌었나, 소형이 끌었나</p>
+  {build_slope_chart(data.get('계좌격자'))}
+
+  <p class="sec-label"><small>1개월 항로</small>🛬 관제탑에 다녀간 섹터들</p>
+  {build_capture_path(1)}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
