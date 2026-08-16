@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l2"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.16-l5"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -1577,8 +1577,14 @@ GRID_최소종목 = 3
 #     프로젝트 표준 상승색(#ff6b4a)까지 5단계.
 #     같은 계열이라도 단계 간 밝기 차를 크게 두면 구분이 된다.
 #     하락도 같은 원리로 남색 → 표준 하락색(#5b9bff).
-GRID_RAMP_UP = ["#2a2e35", "#5e2028", "#992b2a", "#d13a2c", "#ff6b4a"]   # 0→강
-GRID_RAMP_DN = ["#252a33", "#1f3550", "#255c8f", "#2e7fc7", "#5b9bff"]
+#  ⚠️ v-l4: "색이 제각각이라 혼란스럽다"는 지적을 받고 다시 정리했다.
+#     원인은 두 가지였다.
+#       ① 글자색이 칸마다 달랐다(밝은 칸은 검정, 어두운 칸은 흰색) → 표가 얼룩덜룩
+#       ② 램프 끝이 너무 밝아 '순한 상승'과 '강한 상승'이 다른 색처럼 보였다
+#     그래서 **한 계열 안에서 밝기만 단조 증가**하도록 다시 잡고,
+#     글자는 전 칸 흰색으로 통일했다(밝기 대비는 배경이 담당).
+GRID_RAMP_UP = ["#2b2f37", "#4d2529", "#7a2d2c", "#ad3730", "#e04a35"]   # 0→강
+GRID_RAMP_DN = ["#2b2f37", "#22344a", "#2a4f78", "#3568a8", "#4a8fe0"]
 GRID_STEPS = (0.5, 1.0, 2.0, 3.0)     # 이 값들을 경계로 5칸
 
 
@@ -1602,14 +1608,13 @@ def _grid_cell_color(v):
 def _grid_text_style(v):
     """강도에 따라 글자색을 바꾼다.
 
-    ⚠️ 최상단(#ff6b4a·#5b9bff)은 배경이 밝아 흰 글씨가 흐려진다 → 어두운 글자로 뒤집는다.
+    ⚠️ 글자색은 **전 칸 동일**하게 둔다. 칸마다 글자색이 바뀌면
+       표 전체가 얼룩덜룩해져서 "어디가 강한가"가 오히려 안 보인다.
+       강약은 배경 밝기 하나로만 말하게 한다(정보 채널을 하나로).
     """
     if v is None:
         return "color:#6b7280;font-weight:500"
-    s = _grid_step(v)
-    색 = ["#8f96a2", "#e3bcbc", "#ffffff", "#ffffff", "#2a0f06"][s]
-    굵 = [500, 700, 800, 800, 900][s]
-    return f"color:{색};font-weight:{굵}"
+    return "color:#ffffff;font-weight:800"
 
 
 def _load_strata_history(days=20):
@@ -1662,6 +1667,15 @@ def build_account_grid(격자, 주도섹터=None):
     프리미엄 = 격자.get("크기프리미엄")
 
     # 열 폭 고정 — 테마 칸을 넉넉히 주고 나머지를 균등 분배해야 모바일에서 안 깨진다.
+    # 오늘 가장 뜨거웠던 칸 하나에만 금색 테두리 → 시선의 출발점을 만든다.
+    #   (색 농담만으로는 "제일 강한 데가 어디"를 찾는 데 시간이 걸린다)
+    _최강, _최강값 = None, None
+    for _r in 행들:
+        for _층 in ("대형", "중형", "소형"):
+            _v = ((_r.get("칸") or {}).get(_층) or {}).get("등락률")
+            if isinstance(_v, (int, float)) and (_최강값 is None or _v > _최강값):
+                _최강값, _최강 = _v, (_r.get("테마"), _층)
+
     콜 = ('<colgroup><col style="width:33%"><col style="width:16.75%">'
           '<col style="width:16.75%"><col style="width:16.75%"><col style="width:16.75%"></colgroup>')
 
@@ -1695,8 +1709,10 @@ def build_account_grid(격자, 주도섹터=None):
                 칸들.append('<td style="padding:7px 2px;text-align:center;font-size:12px;'
                             'color:#6b7280;background:#ffffff08;border-radius:4px">—</td>')
             else:
+                _링 = ('box-shadow:inset 0 0 0 2px #f0c65a;'
+                      if _최강 == (r.get("테마"), 층) else '')
                 칸들.append(f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
-                            f'background:{_grid_cell_color(v)};border-radius:4px;'
+                            f'background:{_grid_cell_color(v)};border-radius:4px;{_링}'
                             f'{_grid_text_style(v)}">{v:+.1f}</td>')
         전 = r.get("전체")
         if isinstance(전, (int, float)):
@@ -2028,6 +2044,91 @@ def _polar(cx, cy, score, slot):
     return cx + r * _m.cos(a), cy + r * _m.sin(a)
 
 
+def build_crowd_compass(나침반):
+    """🧭 군중 나침반 — 개인이 상승과 하락 중 어느 쪽에 돈을 걸었나.
+
+    ⚠️ 없는 날은 통째로 생략한다(빈 카드를 만들지 않는다 — 프로젝트 원칙).
+    """
+    if not 나침반:
+        return ""
+    L = 나침반.get("레버리지_개인")
+    I = 나침반.get("인버스_개인")
+    기울기 = 나침반.get("기울기")
+    if not isinstance(기울기, (int, float)):
+        return ""
+
+    # 기울기 −100(하락 베팅) ~ +100(상승 베팅) → 막대 위치 0~100%
+    위치 = max(0.0, min(100.0, (기울기 + 100) / 2))
+    if 기울기 >= 35:
+        판정, 색, 설명 = "상승 쪽으로 크게 기울었습니다", "#ff6b4a", \
+            "군중이 반등에 베팅 중입니다. 쏠림이 크면 되돌림도 큽니다."
+    elif 기울기 >= 12:
+        판정, 색, 설명 = "상승 쪽으로 기울었습니다", "#ff9a80", \
+            "개인이 상승 쪽을 조금 더 보고 있습니다."
+    elif 기울기 > -12:
+        판정, 색, 설명 = "양쪽이 팽팽합니다", "#f0c65a", \
+            "군중의 방향이 갈렸습니다. 한쪽으로 몰린 날보다 해석이 조심스러워야 합니다."
+    elif 기울기 > -35:
+        판정, 색, 설명 = "하락 쪽으로 기울었습니다", "#8fb4ee", \
+            "개인이 하락 쪽을 조금 더 보고 있습니다."
+    else:
+        판정, 색, 설명 = "하락 쪽으로 크게 기울었습니다", "#5b9bff", \
+            "군중이 추가 하락에 베팅 중입니다. 공포가 극단이면 반대로 가기도 합니다."
+
+    def _억(v):
+        if not isinstance(v, (int, float)):
+            return "—"
+        return f"{v/10000:+.2f}조" if abs(v) >= 10000 else f"{v:+,.0f}억"
+
+    추정주 = ('<p style="margin:6px 0 0;font-size:10px;color:#6f7784">'
+             '※ 개인 순매수를 직접 못 받아 −(기관+외국인)으로 추정한 값입니다</p>'
+             ) if 나침반.get("추정") else ""
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:12px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">군중 나침반</p>'
+            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '개인은 어느 쪽에 돈을 걸었나</p>'
+            # ── 방향 막대 ──
+            '<div style="position:relative;height:26px;border-radius:13px;'
+            'background:linear-gradient(90deg,#1f3550 0%,#252a33 50%,#5e2028 100%);'
+            'border:1px solid #2a3446">'
+            f'<div style="position:absolute;left:calc({위치:.1f}% - 7px);top:3px;width:14px;'
+            f'height:18px;border-radius:7px;background:{색};box-shadow:0 0 0 2px #0f131a"></div>'
+            '</div>'
+            '<div style="display:flex;justify-content:space-between;margin-top:4px">'
+            '<span style="font-size:10px;color:#8fb4ee">◀ 하락 베팅(인버스)</span>'
+            '<span style="font-size:10px;color:#ff9a80">상승 베팅(레버리지) ▶</span></div>'
+            f'<p style="margin:9px 0 0;font-size:14px;font-weight:800;color:{색}">{판정}</p>'
+            f'<p style="margin:3px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">{설명}</p>'
+            # ── 숫자 두 칸 ──
+            '<div style="display:flex;gap:7px;margin-top:10px">'
+            '<div style="flex:1;background:#191d26;border-radius:8px;padding:8px 9px">'
+            '<p style="margin:0;font-size:10.5px;color:#8b93a0">레버리지(상승)</p>'
+            f'<p style="margin:2px 0 0;font-size:13px;font-weight:800;color:#ff6b4a">{_억(L)}</p></div>'
+            '<div style="flex:1;background:#191d26;border-radius:8px;padding:8px 9px">'
+            '<p style="margin:0;font-size:10.5px;color:#8b93a0">인버스(하락)</p>'
+            f'<p style="margin:2px 0 0;font-size:13px;font-weight:800;color:#5b9bff">{_억(I)}</p></div>'
+            '</div>'
+            + 추정주 +
+            '<details style="margin:9px 0 0;padding:9px 10px;background:#0f131a;'
+            'border-radius:8px;border:1px solid #1e2531">'
+            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            'cursor:pointer;list-style:none">📖 군중 나침반 보는 방법 '
+            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            '<b style="color:#9aa0aa">레버리지</b>는 지수가 오르면 두 배로 버는 상품, '
+            '<b style="color:#9aa0aa">인버스</b>는 지수가 내리면 버는 상품입니다. '
+            '둘 다 사실상 개인의 <b style="color:#9aa0aa">방향 베팅</b>이라, '
+            '어느 쪽에 돈이 더 들어갔는지를 보면 군중의 심리가 드러납니다.<br>'
+            '<b style="color:#9aa0aa">이건 예측이 아닙니다.</b> 군중이 한쪽으로 크게 쏠린 날은 '
+            '그 방향이 맞아서가 아니라 <b style="color:#9aa0aa">되돌림이 나올 여지</b>가 커진다는 '
+            '뜻으로 읽는 편이 안전합니다.<br>'
+            '<b style="color:#9aa0aa">실탄과 헷갈리지 마세요</b> — 실탄은 외국인+기관(큰돈), '
+            '나침반은 개인(군중)입니다. 둘이 반대로 가는 날이 특히 볼 만합니다.'
+            '</p></details></div>')
+
+
 def build_sector_radar():
     """관제 레이더(일간) — 중심에 가까울수록 주도력이 강하다. 화살표는 전날 대비 이동."""
     이력 = _sector_scores(2)
@@ -2231,16 +2332,39 @@ def build_slope_chart(격자):
     for r in 나머지:
         p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
         선 += f'<polyline points="{p}" fill="none" stroke="#4a5260" stroke-width="1.5" opacity=".55"/>'
-    for i, r in enumerate(행들[:3] + 행들[-3:]):
+    강조 = 행들[:3] + 행들[-3:]
+    for i, r in enumerate(강조):
         c = "#ff6b4a" if i < 3 else "#5b9bff"
         p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
         선 += f'<polyline points="{p}" fill="none" stroke="{c}" stroke-width="2.5" stroke-linejoin="round"/>'
         for t in ("대형", "중형", "소형"):
             선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="3.4" fill="{c}"/>'
-        y0 = Y(r["칸"]["대형"]["등락률"])
-        # 이름을 자르지 않는다. 글자도 키우고 한 줄로 둔다.
-        선 += (f'<text x="94" y="{y0+3.5:.0f}" text-anchor="end" font-size="10.5" '
-               f'fill="#d5d9e0">{r["테마"]}</text>')
+
+    # ── 라벨 겹침 방지 ──
+    #  대형 등락률이 비슷한 테마들은 라벨 y가 거의 같아져 글자가 포개졌다.
+    #  그리기 전에 y를 모아 위→아래로 훑으며 최소 간격(13px)을 강제로 벌린다.
+    #  선은 원래 자리에 두고 글자만 밀되, 어느 선의 이름인지 알 수 있게
+    #  많이 밀린 경우 점선 연결선을 그려준다.
+    라벨들 = sorted(
+        [{"y": Y(r["칸"]["대형"]["등락률"]),
+          "c": ("#ff6b4a" if i < 3 else "#5b9bff"),
+          "nm": r["테마"]} for i, r in enumerate(강조)],
+        key=lambda d: d["y"])
+    간격, 이전 = 13.0, None
+    for d in 라벨들:
+        d["ly"] = d["y"] if 이전 is None else max(d["y"], 이전 + 간격)
+        이전 = d["ly"]
+    # 아래로 넘치면 전체를 위로 되민다
+    넘침 = 라벨들[-1]["ly"] - (H - B + 6) if 라벨들 else 0
+    if 넘침 > 0:
+        for d in 라벨들:
+            d["ly"] -= 넘침
+    for d in 라벨들:
+        if abs(d["ly"] - d["y"]) > 3:
+            선 += (f'<line x1="96" y1="{d["y"]:.0f}" x2="90" y2="{d["ly"]:.0f}" '
+                   f'stroke="{d["c"]}" stroke-width="0.8" opacity=".45"/>')
+        선 += (f'<text x="86" y="{d["ly"]+3.5:.0f}" text-anchor="end" font-size="10.5" '
+               f'fill="#d5d9e0">{d["nm"]}</text>')
 
     축 = "".join(f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
                  f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
@@ -2267,7 +2391,22 @@ def build_slope_chart(격자):
 
 
 # ── 4. 포착 항로 (레이더 성적) ───────────────────────────────
-def build_capture_path(개월=1):
+def _index_close_map():
+    """market_history에서 {날짜: (코스피종가, 코스닥종가)} — 벤치마크 계산용."""
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            일별 = (json.load(f) or {}).get("일별") or []
+    except Exception:
+        return {}
+    out = {}
+    for r in 일별:
+        d = str(r.get("날짜", "")).replace("-", "")
+        if d:
+            out[d] = (r.get("코스피"), r.get("코스닥"))
+    return out
+
+
+def build_capture_path(개월=1, 시장=None, 종류="강세"):
     """강세 레이더가 포착한 종목들이 그 뒤 실제로 걸어간 길.
 
     ⚠️ 성과 표시가 아니라 **지표 성능 공시**다. 최저 사례도 반드시 함께 낸다.
@@ -2276,24 +2415,60 @@ def build_capture_path(개월=1):
     파일들 = sorted(alist(r"data_\d{8}\.json"))[-일수:]
     if len(파일들) < 3:
         return ""
+    # ⚠️ 3개월판은 이력이 충분할 때만 낸다.
+    #    지금처럼 19일치뿐이면 66일을 요구해도 결국 같은 19일을 쓰게 되어
+    #    1개월판과 **글자 하나 다르지 않은 그림**이 두 번 나온다.
+    #    같은 걸 두 번 보여주면 구독자는 "대충 만들었네"로 읽는다. 차라리 숨긴다.
+    if 개월 == 3 and len(파일들) < 33:
+        return ""
     쌍 = {}          # (종목,포착일) → (경과, 이후등락) 최신값
     for f in 파일들:
         try:
             with open(apath(f), encoding="utf-8") as fp:
-                tr = ((json.load(fp).get("강세레이더") or {}).get("추적")) or []
+                _d = json.load(fp)
+                _키 = "강세레이더" if 종류 == "강세" else "매집레이더"
+                tr = ((_d.get(_키) or {}).get("추적")) or []
         except Exception:
             continue
         for t in tr:
             g, r = t.get("경과"), t.get("이후등락")
-            if isinstance(g, int) and isinstance(r, (int, float)):
-                쌍[(t.get("종목명"), t.get("포착일"))] = (g, r, t.get("종목명"))
+            if not (isinstance(g, int) and isinstance(r, (int, float))):
+                continue
+            # 시장을 나눠 보는 이유: 코스닥은 변동폭이 구조적으로 커서
+            # 코스피와 한 줄로 섞으면 평균이 코스닥에 끌려간다.
+            if 시장 and t.get("시장") != 시장:
+                continue
+            쌍[(t.get("종목명"), t.get("포착일"))] = (g, r, t.get("종목명"),
+                                                 t.get("포착일"), t.get("시장"))
     if len(쌍) < 5:
         return ""
 
     별 = {}
-    for (g, r, nm) in 쌍.values():
-        별.setdefault(g, []).append(r)
+    for v in 쌍.values():
+        별.setdefault(v[0], []).append(v[1])
     최종 = [(v[1], v[2]) for v in 쌍.values()]
+
+    # ── 벤치마크: 같은 기간 지수는 얼마나 움직였나 ──
+    #   "우리 레이더가 잘한 건가, 그냥 시장이 좋았던 건가"를 가르는 유일한 기준.
+    종가맵 = _index_close_map()
+    날짜들 = sorted(종가맵)
+    _idx = 1 if (시장 == "코스닥") else 0
+    벤치 = {}
+    for v in 쌍.values():
+        g, 포착일 = v[0], v[3]
+        if 포착일 not in 종가맵:
+            continue
+        try:
+            i0 = 날짜들.index(포착일)
+        except ValueError:
+            continue
+        i1 = i0 + g
+        if i1 >= len(날짜들):
+            continue
+        a = 종가맵[날짜들[i0]][_idx]
+        b = 종가맵[날짜들[i1]][_idx]
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)) and a:
+            벤치.setdefault(g, []).append((b - a) / a * 100)
     평균 = sum(r for r, _ in 최종) / len(최종)
     승률 = sum(1 for r, _ in 최종 if r > 0) / len(최종) * 100
     중앙 = sorted(r for r, _ in 최종)[len(최종) // 2]
@@ -2304,7 +2479,8 @@ def build_capture_path(개월=1):
     if len(Ds) < 3:
         return ""
     곡선 = [(d, sum(별[d]) / len(별[d])) for d in Ds]
-    vs = [v for _, v in 곡선]
+    벤곡선 = [(d, sum(벤치[d]) / len(벤치[d])) for d in Ds if 벤치.get(d)]
+    vs = [v for _, v in 곡선] + [v for _, v in 벤곡선]
     lo, hi = min(vs + [0]), max(vs + [0])
     rng = (hi - lo) or 1.0
     # 경사선과 같은 이유로 340폭 좌표계 — 모바일에서 가로 스크롤 없이 한눈에.
@@ -2313,23 +2489,42 @@ def build_capture_path(개월=1):
     def PY(v): return 26 + (hi - v) / rng * 112
 
     선 = " ".join(f"{PX(d):.0f},{PY(v):.0f}" for d, v in 곡선)
+    벤선 = " ".join(f"{PX(d):.0f},{PY(v):.0f}" for d, v in 벤곡선)
+    벤HTML = (f'<polyline points="{벤선}" fill="none" stroke="#8b93a0" stroke-width="1.8" '
+             f'stroke-dasharray="5 4" stroke-linejoin="round"/>') if len(벤곡선) >= 3 else ""
+    # 초과수익 = 우리 곡선 끝점 − 지수 곡선 끝점. 이게 진짜 성적표다.
+    초과 = (곡선[-1][1] - 벤곡선[-1][1]) if 벤곡선 else None
     영 = (f'<line x1="36" y1="{PY(0):.0f}" x2="324" y2="{PY(0):.0f}" stroke="#3a4150" '
          f'stroke-dasharray="4 4"/>')
     눈 = "".join(f'<text x="{PX(d):.0f}" y="162" text-anchor="middle" font-size="10" '
                  f'fill="#6f7784">D+{d}</text>' for d in Ds[::max(1, len(Ds)//5)])
 
     라벨 = "1개월" if 개월 == 1 else "3개월"
+    시장명 = 시장 or "전체"
+    종류명 = "강세" if 종류 == "강세" else "매집"
+    지수명 = "코스닥" if 시장 == "코스닥" else ("코스피" if 시장 == "코스피" else "지수")
+    초과HTML = ""
+    if 초과 is not None:
+        초색 = "#4ade80" if 초과 >= 0 else "#a78bfa"
+        초과HTML = (f'<p style="margin:5px 0 0;font-size:13px;color:#e8eaee">'
+                   f'같은 기간 {지수명} <b>{벤곡선[-1][1]:+.1f}%</b> → '
+                   f'초과수익 <b style="color:{초색}">{초과:+.1f}%p</b></p>')
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">포착 항로</p>'
+            f'<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">'
+            f'포착 항로 · {종류명}편 · {시장명}</p>'
             f'<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            f'레이더가 잡은 종목들, 그 뒤 {라벨}</p>'
+            f'{시장명} {종류명} 레이더가 잡은 종목들, 그 뒤 {라벨}</p>'
             f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
-            f'style="width:100%;max-width:520px;height:auto;display:block">{영}'
+            f'style="width:100%;max-width:520px;height:auto;display:block">{영}{벤HTML}'
             f'<polyline points="{선}" fill="none" stroke="#d85a30" stroke-width="2.6" '
             f'stroke-linejoin="round"/>{눈}</svg>'
+            '<div style="display:flex;gap:12px;margin-top:5px">'
+            '<span style="font-size:10.5px;color:#d85a30">— 포착 종목 평균</span>'
+            f'<span style="font-size:10.5px;color:#8b93a0">--- {지수명} (같은 기간)</span></div>'
             f'<p style="margin:6px 0 0;font-size:13px;color:#e8eaee">'
             f'포착 {len(최종)}종목 · 평균 <b>{평균:+.1f}%</b> · 중앙값 {중앙:+.1f}% · 승률 {승률:.0f}%</p>'
+            + 초과HTML +
             f'<p style="margin:4px 0 0;font-size:12.5px;color:#c9ced6">'
             f'최고 {최고[1]} {최고[0]:+.1f}% · 최저 {최저[1]} {최저[0]:+.1f}%</p>'
             '<p style="margin:6px 0 0;font-size:11.5px;color:#6f7784;line-height:1.5">'
@@ -2541,7 +2736,10 @@ def build_core(핵심편, data, 해석):
     #    → "수급으로 확인" → "그래서 내 계좌는 어디에(좌표·레이더)" 순서로 읽힌다.
     #    · 수급 변속기는 수급 타일 바로 밑(같은 맥락)으로 이동
     #    · 경사선·포착 항로는 분석 성격이 짙어 심층편으로 이동
-    격자블록 = (build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
+    # 순서 의도: 💰수급(외국인·기관=큰돈) → 🧭나침반(개인=군중) → 격자·레이더
+    #   같은 하루를 '큰돈'과 '군중' 두 시선으로 잇따라 보여준다.
+    격자블록 = (build_crowd_compass(data.get("군중나침반"))
+              + build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
               + build_sector_radar())
     변속기블록 = build_flow_gearbox()
 
@@ -3452,6 +3650,20 @@ def build_html(data, report):
     오늘의문장 = 해석.get("오늘의_한문장", "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)")
     프로의시선 = 해석.get("프로의시선") or {}
     오늘의공부 = 해석.get("오늘의_공부", "")
+    # 3개월 항로 — 이력이 충분할 때만 별도 섹션으로 붙는다(부족하면 빈 문자열).
+    # 시장을 나눠 두 장으로 — 코스닥은 변동폭이 구조적으로 커서 섞으면 평균이 끌려간다.
+    _c1 = (build_capture_path(1, "코스피") + build_capture_path(1, "코스닥")) or build_capture_path(1)
+    _c3 = (build_capture_path(3, "코스피") + build_capture_path(3, "코스닥"))
+    # 수급편 — 매집 추적은 오늘부터 쌓이므로 충분해지기 전에는 자동으로 생략된다.
+    _c수급 = (build_capture_path(1, "코스피", "매집") + build_capture_path(1, "코스닥", "매집"))
+    _capture수급_block = (
+        '<p class="sec-label"><small>1개월 항로 · 수급편</small>'
+        '💼 매집 레이더는 잘 잡았나</p>' + _c수급
+    ) if _c수급 else ""
+    _capture3_block = (
+        '<p class="sec-label"><small>3개월 항로</small>🛰️ 더 길게 보면 어떤가</p>' + _c3
+    ) if _c3 else ""
+
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
 
     # ── 다음 거래일 라벨 ──
@@ -3476,17 +3688,27 @@ def build_html(data, report):
               ) if _오늘휴장 else ''
 
     # ── 공유 카드(OG) — 같은 문장이 세 번 겹치던 문제를 역할 분담으로 해결 ──
-    #   og:title = 한줄평 (카드 흰 글씨)  /  og:description = 날짜만 (회색 글씨)
-    #   og:image = 매일 새로 생성되는 썸네일 PNG (make_thumb.py)
-    #   관제지수는 카드에서 전부 뺀다 — 클릭 전 사람에게는 의미 없는 숫자.
+    #   ⚠️ 중복 제거(v-l5): 예전엔 og:title도 한줄평이라, 썸네일 그림 속 한줄평과
+    #      카톡 말풍선 한줄평까지 **같은 문장이 세 번** 나와 지저분했다.
+    #      자리마다 서로 다른 것만 담는다.
+    #        썸네일 그림 = 한줄평 + 공감문구   (make_thumb.py)
+    #        og:title    = 오늘의 정의        (여기 — 그림에 없는 문장)
+    #        og:desc     = 관제지수 + 날짜     (여기)
+    #        텔레그램 캡션 = 브랜드 + 날짜 + 링크 (notify_telegram.py)
     관제 = data.get("관제지수") or {}
-    if isinstance(오늘한줄평, str) and not 오늘한줄평.startswith("—"):
+    _정의 = ((해석.get("핵심편") or {}).get("오늘의정의") or "").strip()
+    if _정의:
+        og_title = _정의
+    elif isinstance(오늘한줄평, str) and not 오늘한줄평.startswith("—"):
         og_title = 오늘한줄평
     else:
         og_title = f"차트프로 관제탑 {날짜}"
     _d = data["날짜"]
     _요일 = "월화수목금토일"[datetime.strptime(_d, "%Y%m%d").weekday()]
-    og_desc = f"{int(_d[4:6])}월 {int(_d[6:])}일 ({_요일}) 마감 · 차트프로 관제탑"
+    _점수 = 관제.get("점수")
+    _구간 = 관제.get("구간") or ""
+    _앞 = (f"관제지수 {_점수}" + (f" · {_구간}" if _구간 else "")) if _점수 is not None else "차트프로 관제탑"
+    og_desc = f"{_앞} · {int(_d[4:6])}월 {int(_d[6:])}일({_요일}) 마감"
     # ⚠️ 캐시 대응: 텔레그램·카톡은 링크를 처음 열어본 순간의 미리보기를 저장해두고
     #    한동안 다시 안 가져온다. 같은 날 다시 발행하면 이미지 파일은 바뀌었는데
     #    미리보기는 옛 그림 그대로다. 이미지 주소 뒤에 빌드 시각을 붙여
@@ -4346,8 +4568,10 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>크기별 경사</small>📐 대형이 끌었나, 소형이 끌었나</p>
   {build_slope_chart(data.get('계좌격자'))}
 
-  <p class="sec-label"><small>1개월 항로</small>🛬 관제탑에 다녀간 섹터들</p>
-  {build_capture_path(1)}
+  <p class="sec-label"><small>1개월 항로 · 강세편</small>🛬 강세 레이더는 잘 잡았나</p>
+  {_c1}
+  {_capture수급_block}
+  {_capture3_block}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
