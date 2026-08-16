@@ -53,26 +53,60 @@ def build_message():
     return "\n".join(줄)
 
 
+def _thumb_path():
+    """오늘 썸네일 파일 경로 (없으면 None)."""
+    p = os.path.join("thumb", f"{DATE}.png")
+    return p if os.path.exists(p) else None
+
+
 def main():
     if not TOKEN or not CHAT_ID:
         print("⚠️ TELEGRAM_TOKEN / TELEGRAM_CHAT_ID 가 없어 알림을 건너뜁니다.")
         return
 
     msg = build_message()
+
+    # ── ① 썸네일이 있으면 sendPhoto로 '직접 업로드' ──────────────
+    #  ⚠️ 왜 바꿨나: 예전에는 sendMessage + link_preview_options만 보냈다.
+    #     그러면 텔레그램이 우리 페이지를 **직접 크롤링해서** og:image를 읽어야
+    #     썸네일이 뜬다. 그런데
+    #       · GitHub Pages 배포가 아직 안 끝났거나
+    #       · 텔레그램이 그 URL을 이미 캐시해 뒀거나
+    #       · 크롤러가 늦게 오면
+    #     그림 없이 글자만 나간다. 실제로 계속 그랬다.
+    #  → 파일을 우리가 직접 올려버리면 크롤링·캐시와 무관하게 100% 나온다.
+    사진 = _thumb_path()
+    if 사진:
+        try:
+            with open(사진, "rb") as f:
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                    data={"chat_id": CHAT_ID, "caption": msg},
+                    files={"photo": (os.path.basename(사진), f, "image/png")},
+                    timeout=30,
+                )
+            if r.status_code == 200:
+                print(f"✅ 텔레그램 전송 완료 (썸네일 직접 첨부: {사진})")
+                return
+            print(f"⚠️ sendPhoto 실패 HTTP {r.status_code}: {r.text[:200]} — 글만 재시도합니다")
+        except Exception as e:
+            print(f"⚠️ sendPhoto 오류: {type(e).__name__}: {e} — 글만 재시도합니다")
+    else:
+        print(f"⚠️ 썸네일 파일 없음(thumb/{DATE}.png) — 글만 보냅니다")
+
+    # ── ② 사진이 없거나 실패하면 기존 방식(링크 미리보기)으로 폴백 ──
     try:
         r = requests.post(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage",
             json={"chat_id": CHAT_ID, "text": msg,
-                  # 미리보기를 크게 + 본문 위에 — 썸네일이 카드의 주인공이 되게
                   "link_preview_options": {"url": REPORT_URL,
                                            "prefer_large_media": True,
                                            "show_above_text": True}},
             timeout=15,
         )
         if r.status_code == 200:
-            print("✅ 텔레그램 알림 전송 완료")
+            print("✅ 텔레그램 알림 전송 완료 (링크 미리보기)")
         else:
-            # 실패 원인을 바로 알 수 있게 (토큰/chat_id 문제 등)
             print(f"⚠️ 텔레그램 전송 실패 HTTP {r.status_code}: {r.text[:200]}")
     except Exception as e:
         print(f"⚠️ 텔레그램 전송 오류: {type(e).__name__}: {e}")
