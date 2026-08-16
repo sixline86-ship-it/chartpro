@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.16-l5"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
@@ -996,6 +996,184 @@ def _extract_program(t, html_text="", 날짜키=None):
     return 결과
 
 
+# ── 🧭 군중 나침반 (v-l3 신규) ────────────────────────────────
+#  무엇: 레버리지 ETF(상승 베팅)와 인버스 ETF(하락 베팅)에 개인이
+#        각각 얼마를 넣었는지 비교해 "군중이 어느 쪽을 보고 있나"를 잰다.
+#
+#  ⚠️ 왜 개인만 보나: 레버리지·인버스는 사실상 개인의 방향성 베팅 상품이다.
+#     외국인·기관은 헤지·차익 목적이 섞여 방향 해석이 흐려진다.
+#
+#  ⚠️ 정직 고지: 이 수집은 네이버 페이지 구조에 의존한다.
+#     실패해도 파이프라인을 멈추지 않고 None을 돌려주며, 화면에서는
+#     나침반 코너 자체가 생략된다(없는 걸 지어내지 않는다).
+CROWD_ETF = [
+    ("122630", "KODEX 레버리지",            "레버리지"),
+    ("233740", "KODEX 코스닥150레버리지",    "레버리지"),
+    ("252670", "KODEX 200선물인버스2X",      "인버스"),
+    ("251340", "KODEX 코스닥150선물인버스",  "인버스"),
+]
+
+
+def _crowd_one_mobile(code):
+    """① 네이버 모바일 API — 개인 순매수가 직접 들어 있어 가장 정확하다."""
+    r = requests.get(f"https://m.stock.naver.com/api/stock/{code}/trend",
+                     headers={**HEADERS, "Referer": "https://m.stock.naver.com/"},
+                     params={"pageSize": "5"}, timeout=10)
+    r.raise_for_status()
+    js = r.json()
+    rows = js if isinstance(js, list) else (js.get("trends") or js.get("result") or [])
+    if not rows:
+        return None
+    d = rows[0]
+    개인 = None
+    for k in ("individualPureBuyQuant", "individual", "individualQuant", "개인"):
+        if isinstance(d.get(k), (int, float)):
+            개인 = float(d[k]); break
+    종가 = None
+    for k in ("closePrice", "close", "종가"):
+        v = d.get(k)
+        if v is not None:
+            try:
+                종가 = float(str(v).replace(",", "")); break
+            except Exception:
+                pass
+    if 개인 is None or not 종가:
+        return None
+    return 개인 * 종가 / 1e8          # 억원
+
+
+def _crowd_one_html(code):
+    """② HTML 표 폴백 — 개인이 없으므로 −(기관+외국인)으로 추정한다.
+
+    ⚠️ 추정치다. 기타법인 몫이 빠져 있어 정확한 개인 순매수와는 다를 수 있다.
+       그래서 화면에도 '추정'임을 표시한다.
+    """
+    r = requests.get("https://finance.naver.com/item/frgn.naver",
+                     headers=HEADERS, params={"code": code}, timeout=10)
+    r.encoding = "euc-kr"
+    for t in read_html_safe(r.text):
+        cols = [str(c) for c in _flatten_cols(t.copy()).columns]
+        if not any("기관" in c for c in cols) or not any("외국인" in c for c in cols):
+            continue
+        t = _flatten_cols(t.copy()).dropna(how="all")
+        기관열 = next((c for c in t.columns if "기관" in str(c)), None)
+        외인열 = next((c for c in t.columns if "외국인" in str(c) and "보유" not in str(c)), None)
+        종가열 = next((c for c in t.columns if "종가" in str(c)), None)
+        if not (기관열 and 외인열 and 종가열):
+            continue
+        for _, row in t.iterrows():
+            기 , 외, 종 = to_num(row[기관열]), to_num(row[외인열]), to_num(row[종가열])
+            if 기 is None or 외 is None or not 종:
+                continue
+            return -(기 + 외) * 종 / 1e8      # 억원 (개인 추정)
+    return None
+
+
+def collect_crowd_compass():
+    """레버리지 vs 인버스 개인 순매수를 모아 '군중 나침반' 원료를 만든다."""
+    print("🧭 군중 나침반 — 레버리지·인버스 개인 순매수 수집")
+    합 = {"레버리지": 0.0, "인버스": 0.0}
+    상세, 추정여부, 성공 = [], False, 0
+    for code, 이름, 방향 in CROWD_ETF:
+        금액 = None
+        try:
+            금액 = _crowd_one_mobile(code)
+        except Exception as e:
+            print(f"   · {이름}: 모바일API 실패({type(e).__name__}) → HTML 시도")
+        if 금액 is None:
+            try:
+                금액 = _crowd_one_html(code)
+                if 금액 is not None:
+                    추정여부 = True
+            except Exception as e:
+                print(f"   · {이름}: HTML도 실패({type(e).__name__})")
+        if 금액 is None:
+            print(f"   ⚠️ {이름} 수집 실패 — 건너뜁니다")
+            continue
+        성공 += 1
+        합[방향] += 금액
+        상세.append({"종목": 이름, "방향": 방향, "개인순매수": round(금액, 1)})
+        print(f"   · {이름}({방향}) 개인 {금액:+,.0f}억")
+
+    if 성공 == 0:
+        print("   ❌ 전부 실패 — 군중 나침반은 이번 리포트에서 생략됩니다")
+        return None
+
+    L, I = 합["레버리지"], 합["인버스"]
+    분모 = abs(L) + abs(I)
+    기울기 = round((L - I) / 분모 * 100, 1) if 분모 else 0.0   # +100 상승베팅 / −100 하락베팅
+    return {
+        "레버리지_개인": round(L, 1),
+        "인버스_개인": round(I, 1),
+        "기울기": 기울기,
+        "표본": 성공,
+        "추정": 추정여부,      # True면 개인=−(기관+외국인) 추정치
+        "상세": 상세,
+    }
+
+
+# ── 매집 레이더 추적 (v-l4 신규) ─────────────────────────────
+#  왜: 강세 레이더는 "그 뒤 어떻게 됐나"를 추적하는데 매집 레이더는 안 했다.
+#      그래서 포착 항로에 '수급편'을 만들 재료가 아예 없었다.
+#      강세와 똑같은 구조로 오늘부터 쌓는다. (시간이 만드는 데이터 — 오늘 안 심으면 영영 없다)
+#  ⚠️ 과거분은 복원 불가. 의미 있는 곡선은 약 1개월 뒤부터.
+ACC_TRACK_DAYS = 20
+
+
+def _load_prev_acc_tracking():
+    """어제 리포트의 매집 추적표를 읽어온다(없으면 빈 목록)."""
+    파일들 = sorted(alist(r"data_\d{8}\.json"))
+    for f in reversed(파일들):
+        if f.endswith(f"{DATE}.json"):
+            continue
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+            tr = ((d.get("매집레이더") or {}).get("추적")) or []
+            if tr:
+                return [dict(t) for t in tr]
+        except Exception:
+            continue
+        break
+    return []
+
+
+def track_accumulation(매집결과, 가격맵):
+    """매집 레이더가 잡은 종목의 이후 경로를 추적한다(강세 추적과 동일 규칙)."""
+    추적 = _load_prev_acc_tracking()
+    맵 = {t.get("종목명"): t for t in 추적}
+
+    for t in 추적:
+        t["경과"] = t.get("경과", 0) + 1
+        현재 = 가격맵.get(t.get("종목명"))
+        if 현재 and t.get("포착가"):
+            t["현재가"] = 현재["현재가"]
+            t["이후등락"] = round((현재["현재가"] - t["포착가"]) / t["포착가"] * 100, 2)
+
+    오늘목록 = []
+    for 키 in ("종목", "중기종목"):
+        for s in (매집결과.get(키) or []):
+            오늘목록.append(s)
+    새로 = 0
+    for s in 오늘목록:
+        nm = s.get("종목명")
+        if not nm or nm in 맵:
+            continue
+        현재 = 가격맵.get(nm)
+        가 = (현재 or {}).get("현재가")
+        if not 가:
+            continue
+        새 = {"종목명": nm, "시장": s.get("시장") or "코스피", "코드": s.get("코드"),
+             "포착일": DATE, "포착가": 가, "현재가": 가,
+             "이후등락": 0.0, "경과": 0, "유형": s.get("유형")}
+        추적.append(새); 맵[nm] = 새; 새로 += 1
+
+    남김 = [t for t in 추적 if t.get("경과", 0) <= ACC_TRACK_DAYS]
+    남김.sort(key=lambda x: x.get("이후등락", 0), reverse=True)
+    print(f"📋 매집 추적 {len(남김)}종목 (오늘 신규 {새로})")
+    return 남김
+
+
 def collect_program_trading():
     """프로그램매매(차익/비차익) 수집 — 확인된 주소를 직접 친다.
 
@@ -1555,7 +1733,8 @@ def collect_strength_radar():
                   f"(회전율 {t['회전율']}%, {t['등락률']:+.2f}%, 거래량 {t['배수']}배)")
 
     추적 = _update_tracking(신규, 가격맵)
-    return {"신규": 신규, "추적": 추적}
+    # 가격맵을 함께 돌려준다 — 매집 추적이 같은 시세를 재사용해야 추가 요청이 0이다.
+    return {"신규": 신규, "추적": 추적, "_가격맵": 가격맵}
 
 
 def _load_prev_tracking():
@@ -2128,8 +2307,20 @@ if __name__ == "__main__":
     등락수 = collect_updown_counts()
     update_market_history(지수수급, 파생, 게이지, 등락수)
     강세레이더 = collect_strength_radar()
+    _가격맵 = 강세레이더.pop("_가격맵", {}) or {}
     매집레이더 = collect_accumulation_radar()
+    # 매집 종목도 강세와 똑같이 그 뒤 경로를 추적한다(포착 항로 수급편의 재료).
+    try:
+        매집레이더["추적"] = track_accumulation(매집레이더, _가격맵)
+    except Exception as e:
+        print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+    # 🧭 군중 나침반 — 실패해도 None만 돌아오고 파이프라인은 계속된다.
+    try:
+        군중나침반 = collect_crowd_compass()
+    except Exception as e:
+        print(f"   ⚠️ 군중 나침반 수집 중 예외({type(e).__name__}: {e}) — 생략합니다")
+        군중나침반 = None
     마감브리핑 = collect_briefings()
 
     전체 = {
@@ -2146,6 +2337,7 @@ if __name__ == "__main__":
         "매집레이더": 매집레이더,
         "등락종목수": 등락수,
         "계좌격자": 계좌격자,
+        "군중나침반": 군중나침반,
         "설정": {
             "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
                    "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
