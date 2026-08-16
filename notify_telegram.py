@@ -29,28 +29,21 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 
 def build_message():
-    """오늘 리포트에서 관제지수·한줄평을 읽어 메시지를 만든다.
-    파일이 없거나 값이 없으면 링크만 보낸다."""
-    날짜표기 = f"{DATE[:4]}.{DATE[4:6]}.{DATE[6:]}"
-    지수, 구간, 한줄 = None, None, None
-    try:
-        with open(REPORT_PATH, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        관제 = d.get("관제지수") or {}
-        지수 = 관제.get("점수")
-        구간 = 관제.get("구간")
-        한줄 = (d.get("해석글") or {}).get("한줄평")
-    except Exception:
-        pass  # 값 없으면 링크만
+    """붙여넣기용 캡션.
 
-    줄 = [f"🗼 차트프로 관제탑 · {날짜표기}"]
-    if 지수 is not None:
-        줄.append(f"오늘의 관제지수: {지수}" + (f" ({구간})" if 구간 else ""))
-    if 한줄:
-        줄.append(f"💬 {한줄}")
-    줄.append("")
-    줄.append(f"👉 {REPORT_URL}")
-    return "\n".join(줄)
+    ⚠️ 역할 분담 원칙(v-l5) — 같은 문장이 세 번 반복되던 문제를 고쳤다.
+       카톡에 이 글을 붙여넣으면 화면에 네 자리가 생긴다.
+         ① 이 캡션 (말풍선)      ② 썸네일 그림  ③ 미리보기 제목  ④ 미리보기 설명
+       예전에는 ①③이 한줄평, ②도 한줄평이라 **같은 말이 세 번** 나왔다.
+       그래서 자리마다 서로 다른 것만 담게 나눴다.
+         ① 캡션      = 브랜드 + 날짜 + 링크   (여기)
+         ② 썸네일    = 한줄평 + 공감문구      (make_thumb.py)
+         ③ 제목      = 오늘의 정의            (build_html.py og:title)
+         ④ 설명      = 관제지수               (build_html.py og:description)
+    """
+    _요일 = "월화수목금토일"[datetime.strptime(DATE, "%Y%m%d").weekday()]
+    날짜표기 = f"{int(DATE[4:6])}월 {int(DATE[6:])}일({_요일}) 마감"
+    return f"🗼 차트프로 관제탑 · {날짜표기}\n\n{REPORT_URL}"
 
 
 def _thumb_path():
