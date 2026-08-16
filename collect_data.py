@@ -20,7 +20,10 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l5"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.16-l6"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+                             #    5개 파일(build_html/generate_report/collect_data/
+                             #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
+                             #    번호가 다르면 일부 파일만 올라간 것이다.
 DART_KEY = os.environ.get("DART_API_KEY", "")
 DATE = datetime.now().strftime("%Y%m%d")
 
