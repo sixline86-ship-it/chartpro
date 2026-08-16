@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.14-k9"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.16-l2"   # ⬅ 버전 표시
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -40,6 +40,73 @@ KRX_HOLIDAYS = {
 }
 
 _요일한글 = ("월", "화", "수", "목", "금", "토", "일")
+
+GRID_슬롯 = [
+    # ⚠️ 순서가 중요하다 — 위에서부터 먼저 걸리는 슬롯으로 배정된다.
+    #    그래서 구체적인 키워드('핵융합')를 넓은 키워드('에너지')보다 위에 둔다.
+    #    예: '핵융합에너지'는 원전 줄로 가야지 정유 줄로 가면 안 된다.
+    ("반도체",          ["반도체", "hbm", "파운드리", "메모리", "웨이퍼", "소부장",
+                        "소캠", "socamm", "d램", "디램", "낸드", "s7", "온디바이스", "cxl"]),
+    ("2차전지·소재",     ["2차전지", "이차전지", "전고체", "양극재", "음극재", "리튬", "폐배터리"]),
+    ("조선·기계·방산",   ["조선", "방산", "우주", "항공기", "기계", "무기", "스페이스", "위성"]),
+    ("전력·신재생·원전", ["원자력", "원전", "핵융합", "전력", "태양광", "풍력", "전선", "변압기",
+                        "수소", "신재생", "smr"]),
+    ("바이오·제약",      ["제약", "바이오", "의료", "백신", "임플란트", "비만", "치료제", "헬스케어"]),
+    ("자동차·부품",      ["자동차", "타이어", "자율주행", "전기차"]),
+    ("AI·소프트웨어",    ["인공지능", "ai", "클라우드", "데이터센터", "로봇", "소프트웨어",
+                        "보안", "it 대표주", "it대표주", "sw"]),
+    ("인터넷·게임·엔터", ["게임", "엔터", "미디어", "콘텐츠", "웹툰", "음원", "영화",
+                        "인터넷", "여행", "야놀자", "플랫폼"]),
+    ("금융·지주",        ["은행", "증권", "보험", "지주", "금융", "카드", "리츠", "reits",
+                        "전자결제", "전자화폐", "종합상사", "환율"]),
+    # ⚠️ v-l1 추가 — 기존 9칸이 성장주 쪽에 쏠려 있어 경기·배당 축이 통째로 비어 있었다.
+    #    실제로 2026-08-14 주도섹터 1위가 '정유'였는데 격자에서는 '기타'로 들어가
+    #    "오늘 시장 1등이 격자에 이름조차 없는" 상태가 됐다.
+    ("에너지·정유·화학", ["정유", "석유", "화학", "가스", "에너지", "lng", "lpg", "석탄", "유가",
+                        "귀금속", "비철", "철강", "광물", "플라스틱", "요소수", "연료전지"]),
+    ("통신·유틸리티",    ["통신", "5g", "이동통신", "전기가스", "유틸리티", "광케이블", "광섬유"]),
+    ("소비·유통·식품",   ["유통", "백화점", "편의점", "홈쇼핑", "음식료", "식품", "주류",
+                        "화장품", "의류", "섬유", "면세", "카지노", "제습기", "공기청정기",
+                        "가전", "마리화나", "대마"]),
+    ("건설·부동산",      ["건설", "부동산", "시멘트", "레미콘", "모듈러", "주택", "인테리어"]),
+    ("운송·물류",        ["해운", "항공", "lcc", "물류", "택배", "운송"]),
+    ("전기전자·부품",    ["led", "디스플레이", "oled", "카메라", "cctv", "dvr", "기판",
+                        "전자부품", "mlcc", "음성인식"]),
+]
+
+
+def _fold(제목, 내용HTML, key):
+    """긴 설명을 '더보기'로 접는다.
+
+    ⚠️ <details>를 쓰는 이유: JS 없이 동작하고, 접힌 상태에서도
+       내용이 DOM에 있어 검색·복사가 된다. 화면만 짧아진다.
+       (설명이 길면 정작 봐야 할 표가 밀려나 안 읽힌다)
+    """
+    return (f'<details style="margin:9px 0 0"><summary style="cursor:pointer;'
+            f'list-style:none;font-size:11.5px;color:#e0c060;font-weight:700;'
+            f'padding:7px 10px;background:#0f131a;border:1px solid #1e2531;'
+            f'border-radius:8px;-webkit-tap-highlight-color:transparent">'
+            f'{제목} <span style="color:#6f7784;font-weight:600">· 눌러서 펼치기</span>'
+            f'</summary>'
+            f'<div style="margin-top:6px;padding:10px;background:#0f131a;'
+            f'border-radius:8px;border:1px solid #1e2531">{내용HTML}</div></details>')
+
+
+def grid_slot_of(테마명):
+    """주도섹터(그날의 네이버 테마명) → 계좌 구역(고정 슬롯) 이름.
+
+    ⚠️ collect_data.py와 **반드시 같은 내용**이어야 한다(GRID_슬롯 포함).
+       두 지도를 잇는 유일한 다리라, 한쪽만 고치면 배지가 어긋난다.
+    """
+    if not 테마명:
+        return None
+    t = str(테마명).lower()
+    for 슬롯명, 키워드들 in GRID_슬롯:
+        if any(k.lower() in t for k in 키워드들):
+            return 슬롯명
+    return None
+
+
 
 
 def is_trading_day(d):
@@ -1572,7 +1639,15 @@ def _spark_svg(vals, w=120, h=22):
             f'stroke-linejoin="round" opacity=".85"/></svg>')
 
 
-def build_account_grid(격자):
+def build_account_grid(격자, 주도섹터=None):
+    # 다리 ② — 오늘 '뜨는 현장'이 속한 구역 줄에 불을 붙인다.
+    #   격자만 보고도 "내 구역에 오늘 불이 났나"를 알 수 있게 한다.
+    불난구역 = {}
+    for s in (주도섹터 or []):
+        슬 = s.get("계좌구역") or grid_slot_of(s.get("테마명"))
+        if 슬:
+            불난구역.setdefault(슬, []).append(
+                re.sub(r"[（(].*", "", str(s.get("테마명") or "")).strip())
     """계좌 좌표 격자 — 테마(세로) × 시총 3단계(가로).
 
     "코스피는 올랐는데 내 종목은 왜 안 올랐나"의 답을 5초에 준다.
@@ -1595,11 +1670,18 @@ def build_account_grid(격자):
         t = str(기준.get(층, "")).strip()
         t = t.replace("위 이하", "~").replace("위 이상", "~").replace("위", "")
         return t.replace(" ", "")
+
+    def _시총기준(층):
+        """순위만으로는 독자가 자기 종목을 대입 못 한다 → 시총도 같이 보여준다."""
+        v = 기준.get({"대형": "대형시총", "중형": "중형시총", "소형": "소형시총"}[층])
+        return str(v) if v else ""
     머리 = ('<tr><th style="text-align:left;padding:6px 3px 6px 2px;font-size:12px;'
             'color:#9aa0aa;font-weight:600">테마</th>'
             + "".join(f'<th style="padding:6px 1px;font-size:11.5px;color:#9aa0aa;font-weight:600;text-align:center">'
-                      f'{층}<br><span style="font-size:9.5px;opacity:.7;white-space:nowrap">'
-                      f'{_짧은기준(층)}</span></th>'
+                      f'{층}<br><span style="font-size:9px;opacity:.65;white-space:nowrap">'
+                      f'{_짧은기준(층)}</span>'
+                      f'<br><span style="font-size:9px;color:#e0c060;white-space:nowrap">'
+                      f'{_시총기준(층)}</span></th>'
                       for 층 in ("대형", "중형", "소형"))
             + '<th style="padding:6px 1px;font-size:12px;color:#e8eaee;font-weight:700;text-align:center">전체</th></tr>')
 
@@ -1638,11 +1720,14 @@ def build_account_grid(격자):
         # ⚠️ 긴 테마명이 두 줄로 접히면 그 행만 두꺼워져 표가 들쭉날쭉해진다.
         #    → 한 줄 고정(넘치면 …로 자름). 전체 이름은 눌렀을 때 헤더에서 볼 수 있다.
         _풀 = str(r.get("테마", ""))
+        _불 = 불난구역.get(_풀)
+        불배지 = (f'<span style="color:#ff9a3c;font-size:9px;flex:none" '
+                f'title="오늘 뜨는 현장: {", ".join(_불)}">&nbsp;🔥</span>') if _불 else ''
         테마명 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
-                 f'white-space:nowrap">{_풀}</span>'
+                 f'white-space:nowrap">{_풀}</span>{불배지}'
                  f'<span style="color:#e0c060;font-size:9px;flex:none">&nbsp;▾</span>')
         테마명_평 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
-                   f'white-space:nowrap">{_풀}</span>')
+                   f'white-space:nowrap">{_풀}</span>{불배지}')
 
         펼칠것 = []
         for 층 in ("대형", "중형", "소형"):
@@ -1742,7 +1827,7 @@ def build_account_grid(격자):
 
     return ('<div style="background:#161a22;border:1px solid #232a36;border-radius:14px;'
             'padding:14px 14px 12px;margin:0 0 14px">'
-            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 계좌 좌표</p>'
+            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 계좌 구역</p>'
             '<p style="margin:0 0 10px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
             '오늘 내 종목은 어디에 있었나</p>'
             # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
@@ -1751,12 +1836,14 @@ def build_account_grid(격자):
             '<script>function gtog(id){var e=document.getElementById(id);'
             'if(e)e.style.display=(e.style.display==="none"?"table-row":"none");}</script>'
             '<p style="margin:7px 0 0;font-size:11px;color:#e0c060">'
-            '👆 테마 이름을 누르면 그 줄의 종목이 펼쳐집니다</p>'
+            '👆 구역 이름을 누르면 그 줄의 종목이 펼쳐집니다 · ''<span style="color:#ff9a3c">🔥</span>는 오늘 그 구역에서 불이 난 줄입니다</p>'
             + 범례 + 프리
-            + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            + '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
-              '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
-              '📖 이렇게 보세요</p>'
+              '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+              'cursor:pointer;list-style:none">📖 내 계좌 구역 보는 방법 '
+              '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+              '<div style="height:6px"></div>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
               '<b style="color:#9aa0aa">가로로 읽으면</b> — 같은 테마라도 대형·중형·소형 중 '
               '어디가 올랐는지 보입니다. 내 종목 크기 칸이 <b style="color:#ff6b4a">밝은 빨강</b>이면 '
@@ -1769,7 +1856,7 @@ def build_account_grid(격자):
               '회색은 거의 안 움직인 칸입니다.<br>'
               '<b style="color:#9aa0aa">맨 아래 줄</b> — 그 크기(대형·중형·소형)의 시장 전체 평균과 '
               '최근 20거래일 추이선입니다. 위 표와 열이 맞춰져 있습니다.'
-              '</p></div>'
+              '</p></details>'
             + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
             f'한 칸에 종목이 {GRID_최소종목}개 미만이면 —로 둡니다 · '
             '한 종목이 여러 테마에 들어갈 수 있습니다</p>'
@@ -2020,38 +2107,38 @@ def build_sector_radar():
         else:
             c, 화 = "#a78bfa", f"▼ {abs(변화):.0f} 멀어짐"
         신규 = " 🆕" if (nm not in 어제맵 and nm in 오늘맵) else ""
+        # 다리 ① — 이 현장이 '내 계좌 구역' 어느 줄인지 붙여준다.
+        #   독자가 "소캠(SOCAMM)이 격자 어디지?"를 스스로 추측하지 않아도 되게.
+        구역 = grid_slot_of(nm)
+        구역HTML = (f'<div style="font-size:9.5px;color:#22d3ee;margin-top:1px">'
+                  f'↳ {구역} 구역</div>') if 구역 else ''
         변동행.append(
             f'<div style="display:flex;justify-content:space-between;gap:8px;'
-            f'padding:4px 0;border-bottom:1px solid #1b212c">'
-            f'<span style="font-size:11.5px;color:#c9ced6">{re.sub(r"[（(].*", "", nm).strip()[:9]}{신규}</span>'
+            f'padding:5px 0;border-bottom:1px solid #1b212c">'
+            f'<div style="min-width:0"><span style="font-size:11.5px;color:#c9ced6">'
+            f'{re.sub(r"[（(].*", "", nm).strip()[:11]}{신규}</span>{구역HTML}</div>'
             f'<span style="font-size:11.5px;font-weight:700;color:{c};white-space:nowrap">{화}</span></div>')
     변동표 = ('<div style="margin:10px 0 0;padding-top:8px;border-top:1px solid #232a36">'
               '<p style="margin:0 0 4px;font-size:11.5px;color:#8b93a0;font-weight:700">'
               '📊 어제 대비 움직임</p>' + "".join(변동행) + '</div>') if 변동행 else ""
 
-    # ⚠️ 모든 섹터가 제자리인 날(휴장 등 데이터 동일)에 "정유 65 → 65"가
-    #    접근·이탈 양쪽에 뜨면 의미 없는 정보다. 실제 이동이 있을 때만 표시한다.
-    if 최대접근[1] > 0.5:
-        접근HTML = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
-                    f'<p style="margin:2px 0 10px;font-size:13.5px;font-weight:700;color:#4ade80">'
-                    f'{최대접근[0]}</p>')
-    else:
-        접근HTML = ('<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 접근</p>'
-                    '<p style="margin:2px 0 10px;font-size:13px;font-weight:700;color:#6f7784">'
-                    '오늘은 없음</p>')
-    if 최대이탈[1] > 0.5:
-        이탈HTML = (f'<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
-                    f'<p style="margin:2px 0 0;font-size:13.5px;font-weight:700;color:#a78bfa">'
-                    f'{최대이탈[0]}</p>')
-    else:
-        이탈HTML = ('<p style="margin:0;font-size:11.5px;color:#8b93a0">가장 빠르게 이탈</p>'
-                    '<p style="margin:2px 0 0;font-size:13px;font-weight:700;color:#6f7784">'
-                    '오늘은 없음</p>')
-    패널 = 접근HTML + 이탈HTML
+    # 접근/이탈은 짝을 이루는 정보라 나란히 두는 편이 비교가 쉽다.
+    #   좁은 화면에서 세로로 쌓이면 두 줄을 눈으로 왕복해야 해서 대비가 안 잡힌다.
+    def _칸(제목, 값, 색):
+        return (f'<div style="flex:1;min-width:0;background:#141922;border-radius:8px;'
+                f'padding:8px 9px">'
+                f'<p style="margin:0;font-size:10.5px;color:#8b93a0">{제목}</p>'
+                f'<p style="margin:3px 0 0;font-size:12.5px;font-weight:700;color:{색};'
+                f'word-break:keep-all;line-height:1.35">{값}</p></div>')
+    접근값, 접근색 = ((최대접근[0], "#4ade80") if 최대접근[1] > 0.5 else ("오늘은 없음", "#6f7784"))
+    이탈값, 이탈색 = ((최대이탈[0], "#a78bfa") if 최대이탈[1] > 0.5 else ("오늘은 없음", "#6f7784"))
+    패널 = ('<div style="display:flex;gap:7px">'
+            + _칸("가장 빠르게 접근", 접근값, 접근색)
+            + _칸("가장 빠르게 이탈", 이탈값, 이탈색) + '</div>')
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">관제 레이더</p>'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">뜨는 현장</p>'
             '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '오늘 관제탑에 가까워진 섹터</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
@@ -2073,10 +2160,12 @@ def build_sector_radar():
             f'{자취}{점}{라벨}</svg>'
             f'<div style="flex:1;min-width:150px">{패널}</div></div>'
             + 변동표
-            + '<div style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            + '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
-              '<p style="margin:0 0 5px;font-size:11.5px;color:#8b93a0;font-weight:700">'
-              '📖 이렇게 보세요</p>'
+              '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+              'cursor:pointer;list-style:none">📖 뜨는 현장 보는 방법 '
+              '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+              '<div style="height:6px"></div>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
               '<b style="color:#22d3ee">가운데 청록색 조준점이 관제탑</b>입니다. 섹터 점이 여기에 '
               '<b style="color:#9aa0aa">가까울수록 오늘 시장을 세게 끌고 갔다</b>는 뜻이고, '
@@ -2086,22 +2175,29 @@ def build_sector_radar():
               '<b style="color:#f0c65a">금색 =</b> 어제와 비슷한 자리<br>'
               '<b style="color:#9aa0aa">속 빈 점 → 꽉 찬 점</b>으로 이어진 선이 '
               '어제 자리에서 오늘 자리까지 움직인 거리입니다. 선이 길수록 하루 사이 변화가 큽니다.'
-              '</p></div>'
-            + '<div style="margin:8px 0 0;padding:9px 10px;background:#141c1e;'
+              '</p></details>'
+            + '<details style="margin:8px 0 0;padding:9px 10px;background:#141c1e;'
               'border-radius:8px;border:1px solid #1e3238">'
-              '<p style="margin:0 0 5px;font-size:11.5px;color:#22d3ee;font-weight:700">'
-              '🔗 내 계좌 좌표와 함께 보면</p>'
+              '<summary style="font-size:11.5px;color:#22d3ee;font-weight:700;'
+              'cursor:pointer;list-style:none">🔗 내 계좌 구역과 함께 보는 법 '
+              '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+              '<div style="height:6px"></div>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
-              '두 그림은 <b style="color:#9aa0aa">같은 하루를 다른 축으로</b> 본 것입니다.<br>'
-              '<b style="color:#9aa0aa">계좌 좌표</b>는 "얼마나 올랐나"(금액·등락률)를, '
-              '<b style="color:#9aa0aa">관제 레이더</b>는 "얼마나 시장을 끌었나"(거래대금·확산도까지 합친 주도력)를 봅니다.<br>'
-              '그래서 <b style="color:#e04a36">좌표는 빨간데 레이더에서는 바깥</b>이면 — '
+              '두 그림은 <b style="color:#9aa0aa">축척이 다른 같은 지도</b>입니다. '
+              '<b style="color:#9aa0aa">계좌 구역</b>은 안 바뀌는 <b style="color:#9aa0aa">주소</b>(내 종목이 사는 동네), '
+              '<b style="color:#22d3ee">뜨는 현장</b>은 매일 바뀌는 '
+              '<b style="color:#9aa0aa">사건 현장</b>(오늘 어디서 불이 났나)입니다. '
+              '그래서 현장 이름 밑에 <b style="color:#22d3ee">↳ 어느 구역</b>인지를 적어뒀고, '
+              '격자에서 불난 줄에는 🔥를 달았습니다.<br>'
+              '<b style="color:#9aa0aa">계좌 구역</b>은 "얼마나 올랐나"(등락률)를, '
+              '<b style="color:#9aa0aa">뜨는 현장</b>은 "얼마나 시장을 끌었나"(거래대금·확산도까지 합친 주도력)를 봅니다.<br>'
+              '그래서 <b style="color:#ff6b4a">구역은 빨간데 현장에서는 바깥</b>이면 — '
               '올랐지만 <b style="color:#9aa0aa">돈이 붙지 않은 상승</b>이라 오래가기 어렵습니다.<br>'
-              '반대로 <b style="color:#4ade80">레이더는 안쪽인데 좌표는 옅다</b>면 — '
+              '반대로 <b style="color:#22d3ee">현장은 안쪽인데 구역은 옅다</b>면 — '
               '아직 덜 올랐는데 <b style="color:#9aa0aa">돈이 먼저 들어오는</b> 자리일 수 있습니다.<br>'
               '<b style="color:#9aa0aa">둘 다 강하면</b> 오늘의 진짜 주인공, '
               '<b style="color:#9aa0aa">둘 다 약하면</b> 굳이 쫓을 이유가 없는 자리입니다.'
-              '</p></div>'
+              '</p></details>'
             + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
             '어제 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
 
@@ -2445,7 +2541,8 @@ def build_core(핵심편, data, 해석):
     #    → "수급으로 확인" → "그래서 내 계좌는 어디에(좌표·레이더)" 순서로 읽힌다.
     #    · 수급 변속기는 수급 타일 바로 밑(같은 맥락)으로 이동
     #    · 경사선·포착 항로는 분석 성격이 짙어 심층편으로 이동
-    격자블록 = build_account_grid(data.get("계좌격자")) + build_sector_radar()
+    격자블록 = (build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
+              + build_sector_radar())
     변속기블록 = build_flow_gearbox()
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
