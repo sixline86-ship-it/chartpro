@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l6"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.16-l7"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -2108,12 +2108,221 @@ def _zone_stat(일별, 시장, n):
             승, len(날짜들), 곡선)
 
 
+# ── 📋 내 종목 (v-l7 신규) ────────────────────────────────
+#  회원이 보유 종목을 입력하면
+#    ① 그 종목이 어느 구역인지
+#    ② 시장 대비 5/20/60일 성적이 어떤지
+#    ③ 오늘 그 종목의 뉴스·공시가 있는지
+#  를 한 자리에서 보여준다.
+#
+#  ⚠️ 설계 원칙: 입력값은 **브라우저에만** 저장한다(서버로 안 보낸다).
+#     계산도 전부 브라우저에서 한다 → 회원이 몇 명이든 서버 부담이 0이다.
+#     그래서 오늘 리포트 안에 '종목사전 20일치'를 미리 실어 보낸다.
+MYSTOCK_MAX = 10        # 입력 상한. 넘으면 화면이 길어져 오히려 안 읽힌다.
+MYSTOCK_DAYS = 60       # 페이지에 실어 보낼 최대 거래일 수
+
+
+def _mystock_payload():
+    """브라우저 계산용 데이터 묶음.
+
+    {"days":[날짜...], "mkt":[코스피등락...],
+     "stocks":{종목명:[구역들, 순위, 층, 시장]},
+     "ret":{종목명:[일별 등락률...]}}   ← ret는 days와 같은 길이(없는 날 null)
+    """
+    파일들 = sorted(alist(r"data_\d{8}\.json"))[-MYSTOCK_DAYS:]
+    days, per = [], {}
+    meta = {}
+    for f in 파일들:
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+        사전 = (d.get("계좌격자") or {}).get("종목사전") or {}
+        if not 사전:
+            continue
+        날짜 = d.get("날짜")
+        days.append(날짜)
+        for nm, v in 사전.items():
+            per.setdefault(nm, {})[날짜] = v[3] if len(v) > 3 else None
+            meta[nm] = [v[0] if v else [], v[1] if len(v) > 1 else None,
+                        v[2] if len(v) > 2 else None, v[4] if len(v) > 4 else None]
+    if not days:
+        return None
+    시장 = {}
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            for r in ((json.load(f) or {}).get("일별") or []):
+                시장[str(r.get("날짜", "")).replace("-", "")] = r.get("코스피등락")
+    except Exception:
+        pass
+    return {
+        "days": days,
+        "mkt": [시장.get(d) for d in days],
+        "stocks": meta,
+        "ret": {nm: [per[nm].get(d) for d in days] for nm in per},
+    }
+
+
+def build_my_stocks(data):
+    payload = _mystock_payload()
+    if not payload:
+        return ""
+    이름들 = sorted(payload["stocks"])
+    보유일 = len(payload["days"])
+
+    # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
+    뉴스 = [{"t": n.get("제목", ""), "u": n.get("링크", "")}
+           for n in (data.get("뉴스원본") or []) if n.get("제목")]
+    공시원 = data.get("공시")
+    공시목록 = 공시원.get("목록") if isinstance(공시원, dict) else (공시원 or [])
+    공시 = [{"c": g.get("회사명", ""), "t": (g.get("공시명") or "").strip(),
+            "s": g.get("별점"), "u": g.get("링크", "")}
+           for g in (공시목록 or []) if g.get("회사명")]
+
+    옵션 = "".join(f'<option value="{n}">' for n in 이름들)
+    PAY = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    NEWS = json.dumps(뉴스, ensure_ascii=False, separators=(",", ":"))
+    DISC = json.dumps(공시, ensure_ascii=False, separators=(",", ":"))
+
+    JS = ("""<script>
+(function(){
+ var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
+ var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
+ var WINDOWS=[[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=20;
+ function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
+ function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
+ function fmt(v){return (v>=0?'+':'')+v.toFixed(1);}
+ function calc(nm,n){
+  var r=P.ret[nm]; if(!r) return null;
+  var idx=[]; for(var i=0;i<P.days.length;i++){if(r[i]!=null&&P.mkt[i]!=null)idx.push(i);}
+  idx=idx.slice(-n); if(idx.length<2) return {short:true,have:idx.length};
+  var tc=1,mc=1,w=0;
+  idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100); if(r[i]>P.mkt[i])w++;});
+  return {ex:(tc-mc)*100, ret:(tc-1)*100, win:w, tot:idx.length};
+ }
+ function render(){
+  var my=get(), box=document.getElementById('ms-list');
+  if(!my.length){box.innerHTML='<p style="margin:14px 0;font-size:12px;color:#7d848f;'+
+   'text-align:center">위에 종목을 입력하면 구역과 시장 대비 성적을 보여드립니다</p>';
+   document.getElementById('ms-sum').innerHTML=''; return;}
+  var html='', exs=[];
+  my.forEach(function(nm){
+   var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,curW);
+   var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
+     'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
+     'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')||
+     '<span style="font-size:10px;color:#6f7784">구역 미분류</span>';
+   var right='';
+   if(c&&!c.short){exs.push(c.ex);
+    var col=c.ex>=0?'#ff6b4a':'#5b9bff';
+    right='<div style="text-align:right;flex:none;width:60px">'+
+     '<div style="font-size:12.5px;font-weight:800;color:'+col+'">'+fmt(c.ex)+'%p</div>'+
+     '<div style="font-size:9.5px;color:#7d848f">'+fmt(c.ret)+'%</div>'+
+     '<div style="font-size:9px;color:#6f7784">'+c.win+'/'+c.tot+'승</div></div>';
+   }else{right='<div style="text-align:right;flex:none;width:60px;font-size:10px;'+
+     'color:#6f7784">축적 중</div>';}
+   var tags='';
+   NEWS.forEach(function(n){if(n.t.indexOf(nm)>=0)tags+='<a href="'+n.u+'" target="_blank" '+
+    'style="display:block;font-size:10.5px;color:#8fb4ee;margin-top:3px;text-decoration:none">'+
+    '📰 '+n.t+'</a>';});
+   DISC.forEach(function(g){if(g.c===nm)tags+='<a href="'+g.u+'" target="_blank" '+
+    'style="display:block;font-size:10.5px;color:#e0c060;margin-top:3px;text-decoration:none">'+
+    '📄 '+g.t+(g.s?' ('+'★'.repeat(g.s)+')':'')+'</a>';});
+   html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c">'+
+    '<div style="display:flex;align-items:flex-start;gap:8px">'+
+    '<div style="flex:1;min-width:0">'+
+    '<div style="font-size:13px;font-weight:800;color:#e8eaee">'+nm+
+    '<span onclick="msDel(\\''+nm+'\\')" style="color:#6f7784;font-size:11px;'+
+    'margin-left:6px;cursor:pointer">✕</span></div>'+
+    '<div style="margin-top:4px">'+zones+'</div>'+
+    (m[1]?'<div style="font-size:9.5px;color:#6f7784;margin-top:3px">'+
+      (m[3]||'')+' · 시총 '+m[1]+'위 ('+(m[2]||'')+')</div>':'')+
+    tags+'</div>'+right+'</div></div>';
+  });
+  box.innerHTML=html;
+  var s=document.getElementById('ms-sum');
+  if(exs.length){var avg=exs.reduce(function(a,b){return a+b;},0)/exs.length;
+   var col=avg>=0?'#ff6b4a':'#5b9bff';
+   s.innerHTML='<div style="margin-top:9px;padding:9px 10px;background:#0f131a;'+
+    'border-radius:8px;display:flex;justify-content:space-between;align-items:center">'+
+    '<span style="font-size:11.5px;color:#c9ced6">내 종목 평균 (동일 비중)</span>'+
+    '<span style="font-size:14px;font-weight:800;color:'+col+'">'+fmt(avg)+'%p</span></div>';
+  }else{s.innerHTML='';}
+ }
+ window.msAdd=function(){
+  var el=document.getElementById('ms-in'), nm=(el.value||'').trim();
+  if(!nm) return;
+  if(!P.stocks[nm]){alert('목록에 없는 종목입니다. 자동완성에서 골라주세요.'); return;}
+  var my=get();
+  if(my.indexOf(nm)>=0){el.value=''; return;}
+  if(my.length>=MAX){alert('최대 '+MAX+'종목까지 담을 수 있습니다.'); return;}
+  my.push(nm); set(my); el.value=''; render();
+ };
+ window.msDel=function(nm){var my=get(),i=my.indexOf(nm);
+  if(i>=0){my.splice(i,1); set(my); render();}};
+ window.msWin=function(n){curW=n;
+  document.querySelectorAll('.ms-tab').forEach(function(t){
+   var on=+t.dataset.n===n;
+   t.style.background=on?'#2a3446':'#171c25';
+   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
+  render();};
+ if(document.readyState!=='loading'){render()}else{
+  document.addEventListener('DOMContentLoaded',render)}
+})();
+</script>""")
+
+    탭 = "".join(
+        f'<span class="ms-tab" data-n="{n}" onclick="msWin({n})" '
+        f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
+        f'cursor:pointer;font-weight:{800 if n==20 else 600};'
+        f'background:{"#2a3446" if n==20 else "#171c25"};'
+        f'color:{"#f0c65a" if n==20 else "#7d848f"};'
+        f'-webkit-tap-highlight-color:transparent">{이름}</span>'
+        for n, 이름 in [(5, "이번 주 (5일)"), (20, "한 달 (20일)"), (60, "분기 (60일)")])
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">내 종목</p>'
+            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '내 종목은 시장을 이기고 있나</p>'
+            '<p style="margin:0 0 10px;font-size:11px;color:#e0c060">'
+            f'최대 {MYSTOCK_MAX}종목 · 입력한 종목은 이 기기에만 저장되고 서버로 보내지 않습니다</p>'
+            f'<datalist id="ms-names">{옵션}</datalist>'
+            '<div style="display:flex;gap:6px;margin-bottom:10px">'
+            '<input id="ms-in" list="ms-names" placeholder="종목명 입력 (예: 삼성전자)" '
+            'style="flex:1;min-width:0;background:#0f131a;border:1px solid #2a3446;'
+            'border-radius:8px;padding:9px 10px;font-size:12.5px;color:#e8eaee;outline:none">'
+            '<button onclick="msAdd()" style="flex:none;background:#2a3446;border:none;'
+            'color:#f0c65a;font-size:12.5px;font-weight:800;border-radius:8px;'
+            'padding:9px 14px;cursor:pointer">추가</button></div>'
+            f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
+            '<div id="ms-list"></div><div id="ms-sum"></div>'
+            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            'border-radius:8px;border:1px solid #1e2531">'
+            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            'cursor:pointer;list-style:none">📖 내 종목 보는 방법 '
+            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            '<b style="color:#9aa0aa">%p</b>는 코스피보다 얼마나 더 벌었나입니다. '
+            '아래 작은 숫자는 실제 수익률, 그 아래는 그 기간 코스피를 이긴 날의 수입니다.<br>'
+            '<b style="color:#8fd0e8">파란 태그</b>가 그 종목이 속한 구역입니다. '
+            '한 종목이 두 구역에 걸치면 <b style="color:#9aa0aa">오늘 더 세게 움직인 구역</b>이 앞에 옵니다.<br>'
+            '<b style="color:#9aa0aa">내 종목 평균</b>은 모든 종목을 같은 금액씩 샀다고 가정한 값입니다. '
+            '실제 보유 비중은 받지 않으므로 참고용입니다.<br>'
+            f'📰 뉴스와 📄 공시는 <b style="color:#9aa0aa">오늘</b> 그 종목이 언급된 것만 붙습니다.'
+            '</p></details></div>' + JS)
+
+
 def build_zone_scoreboard():
     구역, 시장 = _zone_series()
     if not 구역 or not 시장:
         return ""
-    # 가장 짧은 창(5일)조차 못 채우면 아직 보여줄 게 없다.
-    if not any(_zone_stat(v, 시장, w) for v in 구역.values() for w in (5, 20, 60)):
+    # ⚠️ 예전엔 요건 미달이면 카드를 통째로 숨겼다.
+    #    그러면 "기능이 안 만들어졌다"로 보인다(실제로 그런 피드백을 받았다).
+    #    → 카드는 항상 내고, 각 탭에 며칠 남았는지 진행 막대를 보여준다.
+    보유일 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장))
+    if 보유일 < 1:
         return ""
 
     탭버튼, 패널 = "", ""
@@ -2128,8 +2337,16 @@ def build_zone_scoreboard():
         켬 = (idx == 1) if any(True for _ in 통계) else False
 
         if not 통계:
-            본문 = ('<p style="margin:14px 0;font-size:12px;color:#7d848f;text-align:center">'
-                   f'{부제}치가 아직 안 쌓였습니다 · 축적 중</p>')
+            필요 = ZONE_MIN.get(n, 5)
+            비율 = min(100, 보유일 / 필요 * 100)
+            본문 = ('<div style="padding:16px 6px;text-align:center">'
+                   f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
+                   f'{이름} 성적은 <b style="color:#f0c65a">{필요}거래일</b>이 쌓이면 열립니다</p>'
+                   f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
+                   f'<div style="width:{비율:.0f}%;height:100%;background:#f0c65a"></div></div>'
+                   f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
+                   f'지금 <b style="color:#e8eaee">{보유일}일</b> 모았습니다 · '
+                   f'{max(0, 필요-보유일)}거래일 남음</p></div>')
         else:
             mx = max(abs(x[1]) for x in 통계) or 1
             줄 = []
@@ -2351,7 +2568,22 @@ def build_zone_trend():
     if 본문들.get(1):
         기본idx = 1
     if 기본idx is None:
-        return ""
+        # 아직 어느 창도 못 채웠다 → 숨기지 말고 진행 상황을 보여준다.
+        보유 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장)) if 구역 else 0
+        비율 = min(100, 보유 / ZONE_MIN[5] * 100)
+        return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+                'padding:13px 14px;margin:10px 0 0">'
+                '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 추이</p>'
+                '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+                '누가 이겼고, 어떻게 이겼나</p>'
+                '<div style="padding:14px 6px;text-align:center">'
+                f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
+                f'추이 그래프는 <b style="color:#f0c65a">{ZONE_MIN[5]}거래일</b>이 쌓이면 열립니다</p>'
+                f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
+                f'<div style="width:{비율:.0f}%;height:100%;background:#f0c65a"></div></div>'
+                f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
+                f'지금 <b style="color:#e8eaee">{보유}일</b> 모았습니다 · '
+                f'{max(0, ZONE_MIN[5]-보유)}거래일 남음</p></div></div>')
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         본문 = 본문들[idx] or ('<p style="margin:14px 0;font-size:12px;color:#7d848f;'
                             f'text-align:center">{부제}치가 아직 안 쌓였습니다 · 축적 중</p>')
@@ -3099,7 +3331,9 @@ def build_core(핵심편, data, 해석):
     #    · 경사선·포착 항로는 분석 성격이 짙어 심층편으로 이동
     # 순서 의도: 💰수급(외국인·기관=큰돈) → 🧭나침반(개인=군중) → 격자·레이더
     #   같은 하루를 '큰돈'과 '군중' 두 시선으로 잇따라 보여준다.
+    # 순서 의도: 내 종목(가장 개인적) → 내 구역 → 구역 성적 → 시장 전체
     격자블록 = (build_crowd_compass(data.get("군중나침반"))
+              + build_my_stocks(data)
               + build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
               + build_zone_scoreboard()
               + build_sector_radar())
