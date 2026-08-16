@@ -12,6 +12,7 @@ import os
 import requests
 from datetime import datetime
 
+SCRIPT_VERSION = "v2026.08.16-l6"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
 DATE = datetime.now().strftime("%Y%m%d")
 REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
                if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
@@ -79,7 +80,7 @@ def main():
                     timeout=30,
                 )
             if r.status_code == 200:
-                print(f"✅ 텔레그램 전송 완료 (썸네일 직접 첨부: {사진})")
+                print(f"✅ 텔레그램 전송 완료 (썸네일 직접 첨부: {사진}) [{SCRIPT_VERSION}]")
                 return
             print(f"⚠️ sendPhoto 실패 HTTP {r.status_code}: {r.text[:200]} — 글만 재시도합니다")
         except Exception as e:
