@@ -10,7 +10,10 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l5"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.16-l6"   # ⬅ 버전 표시
+                             #    5개 파일(build_html/generate_report/collect_data/
+                             #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
+                             #    번호가 다르면 일부 파일만 올라간 것이다.
 
 # ── 거래일 계산 (v-k5 신규) ──────────────────────────────
 #  왜 필요한가: 금요일 리포트가 "내일 확인하세요"라고 쓰면 틀린 안내가 된다.
@@ -2044,6 +2047,364 @@ def _polar(cx, cy, score, slot):
     return cx + r * _m.cos(a), cy + r * _m.sin(a)
 
 
+# ── 📊 구역 성적표 — 시장 대비 누적 성과 (v-l6 신규) ──────────
+#  무엇: 각 계좌 구역이 코스피를 얼마나 이겼는지 5/20/60일 창으로 집계한다.
+#
+#  ⚠️ 왜 '초과수익(%p)'을 주인공으로 두나:
+#     누적 수익률만 그리면 지수가 흔들 때 모든 구역이 같이 흔들려
+#     "어느 구역이 잘했나"가 곡선 모양에서 안 읽힌다.
+#     시장을 빼면 그 공통 소음이 사라지고 순수 실력만 남는다.
+#
+#  ⚠️ 재료: archive/data_*.json의 계좌격자(행별 '전체') + market_history의 코스피등락.
+#     계좌격자는 최근에 생긴 코너라 이력이 짧다 → 5일치도 못 채우면 통째로 생략한다.
+ZONE_WINDOWS = [(5, "이번 주", "5일"), (20, "한 달", "20일"), (60, "분기", "60일")]
+ZONE_TOP_N = 5          # 처음에 펼쳐 보여줄 줄 수 (나머지는 '더보기')
+#  창별 최소 관측일 — 이만큼 없으면 그 탭은 "축적 중"으로 둔다.
+#  ⚠️ 2일치로 "이번 주 성적"이라고 쓰면 거짓말이 된다. 없는 비교는 만들지 않는다.
+ZONE_MIN = {5: 5, 20: 10, 60: 30}
+
+
+def _zone_series():
+    """{구역명: {날짜: 등락률}} 과 {날짜: 시장등락률}을 만든다."""
+    구역 = {}
+    for f in sorted(alist(r"data_\d{8}\.json")):
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+        날짜 = d.get("날짜")
+        for r in ((d.get("계좌격자") or {}).get("행") or []):
+            v, nm = r.get("전체"), r.get("테마")
+            if nm and isinstance(v, (int, float)):
+                구역.setdefault(nm, {})[날짜] = v
+    시장 = {}
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            for r in ((json.load(f) or {}).get("일별") or []):
+                v = r.get("코스피등락")
+                if isinstance(v, (int, float)):
+                    시장[str(r.get("날짜", "")).replace("-", "")] = v
+    except Exception:
+        pass
+    return 구역, 시장
+
+
+def _zone_stat(일별, 시장, n):
+    """최근 n거래일 성적. 반환 (초과%p, 수익률%, 승, 총, 곡선[(날짜,초과누적)])"""
+    날짜들 = sorted(set(일별) & set(시장))[-n:]
+    if len(날짜들) < ZONE_MIN.get(n, 5):
+        return None
+    tc = mc = 1.0
+    곡선 = []
+    승 = 0
+    for d in 날짜들:
+        t, m = 일별[d], 시장[d]
+        tc *= (1 + t / 100); mc *= (1 + m / 100)
+        if t > m:
+            승 += 1
+        곡선.append((d, round((tc - mc) * 100, 2)))
+    return (round((tc - mc) * 100, 2), round((tc - 1) * 100, 2),
+            승, len(날짜들), 곡선)
+
+
+def build_zone_scoreboard():
+    구역, 시장 = _zone_series()
+    if not 구역 or not 시장:
+        return ""
+    # 가장 짧은 창(5일)조차 못 채우면 아직 보여줄 게 없다.
+    if not any(_zone_stat(v, 시장, w) for v in 구역.values() for w in (5, 20, 60)):
+        return ""
+
+    탭버튼, 패널 = "", ""
+    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
+        통계 = []
+        for nm, 일별 in 구역.items():
+            st = _zone_stat(일별, 시장, n)
+            if st:
+                통계.append((nm,) + st)
+        통계.sort(key=lambda x: -x[1])
+        활성 = idx == 1 and 통계 or (idx == 0 and 통계)
+        켬 = (idx == 1) if any(True for _ in 통계) else False
+
+        if not 통계:
+            본문 = ('<p style="margin:14px 0;font-size:12px;color:#7d848f;text-align:center">'
+                   f'{부제}치가 아직 안 쌓였습니다 · 축적 중</p>')
+        else:
+            mx = max(abs(x[1]) for x in 통계) or 1
+            줄 = []
+            for i, (nm, 초, 수, 승, 총, _) in enumerate(통계):
+                c = "#ff6b4a" if 초 >= 0 else "#5b9bff"
+                wd = abs(초) / mx * 48
+                바 = (f'<div style="position:absolute;left:50%;width:{wd:.1f}%;height:100%;'
+                     f'background:{c};border-radius:0 3px 3px 0"></div>' if 초 >= 0 else
+                     f'<div style="position:absolute;right:50%;width:{wd:.1f}%;height:100%;'
+                     f'background:{c};border-radius:3px 0 0 3px"></div>')
+                # ⚠️ display가 두 번 선언되면 뒤엣것이 이긴다 →
+                #    숨김은 유일한 display 값이어야 한다(예전 버그).
+                더클래스 = " zn-more" if i >= ZONE_TOP_N else ""
+                표시 = "none" if i >= ZONE_TOP_N else "flex"
+                줄.append(
+                    f'<div class="zn-row{더클래스}" data-zone="{nm}" '
+                    f'style="display:{표시};align-items:center;gap:7px;'
+                    f'padding:6px 7px;margin-bottom:3px;border-radius:8px">'
+                    f'<span class="zn-star" onclick="znTog(this)" '
+                    f'style="flex:none;font-size:13px;cursor:pointer;opacity:.25;'
+                    f'-webkit-tap-highlight-color:transparent">★</span>'
+                    f'<div style="flex:1;min-width:0">'
+                    f'<div class="zn-name" style="font-size:11.5px;color:#e8eaee;font-weight:600;'
+                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{nm}</div>'
+                    f'<div style="font-size:9.5px;color:#7d848f;margin-top:1px">'
+                    f'{승}승 {총-승}패 · {승/총*100:.0f}%</div></div>'
+                    f'<div style="flex:1;position:relative;height:20px;background:#161b24;'
+                    f'border-radius:4px;min-width:52px">'
+                    f'<div style="position:absolute;left:50%;top:-2px;width:1px;height:24px;'
+                    f'background:#3a4150"></div>{바}</div>'
+                    f'<div style="width:50px;flex:none;text-align:right">'
+                    f'<div style="font-size:12px;font-weight:800;color:{c}">{초:+.1f}%p</div>'
+                    f'<div style="font-size:9.5px;color:#7d848f">{수:+.1f}%</div></div></div>')
+            더보기 = ""
+            if len(통계) > ZONE_TOP_N:
+                더보기 = (f'<p onclick="znMore(this)" style="margin:7px 0 0;font-size:11.5px;'
+                        f'color:#e0c060;text-align:center;cursor:pointer;font-weight:700;'
+                        f'-webkit-tap-highlight-color:transparent">'
+                        f'▾ 나머지 {len(통계)-ZONE_TOP_N}개 더보기</p>')
+            본문 = "".join(줄) + 더보기
+        패널 += (f'<div class="zn-panel" data-idx="{idx}" '
+                f'style="display:{"block" if idx == 1 else "none"}">{본문}</div>')
+        탭버튼 += (f'<span class="zn-tab" data-idx="{idx}" onclick="znTab({idx})" '
+                 f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;'
+                 f'border-radius:7px;cursor:pointer;font-weight:{800 if idx==1 else 600};'
+                 f'background:{"#2a3446" if idx==1 else "#171c25"};'
+                 f'color:{"#f0c65a" if idx==1 else "#7d848f"};'
+                 f'-webkit-tap-highlight-color:transparent">{이름} ({부제})</span>')
+
+    JS = """<script>
+(function(){
+ var K='chartpro_myzones';
+ function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
+ function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
+ window.znPaint=function(){var my=get();
+  document.querySelectorAll('.zn-row').forEach(function(r){
+   var on=my.indexOf(r.dataset.zone)>=0;
+   r.style.background=on?'#1e2536':'transparent';
+   r.style.boxShadow=on?'inset 0 0 0 1.5px #f0c65a':'none';
+   var s=r.querySelector('.zn-star');
+   s.style.opacity=on?'1':'.25'; s.style.color=on?'#f0c65a':'#7d848f';
+   r.querySelector('.zn-name').style.fontWeight=on?'800':'600';});};
+ window.znTog=function(el){var z=el.closest('.zn-row').dataset.zone,my=get();
+  var i=my.indexOf(z); if(i>=0){my.splice(i,1)}else{my.push(z)} set(my); znPaint();};
+ window.znTab=function(i){
+  document.querySelectorAll('.zn-panel').forEach(function(p){
+   p.style.display=(p.dataset.idx==i)?'block':'none';});
+  document.querySelectorAll('.zn-tab').forEach(function(t){
+   var on=t.dataset.idx==i;
+   t.style.background=on?'#2a3446':'#171c25';
+   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
+  znPaint();};
+ window.znMore=function(el){
+  var p=el.closest('.zn-panel'),h=p.querySelectorAll('.zn-more');
+  var open=h.length&&h[0].style.display!=='none';
+  h.forEach(function(r){r.style.display=open?'none':'flex';});
+  el.textContent=open?('▾ 나머지 '+h.length+'개 더보기'):'▴ 접기';
+  znPaint();};
+ if(document.readyState!=='loading'){znPaint()}else{
+  document.addEventListener('DOMContentLoaded',znPaint)}
+})();
+</script>"""
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 성적표</p>'
+            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '어느 구역이 시장을 이겼나</p>'
+            '<p style="margin:0 0 10px;font-size:11px;color:#e0c060">'
+            '★ 을 누르면 내 구역으로 저장됩니다 (이 기기에서만)</p>'
+            f'<div style="display:flex;gap:6px;margin-bottom:11px">{탭버튼}</div>'
+            + 패널 +
+            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            'border-radius:8px;border:1px solid #1e2531">'
+            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            'cursor:pointer;list-style:none">📖 구역 성적표 보는 방법 '
+            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            '<b style="color:#9aa0aa">%p(퍼센트포인트)</b>는 코스피보다 얼마나 더 벌었나입니다. '
+            '가운데 세로선이 코스피(0)이고, 오른쪽으로 뻗을수록 시장을 크게 이긴 구역입니다.<br>'
+            '<b style="color:#9aa0aa">승패</b>는 그 기간 동안 하루하루 코스피를 이긴 날의 수입니다. '
+            '초과수익이 커도 승률이 낮으면 <b style="color:#9aa0aa">하루 크게 번 것</b>이고, '
+            '승률이 높으면 <b style="color:#9aa0aa">꾸준히 강한 구역</b>입니다.<br>'
+            '<b style="color:#9aa0aa">작은 회색 숫자</b>는 실제 수익률입니다. '
+            '시장이 함께 내린 날은 이 값이 마이너스라도 시장을 이겼을 수 있습니다.<br>'
+            '<b style="color:#f0c65a">내 구역이 아래쪽에 있다면</b> — 종목 선택이 아니라 '
+            '<b style="color:#9aa0aa">자리</b>가 불리했다는 뜻입니다. '
+            '그 구역 안에서는 무엇을 골랐어도 시장을 이기기 어려웠습니다.'
+            '</p></details></div>' + JS)
+
+
+def _zone_trend_panel(n, 구역, 시장):
+    """한 기간(n일)의 순위표 + 곡선 본문. 없으면 빈 문자열."""
+    """📈 구역 초과수익 추이 — 심층편용 '순위가 만들어진 과정'.
+
+    핵심편 성적표는 **결론**(지금 몇 등인가)을 주고,
+    이 차트는 **과정**(어떻게 그 등수가 됐나)을 준다.
+
+    ⚠️ 초과수익(구역 − 코스피)만 그린다. 누적 수익률을 그대로 그리면
+       지수가 흔들 때 모든 곡선이 같이 흔들려 우열이 안 읽힌다.
+    ⚠️ '내 구역'은 브라우저에만 있으므로 서버가 모른다.
+       → 모든 구역의 선을 그려두고 기본은 숨긴 뒤, JS가 내 구역만 켠다.
+    """
+    통계 = []
+    for nm, 일별 in 구역.items():
+        st = _zone_stat(일별, 시장, n)
+        if st:
+            통계.append((nm, st[0], st[2], st[3], st[4]))
+    if len(통계) < 2:
+        return ""
+    통계.sort(key=lambda x: -x[1])
+    기본 = [x[0] for x in 통계[:3]] + [x[0] for x in 통계[-2:]]
+
+    날짜 = [d for d, _ in 통계[0][4]]
+    vals = [v for x in 통계 for _, v in x[4]]
+    lo, hi = min(vals + [0]), max(vals + [0])
+    W, H, L, R, T, B = 360, 175, 34, 12, 14, 24
+
+    def PX(i): return L + i * (W - L - R) / max(1, len(날짜) - 1)
+    def PY(v): return T + (hi - v) / max(0.01, hi - lo) * (H - T - B)
+
+    # ⚠️ 금색(#f0c65a)은 '내 구역' 전용이라 팔레트에서 뺀다.
+    #    기본 선이 금색이면 내 구역과 구분이 안 된다(실제로 겹쳤던 버그).
+    팔레트 = ["#ff6b4a", "#4ade80", "#22d3ee", "#a78bfa", "#5b9bff", "#f472b6"]
+    g = (f'<rect x="{L}" y="{T}" width="{W-L-R}" height="{PY(0)-T:.0f}" fill="#ff6b4a" opacity=".05"/>'
+         f'<rect x="{L}" y="{PY(0):.0f}" width="{W-L-R}" height="{H-B-PY(0):.0f}" '
+         f'fill="#5b9bff" opacity=".05"/>'
+         f'<line x1="{L}" y1="{PY(0):.0f}" x2="{W-R}" y2="{PY(0):.0f}" '
+         f'stroke="#8b93a0" stroke-width="1.4"/>')
+    for k, (nm, 초, 승, 총, 곡선) in enumerate(통계):
+        보임 = nm in 기본
+        c = 팔레트[k % len(팔레트)] if 보임 else "#7d848f"
+        pts = " ".join(f"{PX(i):.0f},{PY(v):.0f}" for i, (_, v) in enumerate(곡선))
+        g += (f'<polyline class="zt-line" data-zone="{nm}" points="{pts}" fill="none" '
+              f'stroke="{c}" stroke-width="1.8" opacity="{0.75 if 보임 else 0}"/>')
+    for t in (hi, 0, lo):
+        g += (f'<text x="{L-4}" y="{PY(t)+3:.0f}" text-anchor="end" font-size="8" '
+              f'fill="#6f7784">{t:+.0f}</text>')
+    g += (f'<text x="{L}" y="{H-6}" font-size="8.5" fill="#6f7784">{날짜[0][4:6]}/{날짜[0][6:]}</text>'
+          f'<text x="{W-R}" y="{H-6}" text-anchor="end" font-size="8.5" fill="#6f7784">'
+          f'{날짜[-1][4:6]}/{날짜[-1][6:]}</text>')
+
+    범례 = ""
+    for k, (nm, 초, 승, 총, _) in enumerate(통계):
+        if nm not in 기본:
+            continue
+        범례 += (f'<span style="font-size:10px;color:{팔레트[k % len(팔레트)]}">— {nm}</span>')
+
+    순위 = ""
+    보일줄 = 통계[:3] + 통계[-2:]
+    for i, (nm, 초, 승, 총, _) in enumerate(보일줄):
+        c = "#ff6b4a" if 초 >= 0 else "#5b9bff"
+        순위 += (f'<div class="zt-row" data-zone="{nm}" style="display:flex;align-items:center;'
+               f'gap:7px;padding:5px 7px;border-radius:7px;margin-bottom:3px;background:#171c25">'
+               f'<span style="width:14px;flex:none;font-size:10px;color:#7d848f;font-weight:800">'
+               f'{i+1 if i < 3 else "·"}</span>'
+               f'<span class="zt-name" style="flex:1;min-width:0;font-size:11.5px;color:#e8eaee;'
+               f'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{nm}</span>'
+               f'<span style="font-size:10px;color:#7d848f;flex:none">{승}/{총}승</span>'
+               f'<span style="width:50px;flex:none;text-align:right;font-size:12px;'
+               f'font-weight:800;color:{c}">{초:+.1f}%p</span></div>')
+
+    JS = """<script>
+(function(){
+ function my(){try{return JSON.parse(localStorage.getItem('chartpro_myzones'))||[]}catch(e){return []}}
+ function paint(){var m=my();
+  document.querySelectorAll('.zt-line').forEach(function(l){
+   if(m.indexOf(l.dataset.zone)>=0){l.setAttribute('stroke','#f0c65a');
+    l.setAttribute('stroke-width','3.4'); l.setAttribute('opacity','1');}});
+  document.querySelectorAll('.zt-row').forEach(function(r){
+   if(m.indexOf(r.dataset.zone)>=0){r.style.background='#1e2536';
+    r.style.boxShadow='inset 0 0 0 1.5px #f0c65a';
+    r.querySelector('.zt-name').style.fontWeight='800';}});}
+ if(document.readyState!=='loading'){paint()}else{
+  document.addEventListener('DOMContentLoaded',paint)}
+})();
+</script>"""
+
+    return (순위 + '<div style="height:9px"></div>'
+            + f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+              f'style="width:100%;max-width:520px;height:auto;display:block">{g}</svg>'
+            + f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">{범례}</div>')
+
+
+def build_zone_trend():
+    """📈 구역 추이 — 5/20/60일 탭. 성적표와 같은 창 구성이라 눈이 안 헷갈린다."""
+    구역, 시장 = _zone_series()
+    if not 구역 or not 시장:
+        return ""
+    탭, 패널, 있음 = "", "", False
+    기본idx = None
+    본문들 = {}
+    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
+        본문 = _zone_trend_panel(n, 구역, 시장)
+        본문들[idx] = 본문
+        if 본문 and 기본idx is None:
+            기본idx = idx
+    # 기본 탭은 '한 달'이 있으면 한 달, 없으면 채워진 첫 탭
+    if 본문들.get(1):
+        기본idx = 1
+    if 기본idx is None:
+        return ""
+    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
+        본문 = 본문들[idx] or ('<p style="margin:14px 0;font-size:12px;color:#7d848f;'
+                            f'text-align:center">{부제}치가 아직 안 쌓였습니다 · 축적 중</p>')
+        켬 = idx == 기본idx
+        패널 += (f'<div class="zt-panel" data-idx="{idx}" '
+                f'style="display:{"block" if 켬 else "none"}">{본문}</div>')
+        탭 += (f'<span class="zt-tab" data-idx="{idx}" onclick="ztTab({idx})" '
+              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
+              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
+              f'background:{"#2a3446" if 켬 else "#171c25"};'
+              f'color:{"#f0c65a" if 켬 else "#7d848f"};'
+              f'-webkit-tap-highlight-color:transparent">{이름} ({부제})</span>')
+
+    JS = """<script>
+(function(){
+ function my(){try{return JSON.parse(localStorage.getItem('chartpro_myzones'))||[]}catch(e){return []}}
+ window.ztPaint=function(){var m=my();
+  document.querySelectorAll('.zt-line').forEach(function(l){
+   if(m.indexOf(l.dataset.zone)>=0){l.setAttribute('stroke','#f0c65a');
+    l.setAttribute('stroke-width','3.4'); l.setAttribute('opacity','1');}});
+  document.querySelectorAll('.zt-row').forEach(function(r){
+   if(m.indexOf(r.dataset.zone)>=0){r.style.background='#1e2536';
+    r.style.boxShadow='inset 0 0 0 1.5px #f0c65a';
+    r.querySelector('.zt-name').style.fontWeight='800';}});};
+ window.ztTab=function(i){
+  document.querySelectorAll('.zt-panel').forEach(function(p){
+   p.style.display=(p.dataset.idx==i)?'block':'none';});
+  document.querySelectorAll('.zt-tab').forEach(function(t){
+   var on=t.dataset.idx==i;
+   t.style.background=on?'#2a3446':'#171c25';
+   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
+  ztPaint();};
+ if(document.readyState!=='loading'){ztPaint()}else{
+  document.addEventListener('DOMContentLoaded',ztPaint)}
+})();
+</script>"""
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 추이</p>'
+            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '누가 이겼고, 어떻게 이겼나</p>'
+            f'<div style="display:flex;gap:6px;margin-bottom:11px">{탭}</div>'
+            + 패널
+            + '<p style="margin:8px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+              '위는 <b style="color:#9aa0aa">순위</b>, 아래는 그 순위가 만들어진 '
+              '<b style="color:#9aa0aa">과정</b>입니다. 가로선이 코스피(0)이고 '
+              '위=이기는 중, 아래=지는 중입니다.<br>'
+              '핵심편 성적표에서 <b style="color:#f0c65a">★</b>로 고른 구역은 '
+              '<b style="color:#f0c65a">금색 굵은 선</b>으로 표시됩니다.</p>'
+            '</div>' + JS)
+
+
 def build_crowd_compass(나침반):
     """🧭 군중 나침반 — 개인이 상승과 하락 중 어느 쪽에 돈을 걸었나.
 
@@ -2740,6 +3101,7 @@ def build_core(핵심편, data, 해석):
     #   같은 하루를 '큰돈'과 '군중' 두 시선으로 잇따라 보여준다.
     격자블록 = (build_crowd_compass(data.get("군중나침반"))
               + build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
+              + build_zone_scoreboard()
               + build_sector_radar())
     변속기블록 = build_flow_gearbox()
 
@@ -3652,6 +4014,11 @@ def build_html(data, report):
     오늘의공부 = 해석.get("오늘의_공부", "")
     # 3개월 항로 — 이력이 충분할 때만 별도 섹션으로 붙는다(부족하면 빈 문자열).
     # 시장을 나눠 두 장으로 — 코스닥은 변동폭이 구조적으로 커서 섞으면 평균이 끌려간다.
+    # 구역 추이 — 데이터가 부족하면 빈 문자열이라 섹션째 사라진다.
+    _zt = build_zone_trend()
+    _zone_trend_block = (
+        '<p class="sec-label"><small>구역 추이</small>📈 어느 구역이 시장을 이겼나</p>' + _zt
+    ) if _zt else ""
     _c1 = (build_capture_path(1, "코스피") + build_capture_path(1, "코스닥")) or build_capture_path(1)
     _c3 = (build_capture_path(3, "코스피") + build_capture_path(3, "코스닥"))
     # 수급편 — 매집 추적은 오늘부터 쌓이므로 충분해지기 전에는 자동으로 생략된다.
@@ -4564,6 +4931,8 @@ a{{color:inherit;text-decoration:none}}
             f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
+
+  {_zone_trend_block}
 
   <p class="sec-label"><small>크기별 경사</small>📐 대형이 끌었나, 소형이 끌었나</p>
   {build_slope_chart(data.get('계좌격자'))}
