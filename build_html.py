@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l7"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.17-m1"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -471,6 +471,10 @@ def one_sector_card(a):
     head_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
     점수 = a.get("주도력점수", "—")
     강도배지 = sector_strength_badge(a.get('테마명'))
+    # 이 현장이 '내 종목 구역'의 어느 줄인지 이어준다(두 지도를 잇는 다리).
+    _구역 = a.get("계좌구역") or grid_slot_of(a.get("테마명"))
+    구역배지 = (f'<p style="margin:2px 0 0;font-size:10px;color:#22d3ee">'
+              f'↳ {_구역} 구역</p>') if _구역 else ''
     return f'''
     <div class="sector-card">
       <div class="sc-head {head_cls}">
@@ -478,6 +482,7 @@ def one_sector_card(a):
           <span class="sc-chg {badge_cls}">{et_s}</span></div>
         <p class="sc-score">주도력 {점수}점</p>
         {f'<p class="sc-strline">{강도배지}</p>' if 강도배지 else ''}
+        {구역배지}
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>현재가</span><span>등락률</span><span>거래대금</span></div>
@@ -553,7 +558,7 @@ def build_terrain(주도섹터):
 
 def build_sectors(주도섹터, 설정=None):
     if not 주도섹터:
-        return '<p class="smut">오늘 수집된 주도 섹터 데이터가 없습니다.</p>'
+        return '<p class="smut">오늘 수집된 데이터가 없습니다.</p>'
     앞2 = 주도섹터[:2]
     뒤4 = 주도섹터[2:6]
     앞 = "".join(one_sector_card(a) for a in 앞2)
@@ -562,7 +567,7 @@ def build_sectors(주도섹터, 설정=None):
     if 뒤4:
         더보기 = f'''
   <div class="hidden-block" id="moreSectors"><div class="sector-grid">{뒤}</div></div>
-  <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 주도 섹터 더보기 ({len(뒤4)}개)')">▾ 주도 섹터 더보기 ({len(뒤4)}개)</button>'''
+  <button class="more-btn" onclick="toggleMore('moreSectors',this,'▾ 나머지 {len(뒤4)}개 더보기')">▾ 나머지 {len(뒤4)}개 더보기</button>'''
     return f'<div class="sector-grid">{앞}</div>{더보기}'
 
 
@@ -1245,7 +1250,12 @@ def _mh_rank(rows, key, val):
         동방향 = sorted([v for v in vals if v >= 0], reverse=True)
     else:
         동방향 = sorted([v for v in vals if v < 0])
-    순 = 동방향.index(val) + 1
+    # ⚠️ val이 rows에 없을 수 있다(오늘 행이 아직 안 쌓였거나 다른 소스에서 온 값).
+    #    그대로 index()를 부르면 ValueError로 리포트 전체가 죽는다 → 순위로 계산한다.
+    if val not in 동방향:
+        순 = sum(1 for v in 동방향 if (v > val if val >= 0 else v < val)) + 1
+    else:
+        순 = 동방향.index(val) + 1
     if 순 <= 3:
         return f"{len(vals)}일 중 {'매수' if val >= 0 else '매도'} {순}위"
     return None      # 상위 3위 안일 때만 배지로 보여줄 가치가 있다
@@ -1647,9 +1657,14 @@ def _spark_svg(vals, w=120, h=22):
             f'stroke-linejoin="round" opacity=".85"/></svg>')
 
 
+_GRID_SEQ = [0]   # 같은 표가 여러 번 그려질 때 id가 겹치지 않게 하는 일련번호
+
+
 def build_account_grid(격자, 주도섹터=None):
     # 다리 ② — 오늘 '뜨는 현장'이 속한 구역 줄에 불을 붙인다.
     #   격자만 보고도 "내 구역에 오늘 불이 났나"를 알 수 있게 한다.
+    _GRID_SEQ[0] += 1
+    _pfx = f"g{_GRID_SEQ[0]}"      # 이 표 전용 id 접두어
     불난구역 = {}
     for s in (주도섹터 or []):
         슬 = s.get("계좌구역") or grid_slot_of(s.get("테마명"))
@@ -1670,15 +1685,6 @@ def build_account_grid(격자, 주도섹터=None):
     프리미엄 = 격자.get("크기프리미엄")
 
     # 열 폭 고정 — 테마 칸을 넉넉히 주고 나머지를 균등 분배해야 모바일에서 안 깨진다.
-    # 오늘 가장 뜨거웠던 칸 하나에만 금색 테두리 → 시선의 출발점을 만든다.
-    #   (색 농담만으로는 "제일 강한 데가 어디"를 찾는 데 시간이 걸린다)
-    _최강, _최강값 = None, None
-    for _r in 행들:
-        for _층 in ("대형", "중형", "소형"):
-            _v = ((_r.get("칸") or {}).get(_층) or {}).get("등락률")
-            if isinstance(_v, (int, float)) and (_최강값 is None or _v > _최강값):
-                _최강값, _최강 = _v, (_r.get("테마"), _층)
-
     콜 = ('<colgroup><col style="width:33%"><col style="width:16.75%">'
           '<col style="width:16.75%"><col style="width:16.75%"><col style="width:16.75%"></colgroup>')
 
@@ -1697,7 +1703,8 @@ def build_account_grid(격자, 주도섹터=None):
             + "".join(f'<th style="padding:6px 1px;font-size:11.5px;color:#9aa0aa;font-weight:600;text-align:center">'
                       f'{층}<br><span style="font-size:9px;opacity:.65;white-space:nowrap">'
                       f'{_짧은기준(층)}</span>'
-                      f'<br><span style="font-size:9px;color:#e0c060;white-space:nowrap">'
+                      f'<br><span style="display:block;font-size:8.5px;color:#e0c060;'
+                      f'line-height:1.2;overflow:hidden;text-overflow:ellipsis">'
                       f'{_시총기준(층)}</span></th>'
                       for 층 in ("대형", "중형", "소형"))
             + '<th style="padding:6px 1px;font-size:12px;color:#e8eaee;font-weight:700;text-align:center">전체</th></tr>')
@@ -1709,12 +1716,15 @@ def build_account_grid(격자, 주도섹터=None):
             c = (r.get("칸") or {}).get(층) or {}
             v = c.get("등락률")
             if v is None:
-                칸들.append('<td style="padding:7px 2px;text-align:center;font-size:12px;'
+                칸들.append(f'<td class="ag-cell" data-cell="{r.get("테마")}|{층}" '
+                            'style="padding:7px 2px;text-align:center;font-size:12px;'
                             'color:#6b7280;background:#ffffff08;border-radius:4px">—</td>')
             else:
-                _링 = ('box-shadow:inset 0 0 0 2px #f0c65a;'
-                      if _최강 == (r.get("테마"), 층) else '')
-                칸들.append(f'<td style="padding:7px 2px;text-align:center;font-size:12.5px;'
+                # ⚠️ 표 안의 테두리는 '내 관심종목 칸(금색)' 하나만 쓴다.
+                #    오늘 최강 칸 강조는 없앴다 — 테두리가 두 종류면 서로 헷갈린다.
+                _링 = ''
+                칸들.append(f'<td class="ag-cell" data-cell="{r.get("테마")}|{층}" '
+                            f'style="padding:7px 2px;text-align:center;font-size:12.5px;'
                             f'background:{_grid_cell_color(v)};border-radius:4px;{_링}'
                             f'{_grid_text_style(v)}">{v:+.1f}</td>')
         전 = r.get("전체")
@@ -1732,7 +1742,7 @@ def build_account_grid(격자, 주도섹터=None):
         # 모바일(가로 360px)에서 표가 잘리지 않게: 테마명은 '·' 뒤에서 줄바꿈을 허용한다.
         #   예) '인터넷·게임·엔터' → '인터넷·' / '게임·' / '엔터' 로 접힘
         #   nowrap을 유지하면 이 한 칸이 표 전체 폭을 밀어내 가로 스크롤이 생긴다.
-        rid = f"gr{len(몸)}"
+        rid = f"{_pfx}r{len(몸)}"
         # ⚠️ 화살표가 혼자 다음 줄로 떨어지던 문제:
         #    테마명을 '·'에서 접히게 해뒀는데 화살표를 그냥 뒤에 붙이면
         #    마지막 조각과 분리될 수 있다. 마지막 조각과 화살표를 한 덩어리로 묶는다.
@@ -1798,28 +1808,9 @@ def build_account_grid(격자, 주도섹터=None):
             테마셀 = (f'<td title="{_풀}" style="padding:7px 3px 7px 2px;font-size:11.5px;'
                     f'color:#d5d9e0"><span style="display:flex;align-items:center">'
                     f'{테마명_평}</span></td>')
-        몸.append('<tr>' + 테마셀 + "".join(칸들) + 전칸 + '</tr>' + 접힘)
+        몸.append(f'<tr class="ag-row" data-zone="{_풀}">'
+                 + 테마셀 + "".join(칸들) + 전칸 + '</tr>' + 접힘)
 
-    # ── 표 맨 아래 '20일 추이' 행 — 격자 열과 세로로 줄을 맞춘다 ──
-    #   예전엔 표 밖에 대형/중형/소형이 세로 3줄로 쌓여 있어서
-    #   "이게 위 표의 어느 열 이야기인지" 눈으로 잇기가 어려웠다.
-    #   표 안의 행으로 넣으면 열이 자동으로 정렬된다.
-    이력 = _load_strata_history()
-    꼬리칸 = []
-    for 층 in ("대형", "중형", "소형"):
-        v = 크기.get(층)
-        sv = _spark_svg([r.get(층) for r in 이력], w=64, h=18)
-        값HTML = (f'<span style="font-size:12px;font-weight:800;'
-                  f'color:{"#e04a36" if (v or 0) >= 0 else "#337ad6"}">{v:+.2f}</span>'
-                  ) if isinstance(v, (int, float)) else '<span style="color:#6b7280">—</span>'
-        꼬리칸.append(f'<td style="padding:8px 1px 2px;text-align:center;vertical-align:top">'
-                    f'<div>{값HTML}</div><div style="line-height:0">{sv}</div></td>')
-    꼬리 = ('<tr><td style="padding:8px 3px 2px 2px;font-size:10.5px;color:#8b93a0;'
-            'line-height:1.3;vertical-align:top">시장<br>평균<br>'
-            '<span style="font-size:9.5px;opacity:.75">20일 추이</span></td>'
-            + "".join(꼬리칸)
-            + '<td style="padding:8px 1px 2px;text-align:center;vertical-align:top">'
-              '<span style="font-size:10px;color:#6f7784">—</span></td></tr>')
 
     # ── 색 강도 범례 (색만으로 못 읽는 사람을 위해 숫자 경계를 같이 보여준다) ──
     def _칩(색, 라벨):
@@ -1836,6 +1827,8 @@ def build_account_grid(격자, 주도섹터=None):
 
     프리 = ""
     if isinstance(프리미엄, (int, float)):
+        # 크기 프리미엄의 최근 평균 비교용(20일 추이 행은 없앴지만 이 숫자는 유지한다).
+        이력 = _load_strata_history()
         추이 = [r.get("크기프리미엄") for r in 이력 if isinstance(r.get("크기프리미엄"), (int, float))]
         평균 = (sum(추이) / len(추이)) if len(추이) >= 5 else None
         비교 = (f' · 최근 {len(추이)}일 평균 {평균:+.1f}%p' if 평균 is not None else " · 추이 축적 중")
@@ -1846,21 +1839,33 @@ def build_account_grid(격자, 주도섹터=None):
 
     return ('<div style="background:#161a22;border:1px solid #232a36;border-radius:14px;'
             'padding:14px 14px 12px;margin:0 0 14px">'
-            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 계좌 구역</p>'
+            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 종목 구역</p>'
             '<p style="margin:0 0 10px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
             '오늘 내 종목은 어디에 있었나</p>'
             # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
             f'<table style="width:100%;border-collapse:separate;border-spacing:2px;'
-            f'table-layout:fixed">{콜}{머리}{"".join(몸)}{꼬리}</table>'
+            f'table-layout:fixed">{콜}{머리}{"".join(몸)}</table>'
             '<script>function gtog(id){var e=document.getElementById(id);'
-            'if(e)e.style.display=(e.style.display==="none"?"table-row":"none");}</script>'
+            'if(e)e.style.display=(e.style.display==="none"?"table-row":"none");}'
+            '(function(){function paint(){var mc=(window.cpMyCells?cpMyCells():{});'
+            'document.querySelectorAll(".ag-cell").forEach(function(c){'
+            'if(!mc[c.dataset.cell]){c.style.outline="none";return;}'
+            'c.style.outline="2px solid #f0c65a"; c.style.outlineOffset="-2px";});}'
+            'window.CP_PAINT=window.CP_PAINT||[];window.CP_PAINT.push(paint);'
+            'if(document.readyState!=="loading"){paint()}else{'
+            'document.addEventListener("DOMContentLoaded",paint)}})();</script>'
             '<p style="margin:7px 0 0;font-size:11px;color:#e0c060">'
-            '👆 구역 이름을 누르면 그 줄의 종목이 펼쳐집니다 · ''<span style="color:#ff9a3c">🔥</span>는 오늘 그 구역에서 불이 난 줄입니다</p>'
+            '👆 섹터 이름을 누르면 그 줄의 종목이 펼쳐집니다<br>'
+            '<span style="color:#ff9a3c">🔥</span>는 오늘 그 섹터에서 불이 난 줄입니다<br>'
+            '<span style="display:inline-block;width:11px;height:11px;border-radius:2px;'
+            'border:1.5px solid #f0c65a;vertical-align:-2px"></span> '
+            '<b>금색 테두리</b>는 <b>내가 등록한 관심종목이 있는 칸</b>입니다<br>'
+            '위 <b>내 관심종목 등록</b>에 종목을 넣으면 자동으로 표시됩니다</p>'
             + 범례 + 프리
             + '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
               '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
-              'cursor:pointer;list-style:none">📖 내 계좌 구역 보는 방법 '
+              'cursor:pointer;list-style:none">📖 내 종목 구역 보는 방법 '
               '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
               '<div style="height:6px"></div>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
@@ -2057,6 +2062,43 @@ def _polar(cx, cy, score, slot):
 #
 #  ⚠️ 재료: archive/data_*.json의 계좌격자(행별 '전체') + market_history의 코스피등락.
 #     계좌격자는 최근에 생긴 코너라 이력이 짧다 → 5일치도 못 채우면 통째로 생략한다.
+# ── 섹터 고정 색 (v-l9) ──────────────────────────────────
+#  왜: 그날 순위에 따라 색이 바뀌면 "어제 빨간 선이 오늘은 파란 선"이 되어
+#      며칠 이어 보는 사람이 선을 눈으로 못 쫓는다.
+#      섹터마다 색을 **못 박아** 두면 색 자체가 이름표가 된다.
+#  ⚠️ 금색(#f0c65a)은 '내 관심종목의 섹터' 전용이라 팔레트에서 뺀다.
+SECTOR_COLORS = {
+    "반도체":           "#ff6b4a",
+    "AI·소프트웨어":     "#22d3ee",
+    "2차전지·소재":      "#5b9bff",
+    "조선·기계·방산":    "#4ade80",
+    "전력·신재생·원전":  "#a78bfa",
+    "바이오·제약":       "#f472b6",
+    "자동차·부품":       "#fb923c",
+    "인터넷·게임·엔터":  "#818cf8",
+    "금융·지주":         "#34d399",
+    "에너지·정유·화학":  "#e879f9",
+    "통신·유틸리티":     "#7dd3fc",
+    "소비·유통·식품":    "#fbbf24",
+    "건설·부동산":       "#94a3b8",
+    "운송·물류":         "#2dd4bf",
+    "전기전자·부품":     "#c084fc",
+    "신규 주도":         "#ef4444",
+    "기타":             "#6b7280",
+}
+_SECTOR_FALLBACK = ["#ff8a65", "#80cbc4", "#9fa8da", "#ce93d8", "#a5d6a7", "#ffab91"]
+
+
+def sector_color(nm):
+    """섹터명 → 항상 같은 색. 표에 없는 이름은 이름 해시로 고정 배정한다."""
+    if nm in SECTOR_COLORS:
+        return SECTOR_COLORS[nm]
+    h = 0
+    for ch in str(nm):
+        h = (h * 31 + ord(ch)) % 9973
+    return _SECTOR_FALLBACK[h % len(_SECTOR_FALLBACK)]
+
+
 ZONE_WINDOWS = [(5, "이번 주", "5일"), (20, "한 달", "20일"), (60, "분기", "60일")]
 ZONE_TOP_N = 5          # 처음에 펼쳐 보여줄 줄 수 (나머지는 '더보기')
 #  창별 최소 관측일 — 이만큼 없으면 그 탭은 "축적 중"으로 둔다.
@@ -2187,11 +2229,24 @@ def build_my_stocks(data):
 
     JS = ("""<script>
 (function(){
+ window.CP_PAINT=window.CP_PAINT||[];
  var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
  var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
- var WINDOWS=[[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=20;
+ var WINDOWS=[[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=5;
  function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
  function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
+ // 내 관심종목이 속한 섹터 집합 — 계좌 구역·섹터 성적표·시총별 섹터가 함께 쓴다.
+ window.cpMyZones=function(){var s={};
+  get().forEach(function(nm){((P.stocks[nm]||[[]])[0]||[]).forEach(function(z){s[z]=1;});});
+  return s;};
+ // 내 종목이 '어느 섹터의 어느 크기 칸'에 있는지 — 칸 단위 표시에 쓴다.
+ //   예: 삼성SDI면 '2차전지·소재 × 대형' 칸 하나만 금색이 되어야 한다.
+ window.cpMyCells=function(){var s={};
+  get().forEach(function(nm){var m=P.stocks[nm]||[[],null,null,null];
+   var tier=m[2]; if(!tier) return;
+   (m[0]||[]).forEach(function(z){s[z+'|'+tier]=1;});});
+  return s;};
+ window.cpFire=function(){(window.CP_PAINT||[]).forEach(function(f){try{f()}catch(e){}});};
  function fmt(v){return (v>=0?'+':'')+v.toFixed(1);}
  function calc(nm,n){
   var r=P.ret[nm]; if(!r) return null;
@@ -2240,7 +2295,7 @@ def build_my_stocks(data):
       (m[3]||'')+' · 시총 '+m[1]+'위 ('+(m[2]||'')+')</div>':'')+
     tags+'</div>'+right+'</div></div>';
   });
-  box.innerHTML=html;
+  box.innerHTML=html; drawChart(my); drawBrief(my); if(window.cpFire)cpFire();
   var s=document.getElementById('ms-sum');
   if(exs.length){var avg=exs.reduce(function(a,b){return a+b;},0)/exs.length;
    var col=avg>=0?'#ff6b4a':'#5b9bff';
@@ -2249,6 +2304,96 @@ def build_my_stocks(data):
     '<span style="font-size:11.5px;color:#c9ced6">내 종목 평균 (동일 비중)</span>'+
     '<span style="font-size:14px;font-weight:800;color:'+col+'">'+fmt(avg)+'%p</span></div>';
   }else{s.innerHTML='';}
+ }
+ // ── 📰 내 종목 브리핑 (심층편) ──
+ //  오늘의 뉴스·공시·수급 중 **특이점만** 짚는다. 없으면 짧게 끝낸다.
+ //  ⚠️ '오늘 분석' 문장은 지금은 숫자에서 뽑은 요약이다.
+ //     Claude가 쓰는 해석으로 교체하는 것이 다음 단계.
+ function drawBrief(my){
+  var host=document.getElementById('ms-brief'); if(!host) return;
+  if(!my.length){host.innerHTML='<p style="margin:14px 0;font-size:12px;color:#7d848f;'+
+   'text-align:center">위 <b>내 관심종목 등록</b>에 종목을 넣으면 여기에 브리핑이 쌓입니다</p>';
+   return;}
+  var out='';
+  my.forEach(function(nm){
+   var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,20);
+   var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
+     'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
+     'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('');
+   var items='', n1=0, n2=0;
+   NEWS.forEach(function(n){if(n.t.indexOf(nm)>=0){n1++;
+    items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
+     '<a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
+     'line-height:1.5;text-decoration:none">'+n.t+'</a></div>';}});
+   DISC.forEach(function(g){if(g.c===nm){n2++;
+    items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
+     '<a href="'+g.u+'" target="_blank" style="font-size:11px;color:#e0c060;'+
+     'line-height:1.5;text-decoration:none">'+g.t+(g.s?' '+'★'.repeat(g.s):'')+'</a></div>';}});
+   if(!items) items='<p style="margin:4px 0 0;font-size:11px;color:#6f7784">'+
+     '오늘은 뉴스도 공시도 없었습니다</p>';
+   var 분석='';
+   if(c&&!c.short){
+    var 승률=c.win/c.tot*100;
+    분석='최근 20일 '+c.win+'승 '+(c.tot-c.win)+'패('+승률.toFixed(0)+'%), 시장 대비 '+
+     fmt(c.ex)+'%p입니다. ';
+    분석+= (c.ex>=0
+      ? (승률>=60?'꾸준히 시장을 이기고 있습니다.':'며칠에 몰아서 번 구간이라 변동이 큽니다.')
+      : (승률<=30?'자리 자체가 불리했습니다 — 종목 선택 문제로 보기 어렵습니다.'
+                 :'시장에 조금 뒤처지는 흐름입니다.'));
+    if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
+    else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
+   }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
+   out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
+    '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+nm+'</div>'+
+    '<div style="margin-top:4px">'+zones+'</div>'+items+
+    '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
+    'border-left:2.5px solid #e0c060">'+
+    '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.7">'+
+    '<b style="color:#e0c060">오늘 분석</b> — '+분석+'</p></div></div>';
+  });
+  host.innerHTML=out;
+ }
+ // 내 종목들의 '시장 대비 초과수익' 곡선 — 등록 종목이 있을 때만 그린다.
+ function drawChart(my){
+  var host=document.getElementById('ms-chart'); if(!host) return;
+  var W=360,H=150,L=30,R=10,T=12,B=20;
+  var idx=[]; for(var i=0;i<P.days.length;i++){if(P.mkt[i]!=null)idx.push(i);}
+  idx=idx.slice(-curW);
+  if(!my.length||idx.length<3){host.innerHTML=''; return;}
+  var series=[],all=[];
+  my.forEach(function(nm){var r=P.ret[nm]; if(!r) return;
+   var tc=1,mc=1,pts=[];
+   idx.forEach(function(i){if(r[i]==null)return;
+    tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100);
+    var v=(tc-mc)*100; pts.push(v); all.push(v);});
+   if(pts.length>=3) series.push({nm:nm,pts:pts});});
+  if(!series.length){host.innerHTML=''; return;}
+  all.push(0);
+  var hi=Math.max.apply(null,all), lo=Math.min.apply(null,all), rng=Math.max(0.01,hi-lo);
+  var n=Math.max.apply(null,series.map(function(s){return s.pts.length;}));
+  function PX(i){return L+i*(W-L-R)/Math.max(1,n-1);}
+  function PY(v){return T+(hi-v)/rng*(H-T-B);}
+  var COL=['#f0c65a','#ff6b4a','#22d3ee','#4ade80','#a78bfa',
+           '#fb923c','#f472b6','#5b9bff','#34d399','#e879f9'];
+  var g='<rect x="'+L+'" y="'+T+'" width="'+(W-L-R)+'" height="'+(PY(0)-T)+
+        '" fill="#ff6b4a" opacity=".05"/>'+
+        '<rect x="'+L+'" y="'+PY(0)+'" width="'+(W-L-R)+'" height="'+(H-B-PY(0))+
+        '" fill="#5b9bff" opacity=".05"/>'+
+        '<line x1="'+L+'" y1="'+PY(0)+'" x2="'+(W-R)+'" y2="'+PY(0)+
+        '" stroke="#8b93a0" stroke-width="1.3"/>';
+  var leg='';
+  series.forEach(function(s,k){
+   var c=COL[k%COL.length];
+   g+='<polyline points="'+s.pts.map(function(v,i){return PX(i)+','+PY(v);}).join(' ')+
+      '" fill="none" stroke="'+c+'" stroke-width="1.6"/>';
+   leg+='<span style="font-size:10px;color:'+c+'">— '+s.nm+'</span>';});
+  [hi,0,lo].forEach(function(t){
+   g+='<text x="'+(L-3)+'" y="'+(PY(t)+3)+'" text-anchor="end" font-size="8" fill="#6f7784">'+
+      (t>=0?'+':'')+t.toFixed(0)+'</text>';});
+  host.innerHTML='<p style="margin:9px 0 3px;font-size:10.5px;color:#8b93a0">'+
+   '시장 대비 초과수익 추이</p>'+
+   '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'+g+'</svg>'+
+   '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:4px">'+leg+'</div>';
  }
  window.msAdd=function(){
   var el=document.getElementById('ms-in'), nm=(el.value||'').trim();
@@ -2275,19 +2420,23 @@ def build_my_stocks(data):
     탭 = "".join(
         f'<span class="ms-tab" data-n="{n}" onclick="msWin({n})" '
         f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
-        f'cursor:pointer;font-weight:{800 if n==20 else 600};'
-        f'background:{"#2a3446" if n==20 else "#171c25"};'
-        f'color:{"#f0c65a" if n==20 else "#7d848f"};'
+        f'cursor:pointer;font-weight:{800 if n==5 else 600};'
+        f'background:{"#2a3446" if n==5 else "#171c25"};'
+        f'color:{"#f0c65a" if n==5 else "#7d848f"};'
         f'-webkit-tap-highlight-color:transparent">{이름}</span>'
         for n, 이름 in [(5, "이번 주 (5일)"), (20, "한 달 (20일)"), (60, "분기 (60일)")])
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">내 종목</p>'
-            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">내 관심종목 등록</p>'
+            '<p style="margin:0 0 5px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '내 종목은 시장을 이기고 있나</p>'
+            '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+            '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
+            '시장 대비 성적(5·20·60일), 그날의 뉴스와 공시, 소속 섹터 변화까지 '
+            '이 자리에서 계속 보여드립니다.</p>'
             '<p style="margin:0 0 10px;font-size:11px;color:#e0c060">'
-            f'최대 {MYSTOCK_MAX}종목 · 입력한 종목은 이 기기에만 저장되고 서버로 보내지 않습니다</p>'
+            f'최대 {MYSTOCK_MAX}종목 · 이 기기에만 저장되고 서버로 보내지 않습니다</p>'
             f'<datalist id="ms-names">{옵션}</datalist>'
             '<div style="display:flex;gap:6px;margin-bottom:10px">'
             '<input id="ms-in" list="ms-names" placeholder="종목명 입력 (예: 삼성전자)" '
@@ -2297,7 +2446,7 @@ def build_my_stocks(data):
             'color:#f0c65a;font-size:12.5px;font-weight:800;border-radius:8px;'
             'padding:9px 14px;cursor:pointer">추가</button></div>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
-            '<div id="ms-list"></div><div id="ms-sum"></div>'
+            '<div id="ms-list"></div><div id="ms-sum"></div><div id="ms-chart"></div>'
             '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
             'border-radius:8px;border:1px solid #1e2531">'
             '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
@@ -2314,411 +2463,491 @@ def build_my_stocks(data):
             '</p></details></div>' + JS)
 
 
-def build_zone_scoreboard():
+def build_stock_brief():
+    """📰 내 종목 브리핑 — 오늘의 뉴스·공시·수급 특이점.
+
+    ⚠️ 내용은 브라우저가 그린다(관심종목이 기기에만 저장되므로).
+       여기서는 자리만 만들고, build_my_stocks의 JS가 채운다.
+    """
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">내 종목 브리핑</p>'
+            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '오늘 내 종목에 무슨 일이 있었나</p>'
+            '<div id="ms-brief"></div>'
+            '<p style="margin:9px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+            '📰 뉴스 · 📄 공시 중 <b>오늘 그 종목이 언급된 것만</b> 붙습니다. '
+            '별일 없는 날은 짧게 끝납니다.</p></div>')
+
+
+def build_sector_scoreboard():
+    """📊 섹터 성적표 — 순위 막대 + 선 그래프를 한 카드로.
+
+    v-l8에서 '구역 성적표'와 '구역 추이'를 합쳤다.
+    둘은 같은 숫자의 두 표현(결론/과정)이라 떨어져 있으면 오히려 헷갈렸다.
+
+    구성: 탭(5·20·60일) → 상승3+하락3 막대 → 더보기 → 선 그래프 → 보는 방법
+    선 그래프에는 막대 줄의 체크박스로 원하는 섹터를 넣고 뺄 수 있다.
+    """
     구역, 시장 = _zone_series()
     if not 구역 or not 시장:
         return ""
-    # ⚠️ 예전엔 요건 미달이면 카드를 통째로 숨겼다.
-    #    그러면 "기능이 안 만들어졌다"로 보인다(실제로 그런 피드백을 받았다).
-    #    → 카드는 항상 내고, 각 탭에 며칠 남았는지 진행 막대를 보여준다.
     보유일 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장))
-    if 보유일 < 1:
-        return ""
 
-    탭버튼, 패널 = "", ""
+    탭, 패널 = "", ""
+    기본idx = 0   # 기본 탭은 5일 — 가장 최근 흐름부터 본다
+
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         통계 = []
         for nm, 일별 in 구역.items():
             st = _zone_stat(일별, 시장, n)
             if st:
-                통계.append((nm,) + st)
+                통계.append((nm,) + st)          # (nm, 초과, 수익, 승, 총, 곡선)
         통계.sort(key=lambda x: -x[1])
-        활성 = idx == 1 and 통계 or (idx == 0 and 통계)
-        켬 = (idx == 1) if any(True for _ in 통계) else False
 
         if not 통계:
             필요 = ZONE_MIN.get(n, 5)
             비율 = min(100, 보유일 / 필요 * 100)
-            본문 = ('<div style="padding:16px 6px;text-align:center">'
-                   f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
-                   f'{이름} 성적은 <b style="color:#f0c65a">{필요}거래일</b>이 쌓이면 열립니다</p>'
-                   f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
-                   f'<div style="width:{비율:.0f}%;height:100%;background:#f0c65a"></div></div>'
-                   f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
-                   f'지금 <b style="color:#e8eaee">{보유일}일</b> 모았습니다 · '
-                   f'{max(0, 필요-보유일)}거래일 남음</p></div>')
+            패널 += (f'<div class="sb-panel" data-idx="{idx}" '
+                    f'style="display:{"block" if idx == 기본idx else "none"}">'
+                    '<div style="padding:16px 6px;text-align:center">'
+                    f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
+                    f'{이름} 성적은 <b style="color:#f0c65a">{필요}거래일</b>이 쌓이면 열립니다</p>'
+                    f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
+                    f'<div style="width:{비율:.0f}%;height:100%;background:#f0c65a"></div></div>'
+                    f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
+                    f'지금 <b style="color:#e8eaee">{보유일}일</b> 모았습니다 · '
+                    f'{max(0, 필요-보유일)}거래일 남음</p></div></div>')
         else:
-            mx = max(abs(x[1]) for x in 통계) or 1
+            # 순위와 무관하게 섹터마다 색이 고정된다(색이 곧 이름표).
+            색맵 = {t[0]: sector_color(t[0]) for t in 통계}
+            기본선 = set([t[0] for t in 통계[:3]] + [t[0] for t in 통계[-3:]])
+            mx = max(abs(t[1]) for t in 통계) or 1
+
             줄 = []
             for i, (nm, 초, 수, 승, 총, _) in enumerate(통계):
+                상위3, 하위3 = i < 3, i >= len(통계) - 3
+                보임 = 상위3 or 하위3
                 c = "#ff6b4a" if 초 >= 0 else "#5b9bff"
-                wd = abs(초) / mx * 48
+                wd = abs(초) / mx * 46
                 바 = (f'<div style="position:absolute;left:50%;width:{wd:.1f}%;height:100%;'
                      f'background:{c};border-radius:0 3px 3px 0"></div>' if 초 >= 0 else
                      f'<div style="position:absolute;right:50%;width:{wd:.1f}%;height:100%;'
                      f'background:{c};border-radius:3px 0 0 3px"></div>')
-                # ⚠️ display가 두 번 선언되면 뒤엣것이 이긴다 →
-                #    숨김은 유일한 display 값이어야 한다(예전 버그).
-                더클래스 = " zn-more" if i >= ZONE_TOP_N else ""
-                표시 = "none" if i >= ZONE_TOP_N else "flex"
+                체크 = "checked" if nm in 기본선 else ""
                 줄.append(
-                    f'<div class="zn-row{더클래스}" data-zone="{nm}" '
-                    f'style="display:{표시};align-items:center;gap:7px;'
-                    f'padding:6px 7px;margin-bottom:3px;border-radius:8px">'
-                    f'<span class="zn-star" onclick="znTog(this)" '
-                    f'style="flex:none;font-size:13px;cursor:pointer;opacity:.25;'
-                    f'-webkit-tap-highlight-color:transparent">★</span>'
-                    f'<div style="flex:1;min-width:0">'
-                    f'<div class="zn-name" style="font-size:11.5px;color:#e8eaee;font-weight:600;'
-                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{nm}</div>'
-                    f'<div style="font-size:9.5px;color:#7d848f;margin-top:1px">'
-                    f'{승}승 {총-승}패 · {승/총*100:.0f}%</div></div>'
-                    f'<div style="flex:1;position:relative;height:20px;background:#161b24;'
-                    f'border-radius:4px;min-width:52px">'
-                    f'<div style="position:absolute;left:50%;top:-2px;width:1px;height:24px;'
+                    f'<div class="sb-row{"" if 보임 else " sb-more"}" data-zone="{nm}" '
+                    f'style="display:{"flex" if 보임 else "none"};align-items:center;gap:6px;'
+                    f'padding:5px 4px;border-bottom:1px solid #1b212c;border-radius:6px">'
+                    f'<input type="checkbox" class="sb-ck" data-idx="{idx}" data-zone="{nm}" '
+                    f'{체크} onchange="sbTog({idx})" '
+                    f'style="flex:none;width:14px;height:14px;accent-color:{색맵[nm]};cursor:pointer">'
+                    f'<div style="width:78px;flex:none;min-width:0">'
+                    f'<div class="sb-name" style="font-size:11px;color:#e8eaee;font-weight:700;'
+                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+                    f'border-radius:4px;padding:1px 3px">{nm}</div>'
+                    f'<div style="font-size:9px;color:#7d848f">{승}승 {총-승}패 · {승/총*100:.0f}%</div></div>'
+                    f'<div style="flex:1;position:relative;height:17px;background:#161b24;'
+                    f'border-radius:3px;min-width:40px">'
+                    f'<div style="position:absolute;left:50%;top:-2px;width:1px;height:21px;'
                     f'background:#3a4150"></div>{바}</div>'
-                    f'<div style="width:50px;flex:none;text-align:right">'
-                    f'<div style="font-size:12px;font-weight:800;color:{c}">{초:+.1f}%p</div>'
-                    f'<div style="font-size:9.5px;color:#7d848f">{수:+.1f}%</div></div></div>')
+                    f'<div style="width:48px;flex:none;text-align:right">'
+                    f'<div style="font-size:11.5px;font-weight:800;color:{c}">{초:+.1f}%p</div>'
+                    f'<div style="font-size:9px;color:#7d848f">{수:+.1f}%</div></div></div>')
+
             더보기 = ""
-            if len(통계) > ZONE_TOP_N:
-                더보기 = (f'<p onclick="znMore(this)" style="margin:7px 0 0;font-size:11.5px;'
+            숨김수 = len(통계) - len(기본선 & set(t[0] for t in 통계))
+            숨김수 = max(0, len(통계) - 6)
+            if 숨김수 > 0:
+                더보기 = (f'<p onclick="sbMore(this)" style="margin:7px 0 0;font-size:11.5px;'
                         f'color:#e0c060;text-align:center;cursor:pointer;font-weight:700;'
                         f'-webkit-tap-highlight-color:transparent">'
-                        f'▾ 나머지 {len(통계)-ZONE_TOP_N}개 더보기</p>')
-            본문 = "".join(줄) + 더보기
-        패널 += (f'<div class="zn-panel" data-idx="{idx}" '
-                f'style="display:{"block" if idx == 1 else "none"}">{본문}</div>')
-        탭버튼 += (f'<span class="zn-tab" data-idx="{idx}" onclick="znTab({idx})" '
-                 f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;'
-                 f'border-radius:7px;cursor:pointer;font-weight:{800 if idx==1 else 600};'
-                 f'background:{"#2a3446" if idx==1 else "#171c25"};'
-                 f'color:{"#f0c65a" if idx==1 else "#7d848f"};'
-                 f'-webkit-tap-highlight-color:transparent">{이름} ({부제})</span>')
+                        f'▾ 나머지 {숨김수}개 더보기</p>')
 
-    JS = """<script>
-(function(){
- var K='chartpro_myzones';
- function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
- function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
- window.znPaint=function(){var my=get();
-  document.querySelectorAll('.zn-row').forEach(function(r){
-   var on=my.indexOf(r.dataset.zone)>=0;
-   r.style.background=on?'#1e2536':'transparent';
-   r.style.boxShadow=on?'inset 0 0 0 1.5px #f0c65a':'none';
-   var s=r.querySelector('.zn-star');
-   s.style.opacity=on?'1':'.25'; s.style.color=on?'#f0c65a':'#7d848f';
-   r.querySelector('.zn-name').style.fontWeight=on?'800':'600';});};
- window.znTog=function(el){var z=el.closest('.zn-row').dataset.zone,my=get();
-  var i=my.indexOf(z); if(i>=0){my.splice(i,1)}else{my.push(z)} set(my); znPaint();};
- window.znTab=function(i){
-  document.querySelectorAll('.zn-panel').forEach(function(p){
-   p.style.display=(p.dataset.idx==i)?'block':'none';});
-  document.querySelectorAll('.zn-tab').forEach(function(t){
-   var on=t.dataset.idx==i;
-   t.style.background=on?'#2a3446':'#171c25';
-   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
-  znPaint();};
- window.znMore=function(el){
-  var p=el.closest('.zn-panel'),h=p.querySelectorAll('.zn-more');
-  var open=h.length&&h[0].style.display!=='none';
-  h.forEach(function(r){r.style.display=open?'none':'flex';});
-  el.textContent=open?('▾ 나머지 '+h.length+'개 더보기'):'▴ 접기';
-  znPaint();};
- if(document.readyState!=='loading'){znPaint()}else{
-  document.addEventListener('DOMContentLoaded',znPaint)}
-})();
-</script>"""
+            # ── 선 그래프 ──
+            날짜 = [d for d, _ in 통계[0][5]]
+            vals = [v for t in 통계 for _, v in t[5]]
+            lo, hi = min(vals + [0]), max(vals + [0])
+            # 오른쪽에 섹터명을 적을 자리를 남긴다(R을 크게).
+            W, H, L, R, T, B = 420, 170, 30, 92, 14, 22
+            def PX(i): return L + i * (W - L - R) / max(1, len(날짜) - 1)
+            def PY(v): return T + (hi - v) / max(0.01, hi - lo) * (H - T - B)
+            g = (f'<rect x="{L}" y="{T}" width="{W-L-R}" height="{PY(0)-T:.0f}" '
+                 f'fill="#ff6b4a" opacity=".05"/>'
+                 f'<rect x="{L}" y="{PY(0):.0f}" width="{W-L-R}" height="{H-B-PY(0):.0f}" '
+                 f'fill="#5b9bff" opacity=".05"/>'
+                 # 기준선이라 눈에 띄어야 한다 — 회색은 곡선에 묻힌다.
+                 f'<line x1="{L}" y1="{PY(0):.0f}" x2="{W-R}" y2="{PY(0):.0f}" '
+                 f'stroke="#ffffff" stroke-width="1.8" opacity=".85"/>'
+                 # 0선 이름은 그림 안이 아니라 **오른쪽 라벨 열**에 둔다.
+                 #   선 위에 겹쳐 쓰면 곡선과 부딪혀 읽히지 않는다.
+                 f'<text class="sb-lab" data-idx="{idx}" data-zone="__mkt" '
+                 f'data-y0="{PY(0):.1f}" x="{W-R+7}" y="{PY(0)+3:.1f}" font-size="8" '
+                 f'fill="#ffffff" font-weight="700">시장 평균</text>'
+                 f'<line class="sb-leader" data-idx="{idx}" data-zone="__mkt" '
+                 f'x1="{W-R}" y1="{PY(0):.1f}" x2="{W-R+5}" y2="{PY(0):.1f}" '
+                 f'stroke="#ffffff" stroke-width="0.7" opacity=".6" style="display:none"/>')
+            for nm, 초, 수, 승, 총, 곡선 in 통계:
+                pts = " ".join(f"{PX(i):.0f},{PY(v):.0f}" for i, (_, v) in enumerate(곡선))
+                켬 = nm in 기본선
+                _ey = PY(곡선[-1][1])   # 라벨 자리는 브라우저가 겹칠 때만 조정한다
+                g += (f'<polyline class="sb-line" data-idx="{idx}" data-zone="{nm}" '
+                      f'points="{pts}" fill="none" stroke="{색맵[nm]}" stroke-width="1.5" '
+                      f'style="display:{"block" if 켬 else "none"}"/>'
+                      f'<text class="sb-lab" data-idx="{idx}" data-zone="{nm}" '
+                      f'data-y0="{_ey:.1f}" x="{W-R+7}" y="{_ey+3:.1f}" font-size="8.5" '
+                      f'fill="{색맵[nm]}" style="display:{"block" if 켬 else "none"}">'
+                      f'{nm[:8]}</text>'
+                      f'<line class="sb-leader" data-idx="{idx}" data-zone="{nm}" '
+                      f'x1="{W-R}" y1="{_ey:.1f}" x2="{W-R+5}" y2="{_ey:.1f}" '
+                      f'stroke="{색맵[nm]}" stroke-width="0.7" opacity=".5" '
+                      f'style="display:none"/>')
+            for t in (hi, 0, lo):
+                g += (f'<text x="{L-3}" y="{PY(t)+3:.0f}" text-anchor="end" font-size="8" '
+                      f'fill="#6f7784">{t:+.0f}</text>')
+            g += (f'<text x="{L}" y="{H-5}" font-size="8.5" fill="#6f7784">'
+                  f'{날짜[0][4:6]}/{날짜[0][6:]}</text>'
+                  f'<text x="{W-R}" y="{H-5}" text-anchor="end" font-size="8.5" fill="#6f7784">'
+                  f'{날짜[-1][4:6]}/{날짜[-1][6:]}</text>')
 
-    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
-            'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 성적표</p>'
-            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '어느 구역이 시장을 이겼나</p>'
-            '<p style="margin:0 0 10px;font-size:11px;color:#e0c060">'
-            '★ 을 누르면 내 구역으로 저장됩니다 (이 기기에서만)</p>'
-            f'<div style="display:flex;gap:6px;margin-bottom:11px">{탭버튼}</div>'
-            + 패널 +
-            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
-            'border-radius:8px;border:1px solid #1e2531">'
-            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
-            'cursor:pointer;list-style:none">📖 구역 성적표 보는 방법 '
-            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
-            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
-            '<b style="color:#9aa0aa">%p(퍼센트포인트)</b>는 코스피보다 얼마나 더 벌었나입니다. '
-            '가운데 세로선이 코스피(0)이고, 오른쪽으로 뻗을수록 시장을 크게 이긴 구역입니다.<br>'
-            '<b style="color:#9aa0aa">승패</b>는 그 기간 동안 하루하루 코스피를 이긴 날의 수입니다. '
-            '초과수익이 커도 승률이 낮으면 <b style="color:#9aa0aa">하루 크게 번 것</b>이고, '
-            '승률이 높으면 <b style="color:#9aa0aa">꾸준히 강한 구역</b>입니다.<br>'
-            '<b style="color:#9aa0aa">작은 회색 숫자</b>는 실제 수익률입니다. '
-            '시장이 함께 내린 날은 이 값이 마이너스라도 시장을 이겼을 수 있습니다.<br>'
-            '<b style="color:#f0c65a">내 구역이 아래쪽에 있다면</b> — 종목 선택이 아니라 '
-            '<b style="color:#9aa0aa">자리</b>가 불리했다는 뜻입니다. '
-            '그 구역 안에서는 무엇을 골랐어도 시장을 이기기 어려웠습니다.'
-            '</p></details></div>' + JS)
+            패널 += (f'<div class="sb-panel" data-idx="{idx}" '
+                    f'data-lo="{T}" data-hi="{H-B+2}" '
+                    f'style="display:{"block" if idx == 기본idx else "none"}">'
+                    + "".join(줄) + 더보기
+                    + '<p style="margin:11px 0 4px;font-size:10.5px;color:#8b93a0">'
+                      '체크한 섹터가 아래 그래프에 들어갑니다</p>'
+                    + f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+                      f'style="width:100%;height:auto;display:block">{g}</svg>'
+                    + '<p style="margin:5px 0 0;font-size:10px;color:#6f7784">'
+                      '<b style="color:#8b93a0">점선</b> = 내 관심종목이 속한 섹터입니다</p>'
+                    + '</div>')
 
-
-def _zone_trend_panel(n, 구역, 시장):
-    """한 기간(n일)의 순위표 + 곡선 본문. 없으면 빈 문자열."""
-    """📈 구역 초과수익 추이 — 심층편용 '순위가 만들어진 과정'.
-
-    핵심편 성적표는 **결론**(지금 몇 등인가)을 주고,
-    이 차트는 **과정**(어떻게 그 등수가 됐나)을 준다.
-
-    ⚠️ 초과수익(구역 − 코스피)만 그린다. 누적 수익률을 그대로 그리면
-       지수가 흔들 때 모든 곡선이 같이 흔들려 우열이 안 읽힌다.
-    ⚠️ '내 구역'은 브라우저에만 있으므로 서버가 모른다.
-       → 모든 구역의 선을 그려두고 기본은 숨긴 뒤, JS가 내 구역만 켠다.
-    """
-    통계 = []
-    for nm, 일별 in 구역.items():
-        st = _zone_stat(일별, 시장, n)
-        if st:
-            통계.append((nm, st[0], st[2], st[3], st[4]))
-    if len(통계) < 2:
-        return ""
-    통계.sort(key=lambda x: -x[1])
-    기본 = [x[0] for x in 통계[:3]] + [x[0] for x in 통계[-2:]]
-
-    날짜 = [d for d, _ in 통계[0][4]]
-    vals = [v for x in 통계 for _, v in x[4]]
-    lo, hi = min(vals + [0]), max(vals + [0])
-    W, H, L, R, T, B = 360, 175, 34, 12, 14, 24
-
-    def PX(i): return L + i * (W - L - R) / max(1, len(날짜) - 1)
-    def PY(v): return T + (hi - v) / max(0.01, hi - lo) * (H - T - B)
-
-    # ⚠️ 금색(#f0c65a)은 '내 구역' 전용이라 팔레트에서 뺀다.
-    #    기본 선이 금색이면 내 구역과 구분이 안 된다(실제로 겹쳤던 버그).
-    팔레트 = ["#ff6b4a", "#4ade80", "#22d3ee", "#a78bfa", "#5b9bff", "#f472b6"]
-    g = (f'<rect x="{L}" y="{T}" width="{W-L-R}" height="{PY(0)-T:.0f}" fill="#ff6b4a" opacity=".05"/>'
-         f'<rect x="{L}" y="{PY(0):.0f}" width="{W-L-R}" height="{H-B-PY(0):.0f}" '
-         f'fill="#5b9bff" opacity=".05"/>'
-         f'<line x1="{L}" y1="{PY(0):.0f}" x2="{W-R}" y2="{PY(0):.0f}" '
-         f'stroke="#8b93a0" stroke-width="1.4"/>')
-    for k, (nm, 초, 승, 총, 곡선) in enumerate(통계):
-        보임 = nm in 기본
-        c = 팔레트[k % len(팔레트)] if 보임 else "#7d848f"
-        pts = " ".join(f"{PX(i):.0f},{PY(v):.0f}" for i, (_, v) in enumerate(곡선))
-        g += (f'<polyline class="zt-line" data-zone="{nm}" points="{pts}" fill="none" '
-              f'stroke="{c}" stroke-width="1.8" opacity="{0.75 if 보임 else 0}"/>')
-    for t in (hi, 0, lo):
-        g += (f'<text x="{L-4}" y="{PY(t)+3:.0f}" text-anchor="end" font-size="8" '
-              f'fill="#6f7784">{t:+.0f}</text>')
-    g += (f'<text x="{L}" y="{H-6}" font-size="8.5" fill="#6f7784">{날짜[0][4:6]}/{날짜[0][6:]}</text>'
-          f'<text x="{W-R}" y="{H-6}" text-anchor="end" font-size="8.5" fill="#6f7784">'
-          f'{날짜[-1][4:6]}/{날짜[-1][6:]}</text>')
-
-    범례 = ""
-    for k, (nm, 초, 승, 총, _) in enumerate(통계):
-        if nm not in 기본:
-            continue
-        범례 += (f'<span style="font-size:10px;color:{팔레트[k % len(팔레트)]}">— {nm}</span>')
-
-    순위 = ""
-    보일줄 = 통계[:3] + 통계[-2:]
-    for i, (nm, 초, 승, 총, _) in enumerate(보일줄):
-        c = "#ff6b4a" if 초 >= 0 else "#5b9bff"
-        순위 += (f'<div class="zt-row" data-zone="{nm}" style="display:flex;align-items:center;'
-               f'gap:7px;padding:5px 7px;border-radius:7px;margin-bottom:3px;background:#171c25">'
-               f'<span style="width:14px;flex:none;font-size:10px;color:#7d848f;font-weight:800">'
-               f'{i+1 if i < 3 else "·"}</span>'
-               f'<span class="zt-name" style="flex:1;min-width:0;font-size:11.5px;color:#e8eaee;'
-               f'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{nm}</span>'
-               f'<span style="font-size:10px;color:#7d848f;flex:none">{승}/{총}승</span>'
-               f'<span style="width:50px;flex:none;text-align:right;font-size:12px;'
-               f'font-weight:800;color:{c}">{초:+.1f}%p</span></div>')
-
-    JS = """<script>
-(function(){
- function my(){try{return JSON.parse(localStorage.getItem('chartpro_myzones'))||[]}catch(e){return []}}
- function paint(){var m=my();
-  document.querySelectorAll('.zt-line').forEach(function(l){
-   if(m.indexOf(l.dataset.zone)>=0){l.setAttribute('stroke','#f0c65a');
-    l.setAttribute('stroke-width','3.4'); l.setAttribute('opacity','1');}});
-  document.querySelectorAll('.zt-row').forEach(function(r){
-   if(m.indexOf(r.dataset.zone)>=0){r.style.background='#1e2536';
-    r.style.boxShadow='inset 0 0 0 1.5px #f0c65a';
-    r.querySelector('.zt-name').style.fontWeight='800';}});}
- if(document.readyState!=='loading'){paint()}else{
-  document.addEventListener('DOMContentLoaded',paint)}
-})();
-</script>"""
-
-    return (순위 + '<div style="height:9px"></div>'
-            + f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
-              f'style="width:100%;max-width:520px;height:auto;display:block">{g}</svg>'
-            + f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">{범례}</div>')
-
-
-def build_zone_trend():
-    """📈 구역 추이 — 5/20/60일 탭. 성적표와 같은 창 구성이라 눈이 안 헷갈린다."""
-    구역, 시장 = _zone_series()
-    if not 구역 or not 시장:
-        return ""
-    탭, 패널, 있음 = "", "", False
-    기본idx = None
-    본문들 = {}
-    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
-        본문 = _zone_trend_panel(n, 구역, 시장)
-        본문들[idx] = 본문
-        if 본문 and 기본idx is None:
-            기본idx = idx
-    # 기본 탭은 '한 달'이 있으면 한 달, 없으면 채워진 첫 탭
-    if 본문들.get(1):
-        기본idx = 1
-    if 기본idx is None:
-        # 아직 어느 창도 못 채웠다 → 숨기지 말고 진행 상황을 보여준다.
-        보유 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장)) if 구역 else 0
-        비율 = min(100, 보유 / ZONE_MIN[5] * 100)
-        return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
-                'padding:13px 14px;margin:10px 0 0">'
-                '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 추이</p>'
-                '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
-                '누가 이겼고, 어떻게 이겼나</p>'
-                '<div style="padding:14px 6px;text-align:center">'
-                f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
-                f'추이 그래프는 <b style="color:#f0c65a">{ZONE_MIN[5]}거래일</b>이 쌓이면 열립니다</p>'
-                f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
-                f'<div style="width:{비율:.0f}%;height:100%;background:#f0c65a"></div></div>'
-                f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
-                f'지금 <b style="color:#e8eaee">{보유}일</b> 모았습니다 · '
-                f'{max(0, ZONE_MIN[5]-보유)}거래일 남음</p></div></div>')
-    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
-        본문 = 본문들[idx] or ('<p style="margin:14px 0;font-size:12px;color:#7d848f;'
-                            f'text-align:center">{부제}치가 아직 안 쌓였습니다 · 축적 중</p>')
         켬 = idx == 기본idx
-        패널 += (f'<div class="zt-panel" data-idx="{idx}" '
-                f'style="display:{"block" if 켬 else "none"}">{본문}</div>')
-        탭 += (f'<span class="zt-tab" data-idx="{idx}" onclick="ztTab({idx})" '
+        탭 += (f'<span class="sb-tab" data-idx="{idx}" onclick="sbTab({idx})" '
               f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
               f'cursor:pointer;font-weight:{800 if 켬 else 600};'
               f'background:{"#2a3446" if 켬 else "#171c25"};'
               f'color:{"#f0c65a" if 켬 else "#7d848f"};'
-              f'-webkit-tap-highlight-color:transparent">{이름} ({부제})</span>')
+              f'-webkit-tap-highlight-color:transparent">{부제}</span>')
 
     JS = """<script>
 (function(){
- function my(){try{return JSON.parse(localStorage.getItem('chartpro_myzones'))||[]}catch(e){return []}}
- window.ztPaint=function(){var m=my();
-  document.querySelectorAll('.zt-line').forEach(function(l){
-   if(m.indexOf(l.dataset.zone)>=0){l.setAttribute('stroke','#f0c65a');
-    l.setAttribute('stroke-width','3.4'); l.setAttribute('opacity','1');}});
-  document.querySelectorAll('.zt-row').forEach(function(r){
-   if(m.indexOf(r.dataset.zone)>=0){r.style.background='#1e2536';
-    r.style.boxShadow='inset 0 0 0 1.5px #f0c65a';
-    r.querySelector('.zt-name').style.fontWeight='800';}});};
- window.ztTab=function(i){
-  document.querySelectorAll('.zt-panel').forEach(function(p){
+ // ── 선택 섹터는 5·20·60일과 '시총별 섹터'까지 하나로 공유한다 ──
+ //   기간 탭을 옮길 때마다 다시 체크하게 만들면 아무도 안 쓴다.
+ window.CP_SECT = window.CP_SECT || null;
+ function seed(){
+  if(window.CP_SECT) return;
+  // ⚠️ 초기 체크는 HTML의 checked 속성으로 판단해야 한다.
+  //    .checked(프로퍼티)는 다른 패널의 같은 섹터를 훑는 도중 덮여
+  //    전부 false가 될 수 있다(실제로 선이 하나도 안 보였다).
+  var s={};
+  document.querySelectorAll('.sb-ck').forEach(function(c){
+   if(c.hasAttribute('checked')) s[c.dataset.zone]=1; });
+  window.CP_SECT=s;
+ }
+ // 보이는 라벨만 모아 겹칠 때만 밀어낸다. 안 겹치면 선 옆에 그대로 둔다.
+ function relayout(){
+  document.querySelectorAll('.sb-panel').forEach(function(pnl){
+   if(pnl.style.display==='none') return;
+   var lo=parseFloat(pnl.dataset.lo||'0'), hi=parseFloat(pnl.dataset.hi||'0');
+   var labs=[].filter.call(pnl.querySelectorAll('.sb-lab'),
+     function(t){return t.style.display!=='none';});
+   labs.sort(function(a,b){return parseFloat(a.dataset.y0)-parseFloat(b.dataset.y0);});
+   // 겹치는 쌍만 **양쪽으로 반씩** 밀어낸다(한쪽으로만 밀면 위쪽에 뭉친다).
+   var GAP=9.5;
+   var ys=labs.map(function(t){return parseFloat(t.dataset.y0);});
+   for(var it=0; it<40; it++){
+    var moved=false;
+    for(var k=0;k<ys.length-1;k++){
+     var d=ys[k+1]-ys[k];
+     if(d<GAP){var push=(GAP-d)/2; ys[k]-=push; ys[k+1]+=push; moved=true;}
+    }
+    // 경계를 넘으면 안쪽으로 되민다
+    if(ys.length){
+     if(ys[0]<lo+4){var sft=(lo+4)-ys[0]; ys=ys.map(function(y){return y+sft;}); moved=true;}
+     if(ys[ys.length-1]>hi){var s2=ys[ys.length-1]-hi;
+      ys=ys.map(function(y){return y-s2;}); moved=true;}
+    }
+    if(!moved) break;
+   }
+   // ⚠️ 라벨 수 × 간격이 차트 높이보다 크면 위 루프가 위·아래로 서로 밀며
+   //    제자리로 돌아온다(실제로 반도체 라벨이 차트 밖 -6px에 남았다).
+   //    그럴 때는 남는 공간에 균등 배치해서라도 전부 화면 안에 넣는다.
+   var top=lo+5, bot=hi-2;
+   if(ys.length){
+    var need=(ys.length-1)*GAP;
+    if(need > bot-top){
+     var step=(bot-top)/Math.max(1,ys.length-1);
+     for(var q=0;q<ys.length;q++) ys[q]=top+step*q;
+    }else{
+     if(ys[0]<top){var s3=top-ys[0]; ys=ys.map(function(y){return y+s3;});}
+     if(ys[ys.length-1]>bot){var s4=ys[ys.length-1]-bot;
+      ys=ys.map(function(y){return y-s4;});}
+     for(var q2=0;q2<ys.length;q2++) ys[q2]=Math.min(bot,Math.max(top,ys[q2]));
+    }
+   }
+   labs.forEach(function(t,i){
+    var y=ys[i], y0=parseFloat(t.dataset.y0);
+    t.setAttribute('y',(y+3).toFixed(1));
+    var ld=pnl.querySelector('.sb-leader[data-zone="'+t.dataset.zone+'"]');
+    if(ld){
+     if(Math.abs(y-y0)>3){ld.setAttribute('y1',y0.toFixed(1));
+      ld.setAttribute('y2',y.toFixed(1)); ld.style.display='block';}
+     else{ld.style.display='none';}}});
+  });
+ }
+ function apply(){
+  var s=window.CP_SECT||{}, mz=(window.cpMyZones?cpMyZones():{});
+  document.querySelectorAll('.sb-ck').forEach(function(c){ c.checked=!!s[c.dataset.zone]; });
+  document.querySelectorAll('.sb-line').forEach(function(l){
+   var on=!!s[l.dataset.zone];
+   l.style.display=on?'block':'none';
+   l.setAttribute('stroke-dasharray', mz[l.dataset.zone]?'6 3':'');
+   l.setAttribute('stroke-width', mz[l.dataset.zone]?'2.4':'1.5');});
+  document.querySelectorAll('.sb-lab').forEach(function(t){
+   var z=t.dataset.zone;
+   // '__'로 시작하는 것은 기준선 라벨 — 체크와 무관하게 항상 보인다.
+   t.style.display=(z.indexOf('__')===0 || s[z])?'block':'none';
+   t.setAttribute('font-weight', mz[z]?'800':'400');});
+  relayout();
+  document.querySelectorAll('.sb-row').forEach(function(r){
+   var on=!!mz[r.dataset.zone], n=r.querySelector('.sb-name');
+   // 줄 전체가 아니라 섹터 이름에만 테두리 — 표가 덜 요란해진다.
+   r.style.background='transparent'; r.style.boxShadow='none';
+   if(n){n.style.boxShadow=on?'inset 0 0 0 1.5px #f0c65a':'none';
+         n.style.color='#e8eaee';}});
+  var all=document.getElementById('sb-all');
+  if(all){
+   var names={}; document.querySelectorAll('.sb-ck').forEach(function(c){names[c.dataset.zone]=1;});
+   all.checked = Object.keys(s).length>0 && Object.keys(s).length>=Object.keys(names).length;}
+  if(window.slSync) slSync();
+ }
+ window.cpSectApply=apply;
+ window.CP_PAINT=window.CP_PAINT||[]; window.CP_PAINT.push(apply);
+ window.sbTab=function(i){
+  document.querySelectorAll('.sb-panel').forEach(function(p){
    p.style.display=(p.dataset.idx==i)?'block':'none';});
-  document.querySelectorAll('.zt-tab').forEach(function(t){
+  document.querySelectorAll('.sb-tab').forEach(function(t){
    var on=t.dataset.idx==i;
    t.style.background=on?'#2a3446':'#171c25';
    t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
-  ztPaint();};
- if(document.readyState!=='loading'){ztPaint()}else{
-  document.addEventListener('DOMContentLoaded',ztPaint)}
+  apply();};
+ window.sbTog=function(i){
+  seed();
+  document.querySelectorAll('.sb-ck[data-idx="'+i+'"]').forEach(function(c){
+   if(c.checked){window.CP_SECT[c.dataset.zone]=1;} else {delete window.CP_SECT[c.dataset.zone];}});
+  apply();};
+ window.sbAll=function(el){
+  seed(); var s={};
+  if(el.checked){document.querySelectorAll('.sb-ck').forEach(function(c){s[c.dataset.zone]=1;});}
+  window.CP_SECT=s; apply();};
+ window.sbMore=function(el){
+  var p=el.closest('.sb-panel'), h=p.querySelectorAll('.sb-more');
+  var open=h.length&&h[0].style.display!=='none';
+  h.forEach(function(r){r.style.display=open?'none':'flex';});
+  el.textContent=open?('▾ 나머지 '+h.length+'개 더보기'):'▴ 접기';
+  apply();};
+ function boot(){seed(); apply();}
+ if(document.readyState!=='loading'){boot()}else{
+  document.addEventListener('DOMContentLoaded',boot)}
 })();
 </script>"""
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">구역 추이</p>'
-            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '누가 이겼고, 어떻게 이겼나</p>'
-            f'<div style="display:flex;gap:6px;margin-bottom:11px">{탭}</div>'
-            + 패널
-            + '<p style="margin:8px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
-              '위는 <b style="color:#9aa0aa">순위</b>, 아래는 그 순위가 만들어진 '
-              '<b style="color:#9aa0aa">과정</b>입니다. 가로선이 코스피(0)이고 '
-              '위=이기는 중, 아래=지는 중입니다.<br>'
-              '핵심편 성적표에서 <b style="color:#f0c65a">★</b>로 고른 구역은 '
-              '<b style="color:#f0c65a">금색 굵은 선</b>으로 표시됩니다.</p>'
-            '</div>' + JS)
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 성적표</p>'
+            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '어느 섹터가 시장을 이겼나 '
+            '<span style="font-size:11.5px;font-weight:600;color:#8b93a0">'
+            '· 시장 대비 초과수익률</span></p>'
+            f'<div style="display:flex;gap:6px;margin:10px 0 8px">{탭}</div>'
+            '<label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;'
+            'font-size:11px;color:#8b93a0;cursor:pointer">'
+            '<input type="checkbox" id="sb-all" onchange="sbAll(this)" '
+            'style="width:14px;height:14px;accent-color:#f0c65a;cursor:pointer">'
+            '전체 선택 / 해제</label>'
+            + 패널 +
+            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            'border-radius:8px;border:1px solid #1e2531">'
+            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            'cursor:pointer;list-style:none">📖 섹터 성적표 보는 방법 '
+            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            '<b style="color:#9aa0aa">%p(퍼센트포인트)</b>는 코스피보다 얼마나 더 벌었나입니다. '
+            '가운데 세로선이 코스피(0), 오른쪽으로 뻗을수록 시장을 크게 이긴 섹터입니다.<br>'
+            '<b style="color:#9aa0aa">승패</b>는 그 기간 하루하루 코스피를 이긴 날의 수입니다. '
+            '초과수익이 커도 승률이 낮으면 <b style="color:#9aa0aa">며칠에 몰아서 번 것</b>이라 '
+            '들고 있는 대부분의 날이 괴로웠다는 뜻입니다.<br>'
+            '<b style="color:#9aa0aa">작은 회색 숫자</b>는 실제 수익률입니다. '
+            '시장이 함께 내린 날은 이 값이 마이너스여도 시장을 이겼을 수 있습니다.<br>'
+            '<b style="color:#9aa0aa">체크박스</b>를 켜고 끄면 아래 선 그래프에 넣고 뺄 수 있습니다. '
+            '기본은 상위 3개와 하위 3개입니다.<br>'
+            '<b style="color:#f0c65a">내 섹터가 아래쪽에 있다면</b> — 종목 선택이 아니라 '
+            '<b style="color:#9aa0aa">자리</b>가 불리했다는 뜻입니다. '
+            '그 섹터 안에서는 무엇을 골랐어도 시장을 이기기 어려웠습니다.'
+            '</p></details></div>' + JS)
 
 
-def build_crowd_compass(나침반):
-    """🧭 군중 나침반 — 개인이 상승과 하락 중 어느 쪽에 돈을 걸었나.
+def build_crowd_compass(_구=None):
+    """🧭 군중 나침반 — 개인이 사고 있나, 팔고 있나.
 
-    ⚠️ 없는 날은 통째로 생략한다(빈 카드를 만들지 않는다 — 프로젝트 원칙).
+    ⚠️ v-l8에서 재설계했다.
+      예전: 레버리지·인버스 ETF 개인 순매수(네이버 크롤링, 검증 불가)
+      지금: **코스피+코스닥 개인 순매수**(market_history에 매일 저장 중, 검증됨)
+
+    왜 바꿨나:
+      · 레버리지 ETF는 개인 자금의 일부일 뿐이다. 개인 전체 수급이 훨씬 큰 그림이다.
+      · 이미 매일 쌓고 있는 데이터라 새 크롤링도, 실패 위험도 없다.
+      · 실탄(외국인+기관)과 정확히 반대편이라 "큰돈 vs 군중" 대비가 선명해진다.
     """
-    if not 나침반:
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            rows = (json.load(f) or {}).get("일별") or []
+    except Exception:
         return ""
-    L = 나침반.get("레버리지_개인")
-    I = 나침반.get("인버스_개인")
-    기울기 = 나침반.get("기울기")
-    if not isinstance(기울기, (int, float)):
+    seq = []
+    for r in rows:
+        a, b = r.get("개인_코스피"), r.get("개인_코스닥")
+        if isinstance(a, (int, float)) or isinstance(b, (int, float)):
+            seq.append((a or 0) + (b or 0))
+    if len(seq) < 2:
         return ""
-
-    # 기울기 −100(하락 베팅) ~ +100(상승 베팅) → 막대 위치 0~100%
-    위치 = max(0.0, min(100.0, (기울기 + 100) / 2))
-    if 기울기 >= 35:
-        판정, 색, 설명 = "상승 쪽으로 크게 기울었습니다", "#ff6b4a", \
-            "군중이 반등에 베팅 중입니다. 쏠림이 크면 되돌림도 큽니다."
-    elif 기울기 >= 12:
-        판정, 색, 설명 = "상승 쪽으로 기울었습니다", "#ff9a80", \
-            "개인이 상승 쪽을 조금 더 보고 있습니다."
-    elif 기울기 > -12:
-        판정, 색, 설명 = "양쪽이 팽팽합니다", "#f0c65a", \
-            "군중의 방향이 갈렸습니다. 한쪽으로 몰린 날보다 해석이 조심스러워야 합니다."
-    elif 기울기 > -35:
-        판정, 색, 설명 = "하락 쪽으로 기울었습니다", "#8fb4ee", \
-            "개인이 하락 쪽을 조금 더 보고 있습니다."
-    else:
-        판정, 색, 설명 = "하락 쪽으로 크게 기울었습니다", "#5b9bff", \
-            "군중이 추가 하락에 베팅 중입니다. 공포가 극단이면 반대로 가기도 합니다."
+    오늘 = seq[-1]
+    누적5 = sum(seq[-5:])
+    누적20 = sum(seq[-20:])
+    연속 = 1
+    for v in reversed(seq[:-1]):
+        if (v > 0) == (오늘 > 0):
+            연속 += 1
+        else:
+            break
 
     def _억(v):
-        if not isinstance(v, (int, float)):
-            return "—"
         return f"{v/10000:+.2f}조" if abs(v) >= 10000 else f"{v:+,.0f}억"
 
-    추정주 = ('<p style="margin:6px 0 0;font-size:10px;color:#6f7784">'
-             '※ 개인 순매수를 직접 못 받아 −(기관+외국인)으로 추정한 값입니다</p>'
-             ) if 나침반.get("추정") else ""
+    사 = 오늘 > 0
+    색 = "#ff6b4a" if 사 else "#5b9bff"
+    if abs(오늘) < 1000:
+        판정, 설명 = "관망하고 있습니다", "개인 자금이 어느 쪽으로도 크게 움직이지 않았습니다."
+    elif 사:
+        판정 = f"{연속}일 연속 사고 있습니다" if 연속 >= 2 else "오늘 샀습니다"
+        설명 = ("개인이 받아내는 중입니다. 외국인·기관이 파는 물량을 개인이 받는 구도라면, "
+              "쏠림이 커질수록 되돌림도 커집니다.")
+    else:
+        판정 = f"{연속}일 연속 팔고 있습니다" if 연속 >= 2 else "오늘 팔았습니다"
+        설명 = ("개인이 내놓는 중입니다. 큰돈이 그 물량을 받고 있다면 바닥 다지기일 수 있고, "
+              "같이 팔고 있다면 수급 공백입니다.")
+
+    # 최근 20일 미니 막대 (컴팩트 — 큰 게이지 대신 흐름만)
+    최근 = seq[-20:]
+    mx = max(abs(v) for v in 최근) or 1
+    막대 = ""
+    for i, v in enumerate(최근):
+        h = max(2, abs(v) / mx * 18)
+        c = "#ff6b4a" if v >= 0 else "#5b9bff"
+        # 0선을 가운데 두고 매수는 위, 매도는 아래로 뻗게 한다.
+        #   (예전엔 flex 정렬만 바꿔 색과 방향이 어긋나 보였다)
+        # ⚠️ flex 중첩으로 위/아래를 나누면 자식 높이가 0으로 눌린다(실제로 막대가 사라졌다).
+        #    위·아래 칸 높이를 20px로 **고정**하고 그 안에서 정렬한다.
+        불 = 0.95 if i == len(최근) - 1 else 0.55
+        위 = (f'<div style="height:20px;display:flex;align-items:flex-end">'
+             f'<div style="width:100%;height:{h:.0f}px;background:{c};'
+             f'border-radius:1.5px 1.5px 0 0;opacity:{불}"></div></div>') if v >= 0 else \
+            '<div style="height:20px"></div>'
+        아래 = (f'<div style="height:20px;display:flex;align-items:flex-start">'
+              f'<div style="width:100%;height:{h:.0f}px;background:{c};'
+              f'border-radius:0 0 1.5px 1.5px;opacity:{불}"></div></div>') if v < 0 else \
+             '<div style="height:20px"></div>'
+        막대 += (f'<div style="flex:1;min-width:0">{위}'
+               f'<div style="height:1px;background:#3a4150"></div>{아래}</div>')
+
+    # ── 신용융자 잔고 (있으면 표시) ──
+    #  ⚠️ 아직 수집원이 없다. data["신용잔고"]에 {"잔고": 억원, "증감": 억원}이 들어오면
+    #     자동으로 켜진다. 없으면 이 블록은 통째로 빠진다(없는 걸 지어내지 않는다).
+    신용HTML = ""
+    신 = (_구 or {}) if isinstance(_구, dict) else {}
+    잔고, 증감 = 신.get("잔고"), 신.get("증감")
+    # 잔고 추이 — archive에서 과거 신용잔고를 모아 선으로 그린다.
+    #   "지금 21.9조"보다 "3주째 늘고 있다"가 훨씬 중요한 정보다.
+    _hist = []
+    for _f in sorted(alist(r"data_\d{8}\.json"))[-40:]:
+        try:
+            with open(apath(_f), encoding="utf-8") as _fp:
+                _v = (json.load(_fp).get("신용잔고") or {}).get("잔고")
+            if isinstance(_v, (int, float)):
+                _hist.append(_v)
+        except Exception:
+            continue
+    추이HTML = ""
+    if len(_hist) >= 3:
+        _hi, _lo = max(_hist), min(_hist)
+        _rng = max(1.0, _hi - _lo)
+        _W, _H = 300, 42
+        _pts = " ".join(f"{i*_W/(len(_hist)-1):.0f},{_H-4-(v-_lo)/_rng*(_H-10):.0f}"
+                        for i, v in enumerate(_hist))
+        _c = "#ff6b4a" if _hist[-1] >= _hist[0] else "#5b9bff"
+        추이HTML = (f'<svg viewBox="0 0 {_W} {_H}" preserveAspectRatio="none" '
+                  f'style="width:100%;height:42px;display:block;margin-top:7px">'
+                  f'<polyline points="{_pts}" fill="none" stroke="{_c}" stroke-width="2"/>'
+                  f'<circle cx="{_W}" cy="{_H-4-(_hist[-1]-_lo)/_rng*(_H-10):.0f}" r="3" '
+                  f'fill="{_c}"/></svg>'
+                  f'<p style="margin:2px 0 0;font-size:9.5px;color:#6f7784">'
+                  f'최근 {len(_hist)}거래일 신용융자 잔고 추이 '
+                  f'({_lo/10000:.1f}조 ~ {_hi/10000:.1f}조)</p>')
+    if isinstance(잔고, (int, float)):
+        c = "#ff6b4a" if (증감 or 0) >= 0 else "#5b9bff"
+        증문 = f"{증감/10000:+.2f}조" if isinstance(증감, (int, float)) and abs(증감) >= 10000 \
+              else (f"{증감:+,.0f}억" if isinstance(증감, (int, float)) else "—")
+        해석 = ("빚내서 사는 돈이 늘고 있습니다. 상승에 대한 기대가 커진 만큼 "
+              "되돌림이 오면 반대매매로 낙폭이 커질 수 있습니다."
+              if (증감 or 0) >= 0 else
+              "빚내서 산 돈이 줄고 있습니다. 부담이 덜어지는 중이지만, "
+              "급격히 줄면 반대매매가 진행 중일 수도 있습니다.")
+        신용HTML = ('<div style="margin-top:9px;padding:9px 10px;background:#191d26;'
+                   'border-radius:8px">'
+                   '<div style="display:flex;justify-content:space-between;align-items:center">'
+                   '<span style="font-size:11.5px;color:#8b93a0">신용융자 잔고</span>'
+                   f'<span style="font-size:13px;font-weight:800;color:#e8eaee">'
+                   f'{잔고/10000:,.1f}조 <span style="color:{c};font-size:11.5px">'
+                   f'{증문}</span></span></div>'
+                   f'<p style="margin:5px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+                   f'{해석}</p>' + 추이HTML + '</div>')
+
+    def _칸(라벨, v):
+        c = "#ff6b4a" if v >= 0 else "#5b9bff"
+        return (f'<div style="flex:1;background:#191d26;border-radius:8px;padding:7px 9px">'
+                f'<p style="margin:0;font-size:10px;color:#8b93a0">{라벨}</p>'
+                f'<p style="margin:2px 0 0;font-size:12.5px;font-weight:800;color:{c}">'
+                f'{_억(v)}</p></div>')
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
-            'padding:12px 14px;margin:10px 0 0">'
+            'padding:13px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">군중 나침반</p>'
-            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '개인은 어느 쪽에 돈을 걸었나</p>'
-            # ── 방향 막대 ──
-            '<div style="position:relative;height:26px;border-radius:13px;'
-            'background:linear-gradient(90deg,#1f3550 0%,#252a33 50%,#5e2028 100%);'
-            'border:1px solid #2a3446">'
-            f'<div style="position:absolute;left:calc({위치:.1f}% - 7px);top:3px;width:14px;'
-            f'height:18px;border-radius:7px;background:{색};box-shadow:0 0 0 2px #0f131a"></div>'
+            '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '개인은 사고 있나, 팔고 있나</p>'
+            f'<p style="margin:0 0 3px;font-size:15px;font-weight:800;color:{색}">{판정}</p>'
+            f'<p style="margin:0 0 9px;font-size:11.5px;color:#c9ced6;line-height:1.6">{설명}</p>'
+            '<div style="display:flex;gap:6px;margin-bottom:8px">'
+            + _칸("오늘", 오늘) + _칸("최근 5일", 누적5) + _칸("최근 20일", 누적20) +
             '</div>'
-            '<div style="display:flex;justify-content:space-between;margin-top:4px">'
-            '<span style="font-size:10px;color:#8fb4ee">◀ 하락 베팅(인버스)</span>'
-            '<span style="font-size:10px;color:#ff9a80">상승 베팅(레버리지) ▶</span></div>'
-            f'<p style="margin:9px 0 0;font-size:14px;font-weight:800;color:{색}">{판정}</p>'
-            f'<p style="margin:3px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">{설명}</p>'
-            # ── 숫자 두 칸 ──
-            '<div style="display:flex;gap:7px;margin-top:10px">'
-            '<div style="flex:1;background:#191d26;border-radius:8px;padding:8px 9px">'
-            '<p style="margin:0;font-size:10.5px;color:#8b93a0">레버리지(상승)</p>'
-            f'<p style="margin:2px 0 0;font-size:13px;font-weight:800;color:#ff6b4a">{_억(L)}</p></div>'
-            '<div style="flex:1;background:#191d26;border-radius:8px;padding:8px 9px">'
-            '<p style="margin:0;font-size:10.5px;color:#8b93a0">인버스(하락)</p>'
-            f'<p style="margin:2px 0 0;font-size:13px;font-weight:800;color:#5b9bff">{_억(I)}</p></div>'
-            '</div>'
-            + 추정주 +
+            f'<div style="display:flex;gap:1.5px">{막대}</div>'
+            '<p style="margin:4px 0 0;font-size:9.5px;color:#6f7784">'
+            '최근 20거래일 개인 순매수 (위=매수 · 아래=매도)</p>'
+            + 신용HTML +
             '<details style="margin:9px 0 0;padding:9px 10px;background:#0f131a;'
             'border-radius:8px;border:1px solid #1e2531">'
             '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
             'cursor:pointer;list-style:none">📖 군중 나침반 보는 방법 '
             '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
             '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
-            '<b style="color:#9aa0aa">레버리지</b>는 지수가 오르면 두 배로 버는 상품, '
-            '<b style="color:#9aa0aa">인버스</b>는 지수가 내리면 버는 상품입니다. '
-            '둘 다 사실상 개인의 <b style="color:#9aa0aa">방향 베팅</b>이라, '
-            '어느 쪽에 돈이 더 들어갔는지를 보면 군중의 심리가 드러납니다.<br>'
-            '<b style="color:#9aa0aa">이건 예측이 아닙니다.</b> 군중이 한쪽으로 크게 쏠린 날은 '
-            '그 방향이 맞아서가 아니라 <b style="color:#9aa0aa">되돌림이 나올 여지</b>가 커진다는 '
-            '뜻으로 읽는 편이 안전합니다.<br>'
-            '<b style="color:#9aa0aa">실탄과 헷갈리지 마세요</b> — 실탄은 외국인+기관(큰돈), '
-            '나침반은 개인(군중)입니다. 둘이 반대로 가는 날이 특히 볼 만합니다.'
+            '코스피와 코스닥에서 <b style="color:#9aa0aa">개인이 순매수한 금액</b>의 합계입니다.<br>'
+            '<b style="color:#9aa0aa">실탄과 정확히 반대편</b>입니다 — 실탄은 외국인+기관(큰돈), '
+            '나침반은 개인(군중)이라, 현물시장이 제로섬이라는 성질상 둘은 대체로 거울처럼 움직입니다.<br>'
+            '<b style="color:#9aa0aa">개인이 연속으로 사는 구간</b>은 큰돈이 내놓는 물량을 '
+            '개인이 받고 있다는 뜻입니다. 그 자체로 좋고 나쁨은 아니지만, '
+            '길어질수록 되돌림 여지가 커진다고 읽는 편이 안전합니다.<br>'
+            '<b style="color:#9aa0aa">신용융자 잔고</b>는 개인이 증권사에서 빌려 산 금액입니다. '
+            '늘어나면 기대가 커진 것이고, 그만큼 하락 시 반대매매 압력도 커집니다.'
             '</p></details></div>')
 
 
@@ -2873,7 +3102,7 @@ def build_sector_radar():
             + '<details style="margin:8px 0 0;padding:9px 10px;background:#141c1e;'
               'border-radius:8px;border:1px solid #1e3238">'
               '<summary style="font-size:11.5px;color:#22d3ee;font-weight:700;'
-              'cursor:pointer;list-style:none">🔗 내 계좌 구역과 함께 보는 법 '
+              'cursor:pointer;list-style:none">🔗 내 종목 구역과 함께 보는 법 '
               '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
               '<div style="height:6px"></div>'
               '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
@@ -2897,93 +3126,662 @@ def build_sector_radar():
 
 
 # ── 3. 경사선 (테마별 대형→중형→소형) ────────────────────────
-def build_slope_chart(격자):
-    """대형에서 소형으로 가는 경사선. 열 줄이 모두 우하향이면 '크기가 수익을 갈랐다'는 뜻."""
-    행들 = [r for r in (격자 or {}).get("행", [])
-            if all(isinstance((r.get("칸") or {}).get(t, {}).get("등락률"), (int, float))
-                   for t in ("대형", "중형", "소형"))]
-    if len(행들) < 4:
+def _tier_series():
+    """archive에서 {섹터: {날짜: {대형·중형·소형 등락률}}} 을 만든다."""
+    out = {}
+    for f in sorted(alist(r"data_\d{8}\.json")):
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+        날짜 = d.get("날짜")
+        for r in ((d.get("계좌격자") or {}).get("행") or []):
+            nm, 칸 = r.get("테마"), (r.get("칸") or {})
+            vals = {t: (칸.get(t) or {}).get("등락률") for t in ("대형", "중형", "소형")}
+            if nm and all(isinstance(v, (int, float)) for v in vals.values()):
+                out.setdefault(nm, {})[날짜] = vals
+    return out
+
+
+def _tier_cum(일별, n):
+    """최근 n거래일 누적 등락(대·중·소). 관측일이 모자라면 None."""
+    날짜들 = sorted(일별)[-n:]
+    if len(날짜들) < min(n, 3):
+        return None
+    acc = {}
+    for t in ("대형", "중형", "소형"):
+        c = 1.0
+        for d in 날짜들:
+            c *= (1 + 일별[d][t] / 100)
+        acc[t] = round((c - 1) * 100, 2)
+    return acc
+
+
+# ── 🗺️ 순위 섹터맵 · 🔮 돌아올 섹터 (v-m1 신규) ──────────────
+#  섹터별 '일별 순위'에서 체류·주기를 계산해 다음 순번을 가늠한다.
+#  ⚠️ 예측이 아니라 순서 관찰이다. 주기는 자주 깨진다.
+CYC_TOP = 5           # 상위 N위를 '주도권 안'으로 본다
+CYC_WINS = [(20, "20일"), (60, "60일"), (120, "120일")]
+
+
+def _cyc_rank():
+    """{섹터: [일별 순위]} 와 날짜 목록. 초과수익 순으로 매일 순위를 매긴다."""
+    구역, 시장 = _zone_series()
+    if not 구역 or not 시장:
+        return None, None, None
+    날짜 = sorted(set().union(*[set(v) for v in 구역.values()]) & set(시장))
+    if len(날짜) < 5:
+        return None, None, None
+    이름 = sorted(구역)
+    순위 = {n: [] for n in 이름}
+    초과 = {n: [] for n in 이름}
+    for d in 날짜:
+        오늘 = [(n, 구역[n][d] - 시장[d]) for n in 이름 if d in 구역[n]]
+        오늘.sort(key=lambda x: -x[1])
+        있는 = {n: i + 1 for i, (n, _) in enumerate(오늘)}
+        for n in 이름:
+            순위[n].append(있는.get(n))
+            초과[n].append(dict(오늘).get(n))
+    return 날짜, 순위, 초과
+
+
+def _cyc_stat(rk):
+    """상위권 체류·등판 주기·이탈 후 경과."""
+    구간, cur = [], None
+    for i, r in enumerate(rk):
+        if r is not None and r <= CYC_TOP:
+            cur = i if cur is None else cur
+        elif cur is not None:
+            구간.append((cur, i - 1)); cur = None
+    if cur is not None:
+        구간.append((cur, len(rk) - 1))
+    체류 = [b - a + 1 for a, b in 구간]
+    간격 = [구간[k + 1][0] - 구간[k][0] for k in range(len(구간) - 1)]
+    return {"회수": len(구간),
+            "평균체류": (sum(체류) / len(체류)) if 체류 else 0,
+            "평균주기": (sum(간격) / len(간격)) if 간격 else None,
+            "경과": (len(rk) - 1 - 구간[-1][1]) if 구간 else len(rk),
+            "현재": rk[-1]}
+
+
+def build_sector_map():
+    """🗺️ 순위 섹터맵 — 주도권이 어떻게 돌았나."""
+    날짜, 순위, 초과 = _cyc_rank()
+    if not 날짜:
         return ""
-    행들 = sorted(행들, key=lambda r: r["전체"], reverse=True)
-    강조 = 행들[:3] + 행들[-3:]
-    나머지 = 행들[3:-3]
+    이름 = sorted(순위)
+    탭, 패널 = "", ""
+    for idx, (n, lab) in enumerate(CYC_WINS):
+        켬 = idx == 0
+        if len(날짜) < 5:
+            continue
+        # ⚠️ 이력이 창 길이에 못 미치면 60일 탭과 120일 탭이 똑같은 그림이 된다.
+        #    같은 걸 두 번 보여주면 "대충 만들었네"로 읽힌다 → 솔직히 남은 일수를 알린다.
+        if len(날짜) < n * 0.9:
+            패널 += (f'<div class="sm-panel" data-idx="{idx}" '
+                    f'style="display:{"block" if 켬 else "none"};padding:18px 6px;'
+                    f'text-align:center">'
+                    f'<p style="margin:0 0 8px;font-size:12.5px;color:#c9ced6">'
+                    f'{lab} 섹터맵은 <b style="color:#f0c65a">{n}거래일</b>이 쌓이면 열립니다</p>'
+                    f'<div style="height:8px;background:#1b2230;border-radius:4px;overflow:hidden">'
+                    f'<div style="width:{min(100, len(날짜)/n*100):.0f}%;height:100%;'
+                    f'background:#f0c65a"></div></div>'
+                    f'<p style="margin:7px 0 0;font-size:11.5px;color:#8b93a0">'
+                    f'지금 <b style="color:#e8eaee">{len(날짜)}일</b> 모았습니다 · '
+                    f'{n-len(날짜)}거래일 남음</p></div>')
+            탭 += (f'<span class="sm-tab" data-idx="{idx}" onclick="smTab({idx})" '
+                  f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;'
+                  f'border-radius:7px;cursor:pointer;font-weight:{800 if 켬 else 600};'
+                  f'background:{"#2a3446" if 켬 else "#171c25"};'
+                  f'color:{"#f0c65a" if 켬 else "#7d848f"}">{lab}</span>')
+            continue
+        take = min(n, len(날짜))
+        def 누적(nm):
+            c = 1.0
+            for v in 초과[nm][-take:]:
+                if v is not None:
+                    c *= (1 + v / 100)
+            return (c - 1) * 100
+        순 = sorted(이름, key=lambda x: -누적(x))
+        rows = ""
+        for nm in 순:
+            rk = 순위[nm][-take:]
+            cells = ""
+            for i, r in enumerate(rk):
+                if r is None:      c, o = "#242a34", 1.0
+                elif r <= 3:       c, o = sector_color(nm), 1.0
+                elif r <= 6:       c, o = sector_color(nm), 0.4
+                else:              c, o = "#242a34", 1.0
+                gap = ";margin-right:2px" if (i + 1) % 5 == 0 and i < len(rk) - 1 else ""
+                cells += (f'<div style="flex:1;height:13px;background:{c};opacity:{o};'
+                          f'border-radius:1px{gap}"></div>')
+            rows += (f'<div class="sm-row" data-zone="{nm}" '
+                     f'style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+                     f'<span class="sm-name" style="width:78px;flex:none;min-width:0;font-size:10px;'
+                     f'text-align:right;font-weight:600;color:#e8eaee;padding:1px 3px;'
+                     f'border-radius:4px;overflow:hidden;text-overflow:ellipsis;'
+                     f'white-space:nowrap">{nm}</span>'
+                     f'<div style="flex:1;min-width:0;display:flex;gap:1px">{cells}</div>'
+                     f'<span style="width:38px;flex:none;text-align:right;font-size:10px;'
+                     f'font-weight:800;color:{"#ff6b4a" if 누적(nm)>=0 else "#5b9bff"}">'
+                     f'{누적(nm):+.1f}</span></div>')
+        주 = max(1, take // 5)
+        눈금 = "".join(f'<span style="flex:1;text-align:center">{주-k}주</span>'
+                      for k in range(0, 주, max(1, 주 // 5)))
+        패널 += (f'<div class="sm-panel" data-idx="{idx}" '
+                f'style="display:{"block" if 켬 else "none"}">{rows}'
+                f'<div style="display:flex;gap:6px;margin-top:5px">'
+                f'<span style="width:78px;flex:none"></span>'
+                f'<div style="flex:1;display:flex;font-size:8.5px;color:#6f7784">{눈금}</div>'
+                f'<span style="width:38px;flex:none;text-align:right;font-size:8.5px;'
+                f'color:#6f7784">누적%p</span></div></div>')
+        탭 += (f'<span class="sm-tab" data-idx="{idx}" onclick="smTab({idx})" '
+              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
+              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
+              f'background:{"#2a3446" if 켬 else "#171c25"};'
+              f'color:{"#f0c65a" if 켬 else "#7d848f"}">{lab}</span>')
 
-    vs = [v for r in 행들 for v in (r["칸"]["대형"]["등락률"], r["칸"]["중형"]["등락률"],
-                                    r["칸"]["소형"]["등락률"])]
-    lo, hi = min(vs), max(vs)
-    rng = (hi - lo) or 1.0
-    # ⚠️ 예전엔 520px 고정폭이라 모바일에서 가로로 밀어야 다 보였다.
-    #    좌표계를 340폭으로 줄이고 SVG를 width:100%로 두면
-    #    좁은 화면엔 딱 맞고 넓은 화면에선 비율대로 커진다(글자도 함께).
-    # 섹터명이 잘리지 않게 왼쪽 라벨 자리를 넉넉히(≈94px) 주고,
-    # 전체 폭을 360으로 늘려 오른쪽 끝까지 그래프가 닿게 한다.
-    W, H, T, B = 360, 250, 34, 30
-    X = {"대형": 100, "중형": 220, "소형": 340}
-    def Y(v): return T + (hi - v) / rng * (H - T - B)
+    JS = """<script>
+(function(){
+ function paint(){var mz=(window.cpMyZones?cpMyZones():{});
+  document.querySelectorAll('.sm-row').forEach(function(r){
+   var n=r.querySelector('.sm-name'), on=!!mz[r.dataset.zone];
+   if(n){n.style.boxShadow=on?'inset 0 0 0 1.3px #f0c65a':'none';
+         n.style.fontWeight=on?800:600;}});}
+ window.CP_PAINT=window.CP_PAINT||[]; window.CP_PAINT.push(paint);
+ window.smTab=function(i){
+  document.querySelectorAll('.sm-panel').forEach(function(p){
+   p.style.display=(p.dataset.idx==i)?'block':'none';});
+  document.querySelectorAll('.sm-tab').forEach(function(t){
+   var on=t.dataset.idx==i;
+   t.style.background=on?'#2a3446':'#171c25';
+   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
+  paint();};
+ if(document.readyState!=='loading'){paint()}else{
+  document.addEventListener('DOMContentLoaded',paint)}
+})();
+</script>"""
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">순위 섹터맵</p>'
+            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '주도권이 어떻게 돌았나</p>'
+            f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>' + 패널 +
+            '<p style="margin:9px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+            '<b style="color:#c9ced6">진한 색 = 상위 3위</b> · 연한 색 = 4~6위 · 회색 = 하위권<br>'
+            '섹터는 <b>그 기간 누적 초과수익이 높은 순</b>으로 정렬 · 가로 눈금은 <b>주 단위</b><br>'
+            '<b style="color:#f0c65a">금색 테두리</b> = 내 관심종목이 속한 섹터</p>'
+            '</div>' + JS)
 
-    선 = ""
-    for r in 나머지:
-        p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
-        선 += f'<polyline points="{p}" fill="none" stroke="#4a5260" stroke-width="1.5" opacity=".55"/>'
-    강조 = 행들[:3] + 행들[-3:]
-    for i, r in enumerate(강조):
-        c = "#ff6b4a" if i < 3 else "#5b9bff"
-        p = " ".join(f'{X[t]},{Y(r["칸"][t]["등락률"]):.0f}' for t in ("대형", "중형", "소형"))
-        선 += f'<polyline points="{p}" fill="none" stroke="{c}" stroke-width="2.5" stroke-linejoin="round"/>'
-        for t in ("대형", "중형", "소형"):
-            선 += f'<circle cx="{X[t]}" cy="{Y(r["칸"][t]["등락률"]):.0f}" r="3.4" fill="{c}"/>'
 
-    # ── 라벨 겹침 방지 ──
-    #  대형 등락률이 비슷한 테마들은 라벨 y가 거의 같아져 글자가 포개졌다.
-    #  그리기 전에 y를 모아 위→아래로 훑으며 최소 간격(13px)을 강제로 벌린다.
-    #  선은 원래 자리에 두고 글자만 밀되, 어느 선의 이름인지 알 수 있게
-    #  많이 밀린 경우 점선 연결선을 그려준다.
-    라벨들 = sorted(
-        [{"y": Y(r["칸"]["대형"]["등락률"]),
-          "c": ("#ff6b4a" if i < 3 else "#5b9bff"),
-          "nm": r["테마"]} for i, r in enumerate(강조)],
-        key=lambda d: d["y"])
-    간격, 이전 = 13.0, None
-    for d in 라벨들:
-        d["ly"] = d["y"] if 이전 is None else max(d["y"], 이전 + 간격)
-        이전 = d["ly"]
-    # 아래로 넘치면 전체를 위로 되민다
-    넘침 = 라벨들[-1]["ly"] - (H - B + 6) if 라벨들 else 0
-    if 넘침 > 0:
-        for d in 라벨들:
-            d["ly"] -= 넘침
-    for d in 라벨들:
-        if abs(d["ly"] - d["y"]) > 3:
-            선 += (f'<line x1="96" y1="{d["y"]:.0f}" x2="90" y2="{d["ly"]:.0f}" '
-                   f'stroke="{d["c"]}" stroke-width="0.8" opacity=".45"/>')
-        선 += (f'<text x="86" y="{d["ly"]+3.5:.0f}" text-anchor="end" font-size="10.5" '
-               f'fill="#d5d9e0">{d["nm"]}</text>')
+def build_return_sector():
+    """🔮 돌아올 섹터 — 주기로 본 다음 순번."""
+    날짜, 순위, _ = _cyc_rank()
+    if not 날짜:
+        return ""
+    ST = {n: _cyc_stat(순위[n]) for n in 순위}
 
-    축 = "".join(f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
-                 f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
-                 f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
-    영 = (f'<line x1="96" y1="{Y(0):.0f}" x2="352" y2="{Y(0):.0f}" stroke="#3a4150" '
-          f'stroke-width="1" stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
+    def 위상(n):
+        s = ST[n]
+        return None if not s["평균주기"] else min(1.25, s["경과"] / s["평균주기"])
 
-    하향 = sum(1 for r in 행들 if r["칸"]["대형"]["등락률"] > r["칸"]["소형"]["등락률"])
-    결론 = (f'{len(행들)}개 테마 중 <b style="color:#f0c65a">{하향}개</b>가 우하향 — '
-            + ("오늘은 테마보다 크기가 수익을 갈랐습니다" if 하향 >= len(행들) * 0.7
-               else "테마별로 크기 효과가 갈렸습니다"))
+    def dday(n):
+        s = ST[n]
+        if not s["평균주기"]:
+            return None
+        if s["현재"] is not None and s["현재"] <= CYC_TOP:
+            return 0
+        return max(0, round(s["평균주기"] - s["경과"]))
+
+    def 그룹(n):
+        s = ST[n]
+        if s["현재"] is not None and s["현재"] <= CYC_TOP:
+            return "지금"
+        d = dday(n)
+        return "임박" if d == 0 else "대기"
+
+    # 순서: 임박(곧 온다) → 대기(언제 오나) → 지금(이미 와 있다)
+    GRP = [("임박", "임박 섹터", "#ff6b4a", "평균 주기를 이미 넘겼습니다"),
+           ("대기", "대기 섹터", "#5b9bff", "아직 순번이 오지 않았습니다"),
+           ("지금", "지금 섹터", "#4ade80", "이미 상위권 안에 있습니다")]
+    본문 = ""
+    for key, 라벨, 색, 설명 in GRP:
+        멤버 = [n for n in 순위 if 그룹(n) == key]
+        if not 멤버:
+            continue
+        if key == "대기":
+            멤버.sort(key=lambda n: (dday(n) if dday(n) is not None else 999))
+        else:
+            멤버.sort(key=lambda n: -(위상(n) or 0))
+        rows = ""
+        for nm in 멤버:
+            c = sector_color(nm); p = min(1.25, (위상(nm) or 0)); pos = p / 1.25 * 100
+            d = dday(nm)
+            뱃 = "지금" if key == "지금" else ("임박" if key == "임박" else
+                                          (f"D-{d}" if d else "—"))
+            _s = ST[nm]
+            if _s["평균주기"]:
+                _차 = _s["경과"] - _s["평균주기"]
+                _차문 = (f'<b style="color:#ff6b4a">+{_차:.0f}일 초과</b>' if _차 >= 0
+                       else f'<b style="color:#5b9bff">{-_차:.0f}일 남음</b>')
+                주기문 = (f'평균 주기 <b style="color:#c9ced6">{_s["평균주기"]:.0f}일</b> · '
+                       f'이탈 후 {_s["경과"]}일 · {_차문}')
+            else:
+                주기문 = f'등판 {_s["회수"]}회 — 주기를 말하기엔 표본이 적습니다'
+            rows += (f'<div class="rs-row" data-zone="{nm}" '
+                     f'style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'
+                     f'<span class="rs-name" style="width:88px;flex:none;min-width:0;'
+                     f'font-size:10.5px;font-weight:600;color:#e8eaee;text-align:right;'
+                     f'padding:1px 3px;border-radius:4px;overflow:hidden;'
+                     f'text-overflow:ellipsis;white-space:nowrap">{nm}</span>'
+                     f'<div style="flex:1;min-width:0;position:relative;height:14px;'
+                     f'background:#0f131a;border-radius:7px;overflow:hidden">'
+                     f'<div style="position:absolute;left:80%;right:0;top:0;bottom:0;'
+                     f'background:#f0c65a;opacity:.13"></div>'
+                     f'<div style="position:absolute;left:0;width:{pos:.0f}%;top:0;bottom:0;'
+                     f'background:{c};opacity:.55"></div>'
+                     f'<div style="position:absolute;left:calc({pos:.0f}% - 6px);top:1px;'
+                     f'width:12px;height:12px;border-radius:6px;background:{c};'
+                     f'box-shadow:0 0 0 1.5px #141922"></div></div>'
+                     f'<span style="width:34px;flex:none;text-align:right;font-size:10.5px;'
+                     f'font-weight:800;color:{색};white-space:nowrap">{뱃}</span></div>'
+                     f'<p style="margin:-2px 0 6px 95px;font-size:9.5px;color:#7d848f">'
+                     f'{주기문}</p>')
+        본문 += (f'<div style="margin-bottom:12px">'
+                f'<div style="display:flex;align-items:baseline;gap:7px;margin-bottom:6px">'
+                f'<span style="font-size:12.5px;font-weight:800;color:{색}">{라벨}</span>'
+                f'<span style="font-size:10px;color:#6f7784">{len(멤버)}개 · {설명}</span></div>'
+                f'{rows}</div>')
+    if not 본문:
+        return ""
+
+    # 도달 지점(80%)을 전 섹터에 걸쳐 세로 점선 한 줄로 잇는다 —
+    #   막대마다 따로 있으면 "공통 기준선"이라는 게 안 읽힌다.
+    JS = """<script>
+(function(){
+ function line(){
+  var host=document.getElementById('rs-body'); if(!host) return;
+  var old=document.getElementById('rs-line'); if(old) old.remove();
+  var ol=document.getElementById('rs-lab'); if(ol) ol.remove();
+  var rows=host.querySelectorAll('.rs-row'); if(!rows.length) return;
+  var track=rows[0].children[1];
+  var hb=host.getBoundingClientRect(), tb=track.getBoundingClientRect();
+  var x=tb.left-hb.left+tb.width*0.8;
+  var first=rows[0].getBoundingClientRect(), last=rows[rows.length-1].getBoundingClientRect();
+  var top=first.top-hb.top, bot=last.bottom-hb.top;
+  var el=document.createElement('div'); el.id='rs-line';
+  el.style.cssText='position:absolute;left:'+x+'px;top:'+top+'px;height:'+(bot-top)+
+   'px;width:0;border-left:1.5px dashed #f0c65a;opacity:.75;pointer-events:none';
+  host.appendChild(el);
+  // 라벨은 선(el)이 아니라 host에 붙인다 — 폭 0인 선에 붙이면 밖으로 삐져나간다.
+  var lab=document.createElement('div'); lab.id='rs-lab';
+  // 마지막 행 설명글과 겹치지 않게 선 '위쪽'에 붙인다.
+  lab.style.cssText='position:absolute;left:'+Math.max(0,x-28)+'px;top:'+Math.max(0,top-13)+
+   'px;font-size:8.5px;color:#f0c65a;pointer-events:none;white-space:nowrap';
+  lab.textContent='도달 지점'; host.appendChild(lab);
+ }
+ function paint(){var mz=(window.cpMyZones?cpMyZones():{});
+  document.querySelectorAll('.rs-row').forEach(function(r){
+   var n=r.querySelector('.rs-name'), on=!!mz[r.dataset.zone];
+   if(n){n.style.boxShadow=on?'inset 0 0 0 1.3px #f0c65a':'none';
+         n.style.fontWeight=on?800:600;}});
+  line();}
+ window.CP_PAINT=window.CP_PAINT||[]; window.CP_PAINT.push(paint);
+ window.addEventListener('resize',line);
+ if(document.readyState!=='loading'){paint()}else{
+  document.addEventListener('DOMContentLoaded',paint)}
+})();
+</script>"""
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">돌아올 섹터</p>'
+            '<p style="margin:0 0 11px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '다음 순번은 어디인가</p>'
+            f'<div id="rs-body" style="position:relative;padding-top:14px">{본문}</div>'
+            '<p style="margin:14px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+            '막대는 <b style="color:#c9ced6">주기 트랙</b>입니다 — 왼쪽 끝이 상위권에서 빠진 날, '
+            '<b style="color:#f0c65a">노란 세로 점선</b>이 평균 주기에 도달하는 지점입니다.<br>'
+            '표식이 점선을 넘으면 <b style="color:#ff6b4a">임박</b>입니다.<br>'
+            '⚠️ <b style="color:#9aa0aa">예측이 아니라 순서 관찰</b>입니다. 주기는 자주 깨집니다.</p>'
+            '</div>' + JS)
+
+
+# ── 🛬 포착 항로 (v-m2 재설계) ────────────────────────────
+#  구조: 기간 탭(20·60·120일) × 시장 카드(코스피·코스닥)
+#        각 카드에 [강세 레이더 평균] [매집 레이더 평균] [해당 지수] 세 곡선을 겹친다.
+#  ⚠️ 코스피 종목은 코스피와, 코스닥 종목은 코스닥과 비교해야 한다.
+#     지수를 섞으면 변동폭이 큰 코스닥이 불리하게 보인다.
+CAP_WINS = [(20, "20일"), (60, "60일"), (120, "120일")]
+CAP_KINDS = [("강세", "강세레이더", "#ff6b4a"), ("매집", "매집레이더", "#4ade80")]
+
+
+def _cap_curves(일수, 시장):
+    """{종류: {경과: 평균등락}} 과 지수 벤치마크 {경과: 평균등락}."""
+    파일들 = sorted(alist(r"data_\d{8}\.json"))[-일수:]
+    종가 = _index_close_map()
+    날짜들 = sorted(종가)
+    _idx = 1 if 시장 == "코스닥" else 0
+    곡선 = {k: {} for k, _, _ in CAP_KINDS}
+    벤치 = {}
+    쌍 = {k: {} for k, _, _ in CAP_KINDS}
+    for f in 파일들:
+        try:
+            with open(apath(f), encoding="utf-8") as fp:
+                d = json.load(fp)
+        except Exception:
+            continue
+        for 라벨, 키, _c in CAP_KINDS:
+            for t in ((d.get(키) or {}).get("추적") or []):
+                g, r = t.get("경과"), t.get("이후등락")
+                if not (isinstance(g, int) and isinstance(r, (int, float))):
+                    continue
+                if t.get("시장") != 시장:
+                    continue
+                쌍[라벨][(t.get("종목명"), t.get("포착일"))] = (g, r, t.get("포착일"))
+    for 라벨 in 곡선:
+        for g, r, 포착일 in 쌍[라벨].values():
+            곡선[라벨].setdefault(g, []).append(r)
+            if 포착일 in 종가:
+                try:
+                    i0 = 날짜들.index(포착일)
+                except ValueError:
+                    continue
+                i1 = i0 + g
+                if i1 < len(날짜들):
+                    a, b = 종가[날짜들[i0]][_idx], 종가[날짜들[i1]][_idx]
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and a:
+                        벤치.setdefault(g, []).append((b - a) / a * 100)
+    평 = {k: {g: sum(v) / len(v) for g, v in 곡선[k].items()} for k in 곡선}
+    벤평 = {g: sum(v) / len(v) for g, v in 벤치.items()}
+    수 = {k: len(쌍[k]) for k in 쌍}
+    return 평, 벤평, 수
+
+
+def _cap_card(일수, 시장):
+    평, 벤, 수 = _cap_curves(일수, 시장)
+    Ds = sorted(set().union(*[set(평[k]) for k in 평]) | set(벤)) if any(평.values()) else []
+    Ds = [d for d in Ds if d <= 20]
+    if len(Ds) < 3:
+        return (f'<div style="padding:14px 6px;text-align:center;font-size:11.5px;color:#7d848f">'
+                f'{시장} — 추적 이력이 아직 부족합니다 · 축적 중</div>')
+    vals = [v for k in 평 for g, v in 평[k].items() if g in Ds] + [벤[g] for g in Ds if g in 벤]
+    hi, lo = max(vals + [0]), min(vals + [0])
+    rng = max(0.5, hi - lo)
+    W, H, L, R, T, B = 380, 165, 30, 60, 12, 22
+    def PX(i): return L + i * (W - L - R) / max(1, len(Ds) - 1)
+    def PY(v): return T + (hi - v) / rng * (H - T - B)
+    g = (f'<line x1="{L}" y1="{PY(0):.0f}" x2="{W-R}" y2="{PY(0):.0f}" stroke="#3a4150" '
+         f'stroke-dasharray="4 3"/>'
+         f'<text x="{L+2}" y="{PY(0)-4:.0f}" font-size="8" fill="#6f7784">0%</text>')
+    if len([d for d in Ds if d in 벤]) >= 3:
+        pts = " ".join(f"{PX(i):.0f},{PY(벤[d]):.0f}" for i, d in enumerate(Ds) if d in 벤)
+        g += (f'<polyline points="{pts}" fill="none" stroke="#8b93a0" stroke-width="2" '
+              f'stroke-dasharray="6 4"/>')
+        _lv = [벤[d] for d in Ds if d in 벤][-1]
+        라벨y = {"__idx": (PY(_lv), "#8b93a0", None)}
+    else:
+        라벨y = {}
+    for 라벨, _키, c in CAP_KINDS:
+        pt = [(i, d) for i, d in enumerate(Ds) if d in 평[라벨]]
+        if len(pt) < 3:
+            continue
+        pts = " ".join(f"{PX(i):.0f},{PY(평[라벨][d]):.0f}" for i, d in pt)
+        g += f'<polyline points="{pts}" fill="none" stroke="{c}" stroke-width="2.4"/>'
+        라벨y[라벨] = (PY(평[라벨][pt[-1][1]]), c, 평[라벨][pt[-1][1]])
+    # 오른쪽 끝 라벨(강세·매집·지수)이 포개지지 않게 최소 11px 간격을 강제한다.
+    ys = sorted(라벨y.items(), key=lambda x: x[1][0])
+    prev = None
+    for 라벨, (y, c, v) in ys:
+        y2 = y if prev is None else max(y, prev + 11)
+        prev = y2
+        글 = 시장 if 라벨 == "__idx" else f'{라벨} {v:+.1f}%'
+        굵 = "400" if 라벨 == "__idx" else "700"
+        g += (f'<text x="{W-R+5}" y="{y2+3:.0f}" font-size="8.5" fill="{c}" '
+              f'font-weight="{굵}">{글}</text>')
+    for i, d in enumerate(Ds):
+        if i % max(1, len(Ds) // 5) == 0:
+            g += (f'<text x="{PX(i):.0f}" y="{H-6}" text-anchor="middle" font-size="8.5" '
+                  f'fill="#6f7784">D+{d}</text>')
+    요약 = ""
+    for 라벨, _키, c in CAP_KINDS:
+        if not 평[라벨]:
+            continue
+        마지막 = 평[라벨][max(평[라벨])]
+        벤끝 = 벤.get(max(평[라벨]))
+        초 = (마지막 - 벤끝) if isinstance(벤끝, (int, float)) else None
+        요약 += (f'<div style="flex:1;background:#161b24;border-radius:8px;padding:7px 8px">'
+               f'<p style="margin:0;font-size:10px;color:{c};font-weight:800">{라벨} 레이더</p>'
+               f'<p style="margin:2px 0 0;font-size:12px;font-weight:800;color:#e8eaee">'
+               f'{마지막:+.1f}%</p>'
+               f'<p style="margin:1px 0 0;font-size:9px;color:#7d848f">'
+               f'{수[라벨]}건'
+               + (f' · 초과 <b style="color:{"#4ade80" if 초>=0 else "#a78bfa"}">{초:+.1f}%p</b>'
+                  if 초 is not None else '') + '</p></div>')
+    return (f'<p style="margin:10px 0 5px;font-size:12px;font-weight:800;color:#c9ced6">'
+            f'{시장}</p>'
+            f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+            f'style="width:100%;height:auto;display:block">{g}</svg>'
+            f'<div style="display:flex;gap:6px;margin-top:5px">{요약}</div>')
+
+
+def build_capture_paths():
+    """포착 항로 — 기간 탭 × 코스피/코스닥 카드."""
+    탭, 패널 = "", ""
+    있음 = False
+    for idx, (n, lab) in enumerate(CAP_WINS):
+        켬 = idx == 0
+        본문 = _cap_card(n, "코스피") + _cap_card(n, "코스닥")
+        if "축적 중" not in 본문:
+            있음 = True
+        패널 += (f'<div class="cp-panel" data-idx="{idx}" '
+                f'style="display:{"block" if 켬 else "none"}">{본문}</div>')
+        탭 += (f'<span class="cp-tab" data-idx="{idx}" onclick="cpTab({idx})" '
+              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
+              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
+              f'background:{"#2a3446" if 켬 else "#171c25"};'
+              f'color:{"#f0c65a" if 켬 else "#7d848f"}">{lab}</span>')
+    JS = """<script>
+window.cpTab=function(i){
+ document.querySelectorAll('.cp-panel').forEach(function(p){
+  p.style.display=(p.dataset.idx==i)?'block':'none';});
+ document.querySelectorAll('.cp-tab').forEach(function(t){
+  var on=t.dataset.idx==i;
+  t.style.background=on?'#2a3446':'#171c25';
+  t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});};
+</script>"""
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">포착 항로</p>'
+            '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '레이더가 잡은 종목들, 그 뒤</p>'
+            f'<div style="display:flex;gap:6px;margin-bottom:4px">{탭}</div>' + 패널 +
+            '<p style="margin:10px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+            '가로축은 <b style="color:#c9ced6">포착 후 며칠(D+N)</b>, 세로축은 '
+            '<b style="color:#c9ced6">포착가 대비 등락률</b>입니다. '
+            '가로 점선(0%) 위면 오른 것입니다. '
+            '탭은 <b>얼마나 과거까지의 포착을 모을지</b>를 정합니다.<br>'
+            '<span style="color:#ff6b4a">━</span> 강세 레이더 · '
+            '<span style="color:#4ade80">━</span> 매집 레이더 · '
+            '<span style="color:#8b93a0">┅</span> 같은 기간 지수<br>'
+            '코스피 종목은 코스피와, 코스닥 종목은 코스닥과 비교합니다 — '
+            '변동폭이 다른 두 시장을 섞으면 비교가 왜곡됩니다.<br>'
+            '⚠️ 포착은 추천이 아니라 <b style="color:#9aa0aa">지표 성능 공시</b>입니다. '
+            '틀린 사례도 지우지 않습니다.</p></div>' + JS)
+
+
+def build_slope_chart(격자):
+    """📐 시총별 섹터 — 같은 섹터라도 대형·중형·소형 중 어디가 끌었나.
+
+    v-l9 변경:
+      · 5/20/60일 탭 (섹터 성적표와 같은 창 구성)
+      · 섹터마다 색 고정, 내 관심종목 섹터는 금색 점선
+      · 시장 평균선은 흰 점선(금색은 '내 섹터' 전용이라 양보)
+    """
+    이력 = _tier_series()
+    if not 이력:
+        return ""
+
+    # 오른쪽에 섹터명을 적으므로 소형 지점을 왼쪽으로 당기고 폭을 넓힌다.
+    # 왼쪽 여백을 없앤다 — 예전엔 라벨을 왼쪽에 뒀던 흔적으로 96px이 비어 있었다.
+    #   지금은 이름을 오른쪽 끝에 적으므로 왼쪽은 축부터 바로 시작해도 된다.
+    W, H, T, B = 440, 250, 34, 30
+    X = {"대형": 38, "중형": 189, "소형": 340}
+    탭, 패널 = "", ""
+    기본idx = 0   # 기본 탭은 5일 — 가장 최근 흐름부터 본다
+
+    for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
+        누적 = {}
+        for nm, 일별 in 이력.items():
+            c = _tier_cum(일별, n)
+            if c:
+                누적[nm] = c
+        켬 = idx == 기본idx
+        if len(누적) < 2:
+            필요 = min(n, 3)
+            패널 += (f'<div class="sl-panel" data-idx="{idx}" '
+                    f'style="display:{"block" if 켬 else "none"};padding:18px 6px;'
+                    f'text-align:center"><p style="margin:0;font-size:12.5px;color:#7d848f">'
+                    f'{이름} 추이는 {필요}거래일이 쌓이면 열립니다 · 축적 중</p></div>')
+        else:
+            순 = sorted(누적, key=lambda k: -sum(누적[k].values()) / 3)
+            보일 = 순[:3] + 순[-3:]
+            vs = [v for nm in 누적 for v in 누적[nm].values()]
+            시장 = None
+            _t = 이력  # 시장 평균 = 전 섹터의 층별 평균
+            시장 = {t: round(sum(누적[nm][t] for nm in 누적) / len(누적), 2)
+                   for t in ("대형", "중형", "소형")}
+            vs += list(시장.values())
+            hi, lo = max(vs), min(vs)
+            rng = max(0.01, hi - lo)
+            def Y(v): return T + (hi - v) / rng * (H - T - B)
+
+            # 전 섹터를 그려두고 기본은 숨긴다 → 섹터 성적표의 체크와 연동해 켠다.
+            # 끝 라벨이 겹치지 않게 y를 벌린다(소형 값이 비슷한 섹터끼리 포개졌다).
+            _ly = {}
+            _이전 = None
+            for nm in sorted(순, key=lambda k: Y(누적[k]["소형"])):
+                y0 = Y(누적[nm]["소형"])
+                _ly[nm] = y0 if _이전 is None else max(y0, _이전 + 11)
+                _이전 = _ly[nm]
+            _넘 = max(_ly.values()) - (H - B + 4) if _ly else 0
+            if _넘 > 0:
+                for k in _ly:
+                    _ly[k] -= _넘
+
+            선 = ""
+            for nm in 순:
+                c = sector_color(nm)
+                켬2 = nm in 보일
+                p = " ".join(f'{X[t]},{Y(누적[nm][t]):.0f}' for t in ("대형", "중형", "소형"))
+                점 = "".join(f'<circle cx="{X[t]}" cy="{Y(누적[nm][t]):.0f}" r="3" fill="{c}"/>'
+                            for t in ("대형", "중형", "소형"))
+                y1, y2 = Y(누적[nm]["소형"]), _ly[nm]
+                잇 = (f'<line x1="{X["소형"]+3}" y1="{y1:.0f}" x2="{X["소형"]+8}" y2="{y2:.0f}" '
+                     f'stroke="{c}" stroke-width="0.7" opacity=".5"/>') if abs(y2-y1) > 3 else ""
+                선 += (f'<g class="sl-line" data-idx="{idx}" data-zone="{nm}" '
+                       f'style="display:{"block" if 켬2 else "none"}">'
+                       f'<polyline class="sl-path" points="{p}" fill="none" stroke="{c}" '
+                       f'stroke-width="2" stroke-linejoin="round"/>{점}{잇}'
+                       f'<text x="{X["소형"]+10}" y="{y2+3:.0f}" font-size="9" '
+                       f'fill="{c}">{nm[:8]}</text></g>')
+            # 시장 평균 — 금색은 '내 섹터' 전용이므로 흰 점선으로.
+            # ⚠️ 점선은 '내 관심종목 섹터' 전용이라, 시장 평균은 굵은 흰 실선으로 구분한다.
+            mp = " ".join(f'{X[t]},{Y(시장[t]):.0f}' for t in ("대형", "중형", "소형"))
+            선 += (f'<polyline points="{mp}" fill="none" stroke="#ffffff" stroke-width="3.4" '
+                   f'stroke-linejoin="round" opacity=".9"/>')
+            for t in ("대형", "중형", "소형"):
+                선 += (f'<circle cx="{X[t]}" cy="{Y(시장[t]):.0f}" r="4" fill="#ffffff" '
+                       f'stroke="#141922" stroke-width="1.2"/>')
+            선 += (f'<text x="{X["소형"]+10}" y="{Y(시장["소형"])+3:.0f}" font-size="9" '
+                   f'fill="#ffffff" font-weight="700">시장 평균</text>')
+
+            축 = "".join(
+                f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
+                f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
+                f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
+            영 = (f'<line x1="34" y1="{Y(0):.0f}" x2="344" y2="{Y(0):.0f}" stroke="#3a4150" '
+                 f'stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
+
+            우하 = sum(1 for nm in 누적 if 누적[nm]["대형"] > 누적[nm]["소형"])
+            결론 = (f'{len(누적)}개 섹터 중 <b style="color:#f0c65a">{우하}개</b>가 우하향 — '
+                   + ("대형이 끌었습니다" if 우하 > len(누적) / 2 else "소형이 더 갔습니다"))
+            패널 += (f'<div class="sl-panel" data-idx="{idx}" '
+                    f'style="display:{"block" if 켬 else "none"}">'
+                    f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
+                    f'style="width:100%;height:auto;display:block">'
+                    f'{축}{영}{선}</svg>'
+                    f'<p style="margin:6px 0 0;font-size:12.5px;color:#c9ced6">{결론}</p></div>')
+
+        탭 += (f'<span class="sl-tab" data-idx="{idx}" onclick="slTab({idx})" '
+              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
+              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
+              f'background:{"#2a3446" if 켬 else "#171c25"};'
+              f'color:{"#f0c65a" if 켬 else "#7d848f"};'
+              f'-webkit-tap-highlight-color:transparent">{부제}</span>')
+
+    JS = """<script>
+(function(){
+ // 섹터 성적표에서 체크한 섹터를 그대로 따라간다(선택 상태는 하나만 존재).
+ function apply(){
+  var sel=window.CP_SECT, mz=(window.cpMyZones?cpMyZones():{});
+  document.querySelectorAll('.sl-line').forEach(function(g){
+   var z=g.dataset.zone;
+   if(sel) g.style.display = sel[z] ? 'block' : 'none';
+   var pa=g.querySelector('.sl-path');
+   if(pa){
+    // 내 관심종목 섹터는 같은 색 점선 — 색은 섹터 고유색을 유지한다.
+    pa.setAttribute('stroke-dasharray', mz[z]?'7 4':'');
+    pa.setAttribute('stroke-width', mz[z]?'3':'2');}
+  });
+ }
+ window.slSync=apply;
+ window.CP_PAINT=window.CP_PAINT||[]; window.CP_PAINT.push(apply);
+ window.slTab=function(i){
+  document.querySelectorAll('.sl-panel').forEach(function(p){
+   p.style.display=(p.dataset.idx==i)?'block':'none';});
+  document.querySelectorAll('.sl-tab').forEach(function(t){
+   var on=t.dataset.idx==i;
+   t.style.background=on?'#2a3446':'#171c25';
+   t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
+  apply();};
+ if(document.readyState!=='loading'){apply()}else{
+  document.addEventListener('DOMContentLoaded',apply)}
+})();
+</script>"""
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
-            'padding:12px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">크기 경사선</p>'
-            '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 크기별</p>'
+            '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '대형에서 소형으로 갈 때 무슨 일이</p>'
-            f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
-            f'style="width:100%;max-width:520px;height:auto;display:block">'
-            f'{축}{영}{선}</svg>'
-            f'<p style="margin:6px 0 0;font-size:12.5px;color:#c9ced6">{결론}</p>'
-            '<p style="margin:4px 0 0;font-size:11.5px;color:#6f7784">'
-            '빨강 = 상위 3테마 · 파랑 = 하위 3테마 · 회색 = 나머지</p></div>')
+            f'<div style="display:flex;gap:6px;margin:10px 0 9px">{탭}</div>'
+            + 패널 +
+            '<p style="margin:8px 0 0;font-size:10.5px;color:#6f7784;line-height:1.6">'
+            '<span style="color:#ffffff">━</span> <b style="color:#c9ced6">굵은 흰 실선 = 시장 평균</b><br>'
+            '<b style="color:#c9ced6">점선 = 내 관심종목이 속한 섹터</b> · 색은 섹터마다 고정입니다<br>'
+            '위 <b>섹터 성적표</b>에서 체크한 섹터가 여기에도 그대로 나옵니다</p>'
+            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            'border-radius:8px;border:1px solid #1e2531">'
+            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            'cursor:pointer;list-style:none">📖 섹터 크기별 보는 방법 '
+            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            '같은 섹터라도 <b style="color:#9aa0aa">대형주와 소형주의 성적은 다릅니다.</b> '
+            '이 그림은 그 차이를 한눈에 보여줍니다.<br>'
+            '<b style="color:#9aa0aa">선이 우하향</b>(왼쪽이 높음)이면 그 섹터는 '
+            '<b style="color:#9aa0aa">대형주가 끌었다</b>는 뜻입니다. 같은 섹터를 골랐어도 '
+            '소형주를 들고 있었으면 못 벌었습니다.<br>'
+            '<b style="color:#9aa0aa">선이 우상향</b>이면 반대로 소형주가 더 갔습니다. '
+            '시장에 온기가 퍼질 때 자주 나오는 모습입니다.<br>'
+            '<b style="color:#9aa0aa">굵은 흰 선(시장 평균)보다 위</b>에 있으면 '
+            '그 크기에서 시장을 이긴 것입니다. 내 섹터 점선이 흰 선 아래로 계속 간다면 '
+            '<b style="color:#9aa0aa">자리 자체가 불리했다</b>는 뜻입니다.<br>'
+            '기간 탭(5·20·60일)을 바꾸면 <b style="color:#9aa0aa">최근 흐름과 큰 흐름</b>이 '
+            '다른지 확인할 수 있습니다.'
+            '</p></details></div>' + JS)
 
 
-# ── 4. 포착 항로 (레이더 성적) ───────────────────────────────
 def _index_close_map():
     """market_history에서 {날짜: (코스피종가, 코스닥종가)} — 벤치마크 계산용."""
     try:
@@ -3332,11 +4130,10 @@ def build_core(핵심편, data, 해석):
     # 순서 의도: 💰수급(외국인·기관=큰돈) → 🧭나침반(개인=군중) → 격자·레이더
     #   같은 하루를 '큰돈'과 '군중' 두 시선으로 잇따라 보여준다.
     # 순서 의도: 내 종목(가장 개인적) → 내 구역 → 구역 성적 → 시장 전체
-    격자블록 = (build_crowd_compass(data.get("군중나침반"))
-              + build_my_stocks(data)
+    # 핵심편은 '내 자리'까지만 — 시장 전체 분석은 심층편으로 내린다.
+    격자블록 = (build_my_stocks(data)
               + build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
-              + build_zone_scoreboard()
-              + build_sector_radar())
+              + build_sector_scoreboard())
     변속기블록 = build_flow_gearbox()
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
@@ -4248,22 +5045,9 @@ def build_html(data, report):
     오늘의공부 = 해석.get("오늘의_공부", "")
     # 3개월 항로 — 이력이 충분할 때만 별도 섹션으로 붙는다(부족하면 빈 문자열).
     # 시장을 나눠 두 장으로 — 코스닥은 변동폭이 구조적으로 커서 섞으면 평균이 끌려간다.
-    # 구역 추이 — 데이터가 부족하면 빈 문자열이라 섹션째 사라진다.
-    _zt = build_zone_trend()
-    _zone_trend_block = (
-        '<p class="sec-label"><small>구역 추이</small>📈 어느 구역이 시장을 이겼나</p>' + _zt
-    ) if _zt else ""
-    _c1 = (build_capture_path(1, "코스피") + build_capture_path(1, "코스닥")) or build_capture_path(1)
-    _c3 = (build_capture_path(3, "코스피") + build_capture_path(3, "코스닥"))
-    # 수급편 — 매집 추적은 오늘부터 쌓이므로 충분해지기 전에는 자동으로 생략된다.
-    _c수급 = (build_capture_path(1, "코스피", "매집") + build_capture_path(1, "코스닥", "매집"))
-    _capture수급_block = (
-        '<p class="sec-label"><small>1개월 항로 · 수급편</small>'
-        '💼 매집 레이더는 잘 잡았나</p>' + _c수급
-    ) if _c수급 else ""
-    _capture3_block = (
-        '<p class="sec-label"><small>3개월 항로</small>🛰️ 더 길게 보면 어떤가</p>' + _c3
-    ) if _c3 else ""
+    # 구역 추이는 v-l8에서 '섹터 성적표'(핵심편)로 흡수됐다 — 심층편에서는 뺀다.
+    _zone_trend_block = ""
+    # 포착 항로는 v-m2에서 '기간 탭 × 시장 카드' 하나로 통합됐다.
 
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
 
@@ -5159,22 +5943,52 @@ a{{color:inherit;text-decoration:none}}
     {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
   </div>
 
-  <p class="sec-label"><small>주도 섹터</small>🏆 오늘의 주인공 — 시장을 끌고 간 6개 업종</p>
+  <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
+    <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
   {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
             f"{(data.get('설정') or {}).get('주도섹터',{}).get('가중치','?')} 점수로 재정렬 → "
             f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
+  <details style="margin:12px 0 0;padding:9px 10px;background:#0f131a;border-radius:8px;
+    border:1px solid #1e2531">
+    <summary style="font-size:11.5px;color:#e0c060;font-weight:700;cursor:pointer;
+      list-style:none">📖 섹터 성적표와 뭐가 다른가요?
+      <span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>
+    <p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">
+      <b style="color:#9aa0aa">오늘의 주인공</b>은 매일 바뀌는 <b>사건 현장</b>입니다.
+      거래대금까지 보기 때문에 <b>돈이 몰린 곳</b>을 잡습니다.<br>
+      <b style="color:#9aa0aa">섹터 성적표</b>는 안 바뀌는 <b>주소</b>입니다. 항상 같은 칸이라
+      어제·지난달과 비교됩니다.<br>
+      그래서 <b style="color:#9aa0aa">두 곳의 순위가 다를 수 있습니다.</b>
+      성적표에선 강한데 여기 없다면 — <b style="color:#f0c65a">올랐지만 돈은 안 붙은 상승</b>입니다.
+    </p></details>
 
   {_zone_trend_block}
 
-  <p class="sec-label"><small>크기별 경사</small>📐 대형이 끌었나, 소형이 끌었나</p>
+  <p class="sec-label"><small>포착 성적</small>🛬 레이더는 잘 잡았나</p>
+  {build_capture_paths()}
+
+  <p class="sec-label"><small>내 자리</small>📰 내 종목 브리핑 — 오늘 무슨 일이</p>
+  {build_stock_brief()}
+
+  <p class="sec-label"><small>내 자리</small>📊 내 종목 구역 다시 보기</p>
+  {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
+
+  <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표 다시 보기</p>
+  {build_sector_scoreboard()}
+
+  <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 대형이 끌었나</p>
   {build_slope_chart(data.get('계좌격자'))}
 
-  <p class="sec-label"><small>1개월 항로 · 강세편</small>🛬 강세 레이더는 잘 잡았나</p>
-  {_c1}
-  {_capture수급_block}
-  {_capture3_block}
+  <p class="sec-label"><small>순환 분석</small>🗺️ 순위 섹터맵 — 주도권이 어떻게 돌았나</p>
+  {build_sector_map()}
+
+  <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
+  {build_return_sector()}
+
+  <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
+  {build_crowd_compass(data.get('신용잔고'))}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
