@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.16-l7"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.17-m1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -2232,12 +2232,12 @@ def collect_account_grid(테마후보):
         """억원 → 사람이 읽는 말. 10,000억 = 1조 (절대 '만억'을 쓰지 않는다)"""
         if not isinstance(억, (int, float)) or 억 <= 0:
             return None
+        # ⚠️ 세 칸(대형·중형·소형)의 단위를 반드시 '조'로 통일한다.
+        #    하나만 '6,200억'으로 나오면 나란히 놓고 비교할 수 없다.
+        # ⚠️ 격자 헤더는 칸이 좁다(모바일 한 칸 ≈ 60px).
+        #    '0.62조~3.12조' 처럼 길면 옆 칸 글자와 겹친다 → 소수 1자리로 짧게.
         조 = 억 / 10000
-        if 조 >= 10:
-            return f"{조:.0f}조"
-        if 조 >= 1:
-            return f"{조:.1f}조"
-        return f"{억:,.0f}억"
+        return f"{조:.0f}" if 조 >= 10 else f"{조:.1f}"
 
     대형선 = _조표기(_시총경계(GRID_대형_끝))
     중형선 = _조표기(_시총경계(GRID_중형_끝))
@@ -2257,9 +2257,10 @@ def collect_account_grid(테마후보):
         "기준": {"대형": f"1~{GRID_대형_끝}위", "중형": f"{GRID_대형_끝+1}~{GRID_중형_끝}위",
                 "소형": f"{GRID_중형_끝+1}위 이하", "최소종목": GRID_최소종목,
                 # 순위와 함께 '그 순위의 실제 시총'을 담는다 — 독자가 자기 종목을 대입할 수 있게.
-                "대형시총": f"{대형선} 이상" if 대형선 else None,
-                "중형시총": f"{중형선}~{대형선}" if (대형선 and 중형선) else None,
-                "소형시총": f"{중형선} 이하" if 중형선 else None},
+                # 조 단위로 통일하고 기호로 줄인다 — 세 칸을 나란히 놓고 읽을 수 있게.
+                "대형시총": f"{대형선}조↑" if 대형선 else None,
+                "중형시총": f"{중형선}~{대형선}조" if (대형선 and 중형선) else None,
+                "소형시총": f"{중형선}조↓" if 중형선 else None},
         "유니버스종목수": len(유니버스),
         # ── 종목 사전 (v-l7 신규) ──
         #  '내 종목' 코너의 재료. 이름 → [구역들, 시총순위, 층, 오늘 등락률].
