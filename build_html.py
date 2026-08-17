@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.17-m1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n1"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -5904,8 +5904,6 @@ a{{color:inherit;text-decoration:none}}
   <div class="deep-wrap">
   {build_gauge(data.get('관제지수'), 오늘한줄평)}
 
-  {build_terrain(data.get('주도섹터'))}
-
   <p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
   <div class="idx-grid">
     <div class="idx-card2">
@@ -5953,7 +5951,7 @@ a{{color:inherit;text-decoration:none}}
   <details style="margin:12px 0 0;padding:9px 10px;background:#0f131a;border-radius:8px;
     border:1px solid #1e2531">
     <summary style="font-size:11.5px;color:#e0c060;font-weight:700;cursor:pointer;
-      list-style:none">📖 섹터 성적표와 뭐가 다른가요?
+      list-style:none">📖 오늘의 주인공과 섹터 성적표는 뭐가 다른가요?
       <span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>
     <p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">
       <b style="color:#9aa0aa">오늘의 주인공</b>은 매일 바뀌는 <b>사건 현장</b>입니다.
@@ -5965,12 +5963,6 @@ a{{color:inherit;text-decoration:none}}
     </p></details>
 
   {_zone_trend_block}
-
-  <p class="sec-label"><small>포착 성적</small>🛬 레이더는 잘 잡았나</p>
-  {build_capture_paths()}
-
-  <p class="sec-label"><small>내 자리</small>📰 내 종목 브리핑 — 오늘 무슨 일이</p>
-  {build_stock_brief()}
 
   <p class="sec-label"><small>내 자리</small>📊 내 종목 구역 다시 보기</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
@@ -5987,8 +5979,8 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
   {build_return_sector()}
 
-  <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
-  {build_crowd_compass(data.get('신용잔고'))}
+  <p class="sec-label"><small>내 자리</small>📰 내 종목 브리핑 — 오늘 무슨 일이</p>
+  {build_stock_brief()}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
@@ -5997,11 +5989,17 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
+  <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
+  {build_crowd_compass(data.get('신용잔고'))}
+
   <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불 붙은 곳</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
   <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
+
+  <p class="sec-label"><small>포착 종목 성적</small>🛬 레이더는 잘 잡았나</p>
+  {build_capture_paths()}
 
   <p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
   {build_briefings(해석.get('마감브리핑'))}
