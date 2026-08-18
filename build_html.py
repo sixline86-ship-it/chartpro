@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n2"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -4260,6 +4260,168 @@ def combo_tag(실탄, 비차익):
     if (not 실) and 비:
         return ("warn", "🟡 지수만 방어", "개별은 파는데 인덱스 자금이 지수를 떠받친 날")
     return ("info", "🔵 지수형 매도", "지수도 종목도 함께 빠진 전면 이탈")
+
+
+# ── 🧺 비차익(바스켓) 해석·통계 ─────────────────────────
+#  비차익 = "종목을 고르지 않고 코스피200을 한 바구니에 담아 통째로 사고판 돈".
+#  이 코너가 답하는 것은 **지수가 오를까 내릴까가 아니다.**
+#  "그 방향이 내 계좌까지 오는 구조인가" — 즉 **폭(넓이)** 하나다.
+#
+#  ⚠️ 판정 기준은 위쪽 수급 관제신호와 **같은 상수를 쓴다.**
+#     (FLOW_바스켓선 / FLOW_실탄최소). 여기서 따로 45%·2000억을 다시 쓰면
+#     같은 날이 두 자리에서 다르게 판정돼 리포트가 자기모순에 빠진다.
+BASKET_HIGH = FLOW_바스켓선 * 100      # 이 이상이면 '지수형'
+BASKET_LOW = 20.0                      # 이 미만이면 '종목형'
+BASKET_MIN_SAMPLE = 5                  # 표본 5회 룰 — 미만이면 빈도 문장을 내지 않는다
+
+
+def basket_ratio(비차익, 실탄):
+    """비차익 ÷ 실탄 × 100. 판정 불가면 None.
+
+    ⚠️ 100%를 넘거나 음수가 나올 수 있다. 오류가 아니다.
+       분모(실탄=외국인+기관 상계 후)와 분자(비차익=시장 전체 프로그램)의
+       집계 범위가 달라서, 한쪽이 지수를 통째로 사고 다른 쪽이 개별 종목을
+       반대로 팔면 이런 값이 나온다.
+    """
+    if 비차익 is None or 실탄 is None:
+        return None
+    if abs(실탄) < FLOW_실탄최소:
+        return None
+    return 비차익 / 실탄 * 100.0
+
+
+def basket_band(r):
+    """비중 → ('high'|'mid'|'low'|'odd'|None, 표시명)"""
+    if r is None:
+        return None, "판정 보류"
+    if r < 0 or r > 100:
+        return "odd", "상계"
+    if r >= BASKET_HIGH:
+        return "high", "지수형"
+    if r >= BASKET_LOW:
+        return "mid", "혼재"
+    return "low", "종목형"
+
+
+def basket_read(실탄, 비차익, 만기=False):
+    """오늘 비차익을 초보 눈높이로 풀어쓴 한 문단 (규칙 기반 — Claude 미개입).
+
+    방향(실탄 부호) × 폭(비중 구간)의 4분면으로 갈라 쓴다.
+    '오를 것이다 / 내릴 것이다'는 절대 쓰지 않는다.
+    """
+    r = basket_ratio(비차익, 실탄)
+    band, _ = basket_band(r)
+
+    if 만기:
+        return ("오늘은 만기일이라 비차익이 기계적으로 크게 잡힙니다. "
+                "폭 판정은 오늘 하루 건너뜁니다.")
+    if band is None:
+        return ("오늘은 실탄이 작아 비율로 나누면 값이 크게 튑니다. "
+                "폭 판정은 보류합니다.")
+
+    pct = f"{r:.0f}%"
+    산다 = 실탄 >= 0
+
+    if band == "odd":
+        return (f"비중이 <b>{pct}</b>로 나왔습니다. 오류가 아니라 "
+                f"<b>한쪽은 지수를 통째로 사고 다른 쪽은 개별 종목을 반대로 판</b> 날입니다. "
+                f"이런 날은 지수와 개별 종목의 방향이 크게 엇갈리기 쉬우니, "
+                f"<b>지수만 보고 내 종목을 판단하면 어긋납니다.</b>")
+    if 산다 and band == "low":
+        return (f"실탄은 들어왔지만 <b>{pct}만 바스켓</b>입니다. "
+                f"지수 상승을 <b>소수 종목이 만들었다</b>는 뜻이라, "
+                f"대부분의 계좌는 지수만큼 못 올랐을 겁니다. "
+                f"이런 날은 지수 방향보다 <b>어느 섹터에 있느냐</b>가 수익을 가릅니다.")
+    if 산다 and band == "mid":
+        return (f"바스켓 비중 <b>{pct}</b> — 지수 전체와 개별 종목이 <b>절반씩 섞인</b> 매수입니다. "
+                f"지수도 오르고 종목별 편차도 남는 구간이라, "
+                f"<b>지수를 따라가되 섹터가 성과를 가른다</b>고 보면 됩니다.")
+    if 산다 and band == "high":
+        return (f"실탄의 <b>{pct}</b>가 바스켓 매수입니다. 종목을 고른 게 아니라 "
+                f"<b>한국 시장 자체를 담은</b> 날이라, 대형주·지수를 따라가는 자리가 유리합니다. "
+                f"넓게 들어온 돈은 좁게 들어온 돈보다 <b>흐름이 오래 이어지는 편</b>이지만, "
+                f"소형 테마는 상대적으로 소외될 수 있습니다.")
+    if (not 산다) and band == "low":
+        return (f"실탄은 빠졌지만 바스켓은 <b>{pct}</b>뿐입니다. "
+                f"지수를 통째로 던진 게 아니라 <b>오른 종목에서 차익을 실현한</b> 쪽에 가깝습니다. "
+                f"지수는 버텨도 <b>많이 오른 종목이 먼저 밀릴 수 있는</b> 자리입니다.")
+    if (not 산다) and band == "mid":
+        return (f"바스켓 비중 <b>{pct}</b> — 지수 이탈과 종목 정리가 <b>같이 일어난</b> 매도입니다. "
+                f"한쪽으로 단정하기 어려운 구간이라 다음 이틀의 방향을 확인하는 편이 낫습니다.")
+    return (f"실탄의 <b>{pct}</b>가 바스켓 매도입니다. 종목을 고른 게 아니라 "
+            f"<b>한국 시장 자체에서 나간</b> 날이라, 개별 호재가 잘 먹히지 않습니다. "
+            f"종목 고르기로 이기기 어려운 국면입니다.")
+
+
+def basket_followup(이력, 앞으로=5, 최소표본=BASKET_MIN_SAMPLE, 만기제외=True):
+    """비차익 비중 구간별로 'N거래일 뒤 코스피가 올랐나'를 센다.
+
+    이력 : flow_history.json 리스트 (날짜·실탄·비차익·코스피등락 필요.
+           선택 필드 '만기'가 True면 표본에서 뺀다)
+    반환 : {'매수': {band: {n, up, down, avg, ready}}, '매도': {...}, 'days': N}
+
+    ⚠️ 만기일은 비차익이 기계적으로 튀므로 반드시 뺀다. 안 빼면 통계가 오염된다.
+    """
+    rows = [x for x in (이력 or []) if x.get("실탄") is not None]
+    n = len(rows)
+    out = {"매수": {}, "매도": {}, "days": 앞으로, "min_sample": 최소표본}
+    buckets = {}
+    for i in range(n - 앞으로):
+        x = rows[i]
+        if 만기제외 and x.get("만기"):
+            continue
+        band, _ = basket_band(basket_ratio(x.get("비차익"), x.get("실탄")))
+        if band is None or band == "odd":
+            continue
+        방향 = "매수" if x["실탄"] >= 0 else "매도"
+        acc, ok = 1.0, True
+        for j in range(i + 1, i + 1 + 앞으로):
+            v = rows[j].get("코스피등락")
+            if v is None:
+                ok = False
+                break
+            acc *= (1 + v / 100.0)
+        if not ok:
+            continue
+        buckets.setdefault((방향, band), []).append((acc - 1) * 100.0)
+    for (방향, band), vals in buckets.items():
+        up = sum(1 for v in vals if v > 0)
+        out[방향][band] = {"n": len(vals), "up": up, "down": len(vals) - up,
+                          "avg": sum(vals) / len(vals), "ready": len(vals) >= 최소표본}
+    return out
+
+
+_BASKET_NAME = {"high": "비중 {:.0f}% 넘은".format(BASKET_HIGH),
+                "mid": "비중 {:.0f}~{:.0f}%".format(BASKET_LOW, BASKET_HIGH),
+                "low": "비중 {:.0f}% 미만".format(BASKET_LOW)}
+
+
+def basket_followup_sentence(stat, 방향="매수"):
+    """basket_followup 결과 → 사람이 읽는 문장.
+
+    ⚠️ 표본이 최소치에 못 미치는 구간은 **아예 말하지 않는다.**
+       (없는 비교는 만들지 않는다 — 절대 원칙 2)
+    """
+    d = (stat or {}).get(방향, {})
+    N = (stat or {}).get("days", 5)
+    최소 = (stat or {}).get("min_sample", BASKET_MIN_SAMPLE)
+    ready = [(b, v) for b, v in d.items() if v["ready"]]
+    if not ready:
+        가진것 = sum(v["n"] for v in d.values())
+        return (f"⏳ {방향}일의 비중 구간별 통계는 아직 표본이 부족합니다 "
+                f"(현재 {가진것}건 · 구간당 {최소}건부터 공개).")
+    parts = []
+    for b in ("high", "mid", "low"):
+        v = d.get(b)
+        if not v or not v["ready"]:
+            continue
+        parts.append(f"{_BASKET_NAME[b]} {방향}일이 기록상 {v['n']}번 있었고, "
+                     f"그중 {N}거래일 뒤 코스피가 오른 건 {v['up']}번이었습니다")
+    미달 = [b for b in ("high", "mid", "low") if b in d and not d[b]["ready"]]
+    꼬리 = ""
+    if 미달:
+        꼬리 = " (" + " · ".join(f"{_BASKET_NAME[b]} {d[b]['n']}건은 표본 부족" for b in 미달) + ")"
+    return ". ".join(parts) + "." + 꼬리 + " 과거 빈도이며 확률 예측이 아닙니다."
 
 
 def _flow_amt(v):
