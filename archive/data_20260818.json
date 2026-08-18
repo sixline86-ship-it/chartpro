@@ -1,6 +1,6 @@
 {
   "날짜": "20260818",
-  "버전_collect": "v2026.08.18-n7",
+  "버전_collect": "v2026.08.18-n9",
   "공시": [
     {
       "회사명": "E8",
@@ -399,6 +399,38 @@
   },
   "뉴스원본": [
     {
+      "제목": "코스피 6거래일만 하락…대외 악재에 개미는 '관망'",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000896984&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "다음 달 유류할증료 최대 9만 원대로 오른다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964299&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "세탁기 조립하고, 청소·빨래하고…엔비디아도 찾은 '로봇 훈련소'",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964298&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "캐릭터 붙였더니 매출 4배로…캐릭터로 2030 잡는다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964297&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "[올댓차이나] 홍콩 증시, 중국 정책 기대에 상승 마감… H주 0.16%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014133829&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "금융위 \"국조실에 단일종목 레버리지 규제심사 요청했다…관련 절차 적정 이행\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014133828&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "쌀 한 포대 20kg? 이제 1kg 포장도 있어요…'쌀의 날' 소비 늘리기 총력전",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964295&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
+      "제목": "고학력 신입부터 AI에 일자리 내줬다…다시 공시생 몰리는 노량진",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964294&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
+    },
+    {
       "제목": "\"자산평가 데이터화·AX로… AI 기반 금융 가치 플랫폼 도약\" [fn이사람]",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005563152&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
     },
@@ -437,42 +469,18 @@
     {
       "제목": "美 장기금리 끌어올린 빅테크 ‘빚투’…K반도체엔 ‘양날의 검’",
       "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006353709&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "\"상폐 피하려 1000원 턱걸이\"…당국, 동전株 점검",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005322121&office_id=015&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "\"수익률 좋은데 왜?\" 줄줄이 상폐되는 ETF",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006353708&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "‘이젠 진짜 국장 떠날 판’ 오전엔 급등·오후엔 급락…정신없는 코스피, 결국 6800까지 [투자360]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002685258&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "금리의 역습, 美·英·日 국채금리 급등",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0003993599&office_id=023&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "'자율주행 AI 솔루션' 라이드플럭스, 코스닥 상장예비심사 신청",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016257225&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
-    },
-    {
-      "제목": "단일 레버리지 반등에도 개인 '눈물의 손절'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005563093&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260818&page=1"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1410.08,
-      "등락률": -0.37,
+      "값": 1409.58,
+      "등락률": -0.41,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 83.91,
-      "등락률": -0.7,
+      "값": 84.06,
+      "등락률": -0.52,
       "표시명": "WTI 유가",
       "단위": "$"
     },
@@ -483,8 +491,8 @@
       "단위": "%"
     },
     "국제금": {
-      "값": 4454.4,
-      "등락률": 0.83,
+      "값": 4446.9,
+      "등락률": 0.66,
       "표시명": "국제 금",
       "단위": "$"
     }
