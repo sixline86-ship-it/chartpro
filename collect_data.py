@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.18-n3"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -525,6 +525,65 @@ MACRO_TICKERS = {
 }
 
 
+def _flow_is_weekend(ymd):
+    """YYYYMMDD가 토·일인가."""
+    try:
+        return datetime.strptime(str(ymd), "%Y%m%d").weekday() >= 5
+    except Exception:
+        return False
+
+
+_FLOW_KEYS = ("외현", "기관", "외선", "비차익", "코스피등락")
+
+
+def _flow_same(a, b):
+    """두 줄의 수급 값이 완전히 같은가 = 데이터가 갱신되지 않았다는 뜻.
+
+    서로 다른 두 거래일에 이 5개 실수가 전부 일치할 확률은 사실상 0이다.
+    따라서 같다면 '휴장일에 직전 거래일 값을 그대로 받아온 것'으로 본다.
+    """
+    if not a or not b:
+        return False
+    if all(a.get(k) is None for k in _FLOW_KEYS):
+        return False
+    return all(a.get(k) == b.get(k) for k in _FLOW_KEYS)
+
+
+def prune_flow_history(이력):
+    """휴장일에 잘못 들어간 줄을 걷어낸다.
+
+    ⚠️ 왜 필요한가 (2026-08-18 발견)
+       워크플로가 8/15(토)·8/16(일)·8/17(대체공휴일)에도 돌았고,
+       pykrx/네이버가 직전 거래일(8/14) 값을 그대로 돌려줘 같은 줄이 4개 쌓였다.
+       그 결과 리포트가 '기관 4일 연속 매도'라고 표시했다 — 실제로는 1일이다.
+       연속일수·평균·순위·차트가 전부 오염되므로 반드시 걷어내야 한다.
+
+    거르는 기준 두 가지
+      ① 토·일 (날짜만으로 확정 판정)
+      ② 직전 줄과 수급 값이 완전히 동일 (공휴일·대체공휴일이 여기서 걸린다)
+
+    ②를 쓰는 이유: 공휴일 표(KRX_HOLIDAYS)는 generate_report·build_html에
+    이미 두 벌이 있어 세 번째 사본을 두면 매년 세 곳을 고쳐야 한다.
+    값이 안 바뀐 날은 어차피 휴장이므로, 표 없이도 같은 결과가 나온다.
+    """
+    if not 이력:
+        return 이력
+    이력 = sorted([x for x in 이력 if x.get("날짜")], key=lambda x: x["날짜"])
+    나온것, 버린주말, 버린중복 = [], 0, 0
+    for row in 이력:
+        if _flow_is_weekend(row["날짜"]):
+            버린주말 += 1
+            continue
+        if 나온것 and _flow_same(row, 나온것[-1]):
+            버린중복 += 1
+            continue
+        나온것.append(row)
+    if 버린주말 or 버린중복:
+        print(f"   🧹 휴장일 정리: 주말 {버린주말}일 · 직전과 동일 {버린중복}일 제거 "
+              f"→ 거래일 {len(나온것)}일치")
+    return 나온것
+
+
 def backfill_flow_history(이력):
     """과거 data_YYYYMMDD.json 을 훑어 flow_history의 빈 날짜를 메운다.
 
@@ -633,6 +692,12 @@ def update_flow_history(지수수급, 파생):
         print("⚠️ 현물 수급 미확보 — flow_history에 오늘을 기록하지 않습니다.")
         return 이력
 
+    # ⚠️ 휴장일 방어 — 주말에는 아예 기록하지 않는다.
+    #    (공휴일은 값이 직전과 같아서 아래 prune_flow_history가 걸러낸다)
+    if _flow_is_weekend(DATE):
+        print(f"🛑 {DATE}는 주말입니다 — flow_history에 기록하지 않습니다.")
+        return prune_flow_history(이력)
+
     코 = ((지수수급 or {}).get("지수") or {}).get("코스피", {})
     코등락 = _f(코.get("등락률"))
     실탄값 = round(외현 + 기관)
@@ -652,7 +717,7 @@ def update_flow_history(지수수급, 파생):
     이력 = [x for x in 이력 if x.get("날짜") != DATE]      # 재발행 시 덮어쓰기
     이력.append(오늘)
     이력 = backfill_flow_history(이력)                    # 빈 과거 날짜 메우기
-    이력.sort(key=lambda x: x.get("날짜", ""))
+    이력 = prune_flow_history(이력)                       # 휴장일에 들어온 줄 제거
     이력 = 이력[-60:]
 
     with open(파일, "w", encoding="utf-8") as f:
