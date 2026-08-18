@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n7"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.18-n9"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -178,10 +178,15 @@ def collect_index_and_flow():
         표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
         오늘행 = 표[표["날짜"].astype(str).str.replace(".", "", regex=False) == DATE[2:]]
         if len(오늘행) == 0:
+            # ⚠️ 오늘 자료가 아직 안 올라온 경우 (2026-08-18 발견)
+            #    예전에는 표의 첫 줄(= 직전 거래일)을 조용히 가져다 오늘 값으로 저장했다.
+            #    그러면 **다른 날 수급이 오늘 숫자로 리포트에 실린다.**
+            #    → 남의 날짜를 오늘로 둔갑시키지 않는다. 못 구했으면 못 구했다고 한다.
             실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
-            if len(실) == 0:
-                return None
-            오늘행 = 실.iloc[[0]]
+            찾음 = str(실.iloc[0]["날짜"]) if len(실) else "없음"
+            print(f"  ⚠️ 수급({sosok}) — {DATE} 자료가 아직 없습니다 "
+                  f"(표의 최신 날짜: {찾음}). 오늘 수급은 '미확보'로 둡니다.")
+            return None
         r = 오늘행.iloc[0]
         return {"개인": str(r["개인"]), "외국인": str(r["외국인"]), "기관계": str(r["기관계"])}
 
