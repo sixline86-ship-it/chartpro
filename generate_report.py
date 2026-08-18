@@ -146,7 +146,7 @@ REPORT_PATH = asave(f"report_{DATE}.json")
 # ── 사용할 모델 선택 ────────────────────────────────────
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
-SCRIPT_VERSION = "v2026.08.18-n3"
+SCRIPT_VERSION = "v2026.08.18-n5"
 
 # 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
 MAX_TOKENS_START = 16000
@@ -572,8 +572,20 @@ def load_previous_watchpoints():
         return None
 
 
+# ⚠️ 프롬프트에서 통째로 빼는 항목 (2026-08-18 실측으로 확정)
+#   계좌격자는 data json의 **75%(약 169,000자)** 를 차지하는데,
+#   프롬프트 어디에서도 참조하지 않는다(전수 확인). 브라우저가 localStorage의
+#   관심종목과 대조해 화면에서 직접 계산하는 자료라 Claude가 쓸 일이 없다.
+#   매일 보내면 그만큼 입력 토큰 값을 낸다 → 통째로 뺀다.
+#   ※ 화면에는 그대로 나온다. build_html이 data json에서 직접 읽기 때문이다.
+PROMPT_제외키 = ("계좌격자", "종목사전")
+
+
 def slim_data(data):
     """Claude에게 보낼 데이터를 줄인다.
+
+    ⚠️ 가장 큰 절감은 PROMPT_제외키(계좌격자 등)를 통째로 빼는 것이다.
+    상위 항목만 잘라서는 10%밖에 안 줄어든다(2026-08-18 실측: 224,813자 → 201,514자).
 
     코너가 늘면서 data json이 비대해졌다(매집 레이더만 69종목 등).
     화면에는 상위 몇 개만 쓰는데 전부 보내면
@@ -583,6 +595,15 @@ def slim_data(data):
     해석에 필요한 만큼만 잘라서 보낸다.
     """
     d = json.loads(json.dumps(data, ensure_ascii=False))   # 원본 보호
+
+    # ── 통째로 빼는 항목 (가장 큰 절감) ──
+    _뺀양 = 0
+    for _k in PROMPT_제외키:
+        if _k in d:
+            _뺀양 += len(json.dumps(d[_k], ensure_ascii=False))
+            d.pop(_k, None)
+    if _뺀양:
+        print(f"   ✂️ 프롬프트 제외: {', '.join(PROMPT_제외키)} — 약 {_뺀양:,}자 절약")
 
     # 주도섹터: 종목은 3개씩이면 해석에 충분
     for s in d.get("주도섹터", []) or []:
@@ -951,11 +972,19 @@ def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
     #    "10분 넘게 걸릴 수 있는 요청은 스트리밍 필수"라며 ValueError를 던진다.
     #    (2026.08.14 실제 발행 실패 원인 — 1차 16,000자 잘림 → 2차 32,000 재시도에서 발생)
     #    스트리밍으로 받으면 같은 Message 객체를 그대로 얻으면서 이 제한을 피한다.
+    # ⚠️ 얼마 썼는지 기록이 없으면 "이 수정으로 얼마 줄었나"를 확인할 방법이 없다.
+    #    Actions 로그에 남겨 두면 다음 최적화의 근거가 된다.
+    print(f"   📤 프롬프트 약 {len(SYSTEM_PROMPT)+len(user_message):,}자 · max_tokens {max_tok:,}")
     with client.messages.stream(**kwargs) as stream:
         response = stream.get_final_message()
 
     # ⚠️ 답변이 중간에 끊겼으면 한도를 올려 다시 시도한다.
     #    (예전엔 같은 한도로 재시도해서 똑같이 실패했다 — 무의미한 재시도)
+    _u = getattr(response, "usage", None)
+    if _u is not None:
+        _i = getattr(_u, "input_tokens", 0) or 0
+        _o = getattr(_u, "output_tokens", 0) or 0
+        print(f"   🧾 토큰 사용: 입력 {_i:,} · 출력 {_o:,} · 합계 {_i+_o:,}")
     if response.stop_reason == "max_tokens":
         if 시도 < 3 and max_tok < MAX_TOKENS_CAP:
             새한도 = min(max_tok * 2, MAX_TOKENS_CAP)
