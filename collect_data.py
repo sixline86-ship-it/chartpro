@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n3"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.18-n5"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -525,6 +525,25 @@ MACRO_TICKERS = {
 }
 
 
+def _is_expiry_day(ymd):
+    """그날이 파생 만기일인가 — 매월 두 번째 목요일.
+
+    ⚠️ 왜 저장하나: 만기일엔 비차익이 기계적으로 크게 튄다.
+       방향성 베팅이 아니라 지수 편입·교체에 따른 조정이라, 비중 통계에
+       섞이면 결과가 오염된다. build_html의 basket_followup(만기제외=True)이
+       이 필드를 보고 표본에서 뺀다. 지금 안 심으면 3개월 뒤 통계가
+       오염된 채로 켜진다.
+       (3·6·9·12월은 선물+옵션 동시 만기 = '네 마녀의 날'로 더 크게 튄다)
+    """
+    try:
+        d = datetime.strptime(str(ymd), "%Y%m%d")
+    except Exception:
+        return False
+    첫날 = d.replace(day=1)
+    첫목 = 1 + ((3 - 첫날.weekday()) % 7)      # 그 달 첫 목요일
+    return d.day == 첫목 + 7                   # 두 번째 목요일
+
+
 def _flow_is_weekend(ymd):
     """YYYYMMDD가 토·일인가."""
     try:
@@ -644,7 +663,7 @@ def backfill_flow_history(이력):
             조합p = {(True, True): "지수형매수", (True, False): "종목장세",
                     (False, True): "지수만방어", (False, False): "지수형매도"}[
                     (실탄p > 0, 비차익p > 0)]
-        새행 = {"날짜": ymd, "외현": 외현, "기관": 기관,
+        새행 = {"날짜": ymd, "만기": _is_expiry_day(ymd), "외현": 외현, "기관": 기관,
                "외선": _f((파생.get("선물수급") or {}).get("외국인")),
                "비차익": 비차익p, "실탄": 실탄p,
                "코스피등락": 코등락, "조합": 조합p}
@@ -708,7 +727,10 @@ def update_flow_history(지수수급, 파생):
         조합 = {(True, True): "지수형매수", (True, False): "종목장세",
                (False, True): "지수만방어", (False, False): "지수형매도"}[
                (실탄값 > 0, 비차익 > 0)]
-    오늘 = {"날짜": DATE, "외현": 외현, "기관": 기관,
+    만기 = _is_expiry_day(DATE)
+    if 만기:
+        print("   📅 오늘은 파생 만기일 — 비차익 통계 표본에서 제외되도록 표시합니다.")
+    오늘 = {"날짜": DATE, "만기": 만기, "외현": 외현, "기관": 기관,
            "외선": 외선, "비차익": 비차익,
            "실탄": 실탄값, "코스피등락": 코등락, "조합": 조합,
            # 캔들용 시·고·저·종 (있을 때만 — 20일 쌓이면 build_html이 캔들로 전환)
