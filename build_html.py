@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n3"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n5"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -1460,8 +1460,13 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
         return f'{side}:50%;width:{w:.1f}%;background:{색}'
 
     # ── BC · 막대 + 성격 (지수 2줄 + 수급 2줄) ──
-    #   색 규칙: 지수는 HTS식(상승 빨강 / 하락 파랑),
-    #            수급은 매수 초록 / 매도 보라(#a78bfa) — 지수 색과 겹치지 않게.
+    #   색 규칙 (2026-08-18 개정):
+    #     지수 = 진한 빨강/파랑(#c1432b / #2e6bd6)
+    #     수급 = 밝은 빨강/파랑(#ff6b4a / #5b9bff)
+    #   ⚠️ 예전엔 수급을 초록/보라로 갈랐는데, 그러면 같은 리포트 안에서
+    #      "초록=샀다"와 "빨강=올랐다"가 동시에 돌아 뜻이 두 개가 됐다.
+    #      이제 **빨강 계열=올랐다/샀다**로 뜻을 하나로 통일하고,
+    #      진하기(지수) vs 밝기(수급)로 "무엇에 대한 얘기인가"를 구분한다.
     #   맨 앞 성격은 '링+화살표'(지수 방향까지 표현).
     #   수급 밑 작은 글씨엔 '연속·순위' 배지, 그 아래 60일 누적을 붙인다.
     #   스케일: 지수 ±4% / 수급 ±3조. 단위가 다르므로 각자 기준(정직).
@@ -1473,15 +1478,15 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
                     f'<span class="ix-bv {o["cls"]}">{o["등문"]}<small>{o["종가"]}</small></span></div>')
 
         def flow_row(nm, v, 배지):
-            # v: 억원. 매수(+)=초록, 매도(-)=보라. ±3조(30,000억)를 최대폭으로.
+            # v: 억원. 매수(+)=밝은 빨강, 매도(-)=밝은 파랑. ±3조(30,000억)를 최대폭으로.
             if v is None:
                 return (f'<div class="ix-bar-row"><span class="ix-bn">{nm}</span>'
                         f'<div class="ix-bt"><span class="ix-bz"></span></div>'
                         f'<span class="ix-bv flat">—<small>&nbsp;</small></span></div>')
             매수 = v >= 0
             w = min(abs(v) / 30000.0, 1.0) * 50.0
-            색 = ("linear-gradient(90deg,#4ade80,#2a9d5a)" if 매수
-                  else "linear-gradient(270deg,#a78bfa,#7c5cd6)")
+            색 = ("linear-gradient(90deg,#ff6b4a,#c1432b)" if 매수
+                  else "linear-gradient(270deg,#5b9bff,#2e6bd6)")
             side = "left" if 매수 else "right"
             vcls = "buy" if 매수 else "sellv"
             return (f'<div class="ix-bar-row"><span class="ix-bn">{nm}</span>'
@@ -1489,7 +1494,7 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
                     f'<div class="ix-bf" style="{side}:50%;width:{w:.1f}%;background:{색}"></div></div>'
                     f'<span class="ix-bv {vcls}">{_flow_amt(v)}<small>{배지}</small></span></div>')
 
-        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조 · 매수 초록 / 매도 보라)</p>'
+        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조 · 매수 빨강 / 매도 파랑)</p>'
                   f'{flow_row("외국인", d["외인"], d["외배지"])}{flow_row("기관", d["기관"], d["기배지"])}'
                   f'<div class="ix-scale"><span>-3조</span><span>0</span><span>+3조</span></div>'
                   ) if (d["외인"] is not None or d["기관"] is not None) else ""
@@ -1544,7 +1549,7 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
     # ── H · 타임라인 내러티브 ──
     if style == "H":
         점색 = "#ff6b4a" if 코["cls"] == "up" else "#5b9bff" if 코["cls"] == "down" else "#888"
-        flowdot = ('<div class="h-item"><span class="h-dot" style="background:#4ade80"></span>'
+        flowdot = ('<div class="h-item"><span class="h-dot" style="background:#ff6b4a"></span>'
                    f'<div><p class="h-txt"><b>외국인·기관 {실탄문}</b></p>'
                    f'<p class="h-sub">큰손이 어느 쪽에 섰는지 보여주는 신호입니다</p></div></div>') if 실탄문 else ""
         return (f'<div class="ix-head">'
@@ -1964,15 +1969,15 @@ def build_flow_gearbox():
     어제 = 최근[-2]
 
     if 오늘 > 0 and 어제 <= 0:
-        상태, 색, 설명 = "매수 전환", "#4ade80", "팔던 흐름이 사는 쪽으로 돌아섰습니다"
+        상태, 색, 설명 = "매수 전환", "#ff6b4a", "팔던 흐름이 사는 쪽으로 돌아섰습니다"
     elif 오늘 < 0 and 어제 >= 0:
-        상태, 색, 설명 = "매도 전환", "#a78bfa", "사던 흐름이 파는 쪽으로 돌아섰습니다"
+        상태, 색, 설명 = "매도 전환", "#5b9bff", "사던 흐름이 파는 쪽으로 돌아섰습니다"
     elif 오늘 > 0 and 오름 >= 2:
-        상태, 색, 설명 = "매수 가속", "#4ade80", "사는 힘이 점점 세지고 있습니다"
+        상태, 색, 설명 = "매수 가속", "#ff6b4a", "사는 힘이 점점 세지고 있습니다"
     elif 오늘 > 0 and 내림 >= 2:
         상태, 색, 설명 = "매수 감속", "#86efac", "여전히 사지만 힘은 빠지는 중입니다"
     elif 오늘 < 0 and 내림 >= 2:
-        상태, 색, 설명 = "매도 가속", "#a78bfa", "파는 힘이 점점 세지고 있습니다"
+        상태, 색, 설명 = "매도 가속", "#5b9bff", "파는 힘이 점점 세지고 있습니다"
     elif 오늘 < 0 and 오름 >= 2:
         상태, 색, 설명 = "매도 감속", "#c4b5fd", "여전히 팔지만 힘은 빠지는 중입니다"
     else:
@@ -1982,7 +1987,7 @@ def build_flow_gearbox():
     최대 = max(abs(v) for v in 최근) or 1
     for v in 최근:
         h = max(4, int(abs(v) / 최대 * 34))
-        c = "#4ade80" if v >= 0 else "#a78bfa"
+        c = "#ff6b4a" if v >= 0 else "#5b9bff"
         막대.append(f'<div style="width:26px;display:flex;flex-direction:column;'
                     f'align-items:center;justify-content:flex-end;height:40px">'
                     f'<div style="width:16px;height:{h}px;background:{c};border-radius:3px"></div></div>')
@@ -2979,7 +2984,7 @@ def build_sector_radar():
     점, 라벨, 자취 = "", "", ""
     최대접근 = (None, -999)
     최대이탈 = (None, -999)
-    for nm in 이름들:
+    for _di, nm in enumerate(이름들):
         s = 배정[nm]
         오 = 오늘맵.get(nm, 권외)
         어 = 어제맵.get(nm, 권외)
@@ -2999,7 +3004,11 @@ def build_sector_radar():
             자취 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
                      f'stroke="{색}" stroke-width="2.4" opacity=".8"/>')
         # 점을 키우고 어두운 테두리를 둘러 배경과 확실히 분리한다.
+        # 레이더처럼 천천히 명멸시킨다. 섹터마다 시작 시점을 어긋나게 해
+        # 한꺼번에 깜빡이지 않도록(=요란하지 않도록) 지연을 준다.
+        _dly = f"{(_di * 0.37) % 3.2:.2f}s"
         점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="7" fill="{색}" '
+               f'class="rdr-dot" style="animation-delay:{_dly}" '
                f'stroke="#0f131a" stroke-width="1.6"/>')
         lx, ly = _polar(cx, cy, -8, s)
         anc = "middle" if abs(lx - cx) < 20 else ("start" if lx > cx else "end")
@@ -4131,8 +4140,10 @@ def build_core(핵심편, data, 해석):
     #   같은 하루를 '큰돈'과 '군중' 두 시선으로 잇따라 보여준다.
     # 순서 의도: 내 종목(가장 개인적) → 내 구역 → 구역 성적 → 시장 전체
     # 핵심편은 '내 자리'까지만 — 시장 전체 분석은 심층편으로 내린다.
-    격자블록 = (build_my_stocks(data)
-              + build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
+    # ⚠️ 내 관심종목 '등록' UI는 심층편으로 내렸다(2026-08-18).
+    #    핵심편은 90초 브리핑이라 '입력하는 화면'이 흐름을 끊는다.
+    #    등록은 심층편에서 하고, 핵심편은 그 결과(격자·성적표)만 보여준다.
+    격자블록 = (build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
               + build_sector_scoreboard())
     변속기블록 = build_flow_gearbox()
 
@@ -4148,6 +4159,7 @@ def build_core(핵심편, data, 해석):
             + 이슈블록
             + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
             + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
+            + core_flow_gauge()
             + f'<div class="mny-tiles">{타일HTML}</div>'
             + 변속기블록
             + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
@@ -4701,11 +4713,45 @@ def flow_pattern_analysis():
 #   · 매수=빨강 / 매도=파랑. 주체 구분은 색이 아니라 **선 색상 대비**로 한다
 #     (외국인=자홍 / 기관=민트) — 매수·매도 색과 겹치면 뜻이 두 개가 된다.
 #   · 데이터가 없는 구간은 0으로 채우지 않는다. **비우고 그 사실을 적는다.**
-FS_BUY, FS_SELL = "#ff6b4a", "#5b9bff"      # 매수 / 매도
+# ⚠️ 색 규칙 (2026-08-18 확정)
+#   지수와 수급이 둘 다 빨강/파랑을 쓰므로 **명도로 층을 나눈다.**
+#   같은 계열이라 뜻(빨강=올랐다·샀다)은 하나로 통하고,
+#   진하기 차이로 "지수 얘긴가 수급 얘긴가"가 구분된다.
+FS_BUY, FS_SELL = "#ff6b4a", "#5b9bff"       # 수급 — 밝은 톤
+IDX_UP, IDX_DN = "#c1432b", "#2e6bd6"        # 지수 — 진한 톤
 FS_FOR, FS_INS = "#f472e6", "#74f0d4"        # 외국인 / 기관
 FS_FUT = "#e0c060"                            # 선물
 FS_TL_MIN = {5: 5, 20: 10, 60: 30}            # 이만큼 없으면 그림 대신 진행 막대
 _FS_TL_SEQ = [0]
+
+
+
+# ══════════════════════════════════════════════════════
+# 🙈 리포트에서 가린 챕터
+# ══════════════════════════════════════════════════════
+#  운영 규칙 (2026-08-18 확정)
+#    · 챕터를 "빼달라"는 요청은 **삭제가 아니라 가림**이다.
+#      코드·CSS·함수는 전부 그대로 두고, 발행되는 HTML에서만 감춘다.
+#    · 다시 보고 싶으면 아래 목록에서 그 줄만 지우면 즉시 되살아난다.
+#      ("가린 거 다 보여줘" → HIDDEN_CHAPTERS = set() 로 비우면 전부 복귀)
+#    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
+#      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
+HIDDEN_CHAPTERS = {
+    "지수와수급나란히",     # 2026-08-18 가림 — 통합 타임라인과 역할이 겹침
+}
+
+
+def hide(key, html):
+    """HIDDEN_CHAPTERS에 있으면 빈 문자열, 없으면 그대로."""
+    return "" if key in HIDDEN_CHAPTERS else html
+
+
+def hidden_note():
+    """가려둔 챕터가 있으면 개발자 메모로만 남긴다(운영자 확인용)."""
+    if not HIDDEN_CHAPTERS:
+        return ""
+    return ("<!-- 가려둔 챕터: " + ", ".join(sorted(HIDDEN_CHAPTERS)) +
+            " (build_html.py의 HIDDEN_CHAPTERS에서 해제) -->")
 
 
 def _fs_stat(arr, 평소일수=20):
@@ -4846,7 +4892,9 @@ def _fs_timeline_svg(이력, p, W=380):
     # ⚠️ viewBox 폭은 실제 표시 폭과 맞춰야 한다. 700으로 잡으면 390px 화면에서
     #    0.54배로 축소돼 11px 글자가 6px가 된다(안 읽힘).
     H = 300
-    PL, PR = 7, 7
+    # ⚠️ 오른쪽 여백(PR)은 선 이름표가 앉을 자리다. 0에 가깝게 잡으면
+    #    선이 화면 끝까지 꽉 차서 '어느 선이 외국인인지'를 못 읽는다.
+    PL, PR = 7, 46
     X = lambda k: PL + (W - PR - PL) * (k + 0.5) / q
     g = []
 
@@ -4866,14 +4914,27 @@ def _fs_timeline_svg(이력, p, W=380):
     YK = lambda v: AB - (AB - AT) * (v - klo) / ((khi - klo) or 1)
     g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YK(v):.1f}" for k, v in enumerate(C코)) +
              '" fill="none" stroke="#6f7784" stroke-width="1.1" stroke-dasharray="3 3" opacity=".6"/>')
+    # 오른쪽 이름표는 서로 최소 11px 떨어뜨린다. 안 그러면 값이 비슷한 날
+    # '코스피'와 '기관'이 겹쳐 둘 다 못 읽는다.
+    _lbl_used = []
+    def _lbl_y(want):
+        y = min(max(want, AT + 9), AB - 3)
+        for _ in range(24):
+            if all(abs(y - u) >= 11 for u in _lbl_used):
+                break
+            y += 11
+            if y > AB - 3:
+                y = AT + 9
+        _lbl_used.append(y)
+        return y
+    _kty = _lbl_y(YK(C코[-1]) + 3)
+    g.append(f'<text x="{W-PR+4}" y="{_kty:.1f}" font-size="8.5" fill="#8b93a0" font-weight="800">코스피</text>')
     for ser, col, nm, wd in ((C기, FS_INS, "기관", 2.4), (C외, FS_FOR, "외국인", 2.8)):
         g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YA(v):.1f}" for k, v in enumerate(ser)) +
                  f'" fill="none" stroke="{col}" stroke-width="{wd}" stroke-linejoin="round"/>')
         g.append(f'<circle cx="{X(q-1):.1f}" cy="{YA(ser[-1]):.1f}" r="3.3" fill="{col}"/>')
-        위 = ser[-1] >= (C외[-1] if ser is C기 else C기[-1])
-        ty = min(max(YA(ser[-1]) + (-9 if 위 else 13), AT + 9), AB - 3)
-        g.append(f'<rect x="{X(q-1)-35:.1f}" y="{ty-8:.1f}" width="30" height="11" rx="3" fill="#0f131a" opacity=".85"/>')
-        g.append(f'<text x="{X(q-1)-7:.1f}" y="{ty:.1f}" font-size="8" fill="{col}" font-weight="800" text-anchor="end">{nm}</text>')
+        ty = _lbl_y(YA(ser[-1]) + 3)
+        g.append(f'<text x="{W-PR+4}" y="{ty:.1f}" font-size="8.5" fill="{col}" font-weight="800">{nm}</text>')
 
     # ── 레인 B: 선물 누적 (확신) ──
     BT, BB = 152, 206
@@ -4888,11 +4949,13 @@ def _fs_timeline_svg(이력, p, W=380):
         g.append(f'<line x1="{X(i0):.1f}" y1="{YB(C선[i0]):.1f}" x2="{X(q-1):.1f}" y2="{YB(C선[q-1]):.1f}" '
                  f'stroke="{sc}" stroke-width="3" stroke-linecap="round" opacity=".9"/>')
         ar = "↗" if sl5 >= 0 else "↘"
-        g.append(f'<text x="{W-PR-4}" y="{BT+10:.1f}" font-size="8" fill="{sc}" font-weight="800" '
+        g.append(f'<text x="{W-PR-6}" y="{BT+10:.1f}" font-size="8" fill="{sc}" font-weight="800" '
                  f'text-anchor="end">5일 기울기 {ar} 하루 {sl5:,.0f}억</text>')
     g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YB(v):.1f}" for k, v in enumerate(C선)) +
              f'" fill="none" stroke="{FS_FUT}" stroke-width="2" stroke-linejoin="round" opacity=".9"/>')
     g.append(f'<circle cx="{X(q-1):.1f}" cy="{YB(C선[-1]):.1f}" r="3" fill="{FS_FUT}"/>')
+    g.append(f'<text x="{W-PR+4}" y="{min(max(YB(C선[-1])+3, BT+10), BB-3):.1f}" font-size="8.5" '
+             f'fill="{FS_FUT}" font-weight="800">선물</text>')
     g.append(f'<rect x="{PL+1}" y="{BT+1}" width="62" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
     g.append(f'<text x="{PL+4}" y="{BT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🛩️ 선물 누적</text>')
 
@@ -4921,19 +4984,18 @@ def _fs_timeline_svg(이력, p, W=380):
                          f'stroke="{gc}" stroke-opacity=".28" stroke-width="1"{dash}/>')
                 g.append(f'<text x="{PL+3}" y="{YC(gy)-2:.1f}" font-size="6.5" fill="{gc}" '
                          f'opacity=".75" font-weight="700">{gt}</text>')
-        seg, segs = [], []
-        for k, r in enumerate(rs):
-            if r is None:
-                if len(seg) > 1:
-                    segs.append(seg)
-                seg = []
-            else:
-                seg.append((X(k), YC(r)))
-        if len(seg) > 1:
-            segs.append(seg)
-        for sgm in segs:
-            g.append('<polyline points="' + " ".join(f"{x:.1f},{y:.1f}" for x, y in sgm) +
-                     '" fill="none" stroke="#c8ced6" stroke-width="1.9" stroke-linejoin="round"/>')
+        # ── 선을 잇는 방식 ──
+        #  측정된 날끼리는 실선, **측정 못 한 날을 건너뛴 구간은 점선**으로 잇는다.
+        #  (실탄이 너무 작아 비율이 튀는 날 = 판정 보류. 값이 없는 것이지
+        #   0인 것이 아니므로, 실선으로 그으면 없는 값을 지어낸 셈이 된다.
+        #   그렇다고 끊어두면 그림이 조각나 흐름이 안 읽힌다 → 점선이 절충안.)
+        측정 = [(k, rs[k]) for k in have]
+        for a, bq in zip(측정, 측정[1:]):
+            (k1, r1), (k2, r2) = a, bq
+            건너뜀 = (k2 - k1) > 1
+            g.append(f'<line x1="{X(k1):.1f}" y1="{YC(r1):.1f}" x2="{X(k2):.1f}" y2="{YC(r2):.1f}" '
+                     f'stroke="#c8ced6" stroke-width="1.9" stroke-linecap="round"'
+                     + (' stroke-dasharray="3 3" opacity=".55"' if 건너뜀 else '') + '/>')
         for k, r in enumerate(rs):
             if r is None:
                 continue
@@ -4947,8 +5009,8 @@ def _fs_timeline_svg(이력, p, W=380):
     else:
         g.append(f'<text x="{W/2:.1f}" y="{(CT+CB)/2+4:.1f}" font-size="8" fill="#4a5462" '
                  f'text-anchor="middle" font-weight="700">이 구간에는 비차익 데이터가 없습니다</text>')
-    g.append(f'<rect x="{W-PR-134}" y="{CT+1}" width="132" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
-    g.append(f'<text x="{W-PR-131}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 실탄 대비 비중(%)</text>')
+    g.append(f'<rect x="{W-PR-136}" y="{CT+1}" width="132" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
+    g.append(f'<text x="{W-PR-133}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 실탄 대비 비중(%)</text>')
 
     # ── 공통 날짜축 ──
     step = max(1, q // 4)
@@ -4959,6 +5021,32 @@ def _fs_timeline_svg(이력, p, W=380):
     g.append(f'<text x="{X(q-1):.1f}" y="{H-6}" font-size="7" fill="#c9d0d9" '
              f'text-anchor="middle" font-weight="800">{날[-1]}</text>')
     return f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg>'
+
+
+def core_flow_gauge():
+    """핵심편 수급 머리 — 심층편과 **같은 계기**를 작게 얹는다.
+
+    ⚠️ 핵심편은 90초 브리핑이라 통합 타임라인·비차익 판독까지는 내리지 않는다.
+       두 편이 **같은 언어**(같은 계기·같은 색)를 쓰되 **깊이만 다르게** 한다.
+       (인수인계 §5 '두 지도' 원칙과 같은 구조)
+    """
+    이력 = load_json("flow_history.json") or []
+    이력 = [x for x in 이력 if isinstance(x, dict) and x.get("실탄") is not None]
+    if not 이력:
+        return ""
+    st = _fs_stat([x["실탄"] for x in 이력])
+    if not st:
+        return ""
+    c = FS_BUY if st["v"] >= 0 else FS_SELL
+    ico, key = _fs_keyfact(st)
+    return (f'<div class="core-g">'
+            f'<div class="core-g-l">{_fs_gauge(st, 96)}'
+            f'<p class="core-g-x" style="color:{c}">평소의 {st["배수"]:.1f}배</p></div>'
+            f'<div class="core-g-r">'
+            f'<p class="core-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
+            f'<p class="core-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
+            f'<p class="core-g-k" style="border-color:{c}55;color:{c}">{ico} {key}</p>'
+            f'</div></div>')
 
 
 def build_flow_timeline(이력):
@@ -4992,6 +5080,7 @@ def build_flow_timeline(이력):
         <span><i style="background:{FS_INS}"></i>기관 누적</span>
         <span><i style="background:{FS_FUT}"></i>선물 누적</span>
         <span><i style="background:#6f7784"></i>코스피</span>
+        <span><i style="background:#c8ced6"></i>비차익 — 점 = 측정된 날 · 점선 = 판정 보류 구간</span>
       </div>
     </div>
     <script>(function(){{
@@ -5451,7 +5540,7 @@ def build_flow_signal(파생, 지수수급):
       <p class="fs-checks-t">🔍 두 가지만 확인하면 됩니다</p>
       {"".join(행들)}
     </div>
-    <div class="fs-splittitle">🕒 하나의 타임라인 <span>— 같은 날, 네 가지가 무슨 일이었나</span></div>
+    <div class="fs-splittitle">🕒 하나의 타임라인 <span>— 지수 + 수급 + 선물 + 비차익</span></div>
     {build_flow_timeline(이력)}
     <div class="fs-read">
       <p class="fs-read-t">🧺 오늘의 비차익 판독</p>
@@ -5463,15 +5552,16 @@ def build_flow_signal(파생, 지수수급):
     </div>
     {f'<p class="fs-combo"><b>{조합[1]}</b> — {조합[2]}</p>' if 조합 else ''}
     {f'<p class="fs-warn">{만기배지} — {만기설명}</p>' if 만기배지 else ''}
+    {hide("지수와수급나란히", f'''
     <div class="fs-splittitle">📊 지수와 수급, 나란히 보기 <span>— 최근 {min(N,20)}거래일</span></div>
     <div class="fs-cum">
       <div class="fs-cum-head">{배지HTML}</div>
       {그래프HTML}
       {판독HTML}
-    </div>
+    </div>''')}{hidden_note()}
     {flow_pattern_analysis()}
-    <p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
-      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>
+    {hide("지수와수급나란히", f'''<p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
+      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>''')}
   </div>'''
 
 
@@ -6187,6 +6277,22 @@ a{{color:inherit;text-decoration:none}}
 .fs-combo b{{color:#fff}}
 .fs-warn{{font-size:11px;color:#e8d9a8;line-height:1.7;margin-top:.5rem;background:rgba(224,192,96,.09);border:.5px solid rgba(224,192,96,.25);border-radius:var(--rmd);padding:.5rem .75rem}}
 .fs-warn b{{color:#f0e2b8}}
+/* 핵심편 수급 머리 — 심층편과 같은 계기 */
+.core-g{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;margin:.5rem 0 .7rem;padding:.6rem .2rem;border-bottom:.5px solid rgba(255,255,255,.08)}}
+.core-g-l{{text-align:center}}
+.core-g-l svg{{max-width:96px}}
+.core-g-x{{font-size:11px;font-weight:900;margin:.1rem 0 0}}
+.core-g-v{{font-size:23px;font-weight:900;margin:0;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:1.1}}
+.core-g-s{{font-size:10.5px;color:#8b93a0;margin:.2rem 0 0}}
+.core-g-s b{{color:#c9d0d9}}
+.core-g-k{{display:inline-block;font-size:10px;font-weight:800;padding:.15rem .5rem;border-radius:20px;border:1px solid #2a3342;background:#0d1118;margin:.35rem 0 0}}
+/* 뜨는 현장 레이더 — 섹터 점이 천천히 명멸한다 */
+/*   ⚠️ 빠르게 깜빡이면 요란하고 눈이 아프다. 3.2초 주기 ease-in-out으로
+       숨 쉬듯 느리게, 투명도만 오간다(크기는 안 건드려 위치가 안 흔들린다).
+       섹터마다 시작 시점을 어긋나게 해 한꺼번에 켜지지 않게 한다. */
+@keyframes rdrpulse{{0%,100%{{opacity:1}}50%{{opacity:.42}}}}
+.rdr-dot{{animation:rdrpulse 3.2s ease-in-out infinite}}
+@media (prefers-reduced-motion:reduce){{.rdr-dot{{animation:none}}}}
 /* ── 수급 관제신호 v5 ── */
 .fs-v5{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;padding:0 0 .7rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
 .fs-v5-g{{text-align:center;flex:0 0 auto}}
@@ -6441,6 +6547,9 @@ a{{color:inherit;text-decoration:none}}
     {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
   </div>
 
+  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 등록 — 먼저 내 종목부터</p>
+  {build_my_stocks(data)}
+
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
     <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
   {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
@@ -6463,6 +6572,9 @@ a{{color:inherit;text-decoration:none}}
     </p></details>
 
   {_zone_trend_block}
+
+  <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 섹터</p>
+  {hide("관제레이더", build_sector_radar())}
 
   <p class="sec-label"><small>내 자리</small>📊 내 종목 구역 다시 보기</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
