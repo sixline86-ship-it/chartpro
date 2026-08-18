@@ -10,7 +10,10 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n7"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n9"   # ⬅ 버전 표시
+# 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
+# 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
+BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -349,7 +352,7 @@ def theme_label(테마명):
 # ── 📊 오늘의 성적표 — SCORE B (2026-08-18) ────────────────
 #  왼쪽 칸: 지수 → 태그 → 한 줄 설명 (세로로 쌓아 빈 공간을 없앤다)
 #  오른쪽 칸: 수급 가로 막대 (작게 — 주인공은 지수와 설명이다)
-def _sc_flowbar(수급, W=150, H=17):
+def _sc_flowbar(수급, W=190, H=21):
     """0선 좌우 발산 막대 3줄. 왼쪽은 이름, 오른쪽은 금액 자리로 비워둔다.
     ⚠️ 비워두지 않으면 막대 끝과 금액 글자가 겹친다."""
     def _n(v):
@@ -364,7 +367,7 @@ def _sc_flowbar(수급, W=150, H=17):
     if not 항목:
         return ""
     mx = max(abs(v) for _, v in 항목) or 1
-    L, R = 30, 46
+    L, R = 34, 54
     z = L + (W - L - R) / 2
     half = (W - L - R) / 2 - 3
     g = []
@@ -373,11 +376,11 @@ def _sc_flowbar(수급, W=150, H=17):
         c = FS_BUY if v >= 0 else FS_SELL
         w = abs(v) / mx * half
         x = z if v >= 0 else z - w
-        g.append(f'<text x="0" y="{y+9:.0f}" font-size="8" fill="#8b93a0" font-weight="700">{nm}</text>')
-        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="10" rx="2" fill="{c}"/>')
-        g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+12:.0f}" '
+        g.append(f'<text x="0" y="{y+10:.0f}" font-size="9.5" fill="#8b93a0" font-weight="700">{nm}</text>')
+        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="13" rx="2.5" fill="{c}"/>')
+        g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+15:.0f}" '
                  f'stroke="#fff" stroke-opacity=".3"/>')
-        g.append(f'<text x="{W}" y="{y+9:.0f}" font-size="8" fill="{c}" text-anchor="end" '
+        g.append(f'<text x="{W}" y="{y+11:.0f}" font-size="9.5" fill="{c}" text-anchor="end" '
                  f'font-weight="800">{_flow_amt(v)}</text>')
     return f'<svg viewBox="0 0 {W} {len(항목)*H+4}">{"".join(g)}</svg>'
 
@@ -967,12 +970,17 @@ def _acc_star_names(매집):
     return 단기TOP & 중기TOP
 
 
+_AC_SEQ = [0]
+
+
 def build_accumulation(매집, 설정=None):
     if not 매집:
         return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
     종목 = 매집.get("종목") or []
     if not 종목:
         return '<div class="pending">오늘은 조건을 만족한 매집 종목이 없습니다.</div>'
+    _AC_SEQ[0] += 1
+    _AC_GID = f"ac{_AC_SEQ[0]}"   # 같은 표를 두 번 렌더해도 탭이 안 엉키게
     기간 = 매집.get("기간", 5)
     쌍최소 = 매집.get("쌍끌이최소", 3)
     단최소 = 매집.get("단독최소", 4)
@@ -1041,16 +1049,14 @@ def build_accumulation(매집, 설정=None):
                   + ('<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span>' if s["종목명"] in 별명단 else ""))
                 for i, s in enumerate(목록, 1))
         중기블록 = f'''
-    <div class="ac-long">
-      <p class="ac-long-t">🏗️ 중기 매집 — 최근 {중기간}거래일, 더 긴 호흡의 돈</p>
-      <p class="ac-long-s">5일이 "이번 주 신호"라면, {중기간}일은 "한 달째 이어지는 의지"입니다.
+      <p class="ac-long-s">5일이 <b>"이번 주 신호"</b>라면, {중기간}일은 <b>"한 달째 이어지는 의지"</b>입니다.
+        하루 이틀 산 게 아니라 <b>한 달 내내 같은 방향</b>이었다는 뜻이라, 단기보다 되돌림이 적습니다.<br>
         🤝쌍끌이 = 둘 다 {매집.get("중기쌍끌이",12)}일↑ · 💼단독 = 한쪽 {매집.get("중기단독",14)}일↑ ·
-        ⭐ = 5일 랭킹에도 동시 등재 (가장 강한 신호)</p>
+        <b>⭐ = 5일 랭킹에도 동시 등재</b>(가장 강한 신호)</p>
       <div class="ac-two">
         <div class="ac-col"><p class="ac-col-t">📊 코스피 · {중기간}일</p>{중기랭킹("코스피")}</div>
         <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일</p>{중기랭킹("코스닥")}</div>
-      </div>
-    </div>'''
+      </div>'''
 
     보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
           f'(🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}) — '
@@ -1064,21 +1070,43 @@ def build_accumulation(매집, 설정=None):
       🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
       💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
-    <p class="ac-long-t" style="margin-top:.6rem">🔥 단기 매집 — 최근 {기간}거래일</p>
-    <div class="ac-two">
-      <div class="ac-col">
-        <p class="ac-col-t">📊 코스피 · 시총 대비</p>
-        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
-        {코스피행}
-      </div>
-      <div class="ac-col">
-        <p class="ac-col-t">📊 코스닥 · 시총 대비</p>
-        <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
-        {코스닥행}
-      </div>
+    <div class="ac-tabs" data-g="{_AC_GID}">
+      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 단기 {기간}일</div>
+      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ 중기 {매집.get("중기기간",20)}일</div>
     </div>
-    {보충}
-    {중기블록}
+    <div class="ac-body on" data-g="{_AC_GID}" data-p="s">
+      <p class="ac-long-s">{기간}일은 <b>"이번 주에 막 들어온 돈"</b>입니다.
+        아직 짧아 되돌릴 수도 있지만, <b>가장 빠른 신호</b>이기도 합니다.<br>
+        🤝쌍끌이 = 둘 다 {쌍최소}일↑ · 💼단독 = 한쪽 {단최소}일↑</p>
+      <div class="ac-two">
+        <div class="ac-col">
+          <p class="ac-col-t">📊 코스피 · 시총 대비</p>
+          <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+          {코스피행}
+        </div>
+        <div class="ac-col">
+          <p class="ac-col-t">📊 코스닥 · 시총 대비</p>
+          <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
+          {코스닥행}
+        </div>
+      </div>
+      {보충}
+    </div>
+    <div class="ac-body" data-g="{_AC_GID}" data-p="l">
+      {중기블록 or '<p class="rd-empty">중기(20일) 매집은 이력이 더 쌓이면 열립니다.</p>'}
+    </div>
+    <script>(function(){{
+      var root=document.currentScript.parentNode;
+      root.addEventListener('click',function(e){{
+        var t=e.target.closest('.ac-tab'); if(!t||t.classList.contains('off')) return;
+        var g=t.getAttribute('data-g'), p=t.getAttribute('data-p');
+        root.querySelectorAll('.ac-tab[data-g="'+g+'"]').forEach(function(c){{c.classList.remove('on');}});
+        t.classList.add('on');
+        root.querySelectorAll('.ac-body[data-g="'+g+'"]').forEach(function(b){{
+          b.classList.toggle('on', b.getAttribute('data-p')===p);
+        }});
+      }});
+    }})();</script>
     <p class="rd-foot">💡 <b>순위가 높다고 "곧 오른다"는 뜻이 아닙니다.</b> 그 회사 규모에 비해 들어온 돈이
       컸다는 사실만 보여줄 뿐이며, 이유는 개별 확인이 필요합니다.
       시장을 나눈 이유는 시총 규모가 다른 코스피·코스닥을 한 줄로 세우면 늘 소형주만 올라오기 때문입니다.<br>
@@ -2194,11 +2222,16 @@ def sector_color(nm):
     return _SECTOR_FALLBACK[h % len(_SECTOR_FALLBACK)]
 
 
-ZONE_WINDOWS = [(5, "이번 주", "5일"), (20, "한 달", "20일"), (60, "분기", "60일")]
+# ⚠️ '당일'(1일) 탭 — 오늘 하루만 놓고 본 섹터 성적.
+#    5일 이상은 "흐름"이지만 1일은 "오늘 어디가 셌나"라 성격이 다르다.
+#    누적곱이 하루뿐이라 승패(승/총)는 0승 또는 1승으로만 나오므로,
+#    화면에서는 초과수익만 의미가 있다.
+ZONE_WINDOWS = [(1, "당일", "오늘"), (5, "이번 주", "5일"),
+                (20, "한 달", "20일"), (60, "분기", "60일")]
 ZONE_TOP_N = 5          # 처음에 펼쳐 보여줄 줄 수 (나머지는 '더보기')
 #  창별 최소 관측일 — 이만큼 없으면 그 탭은 "축적 중"으로 둔다.
 #  ⚠️ 2일치로 "이번 주 성적"이라고 쓰면 거짓말이 된다. 없는 비교는 만들지 않는다.
-ZONE_MIN = {5: 5, 20: 10, 60: 30}
+ZONE_MIN = {1: 1, 5: 5, 20: 10, 60: 30}
 
 
 def _zone_series():
@@ -2544,6 +2577,10 @@ def build_my_stocks(data):
             'padding:9px 14px;cursor:pointer">추가</button></div>'
             '<div id="ms-sug" style="display:none;background:#0f131a;border:1px solid #2a3446;'
             'border-radius:8px;margin:0 0 10px;max-height:186px;overflow-y:auto"></div>'
+            # ⚠️ 제목을 **입력창 바로 밑**에 둔다(2026-08-18 지시).
+            #    등록하자마자 "그래서 내 종목이 이기고 있나"가 바로 이어져야 한다.
+            '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '내 종목은 시장을 이기고 있나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
             '<div id="ms-list"></div><div id="ms-sum"></div><div id="ms-chart"></div>'
             '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
@@ -2634,7 +2671,7 @@ def build_sector_scoreboard():
     보유일 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장))
 
     탭, 패널 = "", ""
-    기본idx = 0   # 기본 탭은 5일 — 가장 최근 흐름부터 본다
+    기본idx = 1   # 기본 탭은 5일(당일이 맨 앞이라 idx 1) — 흐름부터 본다
 
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         통계 = []
@@ -2734,7 +2771,7 @@ def build_sector_scoreboard():
                       f'points="{pts}" fill="none" stroke="{색맵[nm]}" stroke-width="1.5" '
                       f'style="display:{"block" if 켬 else "none"}"/>'
                       f'<text class="sb-lab" data-idx="{idx}" data-zone="{nm}" '
-                      f'data-y0="{_ey:.1f}" x="{W-R+7}" y="{_ey+3:.1f}" font-size="8.5" '
+                      f'data-y0="{_ey:.1f}" x="{W-R+7}" y="{_ey+3.5:.1f}" font-size="11" font-weight="700" '
                       f'fill="{색맵[nm]}" style="display:{"block" if 켬 else "none"}">'
                       f'{nm[:8]}</text>'
                       f'<line class="sb-leader" data-idx="{idx}" data-zone="{nm}" '
@@ -3137,7 +3174,10 @@ def build_sector_radar():
         #  ⚠️ 예전엔 이동선이 굵어서 점과 구분이 안 됐다.
         #     선은 **가늘고 옅은 점선**으로 낮추고, 끝에 **화살촉**을 달아
         #     "어디서 어디로" 갔는지를 방향으로 읽게 한다.
-        if abs(변화) > 2:
+        # ⚠️ 이동 자취는 **다가온 섹터만** 그린다 (2026-08-18 지시).
+        #    멀어진 섹터까지 선을 그으면 화면이 선으로 뒤덮여 정작 봐야 할
+        #    "달아오르는 곳"이 안 보인다. 멀어진 섹터는 점(속 빈 원)으로만 남긴다.
+        if 꼴 == "in":
             자취 += (f'<circle cx="{ox:.0f}" cy="{oy:.0f}" r="2.6" fill="none" '
                      f'stroke="{색}" stroke-width="1" opacity=".45"/>')
             자취 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
@@ -3149,6 +3189,11 @@ def build_sector_radar():
             _hy = ny - (ny - oy) * 0.22
             자취 += (f'<g transform="translate({_hx:.1f} {_hy:.1f}) rotate({_ang:.0f})">'
                      f'<path d="M0 0 L-6 -3.4 L-6 3.4 Z" fill="{색}" opacity=".8"/></g>')
+            # 얼마나 다가왔는지를 숫자로 — 선 길이만으로는 크기 비교가 안 된다
+            _mx2 = (ox + nx) / 2
+            _my2 = (oy + ny) / 2
+            자취 += (f'<text x="{_mx2:.0f}" y="{_my2-7:.0f}" font-size="10" fill="{색}" '
+                     f'font-weight="900" text-anchor="middle">▲{abs(변화):.0f}</text>')
 
         # ── 오늘 자리 (점) ──
         #  들어옴 / 빠짐 / 제자리를 **색뿐 아니라 모양으로도** 갈라 놓는다.
@@ -3233,7 +3278,7 @@ def build_sector_radar():
             f'<circle cx="7.5" cy="7.5" r="4.5" fill="{FS_BUY}"/></svg> 들어옴(달아오름)</span>'
             f'<span><svg width="15" height="15" viewBox="0 0 15 15" style="display:inline-block;'
             f'vertical-align:-3px"><circle cx="7.5" cy="7.5" r="4.5" fill="#0b0e13" '
-            f'stroke="{FS_SELL}" stroke-width="2.4"/></svg> 빠짐(식는 중)</span>'
+            f'stroke="{FS_SELL}" stroke-width="2.4"/></svg> 빠짐</span>'
             '<span><svg width="15" height="15" viewBox="0 0 15 15" style="display:inline-block;'
             'vertical-align:-3px"><circle cx="7.5" cy="7.5" r="3.4" fill="#f0c65a"/></svg> 제자리</span>'
             '<span><svg width="26" height="10" viewBox="0 0 26 10" style="display:inline-block;'
@@ -3241,9 +3286,10 @@ def build_sector_radar():
             'stroke-width="1.3" stroke-dasharray="3 3"/><path d="M26 5 L18 1.6 L18 8.4 Z" '
             'fill="#8b93a0"/></svg> 어제→오늘 이동</span>'
             '</div>')
+    # ⚠️ '이탈' 칸은 뺐다(2026-08-18). 이 코너의 질문은
+    #    "오늘 어디가 달아올랐나" 하나다. 이탈까지 같이 두면 초점이 흐려진다.
     패널 = (범례 + '<div style="display:flex;gap:7px">'
-            + _칸("가장 빠르게 접근", 접근값, 접근색)
-            + _칸("가장 빠르게 이탈", 이탈값, 이탈색) + '</div>')
+            + _칸("가장 빠르게 접근", 접근값, 접근색) + '</div>')
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:12px 14px;margin:10px 0 0">'
@@ -3814,7 +3860,7 @@ def build_slope_chart(격자):
     W, H, T, B = 440, 250, 34, 30
     X = {"대형": 38, "중형": 189, "소형": 340}
     탭, 패널 = "", ""
-    기본idx = 0   # 기본 탭은 5일 — 가장 최근 흐름부터 본다
+    기본idx = 1   # 기본 탭은 5일(당일이 맨 앞이라 idx 1) — 흐름부터 본다
 
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         누적 = {}
@@ -3869,7 +3915,7 @@ def build_slope_chart(격자):
                        f'style="display:{"block" if 켬2 else "none"}">'
                        f'<polyline class="sl-path" points="{p}" fill="none" stroke="{c}" '
                        f'stroke-width="2" stroke-linejoin="round"/>{점}{잇}'
-                       f'<text x="{X["소형"]+10}" y="{y2+3:.0f}" font-size="9" '
+                       f'<text x="{X["소형"]+10}" y="{y2+3.5:.0f}" font-size="11" font-weight="700" '
                        f'fill="{c}">{nm[:8]}</text></g>')
             # 시장 평균 — 금색은 '내 섹터' 전용이므로 흰 점선으로.
             # ⚠️ 점선은 '내 관심종목 섹터' 전용이라, 시장 평균은 굵은 흰 실선으로 구분한다.
@@ -3879,7 +3925,7 @@ def build_slope_chart(격자):
             for t in ("대형", "중형", "소형"):
                 선 += (f'<circle cx="{X[t]}" cy="{Y(시장[t]):.0f}" r="4" fill="#ffffff" '
                        f'stroke="#141922" stroke-width="1.2"/>')
-            선 += (f'<text x="{X["소형"]+10}" y="{Y(시장["소형"])+3:.0f}" font-size="9" '
+            선 += (f'<text x="{X["소형"]+10}" y="{Y(시장["소형"])+3.5:.0f}" font-size="11" font-weight="700" '
                    f'fill="#ffffff" font-weight="700">시장 평균</text>')
 
             축 = "".join(
@@ -4966,30 +5012,53 @@ def _fs_stat(arr, 평소일수=20):
 
 
 def _fs_gauge(st, W=118):
-    """실탄 계기 — 바늘이 가리키는 건 금액이 아니라 **평소 대비 배수**다.
+    """실탄 계기 — DIAL 01 '기본 정돈형' (2026-08-18 확정).
 
-    금액을 바늘로 그리면 '3조가 얼마나 큰지'를 여전히 모른다.
-    배수로 그리면 바늘 위치 자체가 '오늘이 유별났나'에 대한 답이 된다.
+    바늘이 가리키는 건 금액이 아니라 **평소 대비 배수**다.
+    금액을 바늘로 그리면 "3조가 얼마나 큰지"를 여전히 모른다.
+
+    설계 포인트
+      · 눈금 라벨(2배·1배·평소)을 **호 바깥**에 둔다 → 바늘이 글자를 안 가린다.
+      · 매수 쪽은 옅은 빨강, 매도 쪽은 옅은 파랑으로 미리 갈라둔다.
+      · ⚠️ **매도인 날은 바늘도 파랑**이다. 바늘 색이 곧 방향이라
+        각도를 보기 전에 색만으로 매수/매도가 잡힌다.
     """
+    import math as _m
     배수, 양 = st["배수"], st["v"] >= 0
-    deg = max(-86, min(86, 배수 / 2 * 90)) * (1 if 양 else -1)
+    deg = max(-86, min(86, 배수 / 2 * 90)) * (1 if 양 else -1)   # ±2배 = ±90°
     c = FS_BUY if 양 else FS_SELL
-    # ⚠️ 반원이 잘려 보이던 문제 (2026-08-18)
-    #    viewBox 높이가 86이라 위쪽 호(y=16)와 아래 라벨(y=80)이 경계에 붙어
-    #    브라우저에 따라 획이 잘렸다. 위아래로 여유를 8px씩 준다.
-    return (f'<svg class="fs-g" viewBox="-4 -2 140 100" style="width:{W}px">'
-            f'<path d="M16 66 A50 50 0 0 1 116 66" fill="none" stroke="#161c26" stroke-width="12"/>'
-            f'<path d="M66 16 A50 50 0 0 1 116 66" fill="none" stroke="{c}" stroke-width="12" stroke-opacity=".26"/>'
-            f'<g stroke="#12161d" stroke-width="2">'
-            f'<line x1="66" y1="10" x2="66" y2="22"/>'
-            f'<line x1="30.6" y1="30.6" x2="39.1" y2="39.1"/>'
-            f'<line x1="101.4" y1="30.6" x2="92.9" y2="39.1"/></g>'
-            f'<text x="66" y="7" font-size="7" fill="#5b6472" font-weight="700" text-anchor="middle">평소 0</text>'
-            f'<text x="16" y="80" font-size="8" fill="{FS_SELL}" font-weight="800">← 매도</text>'
-            f'<text x="116" y="80" font-size="8" fill="{FS_BUY}" font-weight="800" text-anchor="end">매수 →</text>'
-            f'<g transform="rotate({deg:.1f} 66 66)"><path d="M62.8 42 L66 18 L69.2 42 Z" fill="{c}"/></g>'
-            f'<circle cx="66" cy="66" r="4" fill="{c}"/></svg>')
+    cx = cy = 66
+    r = 50
 
+    def _p(d, rr):
+        a = _m.radians(d - 90)
+        return cx + rr * _m.cos(a), cy + rr * _m.sin(a)
+
+    def _arc(rr, d0, d1, w, col, op=1.0):
+        x0, y0 = _p(d0, rr); x1, y1 = _p(d1, rr)
+        return (f'<path d="M{x0:.1f} {y0:.1f} A{rr} {rr} 0 0 1 {x1:.1f} {y1:.1f}" '
+                f'fill="none" stroke="{col}" stroke-width="{w}" stroke-opacity="{op}"/>')
+
+    g = [_arc(r, -90, 90, 13, "#161c26"),
+         _arc(r, 0, 90, 13, FS_BUY, .22),
+         _arc(r, -90, 0, 13, FS_SELL, .22)]
+    for d, lab in ((-90, "2배"), (-45, "1배"), (0, "평소"), (45, "1배"), (90, "2배")):
+        a, b = _p(d, r - 8), _p(d, r + 8)
+        g.append(f'<line x1="{a[0]:.1f}" y1="{a[1]:.1f}" x2="{b[0]:.1f}" y2="{b[1]:.1f}" '
+                 f'stroke="#0b0e13" stroke-width="{2.4 if d == 0 else 1.6}"/>')
+        t = _p(d, r + 15)
+        anc = "middle" if abs(d) < 90 else ("start" if d < 0 else "end")
+        dx = 0 if abs(d) < 90 else (2 if d < 0 else -2)
+        g.append(f'<text x="{t[0]+dx:.1f}" y="{t[1]+3:.1f}" font-size="7.5" fill="#6f7784" '
+                 f'font-weight="700" text-anchor="{anc}">{lab}</text>')
+    g.append(f'<g transform="rotate({deg:.1f} {cx} {cy})">'
+             f'<path d="M{cx-3.4} {cy} L{cx} {cy-r+6} L{cx+3.4} {cy} Z" fill="{c}"/></g>')
+    g.append(f'<circle cx="{cx}" cy="{cy}" r="5" fill="#0f131a" stroke="{c}" stroke-width="2.4"/>')
+    g.append(f'<text x="{cx}" y="{cy+22}" font-size="15" fill="{c}" font-weight="900" '
+             f'text-anchor="middle">{배수:.1f}배</text>')
+    g.append(f'<text x="{cx}" y="{cy+33}" font-size="7.5" fill="#7d848f" font-weight="700" '
+             f'text-anchor="middle">평소 대비</text>')
+    return f'<svg class="fs-g" viewBox="-6 -4 144 108" style="width:{W}px">{"".join(g)}</svg>'
 
 def _fs_hbar(st, MX, W=200, H=16):
     """가로 막대 — 뒤 회색 띠는 그 주체의 '평소 하루 폭'.
@@ -5720,8 +5789,7 @@ def build_flow_signal(파생, 지수수급):
     return f'''
   <div class="fs-box">
     <div class="fs-v5">
-      <div class="fs-v5-g">{계기HTML}
-        <p class="fs-v5-gl" style="color:{FS_BUY if 방향양 else FS_SELL}">평소의 {S실["배수"]:.1f}배</p></div>
+      <div class="fs-v5-g">{계기HTML}</div>
       <div class="fs-v5-m">
         <p class="fs-k">오늘의 실탄 <span>외국인+기관이 실제 주식에 넣은 현금</span>{쌓임안내}</p>
         <p class="fs-v5-num" style="color:{FS_BUY if 방향양 else FS_SELL}">{_flow_amt(실탄)}</p>
@@ -5846,6 +5914,36 @@ def build_html(data, report):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- ⚠️ 캐시 금지 (2026-08-18)
+     GitHub Pages는 index.html을 10분 캐시하라고 지시하는데,
+     모바일 인앱 브라우저(카톡·텔레그램)는 그보다 훨씬 오래 붙들고 있어
+     PC와 모바일이 서로 다른 날 리포트를 보여주는 일이 생겼다.
+     아래 세 줄이 "매번 서버에 다시 물어봐라"라고 지시한다. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="cp-build" content="{BUILD_STAMP}">
+<script>
+/* 캐시된 옛 페이지를 자동으로 갈아끼운다.
+   [WHY] 메타 태그만으로는 이미 캐시에 남은 페이지를 못 지운다.
+         페이지가 열리면 서버에 최신 표식을 물어보고, 내가 들고 있는 것과
+         다르면 한 번만 강제로 다시 받는다. (사용자가 ?v= 를 붙일 필요 없음) */
+(function(){{
+  try{{
+    var mine=document.querySelector('meta[name="cp-build"]');
+    mine=mine?mine.getAttribute('content'):'';
+    if(!mine||location.search.indexOf('cpfresh=')>-1) return;
+    fetch(location.pathname+'?cpcheck='+Date.now(),{{cache:'no-store'}})
+      .then(function(r){{return r.text();}})
+      .then(function(t){{
+        var m=t.match(/name="cp-build" content="(\d+)"/);
+        if(m&&m[1]&&m[1]!==mine){{
+          location.replace(location.pathname+'?cpfresh='+m[1]);
+        }}
+      }}).catch(function(){{}});
+  }}catch(e){{}}
+}})();
+</script>
 <title>차트프로 관제탑 · {날짜}</title>
 <meta property="og:title" content="{og_title}">
 <meta property="og:description" content="{og_desc}">
@@ -6484,8 +6582,15 @@ a{{color:inherit;text-decoration:none}}
 @keyframes rdrpulse{{0%,100%{{opacity:1}}50%{{opacity:.42}}}}
 .rdr-dot{{animation:rdrpulse 3.2s ease-in-out infinite}}
 @media (prefers-reduced-motion:reduce){{.rdr-dot{{animation:none}}}}
+/* 매집 레이더 기간 탭 */
+.ac-tabs{{display:flex;gap:.35rem;margin:.7rem 0 .6rem}}
+.ac-tab{{flex:1;text-align:center;font-size:11.5px;font-weight:800;padding:.42rem 0;border-radius:8px;background:#0d1118;border:1px solid #1e2531;color:#7d848f;cursor:pointer}}
+.ac-tab.on{{background:#1b2432;border-color:#3a465c;color:#fff}}
+.ac-tab.off{{opacity:.4;cursor:default}}
+.ac-body{{display:none}}
+.ac-body.on{{display:block}}
 /* 오늘의 성적표 SCORE B */
-.idx-card2.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.92fr);gap:.6rem;align-items:center}}
+.idx-card2.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:.6rem;align-items:center}}
 .sc2-l{{min-width:0}}
 .sc2-r{{min-width:0}}
 .sc2-tagbox{{margin:.5rem 0 0}}
