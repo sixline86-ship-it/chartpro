@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n5"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n7"   # ⬅ 버전 표시
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -345,6 +345,95 @@ def theme_label(테마명):
 
 
 # ── 게이지 ──────────────────────────────────────────────
+
+# ── 📊 오늘의 성적표 — SCORE B (2026-08-18) ────────────────
+#  왼쪽 칸: 지수 → 태그 → 한 줄 설명 (세로로 쌓아 빈 공간을 없앤다)
+#  오른쪽 칸: 수급 가로 막대 (작게 — 주인공은 지수와 설명이다)
+def _sc_flowbar(수급, W=150, H=17):
+    """0선 좌우 발산 막대 3줄. 왼쪽은 이름, 오른쪽은 금액 자리로 비워둔다.
+    ⚠️ 비워두지 않으면 막대 끝과 금액 글자가 겹친다."""
+    def _n(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+    항목 = [("외국인", _n(수급.get("외국인"))),
+            ("기관", _n(수급.get("기관계"))),
+            ("개인", _n(수급.get("개인")))]
+    항목 = [(n, v) for n, v in 항목 if v is not None]
+    if not 항목:
+        return ""
+    mx = max(abs(v) for _, v in 항목) or 1
+    L, R = 30, 46
+    z = L + (W - L - R) / 2
+    half = (W - L - R) / 2 - 3
+    g = []
+    for i, (nm, v) in enumerate(항목):
+        y = 3 + i * H
+        c = FS_BUY if v >= 0 else FS_SELL
+        w = abs(v) / mx * half
+        x = z if v >= 0 else z - w
+        g.append(f'<text x="0" y="{y+9:.0f}" font-size="8" fill="#8b93a0" font-weight="700">{nm}</text>')
+        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="10" rx="2" fill="{c}"/>')
+        g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+12:.0f}" '
+                 f'stroke="#fff" stroke-opacity=".3"/>')
+        g.append(f'<text x="{W}" y="{y+9:.0f}" font-size="8" fill="{c}" text-anchor="end" '
+                 f'font-weight="800">{_flow_amt(v)}</text>')
+    return f'<svg viewBox="0 0 {W} {len(항목)*H+4}">{"".join(g)}</svg>'
+
+
+def _sc_read(수급):
+    """수급 세 주체를 보고 '누가 끌었나'를 한 줄로 판정한다 (규칙 기반).
+
+    ⚠️ '오를 것이다/내릴 것이다'는 쓰지 않는다.
+       말하는 것은 **오늘의 상승·하락을 누가 만들었나**뿐이다.
+    """
+    def _n(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+    외, 기, 개 = _n(수급.get("외국인")), _n(수급.get("기관계")), _n(수급.get("개인"))
+    if 외 is None or 기 is None:
+        return None, None, None
+    실 = 외 + 기
+    큰쪽 = "외국인" if abs(외) >= abs(기) else "기관"
+    큰값 = 외 if abs(외) >= abs(기) else 기
+
+    if 외 > 0 and 기 > 0:
+        return "🔥 두 큰손이 함께 샀다", FS_BUY, (
+            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>가 같이 들어왔습니다.")
+    if 외 < 0 and 기 < 0:
+        return "🧊 두 큰손이 함께 팔았다", FS_SELL, (
+            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>가 같이 빠졌습니다."
+            + (f" 개인만 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
+    if 실 >= 0:
+        약 = "기관" if 큰쪽 == "외국인" else "외국인"
+        return f"🔥 {큰쪽}이 끌었다", FS_BUY, (
+            f"{큰쪽} <b>{_flow_amt(큰값)}</b>가 {약} 매도를 덮었습니다.")
+    return f"🧊 {큰쪽}이 밀었다", FS_SELL, (
+        f"{큰쪽} <b>{_flow_amt(큰값)}</b>가 빠져 나갔습니다."
+        + (f" 개인이 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
+
+
+def build_score_card(이름, 지수, 수급):
+    """지수 카드 한 장 (SCORE B 배치)."""
+    태그, 색, 글 = _sc_read(수급 or {})
+    설명 = ""
+    if 태그:
+        설명 = (f'<div class="sc2-tagbox"><span class="sc2-tag" style="border-color:{색}55;'
+                f'color:{색}">{태그}</span><p class="sc2-txt">{글}</p></div>')
+    return f'''<div class="idx-card2 sc2">
+      <div class="sc2-l">
+        <p class="ic-mkt">{이름}</p>
+        <p class="ic-num">{지수.get('종가','—')}</p>
+        <p class="{idx_dir_class(지수)}">{지수.get('등락방향','—')} {지수.get('등락률','—')}%</p>
+        {설명}
+      </div>
+      <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
+    </div>'''
+
+
 def build_gauge(gauge, 오늘한줄평):
     if not gauge:
         return '<div class="gauge-box"><p style="color:#9aa0a8">⏳ 관제지수 데이터 없음</p></div>'
@@ -440,7 +529,7 @@ def sector_strength_badge(테마명):
     등장 = len(순위들)
     if 등장 <= 1:
         # 오늘 처음(또는 오늘만) — 신규 대장
-        return ('<span class="sc-str new">🆕 신규 주도 · '
+        return ('<span class="sc-str new">🆕 신규 테마 · '
                 f'최근 {N}일 중 처음</span>')
     평균 = sum(순위들) / 등장
     최고 = min(순위들)
@@ -1494,7 +1583,7 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
                     f'<div class="ix-bf" style="{side}:50%;width:{w:.1f}%;background:{색}"></div></div>'
                     f'<span class="ix-bv {vcls}">{_flow_amt(v)}<small>{배지}</small></span></div>')
 
-        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조 · 매수 빨강 / 매도 파랑)</p>'
+        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조)</p>'
                   f'{flow_row("외국인", d["외인"], d["외배지"])}{flow_row("기관", d["기관"], d["기배지"])}'
                   f'<div class="ix-scale"><span>-3조</span><span>0</span><span>+3조</span></div>'
                   ) if (d["외인"] is not None or d["기관"] is not None) else ""
@@ -2088,7 +2177,8 @@ SECTOR_COLORS = {
     "건설·부동산":       "#94a3b8",
     "운송·물류":         "#2dd4bf",
     "전기전자·부품":     "#c084fc",
-    "신규 주도":         "#ef4444",
+    "신규 테마":         "#ef4444",   # 구 "신규 주도" — 2026-08-18 개명
+    "신규 주도":         "#ef4444",   # ⚠️ 과거 archive 호환용(지우면 옛 리포트 색이 깨진다)
     "기타":             "#6b7280",
 }
 _SECTOR_FALLBACK = ["#ff8a65", "#80cbc4", "#9fa8da", "#ce93d8", "#a5d6a7", "#ffab91"]
@@ -2216,6 +2306,8 @@ def build_my_stocks(data):
     if not payload:
         return ""
     이름들 = sorted(payload["stocks"])
+    # 자체 자동완성이 쓸 종목명 배열 (datalist 대체)
+    이름배열JS = "window.CP_NAMES=" + json.dumps(이름들, ensure_ascii=False) + ";" 
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
@@ -2227,7 +2319,7 @@ def build_my_stocks(data):
             "s": g.get("별점"), "u": g.get("링크", "")}
            for g in (공시목록 or []) if g.get("회사명")]
 
-    옵션 = "".join(f'<option value="{n}">' for n in 이름들)
+    옵션 = ""   # ⚠️ datalist 폐기 — 자체 제안창(msSug)이 대신한다
     PAY = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     NEWS = json.dumps(뉴스, ensure_ascii=False, separators=(",", ":"))
     DISC = json.dumps(공시, ensure_ascii=False, separators=(",", ":"))
@@ -2450,6 +2542,8 @@ def build_my_stocks(data):
             '<button onclick="msAdd()" style="flex:none;background:#2a3446;border:none;'
             'color:#f0c65a;font-size:12.5px;font-weight:800;border-radius:8px;'
             'padding:9px 14px;cursor:pointer">추가</button></div>'
+            '<div id="ms-sug" style="display:none;background:#0f131a;border:1px solid #2a3446;'
+            'border-radius:8px;margin:0 0 10px;max-height:186px;overflow-y:auto"></div>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
             '<div id="ms-list"></div><div id="ms-sum"></div><div id="ms-chart"></div>'
             '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
@@ -2465,7 +2559,47 @@ def build_my_stocks(data):
             '<b style="color:#9aa0aa">내 종목 평균</b>은 모든 종목을 같은 금액씩 샀다고 가정한 값입니다. '
             '실제 보유 비중은 받지 않으므로 참고용입니다.<br>'
             f'📰 뉴스와 📄 공시는 <b style="color:#9aa0aa">오늘</b> 그 종목이 언급된 것만 붙습니다.'
-            '</p></details></div>' + JS)
+            '</p></details></div>' + JS
+            + '<script>' + 이름배열JS + """
+/* 자체 자동완성 (datalist 대체)
+   [WHY] 입력창을 누르기만 해도 전 종목 목록이 뜨면 모바일에서 키보드가 가려진다.
+         글자를 1자 이상 넣었을 때만, 앞글자 일치 우선으로 최대 8개만 보여준다. */
+function msSug(){
+  var el=document.getElementById('ms-in'), box=document.getElementById('ms-sug');
+  if(!el||!box) return;
+  var q=(el.value||'').trim();
+  if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  var names=(window.CP_NAMES||[]), head=[], part=[];
+  for(var i=0;i<names.length;i++){
+    var n=names[i];
+    if(n.indexOf(q)===0){ if(head.length<8) head.push(n); }
+    else if(n.indexOf(q)>-1){ if(part.length<8) part.push(n); }
+  }
+  var out=head.concat(part).slice(0,8);
+  if(!out.length){ box.style.display='none'; box.innerHTML=''; return; }
+  var h='';
+  for(var j=0;j<out.length;j++){
+    h+='<div class="ms-sug-i" data-n="'+out[j]+'" style="padding:9px 11px;font-size:12.5px;'
+      +'color:#e8eaee;cursor:pointer;border-bottom:1px solid #1a2029">'+out[j]+'</div>';
+  }
+  box.innerHTML=h; box.style.display='block';
+}
+function msPick(n){
+  var el=document.getElementById('ms-in'), box=document.getElementById('ms-sug');
+  if(el) el.value=n;
+  if(box){ box.style.display='none'; box.innerHTML=''; }
+  if(typeof msAdd==='function') msAdd();
+}
+document.addEventListener('input',function(e){ if(e.target&&e.target.id==='ms-in') msSug(); });
+document.addEventListener('click',function(e){
+  var it=(e.target&&e.target.closest)?e.target.closest('.ms-sug-i'):null;
+  if(it){ msPick(it.getAttribute('data-n')); return; }
+  if(!e.target||e.target.id!=='ms-in'){
+    var box=document.getElementById('ms-sug');
+    if(box) box.style.display='none';
+  }
+});
+""" + '</script>')
 
 
 def build_stock_brief():
@@ -2991,25 +3125,50 @@ def build_sector_radar():
         nx, ny = _polar(cx, cy, 오, s)
         ox, oy = _polar(cx, cy, 어, s)
         변화 = 오 - 어
+        # ⚠️ 색은 리포트 전체 규칙과 같아야 한다 — 좋아짐=빨강 / 나빠짐=파랑.
+        #    (예전엔 초록/보라였는데 수급 색 규칙이 바뀌어 여기만 남아 있었다)
         if 변화 > 2:
-            색, 표식 = "#4ade80", "▲"      # 관제탑에 가까워짐
+            색, 표식, 꼴 = FS_BUY, "▲", "in"      # 관제탑에 가까워짐 = 들어옴
         elif 변화 < -2:
-            색, 표식 = "#a78bfa", "▼"      # 멀어짐
+            색, 표식, 꼴 = FS_SELL, "▼", "out"    # 멀어짐 = 빠짐
         else:
-            색, 표식 = "#f0c65a", "="      # 제자리 — 금색으로 또렷하게
-        # 어제 자리는 속 빈 점으로, 오늘까지의 이동은 화살표 선으로 남긴다.
+            색, 표식, 꼴 = "#f0c65a", "=", "stay"  # 제자리
+        # ── 이동 자취 ──
+        #  ⚠️ 예전엔 이동선이 굵어서 점과 구분이 안 됐다.
+        #     선은 **가늘고 옅은 점선**으로 낮추고, 끝에 **화살촉**을 달아
+        #     "어디서 어디로" 갔는지를 방향으로 읽게 한다.
         if abs(변화) > 2:
-            자취 += (f'<circle cx="{ox:.0f}" cy="{oy:.0f}" r="3.2" fill="none" '
-                     f'stroke="{색}" stroke-width="1.4" opacity=".55"/>')
+            자취 += (f'<circle cx="{ox:.0f}" cy="{oy:.0f}" r="2.6" fill="none" '
+                     f'stroke="{색}" stroke-width="1" opacity=".45"/>')
             자취 += (f'<line x1="{ox:.0f}" y1="{oy:.0f}" x2="{nx:.0f}" y2="{ny:.0f}" '
-                     f'stroke="{색}" stroke-width="2.4" opacity=".8"/>')
-        # 점을 키우고 어두운 테두리를 둘러 배경과 확실히 분리한다.
-        # 레이더처럼 천천히 명멸시킨다. 섹터마다 시작 시점을 어긋나게 해
-        # 한꺼번에 깜빡이지 않도록(=요란하지 않도록) 지연을 준다.
+                     f'stroke="{색}" stroke-width="1.3" stroke-dasharray="3 3" opacity=".5"/>')
+            # 화살촉 — 이동 방향 (어제 → 오늘)
+            import math as _rm
+            _ang = _rm.degrees(_rm.atan2(ny - oy, nx - ox))
+            _hx = nx - (nx - ox) * 0.22
+            _hy = ny - (ny - oy) * 0.22
+            자취 += (f'<g transform="translate({_hx:.1f} {_hy:.1f}) rotate({_ang:.0f})">'
+                     f'<path d="M0 0 L-6 -3.4 L-6 3.4 Z" fill="{색}" opacity=".8"/></g>')
+
+        # ── 오늘 자리 (점) ──
+        #  들어옴 / 빠짐 / 제자리를 **색뿐 아니라 모양으로도** 갈라 놓는다.
+        #    들어옴 = 채운 원 + 바깥 링   (다가온 느낌)
+        #    빠짐   = 속 빈 원            (비어 나간 느낌)
+        #    제자리 = 작은 채운 원
+        #  레이더처럼 천천히 명멸시키되, 섹터마다 시작을 어긋나게 해 요란하지 않게.
         _dly = f"{(_di * 0.37) % 3.2:.2f}s"
-        점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="7" fill="{색}" '
-               f'class="rdr-dot" style="animation-delay:{_dly}" '
-               f'stroke="#0f131a" stroke-width="1.6"/>')
+        _cls = f'class="rdr-dot" style="animation-delay:{_dly}"'
+        if 꼴 == "in":
+            점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="13" fill="{색}" '
+                   f'fill-opacity=".16" {_cls}/>')
+            점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="8" fill="{색}" '
+                   f'stroke="#0b0e13" stroke-width="2" {_cls}/>')
+        elif 꼴 == "out":
+            점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="7.5" fill="#0b0e13" '
+                   f'stroke="{색}" stroke-width="3" {_cls}/>')
+        else:
+            점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="5.5" fill="{색}" '
+                   f'stroke="#0b0e13" stroke-width="1.6" {_cls}/>')
         lx, ly = _polar(cx, cy, -8, s)
         anc = "middle" if abs(lx - cx) < 20 else ("start" if lx > cx else "end")
         # 라벨이 그림 밖으로 잘리지 않게: 이름을 줄이고 x를 안쪽으로 붙든다.
@@ -3053,6 +3212,7 @@ def build_sector_radar():
     변동표 = ('<div style="margin:10px 0 0;padding-top:8px;border-top:1px solid #232a36">'
               '<p style="margin:0 0 4px;font-size:11.5px;color:#8b93a0;font-weight:700">'
               '📊 어제 대비 움직임</p>' + "".join(변동행) + '</div>') if 변동행 else ""
+    변동표 = hide("어제대비움직임", 변동표)
 
     # 접근/이탈은 짝을 이루는 정보라 나란히 두는 편이 비교가 쉽다.
     #   좁은 화면에서 세로로 쌓이면 두 줄을 눈으로 왕복해야 해서 대비가 안 잡힌다.
@@ -3062,9 +3222,26 @@ def build_sector_radar():
                 f'<p style="margin:0;font-size:10.5px;color:#8b93a0">{제목}</p>'
                 f'<p style="margin:3px 0 0;font-size:12.5px;font-weight:700;color:{색};'
                 f'word-break:keep-all;line-height:1.35">{값}</p></div>')
-    접근값, 접근색 = ((최대접근[0], "#4ade80") if 최대접근[1] > 0.5 else ("오늘은 없음", "#6f7784"))
-    이탈값, 이탈색 = ((최대이탈[0], "#a78bfa") if 최대이탈[1] > 0.5 else ("오늘은 없음", "#6f7784"))
-    패널 = ('<div style="display:flex;gap:7px">'
+    접근값, 접근색 = ((최대접근[0], FS_BUY) if 최대접근[1] > 0.5 else ("오늘은 없음", "#6f7784"))
+    이탈값, 이탈색 = ((최대이탈[0], FS_SELL) if 최대이탈[1] > 0.5 else ("오늘은 없음", "#6f7784"))
+    # ⚠️ 모양을 갈랐으면 그 뜻을 반드시 그림 옆에 적어야 한다.
+    #    안 적으면 "왜 어떤 건 속이 비었지?"에서 멈춘다.
+    범례 = ('<div style="display:flex;gap:11px;flex-wrap:wrap;justify-content:center;'
+            'margin:8px 0 10px;font-size:10px;color:#8b93a0;font-weight:700">'
+            f'<span><svg width="15" height="15" viewBox="0 0 15 15" style="display:inline-block;'
+            f'vertical-align:-3px"><circle cx="7.5" cy="7.5" r="7" fill="{FS_BUY}" fill-opacity=".18"/>'
+            f'<circle cx="7.5" cy="7.5" r="4.5" fill="{FS_BUY}"/></svg> 들어옴(달아오름)</span>'
+            f'<span><svg width="15" height="15" viewBox="0 0 15 15" style="display:inline-block;'
+            f'vertical-align:-3px"><circle cx="7.5" cy="7.5" r="4.5" fill="#0b0e13" '
+            f'stroke="{FS_SELL}" stroke-width="2.4"/></svg> 빠짐(식는 중)</span>'
+            '<span><svg width="15" height="15" viewBox="0 0 15 15" style="display:inline-block;'
+            'vertical-align:-3px"><circle cx="7.5" cy="7.5" r="3.4" fill="#f0c65a"/></svg> 제자리</span>'
+            '<span><svg width="26" height="10" viewBox="0 0 26 10" style="display:inline-block;'
+            'vertical-align:-1px"><line x1="0" y1="5" x2="18" y2="5" stroke="#8b93a0" '
+            'stroke-width="1.3" stroke-dasharray="3 3"/><path d="M26 5 L18 1.6 L18 8.4 Z" '
+            'fill="#8b93a0"/></svg> 어제→오늘 이동</span>'
+            '</div>')
+    패널 = (범례 + '<div style="display:flex;gap:7px">'
             + _칸("가장 빠르게 접근", 접근값, 접근색)
             + _칸("가장 빠르게 이탈", 이탈값, 이탈색) + '</div>')
 
@@ -4737,7 +4914,9 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
-    "지수와수급나란히",     # 2026-08-18 가림 — 통합 타임라인과 역할이 겹침
+    "지수와수급나란히",     # 2026-08-18 — 통합 타임라인과 역할이 겹침
+    "어제대비움직임",       # 2026-08-18 — 레이더 그림과 같은 내용을 표로 반복
+    "과거엔어땠나",         # 2026-08-18 — 차별점이 없어 보류 (표본 쌓이면 되살릴 것)
 }
 
 
@@ -4795,7 +4974,10 @@ def _fs_gauge(st, W=118):
     배수, 양 = st["배수"], st["v"] >= 0
     deg = max(-86, min(86, 배수 / 2 * 90)) * (1 if 양 else -1)
     c = FS_BUY if 양 else FS_SELL
-    return (f'<svg class="fs-g" viewBox="0 0 132 86" style="width:{W}px">'
+    # ⚠️ 반원이 잘려 보이던 문제 (2026-08-18)
+    #    viewBox 높이가 86이라 위쪽 호(y=16)와 아래 라벨(y=80)이 경계에 붙어
+    #    브라우저에 따라 획이 잘렸다. 위아래로 여유를 8px씩 준다.
+    return (f'<svg class="fs-g" viewBox="-4 -2 140 100" style="width:{W}px">'
             f'<path d="M16 66 A50 50 0 0 1 116 66" fill="none" stroke="#161c26" stroke-width="12"/>'
             f'<path d="M66 16 A50 50 0 0 1 116 66" fill="none" stroke="{c}" stroke-width="12" stroke-opacity=".26"/>'
             f'<g stroke="#12161d" stroke-width="2">'
@@ -5040,8 +5222,7 @@ def core_flow_gauge():
     c = FS_BUY if st["v"] >= 0 else FS_SELL
     ico, key = _fs_keyfact(st)
     return (f'<div class="core-g">'
-            f'<div class="core-g-l">{_fs_gauge(st, 96)}'
-            f'<p class="core-g-x" style="color:{c}">평소의 {st["배수"]:.1f}배</p></div>'
+            f'<div class="core-g-l">{_fs_gauge(st, 104)}</div>'
             f'<div class="core-g-r">'
             f'<p class="core-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
             f'<p class="core-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
@@ -5568,7 +5749,7 @@ def build_flow_signal(파생, 지수수급):
     {f'<p class="fs-combo"><b>{조합[1]}</b> — {조합[2]}</p>' if 조합 else ''}
     {f'<p class="fs-warn">{만기배지} — {만기설명}</p>' if 만기배지 else ''}
     {나란히블록}{hidden_note()}
-    {flow_pattern_analysis()}
+    {hide("과거엔어땠나", flow_pattern_analysis())}
     {읽는법블록}
   </div>'''
 
@@ -5997,8 +6178,10 @@ a{{color:inherit;text-decoration:none}}
 .ix-flow{{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}}
 .ix-flow-k{{font-size:11px;color:#9aa0a8;font-weight:700}}
 .ix-flow-v{{font-size:14.5px;font-weight:900}}
-.ix-head .buy{{color:#4ade80}} .ix-head .sell{{color:#ff6b4a}} .ix-head .flat{{color:#8a909a}}
-.ix-head .sellv{{color:#a78bfa}}
+/* ⚠️ 수급 값 색도 막대와 같아야 한다. 막대만 바꾸고 숫자를 초록/보라로 두면
+   같은 줄 안에서 색이 둘로 갈려 더 헷갈린다. (2026-08-18) */
+.ix-head .buy{{color:#ff6b4a}} .ix-head .sell{{color:#ff6b4a}} .ix-head .flat{{color:#8a909a}}
+.ix-head .sellv{{color:#5b9bff}}
 .ix-ring{{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}}
 .hi-ring{{width:42px;height:42px;border-radius:50%;border:3px solid #ff6b4a;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;flex-shrink:0}}
 .hi-gauge{{width:46px;height:46px;position:relative;flex-shrink:0}}
@@ -6018,7 +6201,7 @@ a{{color:inherit;text-decoration:none}}
 .hi-round{{width:46px;height:46px;border-radius:13px;border:1.5px solid;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px}}
 .ix-cum{{font-size:10.5px;color:#9aa0a8;margin-top:9px;padding-top:8px;border-top:1px dashed rgba(255,255,255,.1);line-height:1.5}}
 .ix-cum b{{font-weight:800}}
-.ix-cum .buy{{color:#4ade80}} .ix-cum .sellv{{color:#a78bfa}}
+.ix-cum .buy{{color:#ff6b4a}} .ix-cum .sellv{{color:#5b9bff}}
 .ix-grouplbl{{font-size:9px;color:#7d838c;font-weight:700;letter-spacing:.04em;margin-bottom:6px;padding-left:2px}}
 .ix-div{{height:1px;background:rgba(255,255,255,.08);margin:9px 0 8px}}
 .ix-bv small{{font-size:9px}}
@@ -6301,6 +6484,15 @@ a{{color:inherit;text-decoration:none}}
 @keyframes rdrpulse{{0%,100%{{opacity:1}}50%{{opacity:.42}}}}
 .rdr-dot{{animation:rdrpulse 3.2s ease-in-out infinite}}
 @media (prefers-reduced-motion:reduce){{.rdr-dot{{animation:none}}}}
+/* 오늘의 성적표 SCORE B */
+.idx-card2.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.92fr);gap:.6rem;align-items:center}}
+.sc2-l{{min-width:0}}
+.sc2-r{{min-width:0}}
+.sc2-tagbox{{margin:.5rem 0 0}}
+.sc2-tag{{display:inline-block;font-size:9.5px;font-weight:800;padding:.1rem .45rem;border-radius:20px;border:1px solid #2a3342}}
+.sc2-txt{{font-size:10.5px;color:#8b93a0;margin:.28rem 0 0;line-height:1.6}}
+.sc2-txt b{{color:#c9d0d9}}
+@media (max-width:359px){{.idx-card2.sc2{{grid-template-columns:1fr}}}}
 /* ── 수급 관제신호 v5 ── */
 .fs-v5{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;padding:0 0 .7rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
 .fs-v5-g{{text-align:center;flex:0 0 auto}}
@@ -6520,26 +6712,8 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
   <div class="idx-grid">
-    <div class="idx-card2">
-      <p class="ic-mkt">KOSPI</p>
-      <p class="ic-num">{코.get('종가','—')}</p>
-      <p class="{idx_dir_class(코)}">{코.get('등락방향','—')} {코.get('등락률','—')}%</p>
-      <div class="sup-grid">
-        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(코수.get('외국인'))}">{fmt_flow(코수.get('외국인'))}</p></div>
-        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(코수.get('기관계'))}">{fmt_flow(코수.get('기관계'))}</p></div>
-        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt {money_class(코수.get('개인'))}">{fmt_flow(코수.get('개인'))}</p></div>
-      </div>
-    </div>
-    <div class="idx-card2">
-      <p class="ic-mkt">KOSDAQ</p>
-      <p class="ic-num">{닥.get('종가','—')}</p>
-      <p class="{idx_dir_class(닥)}">{닥.get('등락방향','—')} {닥.get('등락률','—')}%</p>
-      <div class="sup-grid">
-        <div class="sup"><p class="sup-who">외국인</p><p class="sup-amt {money_class(닥수.get('외국인'))}">{fmt_flow(닥수.get('외국인'))}</p></div>
-        <div class="sup"><p class="sup-who">기관</p><p class="sup-amt {money_class(닥수.get('기관계'))}">{fmt_flow(닥수.get('기관계'))}</p></div>
-        <div class="sup"><p class="sup-who">개인</p><p class="sup-amt {money_class(닥수.get('개인'))}">{fmt_flow(닥수.get('개인'))}</p></div>
-      </div>
-    </div>
+    {build_score_card("KOSPI", 코, 코수)}
+    {build_score_card("KOSDAQ", 닥, 닥수)}
   </div>
 
   <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
@@ -6554,9 +6728,6 @@ a{{color:inherit;text-decoration:none}}
     {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
     {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
   </div>
-
-  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 등록 — 먼저 내 종목부터</p>
-  {build_my_stocks(data)}
 
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
     <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
@@ -6584,6 +6755,11 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 섹터</p>
   {hide("관제레이더", build_sector_radar())}
 
+  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 — 등록하고 바로 확인</p>
+  {build_my_stocks(data)}
+  {build_stock_brief()}
+
+
   <p class="sec-label"><small>내 자리</small>📊 내 종목 구역 다시 보기</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
 
@@ -6598,9 +6774,6 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
   {build_return_sector()}
-
-  <p class="sec-label"><small>내 자리</small>📰 내 종목 브리핑 — 오늘 무슨 일이</p>
-  {build_stock_brief()}
 
   <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
   {build_insight(프로의시선)}
