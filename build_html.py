@@ -5521,6 +5521,21 @@ def build_flow_signal(파생, 지수수급):
 
     쌓임안내 = f' <span class="fs-n">({N}일치 기준)</span>' if N < 20 else ""
 
+    # ── 가림 처리 (⚠️ f-string 중첩 금지) ──
+    #   f-string 안에 같은 따옴표의 f-string을 넣는 문법(PEP 701)은
+    #   **Python 3.12부터만** 된다. GitHub Actions는 3.11이라 그대로 두면
+    #   발행이 SyntaxError로 죽는다 (2026-08-18 실제 사고).
+    #   → 블록을 **먼저 변수로 만들고** 본문에서는 이름만 끼운다.
+    나란히블록 = hide("지수와수급나란히", f'''
+    <div class="fs-splittitle">📊 지수와 수급, 나란히 보기 <span>— 최근 {min(N,20)}거래일</span></div>
+    <div class="fs-cum">
+      <div class="fs-cum-head">{배지HTML}</div>
+      {그래프HTML}
+      {판독HTML}
+    </div>''')
+    읽는법블록 = hide("지수와수급나란히", f'''<p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
+      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>''')
+
     return f'''
   <div class="fs-box">
     <div class="fs-v5">
@@ -5552,16 +5567,9 @@ def build_flow_signal(파생, 지수수급):
     </div>
     {f'<p class="fs-combo"><b>{조합[1]}</b> — {조합[2]}</p>' if 조합 else ''}
     {f'<p class="fs-warn">{만기배지} — {만기설명}</p>' if 만기배지 else ''}
-    {hide("지수와수급나란히", f'''
-    <div class="fs-splittitle">📊 지수와 수급, 나란히 보기 <span>— 최근 {min(N,20)}거래일</span></div>
-    <div class="fs-cum">
-      <div class="fs-cum-head">{배지HTML}</div>
-      {그래프HTML}
-      {판독HTML}
-    </div>''')}{hidden_note()}
+    {나란히블록}{hidden_note()}
     {flow_pattern_analysis()}
-    {hide("지수와수급나란히", f'''<p class="fs-foot">읽는 법: 아래 막대는 <b>그날그날의 실탄</b>(빨강 = 들어옴 · 파랑 = 빠짐), 흰 선은 그것이 <b>차곡차곡 쌓인 누적</b>입니다.
-      선이 우상향이면 큰돈이 시장에 쌓이는 중입니다. 흐린 파란 점선은 <b>외국인 선물 누적</b>으로, 현물과 단위가 달라 <b>크기가 아니라 방향만</b> 견주는 참고선입니다. ※ 오늘까지의 수급 사실 정리이며 내일의 예측이나 매매 신호가 아닙니다.</p>''')}
+    {읽는법블록}
   </div>'''
 
 
