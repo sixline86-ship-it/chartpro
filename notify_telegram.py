@@ -12,7 +12,7 @@ import os
 import requests
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.19-n12"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.20-o1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
 DATE = datetime.now().strftime("%Y%m%d")
 REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
                if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
