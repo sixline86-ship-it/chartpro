@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n11"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.19-n12"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -352,7 +352,7 @@ def theme_label(테마명):
 # ── 📊 오늘의 성적표 — SCORE B (2026-08-18) ────────────────
 #  왼쪽 칸: 지수 → 태그 → 한 줄 설명 (세로로 쌓아 빈 공간을 없앤다)
 #  오른쪽 칸: 수급 가로 막대 (작게 — 주인공은 지수와 설명이다)
-def _sc_flowbar(수급, W=190, H=21):
+def _sc_flowbar(수급, W=205, H=23):
     """0선 좌우 발산 막대 3줄. 왼쪽은 이름, 오른쪽은 금액 자리로 비워둔다.
     ⚠️ 비워두지 않으면 막대 끝과 금액 글자가 겹친다."""
     def _n(v):
@@ -376,11 +376,11 @@ def _sc_flowbar(수급, W=190, H=21):
         c = FS_BUY if v >= 0 else FS_SELL
         w = abs(v) / mx * half
         x = z if v >= 0 else z - w
-        g.append(f'<text x="0" y="{y+10:.0f}" font-size="9.5" fill="#8b93a0" font-weight="700">{nm}</text>')
-        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="13" rx="2.5" fill="{c}"/>')
+        g.append(f'<text x="0" y="{y+11:.0f}" font-size="10.5" fill="#8b93a0" font-weight="700">{nm}</text>')
+        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="15" rx="3" fill="{c}"/>')
         g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+15:.0f}" '
                  f'stroke="#fff" stroke-opacity=".3"/>')
-        g.append(f'<text x="{W}" y="{y+11:.0f}" font-size="9.5" fill="{c}" text-anchor="end" '
+        g.append(f'<text x="{W}" y="{y+12:.0f}" font-size="10.5" fill="{c}" text-anchor="end" '
                  f'font-weight="800">{_flow_amt(v)}</text>')
     return f'<svg viewBox="0 0 {W} {len(항목)*H+4}">{"".join(g)}</svg>'
 
@@ -426,14 +426,18 @@ def build_score_card(이름, 지수, 수급):
     if 태그:
         설명 = (f'<div class="sc2-tagbox"><span class="sc2-tag" style="border-color:{색}55;'
                 f'color:{색}">{태그}</span><p class="sc2-txt">{글}</p></div>')
-    return f'''<div class="idx-card2 sc2">
-      <div class="sc2-l">
-        <p class="ic-mkt">{이름}</p>
-        <p class="ic-num">{지수.get('종가','—')}</p>
-        <p class="{idx_dir_class(지수)}">{지수.get('등락방향','—')} {지수.get('등락률','—')}%</p>
-        {설명}
+    # ⚠️ 설명글은 **카드 전체 폭**을 쓴다(2026-08-19).
+    #    왼쪽 좁은 칸에 넣으면 두세 줄로 접혀 읽기가 힘들다.
+    return f'''<div class="idx-card2 sc2wrap">
+      <div class="sc2">
+        <div class="sc2-l">
+          <p class="ic-mkt">{이름}</p>
+          <p class="ic-num">{지수.get('종가','—')}</p>
+          <p class="{idx_dir_class(지수)}">{지수.get('등락률','—')}%</p>
+        </div>
+        <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
       </div>
-      <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
+      {설명}
     </div>'''
 
 
@@ -1071,8 +1075,8 @@ def build_accumulation(매집, 설정=None):
       💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
     <div class="ac-tabs" data-g="{_AC_GID}">
-      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 단기 {기간}일 종목</div>
-      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ 중기 {매집.get("중기기간",20)}일 종목</div>
+      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 {기간}일 매집 종목</div>
+      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ {매집.get("중기기간",20)}일 매집 종목</div>
     </div>
     <div class="ac-body on" data-g="{_AC_GID}" data-p="s">
       <p class="ac-long-s">{기간}일은 <b>"이번 주에 막 들어온 돈"</b>입니다.
@@ -3273,11 +3277,13 @@ def build_sector_radar():
         # ⚠️ 색은 리포트 전체 규칙과 같아야 한다 — 좋아짐=빨강 / 나빠짐=파랑.
         #    (예전엔 초록/보라였는데 수급 색 규칙이 바뀌어 여기만 남아 있었다)
         if 변화 > 2:
-            색, 표식, 꼴 = FS_BUY, "▲", "in"      # 관제탑에 가까워짐 = 들어옴
+            색, 표식, 꼴 = FS_BUY, "", "in"       # 관제탑에 가까워짐 = 들어옴
+            # ⚠️ 섹터명 옆 화살표(▲▼=)는 뺐다(2026-08-19).
+            #    점의 모양·색이 이미 같은 말을 하고 있어 글자만 어수선해졌다.
         elif 변화 < -2:
-            색, 표식, 꼴 = FS_SELL, "▼", "out"    # 멀어짐 = 빠짐
+            색, 표식, 꼴 = FS_SELL, "", "out"    # 멀어짐 = 빠짐
         else:
-            색, 표식, 꼴 = "#f0c65a", "=", "stay"  # 제자리
+            색, 표식, 꼴 = "#f0c65a", "", "stay"  # 제자리
         # ── 이동 자취 ──
         #  ⚠️ 예전엔 이동선이 굵어서 점과 구분이 안 됐다.
         #     선은 **가늘고 옅은 점선**으로 낮추고, 끝에 **화살촉**을 달아
@@ -4255,10 +4261,29 @@ def build_core(핵심편, data, 해석):
     """핵심편 '90초 브리핑' — 리포트 최상단.
 
     글(정의·공감·왜·특징·뒤집어보기)은 Claude가, 숫자 타일·티저는 코드가 만든다.
-    핵심편 JSON이 없으면(과거 리포트 재빌드) 빈 문자열 — 하위 호환.
+    ⚠️ 핵심편이 없으면 **조용히 사라지지 않는다** (2026-08-19).
+       핵심편은 100% Claude 해석글이라, 워크플로를 '재사용(무료)'으로 돌리면
+       archive/report_YYYYMMDD.json 자체가 안 만들어져 통째로 빠진다.
+       예전에는 빈 문자열만 반환해서, 발행하고 나서야 "핵심편이 없다"를 알았다.
+       (같은 사고가 여러 번 반복됐다)
+       → 이제 **자리에 안내 상자를 남기고 빌드 로그에도 크게 경고**한다.
     """
     if not 핵심편:
-        return ""
+        print("=" * 60)
+        print("⚠️  핵심편 없음 — 오늘 해석글(archive/report_*.json)이 없습니다.")
+        print("    워크플로를 'Claude 해석글 = 새로 생성(과금)'으로 다시 돌리세요.")
+        print("=" * 60)
+        return (
+            '<div style="background:#2a1a12;border:1px solid #6b3f1f;border-radius:12px;'
+            'padding:14px 16px;margin:0 0 14px">'
+            '<p style="margin:0;font-size:13px;font-weight:800;color:#f0c65a">'
+            '⏱️ 핵심편이 아직 준비되지 않았습니다</p>'
+            '<p style="margin:6px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.7">'
+            '오늘의 해석글이 만들어지지 않아 90초 브리핑을 실을 수 없습니다. '
+            '아래 <b>정밀 관제(심층편)</b>의 숫자와 표는 모두 정상입니다.<br>'
+            '<span style="color:#8b93a0">운영자: 워크플로를 '
+            '<b style="color:#f0c65a">Claude 해석글 = 새로 생성</b>으로 다시 실행하면 채워집니다.</span></p>'
+            '</div>')
     # 금요일·연휴 직전에는 "내일"이 틀린 말이 된다 → 실제 다음 거래일로 표기.
     try:
         _NEXT_LABEL = trading_day_context(
@@ -5054,6 +5079,7 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "새테마",               # 2026-08-19 — 어차피 '오늘의 주인공'에 같은 테마가 나온다
     "지수와수급나란히",     # 2026-08-18 — 통합 타임라인과 역할이 겹침
     "어제대비움직임",       # 2026-08-18 — 레이더 그림과 같은 내용을 표로 반복
     "과거엔어땠나",         # 2026-08-18 — 차별점이 없어 보류 (표본 쌓이면 되살릴 것)
@@ -6701,14 +6727,15 @@ a{{color:inherit;text-decoration:none}}
 .nt-foot{{font-size:10px;color:#6f7784;margin:9px 0 0;line-height:1.6}}
 .nt-foot b{{color:#9aa0aa}}
 /* 오늘의 성적표 SCORE B */
-.idx-card2.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:.6rem;align-items:center}}
+.idx-card2.sc2wrap{{display:block}}
+.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:.6rem;align-items:center}}
 .sc2-l{{min-width:0}}
 .sc2-r{{min-width:0}}
-.sc2-tagbox{{margin:.5rem 0 0}}
+.sc2-tagbox{{margin:.7rem 0 0;padding:.65rem .1rem 0;border-top:1px solid rgba(255,255,255,.07)}}
 .sc2-tag{{display:inline-block;font-size:9.5px;font-weight:800;padding:.1rem .45rem;border-radius:20px;border:1px solid #2a3342}}
 .sc2-txt{{font-size:10.5px;color:#8b93a0;margin:.28rem 0 0;line-height:1.6}}
 .sc2-txt b{{color:#c9d0d9}}
-@media (max-width:359px){{.idx-card2.sc2{{grid-template-columns:1fr}}}}
+@media (max-width:359px){{.sc2{{grid-template-columns:1fr}}}}
 /* ── 수급 관제신호 v5 ── */
 .fs-v5{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;padding:0 0 .7rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
 .fs-v5-g{{text-align:center;flex:0 0 auto}}
@@ -6952,23 +6979,26 @@ a{{color:inherit;text-decoration:none}}
             f"상위 {(data.get('설정') or {}).get('주도섹터',{}).get('선정수','?')}개. "
             f"단, 앞 카드와 종목이 {(data.get('설정') or {}).get('주도섹터',{}).get('중복제외기준','?')}개 이상 겹치면 제외")}
   {build_sectors(data.get('주도섹터'))}
-  <details style="margin:12px 0 0;padding:9px 10px;background:#0f131a;border-radius:8px;
-    border:1px solid #1e2531">
-    <summary style="font-size:11.5px;color:#e0c060;font-weight:700;cursor:pointer;
+  <!-- ⚠️ 접기 배경을 어둡게(#0f131a) 두니 주인공 카드(밝은 배경)와 따로 놀았다.
+       (2026-08-19) → 카드와 같은 배경·테두리 변수를 쓰고, 금색 왼쪽 선으로만 구분한다. -->
+  <details style="margin:12px 0 0;padding:10px 12px;background:var(--bg);
+    border:.5px solid var(--line);border-left:3px solid rgba(240,198,90,.55);
+    border-radius:var(--rlg);box-shadow:0 1px 3px rgba(0,0,0,.03)">
+    <summary style="font-size:11.5px;color:#a07d1f;font-weight:700;cursor:pointer;
       list-style:none">📖 오늘의 주인공과 섹터 성적표는 뭐가 다른가요?
       <span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>
     <p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">
       <b style="color:#9aa0aa">오늘의 주인공</b>은 매일 바뀌는 <b>사건 현장</b>입니다.
       거래대금까지 보기 때문에 <b>돈이 몰린 곳</b>을 잡습니다.<br>
-      <b style="color:#9aa0aa">섹터 성적표</b>는 안 바뀌는 <b>주소</b>입니다. 항상 같은 칸이라
+      <b style="color:#2c3340">섹터 성적표</b>는 안 바뀌는 <b>주소</b>입니다. 항상 같은 칸이라
       어제·지난달과 비교됩니다.<br>
-      그래서 <b style="color:#9aa0aa">두 곳의 순위가 다를 수 있습니다.</b>
-      성적표에선 강한데 여기 없다면 — <b style="color:#f0c65a">올랐지만 돈은 안 붙은 상승</b>입니다.
+      그래서 <b style="color:#2c3340">두 곳의 순위가 다를 수 있습니다.</b>
+      성적표에선 강한데 여기 없다면 — <b style="color:#a07d1f">올랐지만 돈은 안 붙은 상승</b>입니다.
     </p></details>
 
   {_zone_trend_block}
 
-  {build_new_theme(data.get('계좌격자'))}
+  {hide("새테마", build_new_theme(data.get('계좌격자')))}
 
   <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 섹터</p>
   {hide("관제레이더", build_sector_radar())}
