@@ -34,6 +34,17 @@ on:
       claude:
         description: 'Claude 해석글'
         type: choice
+        # 기본값은 '재사용'(무료). 수동 실행의 대부분이 화면 확인이기 때문이다.
+        #
+        # ⚠️ 그런데 이게 사고를 냈다 (2026-08-19)
+        #    재사용은 해석글을 만들지 않으므로 **핵심편이 비어 있는 HTML**이 나온다.
+        #    그런데 예전에는 그 HTML로 index.html까지 덮어쓰고 커밋까지 해버려서,
+        #    **라이브 사이트에서 핵심편이 통째로 사라졌다.**
+        #
+        #    → 기본값은 그대로 '재사용'으로 두되,
+        #      아래 '리포트 HTML 생성'과 '자동 커밋' 단계에서
+        #      **해석글이 없으면 index.html을 건드리지 않도록** 막았다.
+        #      (화면 확인은 report_YYYYMMDD.html로 하면 된다)
         default: '재사용 (무료 — 화면 확인용)'
         options:
           - '재사용 (무료 — 화면 확인용)'
@@ -154,11 +165,32 @@ jobs:
             echo "⏰ 자동 실행 — 정식 발행 (Claude 생성 + 텔레그램 발송)"
           fi
 
+      # ⚠️ '재사용'인데 오늘 해석글이 아예 없으면 핵심편이 빈 채로 나간다.
+      #    그 상태로 발행되면 구독자가 "핵심편이 사라졌다"고 느낀다 → 미리 크게 경고한다.
+      - name: 해석글 없음 경고
+        if: steps.guard.outputs.run == 'yes'
+        run: |
+          TODAY=$(date +%Y%m%d)
+          if [ ! -f "archive/report_${TODAY}.json" ]; then
+            echo "::warning title=핵심편 없음::오늘 해석글(archive/report_${TODAY}.json)이 없습니다. 이대로 발행하면 ⏱️핵심편이 통째로 빠집니다. 'Claude 해석글 = 새로 생성'으로 다시 실행하세요."
+          else
+            echo "✅ 오늘 해석글 확인 — 핵심편이 정상 포함됩니다."
+          fi
+
       - name: 리포트 HTML 생성
         if: steps.guard.outputs.run == 'yes'
         run: |
+          TODAY=$(date +%Y%m%d)
           python build_html.py
-          cp report_$(date +%Y%m%d).html index.html
+          # ⚠️ 해석글(핵심편)이 없으면 index.html을 건드리지 않는다 (2026-08-19).
+          #    재사용 모드로 돌렸을 때 라이브 첫 화면이 '핵심편 없는 버전'으로
+          #    덮어써지던 사고를 막는다. 화면 확인은 report_YYYYMMDD.html로 하면 된다.
+          if [ -f "archive/report_${TODAY}.json" ]; then
+            cp "report_${TODAY}.html" index.html
+            echo "✅ index.html 갱신 — 핵심편 포함"
+          else
+            echo "::notice title=index.html 보호::해석글이 없어 index.html을 그대로 두었습니다. 오늘 화면은 report_${TODAY}.html 로 확인하세요. (정식 발행하려면 'Claude 해석글 = 새로 생성')"
+          fi
       - name: 공유 썸네일 생성
         run: python make_thumb.py
 
