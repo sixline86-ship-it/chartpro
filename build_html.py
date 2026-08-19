@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.18-n9"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.18-n11"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1071,8 +1071,8 @@ def build_accumulation(매집, 설정=None):
       💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
     <div class="ac-tabs" data-g="{_AC_GID}">
-      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 단기 {기간}일</div>
-      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ 중기 {매집.get("중기기간",20)}일</div>
+      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 단기 {기간}일 종목</div>
+      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ 중기 {매집.get("중기기간",20)}일 종목</div>
     </div>
     <div class="ac-body on" data-g="{_AC_GID}" data-p="s">
       <p class="ac-long-s">{기간}일은 <b>"이번 주에 막 들어온 돈"</b>입니다.
@@ -1782,6 +1782,66 @@ def _spark_svg(vals, w=120, h=22):
 _GRID_SEQ = [0]   # 같은 표가 여러 번 그려질 때 id가 겹치지 않게 하는 일련번호
 
 
+
+def build_new_theme(격자):
+    """🆕 어디에도 안 걸린 새 테마 — '오늘의 주인공' 옆자리.
+
+    ⚠️ 이 칸은 격자(주소 지도)에서 옮겨온 것이다.
+       15개 고정 슬롯 어디에도 안 걸린 테마 중 **오늘 가장 센 것**이라
+       담기는 종목이 매일 통째로 바뀐다. 그래서
+         · 누적 통계에는 절대 넣지 않는다 (ZONE_EXCLUDE)
+         · 어제와 비교하지 않는다 ("어제도 올랐다"는 말이 성립하지 않는다)
+         · 편차가 크면 평균이 거짓이 되므로 그 사실을 화면에 적는다
+    """
+    행 = None
+    for r in ((격자 or {}).get("행") or []):
+        if r.get("테마") in ZONE_EXCLUDE:
+            행 = r
+            break
+    if not 행:
+        return ""
+    테마 = (행.get("네이버테마") or [None])[0]
+    if not 테마:
+        return ""
+    전체 = 행.get("전체")
+    종목 = []
+    for 층 in ("대형", "중형", "소형"):
+        c = (행.get("칸") or {}).get(층) or {}
+        for x in (c.get("종목") or []):
+            if isinstance(x, dict) and x.get("명") is not None:
+                종목.append((x["명"], x.get("등")))
+    종목 = [t for t in 종목 if t[1] is not None]
+    종목.sort(key=lambda t: -t[1])
+
+    칩 = "".join(
+        f'<span class="nt-chip" style="border-color:'
+        f'{FS_BUY if v >= 0 else FS_SELL}55;color:{FS_BUY if v >= 0 else FS_SELL}">'
+        f'{nm} {v:+.1f}%</span>' for nm, v in 종목[:8])
+
+    경고 = ""
+    if len(종목) >= 3:
+        폭 = 종목[0][1] - 종목[-1][1]
+        if 폭 >= 20:
+            경고 = (f'<p class="nt-warn">⚠️ 같은 꾸러미인데 '
+                    f'<b>{종목[0][0]} {종목[0][1]:+.1f}%</b> ~ '
+                    f'<b>{종목[-1][0]} {종목[-1][1]:+.1f}%</b>로 '
+                    f'<b>{폭:.0f}%p</b> 벌어졌습니다. '
+                    f'<b>평균({전체:+.1f}%)만 보면 안 됩니다.</b></p>')
+
+    색 = FS_BUY if (전체 or 0) >= 0 else FS_SELL
+    return f'''
+  <div class="nt-box">
+    <p class="nt-k">🆕 어디에도 안 걸린 새 테마</p>
+    <p class="nt-t">{테마} <span style="color:{색}">{전체:+.1f}%</span></p>
+    <p class="nt-s">15개 고정 구역 어디에도 안 들어가는 테마 중, 오늘 가장 세게 움직인 곳입니다.</p>
+    <div class="nt-chips">{칩}</div>
+    {경고}
+    <p class="nt-foot">⚠️ <b>이 칸은 매일 내용물이 통째로 바뀝니다.</b>
+      어제의 새 테마와 오늘의 새 테마는 아무 관계가 없어, 누적 성적에는 넣지 않습니다.
+      "새 테마가 계속 뜬다"로 읽으면 안 됩니다.</p>
+  </div>'''
+
+
 def build_account_grid(격자, 주도섹터=None):
     # 다리 ② — 오늘 '뜨는 현장'이 속한 구역 줄에 불을 붙인다.
     #   격자만 보고도 "내 구역에 오늘 불이 났나"를 알 수 있게 한다.
@@ -1802,7 +1862,10 @@ def build_account_grid(격자, 주도섹터=None):
         return ""
 
     기준 = 격자.get("기준") or {}
-    행들 = 격자.get("행") or []
+    # ⚠️ 「신규 테마」는 격자에서 뺀다(2026-08-18).
+    #    격자는 "안 바뀌는 주소"인데 이 칸만 매일 내용물이 통째로 바뀐다.
+    #    → build_new_theme()이 '오늘의 주인공' 옆에서 따로 보여준다.
+    행들 = [r for r in (격자.get("행") or []) if r.get("테마") not in ZONE_EXCLUDE]
     크기 = 격자.get("크기전체") or {}
     프리미엄 = 격자.get("크기프리미엄")
 
@@ -1871,7 +1934,15 @@ def build_account_grid(격자, 주도섹터=None):
         # ⚠️ 긴 테마명이 두 줄로 접히면 그 행만 두꺼워져 표가 들쭉날쭉해진다.
         #    → 한 줄 고정(넘치면 …로 자름). 전체 이름은 눌렀을 때 헤더에서 볼 수 있다.
         _풀 = str(r.get("테마", ""))
-        _불 = 불난구역.get(_풀)
+        # ⚠️ 「신규 테마」는 **매일 내용물이 통째로 바뀌는 칸**이다.
+        #    (8/14 정유 → 8/16 스마트카 → 8/18 신규상장)
+        #    이름만 고정이라 "같은 섹터가 계속 뜨고 있다"는 착시를 준다.
+        #    → 오늘 실제로 무엇이 담겼는지를 이름 옆에 적어 매일 바뀜을 드러낸다.
+        if _풀 in ZONE_EXCLUDE:
+            _오늘테마 = (r.get("네이버테마") or [None])[0]
+            if _오늘테마:
+                _풀 = f"{_풀} · {_오늘테마}"
+        _불 = 불난구역.get(str(r.get("테마", "")))
         불배지 = (f'<span style="color:#ff9a3c;font-size:9px;flex:none" '
                 f'title="오늘 뜨는 현장: {", ".join(_불)}">&nbsp;🔥</span>') if _불 else ''
         테마명 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
@@ -2233,6 +2304,13 @@ ZONE_TOP_N = 5          # 처음에 펼쳐 보여줄 줄 수 (나머지는 '더�
 #  ⚠️ 2일치로 "이번 주 성적"이라고 쓰면 거짓말이 된다. 없는 비교는 만들지 않는다.
 ZONE_MIN = {1: 1, 5: 5, 20: 10, 60: 30}
 
+#  ⚠️ 누적 통계에서 빼야 하는 칸
+#     「신규 테마」는 "어디에도 안 걸린 테마 중 오늘 최강"이라 **매일 내용물이 바뀐다**.
+#     (8/14 정유 → 8/16 스마트카 → 8/18 신규상장)
+#     서로 다른 종목 묶음의 등락률을 누적하면 곡선·순위·주기가 전부 거짓이 된다.
+#     하루 격자에는 남기되, 누적하는 코너에서는 제외한다.
+ZONE_EXCLUDE = {"신규 테마", "신규 주도"}   # 구 이름도 함께(과거 archive 호환)
+
 
 def _zone_series():
     """{구역명: {날짜: 등락률}} 과 {날짜: 시장등락률}을 만든다."""
@@ -2246,6 +2324,8 @@ def _zone_series():
         날짜 = d.get("날짜")
         for r in ((d.get("계좌격자") or {}).get("행") or []):
             v, nm = r.get("전체"), r.get("테마")
+            if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
+                continue
             if nm and isinstance(v, (int, float)):
                 구역.setdefault(nm, {})[날짜] = v
     시장 = {}
@@ -2340,7 +2420,17 @@ def build_my_stocks(data):
         return ""
     이름들 = sorted(payload["stocks"])
     # 자체 자동완성이 쓸 종목명 배열 (datalist 대체)
-    이름배열JS = "window.CP_NAMES=" + json.dumps(이름들, ensure_ascii=False) + ";" 
+    이름배열JS = "window.CP_NAMES=" + json.dumps(이름들, ensure_ascii=False) + ";"
+    # 브리핑이 "조용한 날"에 쓸 재료 — 구역별 오늘 등락률
+    _오늘구역 = {}
+    try:
+        for _r in ((data.get("계좌격자") or {}).get("행") or []):
+            _nm, _v = _r.get("테마"), _r.get("전체")
+            if _nm and _v is not None:
+                _오늘구역[_nm] = _v
+    except Exception:
+        _오늘구역 = {}
+    이름배열JS += "window.CP_SECT_TODAY=" + json.dumps(_오늘구역, ensure_ascii=False) + ";" 
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
@@ -2459,8 +2549,26 @@ def build_my_stocks(data):
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
      '<a href="'+g.u+'" target="_blank" style="font-size:11px;color:#e0c060;'+
      'line-height:1.5;text-decoration:none">'+g.t+(g.s?' '+'★'.repeat(g.s):'')+'</a></div>';}});
-   if(!items) items='<p style="margin:4px 0 0;font-size:11px;color:#6f7784">'+
-     '오늘은 뉴스도 공시도 없었습니다</p>';
+   // ⚠️ 조용한 날에도 할 말은 있다 (2026-08-18).
+   //    뉴스도 공시도 없으면 '없었습니다'로 끝내지 말고,
+   //    **그 종목이 속한 구역이 오늘 어땠는지**를 대신 알려준다.
+   //    개별 재료가 없는 날의 주가는 대개 섹터를 따라가기 때문이다.
+   if(!items){
+    var zs=(m[0]||[]), zt='';
+    if(zs.length && window.CP_SECT_TODAY){
+     var ln=[];
+     zs.slice(0,2).forEach(function(z){
+      var v=window.CP_SECT_TODAY[z];
+      if(v===undefined||v===null) return;
+      var cc=v>=0?'#ff6b4a':'#5b9bff';
+      ln.push('<b>'+z+'</b> 구역 <b style=\\"color:'+cc+'\\">'+fmt(v)+'%</b>');
+     });
+     if(ln.length) zt=ln.join(' · ');
+    }
+    items='<p style=\\"margin:4px 0 0;font-size:11px;color:#8b93a0;line-height:1.6\\">'+
+      '오늘은 이 종목에 붙은 뉴스·공시가 없었습니다.'+
+      (zt?'<br>대신 소속 구역을 보면 — '+zt+'였습니다.':'')+'</p>';
+   }
    var 분석='';
    if(c&&!c.short){
     var 승률=c.win/c.tot*100;
@@ -2472,6 +2580,7 @@ def build_my_stocks(data):
                  :'시장에 조금 뒤처지는 흐름입니다.'));
     if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
     else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
+    else 분석+=' 오늘은 개별 재료가 없었으니, 주가는 대체로 소속 섹터를 따라갔을 가능성이 큽니다.';
    }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
     '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+nm+'</div>'+
@@ -2558,9 +2667,8 @@ def build_my_stocks(data):
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">내 관심종목 등록</p>'
-            '<p style="margin:0 0 5px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '내 종목은 시장을 이기고 있나</p>'
+            # ⚠️ 큰 제목은 입력창 바로 밑(ms-sug 다음)에 있다. 여기 또 두면 두 번 나온다.
+            '<p style="margin:0 0 6px;font-size:11.5px;color:#8b93a0">내 관심종목 등록</p>'
             '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
             '시장 대비 성적(5·20·60일), 그날의 뉴스와 공시, 소속 섹터 변화까지 '
@@ -2671,7 +2779,7 @@ def build_sector_scoreboard():
     보유일 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장))
 
     탭, 패널 = "", ""
-    기본idx = 1   # 기본 탭은 5일(당일이 맨 앞이라 idx 1) — 흐름부터 본다
+    기본idx = 0   # 기본 탭은 **당일** — "오늘 어디가 셌나"부터 본다 (2026-08-18)
 
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         통계 = []
@@ -3189,11 +3297,6 @@ def build_sector_radar():
             _hy = ny - (ny - oy) * 0.22
             자취 += (f'<g transform="translate({_hx:.1f} {_hy:.1f}) rotate({_ang:.0f})">'
                      f'<path d="M0 0 L-6 -3.4 L-6 3.4 Z" fill="{색}" opacity=".8"/></g>')
-            # 얼마나 다가왔는지를 숫자로 — 선 길이만으로는 크기 비교가 안 된다
-            _mx2 = (ox + nx) / 2
-            _my2 = (oy + ny) / 2
-            자취 += (f'<text x="{_mx2:.0f}" y="{_my2-7:.0f}" font-size="10" fill="{색}" '
-                     f'font-weight="900" text-anchor="middle">▲{abs(변화):.0f}</text>')
 
         # ── 오늘 자리 (점) ──
         #  들어옴 / 빠짐 / 제자리를 **색뿐 아니라 모양으로도** 갈라 놓는다.
@@ -3201,7 +3304,10 @@ def build_sector_radar():
         #    빠짐   = 속 빈 원            (비어 나간 느낌)
         #    제자리 = 작은 채운 원
         #  레이더처럼 천천히 명멸시키되, 섹터마다 시작을 어긋나게 해 요란하지 않게.
-        _dly = f"{(_di * 0.37) % 3.2:.2f}s"
+        # ⚠️ 다가온 섹터(꼴=="in")는 **모두 같은 박자로** 깜빡인다.
+        #    같이 반짝여야 "오늘 여기가 달아올랐다"가 한 덩어리로 보인다.
+        #    나머지는 시작을 어긋나게 해 조용히 명멸시킨다(요란함 방지).
+        _dly = "0s" if 꼴 == "in" else f"{(_di * 0.37) % 3.2:.2f}s"
         _cls = f'class="rdr-dot" style="animation-delay:{_dly}"'
         if 꼴 == "in":
             점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="13" fill="{색}" '
@@ -3318,41 +3424,26 @@ def build_sector_radar():
             + '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
               'border-radius:8px;border:1px solid #1e2531">'
               '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
-              'cursor:pointer;list-style:none">📖 뜨는 현장 보는 방법 '
+              'cursor:pointer;list-style:none">📖 보는 방법 '
               '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
               '<div style="height:6px"></div>'
-              '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
-              '<b style="color:#22d3ee">가운데 청록색 조준점이 관제탑</b>입니다. 섹터 점이 여기에 '
-              '<b style="color:#9aa0aa">가까울수록 오늘 시장을 세게 끌고 갔다</b>는 뜻이고, '
-              '바깥에 있을수록 뒤로 밀렸다는 뜻입니다.<br>'
-              '<b style="color:#4ade80">초록 ▲</b> 어제보다 안쪽으로 들어옴 (달아오르는 중) · '
-              '<b style="color:#a78bfa">보라 ▼</b> 바깥으로 밀림 (식는 중) · '
-              '<b style="color:#f0c65a">금색 =</b> 어제와 비슷한 자리<br>'
-              '<b style="color:#9aa0aa">속 빈 점 → 꽉 찬 점</b>으로 이어진 선이 '
-              '어제 자리에서 오늘 자리까지 움직인 거리입니다. 선이 길수록 하루 사이 변화가 큽니다.'
-              '</p></details>'
-            + '<details style="margin:8px 0 0;padding:9px 10px;background:#141c1e;'
-              'border-radius:8px;border:1px solid #1e3238">'
-              '<summary style="font-size:11.5px;color:#22d3ee;font-weight:700;'
-              'cursor:pointer;list-style:none">🔗 내 종목 구역과 함께 보는 법 '
-              '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
-              '<div style="height:6px"></div>'
-              '<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.65">'
-              '두 그림은 <b style="color:#9aa0aa">축척이 다른 같은 지도</b>입니다. '
-              '<b style="color:#9aa0aa">계좌 구역</b>은 안 바뀌는 <b style="color:#9aa0aa">주소</b>(내 종목이 사는 동네), '
-              '<b style="color:#22d3ee">뜨는 현장</b>은 매일 바뀌는 '
-              '<b style="color:#9aa0aa">사건 현장</b>(오늘 어디서 불이 났나)입니다. '
-              '그래서 현장 이름 밑에 <b style="color:#22d3ee">↳ 어느 구역</b>인지를 적어뒀고, '
-              '격자에서 불난 줄에는 🔥를 달았습니다.<br>'
-              '<b style="color:#9aa0aa">계좌 구역</b>은 "얼마나 올랐나"(등락률)를, '
-              '<b style="color:#9aa0aa">뜨는 현장</b>은 "얼마나 시장을 끌었나"(거래대금·확산도까지 합친 주도력)를 봅니다.<br>'
-              '그래서 <b style="color:#ff6b4a">구역은 빨간데 현장에서는 바깥</b>이면 — '
-              '올랐지만 <b style="color:#9aa0aa">돈이 붙지 않은 상승</b>이라 오래가기 어렵습니다.<br>'
-              '반대로 <b style="color:#22d3ee">현장은 안쪽인데 구역은 옅다</b>면 — '
-              '아직 덜 올랐는데 <b style="color:#9aa0aa">돈이 먼저 들어오는</b> 자리일 수 있습니다.<br>'
-              '<b style="color:#9aa0aa">둘 다 강하면</b> 오늘의 진짜 주인공, '
-              '<b style="color:#9aa0aa">둘 다 약하면</b> 굳이 쫓을 이유가 없는 자리입니다.'
-              '</p></details>'
+              '<p style="margin:0;font-size:11.5px;color:#9aa0aa;line-height:1.75">'
+              '<b style="color:#22d3ee">가운데가 관제탑</b>입니다. '
+              '<b style="color:#e8eaee">가까울수록 오늘 시장을 세게 끌었다</b>는 뜻입니다.<br>'
+              f'<b style="color:{FS_BUY}">● 채운 점</b> = 어제보다 안쪽으로 <b>들어옴</b> · '
+              f'<b style="color:{FS_SELL}">○ 빈 점</b> = 바깥으로 <b>빠짐</b> · '
+              '<b style="color:#f0c65a">● 금색</b> = 제자리<br>'
+              '<b style="color:#e8eaee">점선 화살표</b>는 어제 자리에서 오늘 자리까지 움직인 거리입니다.</p>'
+              '<div style="height:9px"></div>'
+              '<p style="margin:0;font-size:11.5px;color:#9aa0aa;line-height:1.75;'
+              'border-top:1px solid #1e2531;padding-top:8px">'
+              '<b style="color:#e8eaee">내 종목 구역과 뭐가 다른가요?</b><br>'
+              '구역은 <b>안 바뀌는 주소</b>(내 종목이 사는 동네), '
+              '여기는 <b>매일 바뀌는 사건 현장</b>(오늘 어디서 불이 났나)입니다.<br>'
+              '구역은 <b>얼마나 올랐나</b>를, 여기는 <b>얼마나 돈이 붙었나</b>를 봅니다. '
+              '<b>올랐는데 여기선 바깥</b>이면 돈이 안 붙은 상승이라 오래가기 어렵고, '
+              '<b>덜 올랐는데 여기선 안쪽</b>이면 돈이 먼저 들어오는 자리일 수 있습니다.</p>'
+              '</details>'
             + '<p style="margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.5">'
             '어제 주도 6위 밖이던 섹터는 바깥에서 출발한 것으로 표시됩니다</p></div>')
 
@@ -3370,6 +3461,8 @@ def _tier_series():
         날짜 = d.get("날짜")
         for r in ((d.get("계좌격자") or {}).get("행") or []):
             nm, 칸 = r.get("테마"), (r.get("칸") or {})
+            if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
+                continue
             vals = {t: (칸.get(t) or {}).get("등락률") for t in ("대형", "중형", "소형")}
             if nm and all(isinstance(v, (int, float)) for v in vals.values()):
                 out.setdefault(nm, {})[날짜] = vals
@@ -3860,7 +3953,7 @@ def build_slope_chart(격자):
     W, H, T, B = 440, 250, 34, 30
     X = {"대형": 38, "중형": 189, "소형": 340}
     탭, 패널 = "", ""
-    기본idx = 1   # 기본 탭은 5일(당일이 맨 앞이라 idx 1) — 흐름부터 본다
+    기본idx = 0   # 기본 탭은 **당일** — "오늘 어디가 셌나"부터 본다 (2026-08-18)
 
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         누적 = {}
@@ -4555,6 +4648,7 @@ def basket_read(실탄, 비차익, 만기=False):
                 "폭 판정은 보류합니다.")
 
     pct = f"{r:.0f}%"
+    금 = _flow_amt(비차익)      # ⚠️ %만 말하면 "그래서 얼마?"가 남는다
     산다 = 실탄 >= 0
 
     if band == "odd":
@@ -4563,21 +4657,21 @@ def basket_read(실탄, 비차익, 만기=False):
                 f"이런 날은 지수와 개별 종목의 방향이 크게 엇갈리기 쉬우니, "
                 f"<b>지수만 보고 내 종목을 판단하면 어긋납니다.</b>")
     if 산다 and band == "low":
-        return (f"실탄은 들어왔지만 <b>{pct}만 바스켓</b>입니다. "
+        return (f"실탄은 들어왔지만 바스켓은 <b>{금}</b>({pct})뿐입니다. "
                 f"지수 상승을 <b>소수 종목이 만들었다</b>는 뜻이라, "
                 f"대부분의 계좌는 지수만큼 못 올랐을 겁니다. "
                 f"이런 날은 지수 방향보다 <b>어느 섹터에 있느냐</b>가 수익을 가릅니다.")
     if 산다 and band == "mid":
-        return (f"바스켓 비중 <b>{pct}</b> — 지수 전체와 개별 종목이 <b>절반씩 섞인</b> 매수입니다. "
+        return (f"바스켓 <b>{금}</b>(비중 {pct}) — 지수 전체와 개별 종목이 <b>절반씩 섞인</b> 매수입니다. "
                 f"지수도 오르고 종목별 편차도 남는 구간이라, "
                 f"<b>지수를 따라가되 섹터가 성과를 가른다</b>고 보면 됩니다.")
     if 산다 and band == "high":
-        return (f"실탄의 <b>{pct}</b>가 바스켓 매수입니다. 종목을 고른 게 아니라 "
+        return (f"바스켓 매수가 <b>{금}</b>로 실탄의 <b>{pct}</b>입니다. 종목을 고른 게 아니라 "
                 f"<b>한국 시장 자체를 담은</b> 날이라, 대형주·지수를 따라가는 자리가 유리합니다. "
                 f"넓게 들어온 돈은 좁게 들어온 돈보다 <b>흐름이 오래 이어지는 편</b>이지만, "
                 f"소형 테마는 상대적으로 소외될 수 있습니다.")
     if (not 산다) and band == "low":
-        return (f"실탄은 빠졌지만 바스켓은 <b>{pct}</b>뿐입니다. "
+        return (f"실탄은 빠졌지만 바스켓은 <b>{금}</b>({pct})뿐입니다. "
                 f"지수를 통째로 던진 게 아니라 <b>오른 종목에서 차익을 실현한</b> 쪽에 가깝습니다. "
                 f"지수는 버텨도 <b>많이 오른 종목이 먼저 밀릴 수 있는</b> 자리입니다.")
     if (not 산다) and band == "mid":
@@ -5254,14 +5348,18 @@ def _fs_timeline_svg(이력, p, W=380):
             c = "#e0a83c" if 이상 else (FS_BUY if r >= BASKET_HIGH else "#8b93a0")
             g.append(f'<circle cx="{X(k):.1f}" cy="{YC(r):.1f}" r="{3.2 if k==q-1 else 2.2}" fill="{c}"/>')
         if rs[-1] is not None:
-            ty = min(max(YC(rs[-1]) - 7, CT + 24), CB - 4)
-            g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty:.1f}" font-size="9" fill="{FS_BUY}" '
+            # ⚠️ %만 있으면 "그래서 얼마?"가 안 보인다. 금액을 같이 적는다(2026-08-18).
+            ty = min(max(YC(rs[-1]) - 9, CT + 24), CB - 12)
+            _bc = FS_BUY if (비[-1] or 0) >= 0 else FS_SELL
+            g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty:.1f}" font-size="9" fill="{_bc}" '
                      f'font-weight="900" text-anchor="end">{rs[-1]:.0f}%</text>')
+            g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty+9:.1f}" font-size="7.5" fill="{_bc}" '
+                     f'font-weight="800" text-anchor="end" opacity=".9">{_flow_amt(비[-1])}</text>')
     else:
         g.append(f'<text x="{W/2:.1f}" y="{(CT+CB)/2+4:.1f}" font-size="8" fill="#4a5462" '
                  f'text-anchor="middle" font-weight="700">이 구간에는 비차익 데이터가 없습니다</text>')
     g.append(f'<rect x="{W-PR-136}" y="{CT+1}" width="132" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
-    g.append(f'<text x="{W-PR-133}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 실탄 대비 비중(%)</text>')
+    g.append(f'<text x="{W-PR-133}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 비중(%) · 금액</text>')
 
     # ── 공통 날짜축 ──
     step = max(1, q // 4)
@@ -6584,11 +6682,24 @@ a{{color:inherit;text-decoration:none}}
 @media (prefers-reduced-motion:reduce){{.rdr-dot{{animation:none}}}}
 /* 매집 레이더 기간 탭 */
 .ac-tabs{{display:flex;gap:.35rem;margin:.7rem 0 .6rem}}
-.ac-tab{{flex:1;text-align:center;font-size:11.5px;font-weight:800;padding:.42rem 0;border-radius:8px;background:#0d1118;border:1px solid #1e2531;color:#7d848f;cursor:pointer}}
-.ac-tab.on{{background:#1b2432;border-color:#3a465c;color:#fff}}
+/* ⚠️ 이 코너는 밝은 배경 카드 위에 놓인다. 탭을 검게 두면 배경에 파묻혀
+   "누를 수 있는 것"으로 안 보인다 → 밝은 회색 위에 금색 선택으로 바꿨다. */
+.ac-tab{{flex:1;text-align:center;font-size:12px;font-weight:800;padding:.5rem 0;border-radius:8px;background:#eef1f6;border:1px solid #d6dbe4;color:#6b7280;cursor:pointer}}
+.ac-tab.on{{background:#f0c65a;border-color:#d8ab35;color:#2a2410}}
 .ac-tab.off{{opacity:.4;cursor:default}}
 .ac-body{{display:none}}
 .ac-body.on{{display:block}}
+/* 🆕 어디에도 안 걸린 새 테마 */
+.nt-box{{background:#141922;border:1px solid #2a3342;border-left:3px solid #ef4444;border-radius:12px;padding:12px 14px;margin:10px 0 0}}
+.nt-k{{font-size:11px;color:#8b93a0;font-weight:700;margin:0}}
+.nt-t{{font-size:16px;font-weight:900;color:#f2f4f7;margin:3px 0 0;letter-spacing:-.02em}}
+.nt-s{{font-size:11px;color:#8b93a0;margin:5px 0 0;line-height:1.6}}
+.nt-chips{{display:flex;flex-wrap:wrap;gap:5px;margin:9px 0 0}}
+.nt-chip{{font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:20px;border:1px solid #2a3342;background:#0d1118}}
+.nt-warn{{font-size:11px;color:#e0c060;margin:9px 0 0;line-height:1.65;background:#1a1610;border-radius:8px;padding:8px 10px}}
+.nt-warn b{{color:#f0c65a}}
+.nt-foot{{font-size:10px;color:#6f7784;margin:9px 0 0;line-height:1.6}}
+.nt-foot b{{color:#9aa0aa}}
 /* 오늘의 성적표 SCORE B */
 .idx-card2.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:.6rem;align-items:center}}
 .sc2-l{{min-width:0}}
@@ -6856,6 +6967,8 @@ a{{color:inherit;text-decoration:none}}
     </p></details>
 
   {_zone_trend_block}
+
+  {build_new_theme(data.get('계좌격자'))}
 
   <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 섹터</p>
   {hide("관제레이더", build_sector_radar())}
