@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-o1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.19-n13"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -197,89 +197,14 @@ def asave(name):
     return os.path.join(ARCHIVE, name)
 
 
-_DATA_PAT = r"data_\d{8}\.json"
-_DATA_KEEP = None       # 한 번만 계산해 두고 재사용한다(파일을 여러 번 읽지 않게)
-
-
-def _prune_data_files(파일들):
-    """휴장일에 만들어진 archive/data_*.json 을 계산에서 뺀다.
-
-    ⚠️ 2026-08-19 발견 — 워크플로가 주말·대체공휴일에도 돌아
-       **직전 거래일과 똑같은 내용의 data 파일**이 4개 만들어져 있었다.
-         data_20260725(토) · data_20260815(토) · data_20260816(일) · data_20260817(대체공휴일)
-       이 파일들이 '20일 창'에 들어가면 8/14 하루가 네 번 반영되어
-       내 종목 초과수익·승패·섹터 성적표가 전부 부풀려진다.
-
-    ⚠️ **파일을 지우지 않는다.** 읽을 때 빼기만 한다.
-       지우면 되돌릴 수 없고, 나중에 원인을 추적할 근거도 사라진다.
-       (가림은 삭제가 아니다 — 챕터 가림 규칙과 같은 원리)
-
-    거르는 기준
-      ① 토·일 — 날짜만으로 확정
-      ② 직전 거래일과 종목사전이 완전히 동일 — 공휴일이 여기서 걸린다
-    """
-    global _DATA_KEEP
-    if _DATA_KEEP is not None:
-        return _DATA_KEEP
-    남김, 앞지문, 버린주말, 버린중복 = [], None, 0, 0
-    for f in 파일들:
-        if f == f"data_{DATE}.json":      # 오늘 파일은 무슨 일이 있어도 지키다
-            남김.append(f)
-            continue
-        try:
-            주말 = datetime.strptime(f[5:13], "%Y%m%d").weekday() >= 5
-        except Exception:
-            주말 = False
-        지문 = None
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
-            사전 = (d.get("계좌격자") or {}).get("종목사전") or {}
-            if 사전:
-                # 전체를 비교하면 무겁다. 이름순 앞 200종목의 등락률이면 충분히 유일하다.
-                표본 = sorted(사전.items())[:200]
-                지문 = json.dumps([[n, v[3] if len(v) > 3 else None] for n, v in 표본],
-                                 ensure_ascii=False)
-        except Exception:
-            지문 = None
-        #  ⚠️ 주말 파일도 **지문은 먼저 읽어 둔다.**
-        #     안 그러면 금요일 → (토·일 건너뜀) → 대체공휴일 월요일 비교가 끊긴다.
-        #     실제로 8/17(대체공휴일)이 8/16(일)의 복사본이라 이 다리가 없으면 못 잡는다.
-        if 지문 is not None:
-            앞지문_후보 = 지문
-        else:
-            앞지문_후보 = 앞지문
-        if 주말:
-            버린주말 += 1
-            앞지문 = 앞지문_후보
-            continue
-        if 지문 is not None and 지문 == 앞지문:
-            버린중복 += 1
-            continue
-        앞지문 = 앞지문_후보
-        남김.append(f)
-    if 버린주말 or 버린중복:
-        print(f"🧹 휴장일 data 파일 제외: 주말 {버린주말}개 · 직전과 동일 {버린중복}개 "
-              f"→ 거래일 {len(남김)}일치로 계산")
-    _DATA_KEEP = 남김
-    return 남김
-
-
 def alist(pattern):
-    """archive/와 루트를 함께 훑어 파일명 목록을 준다(중복 제거).
-
-    ⚠️ data_*.json 은 **휴장일 파일을 걸러서** 돌려준다.
-       archive를 읽는 곳이 일곱 군데라, 각자 거르게 하면 언젠가 한 곳이 빠진다.
-       길목 하나에서 막는다.
-    """
+    """archive/와 루트를 함께 훑어 파일명 목록을 준다(중복 제거)."""
     names = set()
     for d in (ARCHIVE, "."):
         try:
             names.update(f for f in os.listdir(d) if re.fullmatch(pattern, f))
         except FileNotFoundError:
             continue
-    if pattern == _DATA_PAT:
-        return _prune_data_files(sorted(names))
     return sorted(names)
 
 
@@ -427,11 +352,7 @@ def theme_label(테마명):
 # ── 📊 오늘의 성적표 — SCORE B (2026-08-18) ────────────────
 #  왼쪽 칸: 지수 → 태그 → 한 줄 설명 (세로로 쌓아 빈 공간을 없앤다)
 #  오른쪽 칸: 수급 가로 막대 (작게 — 주인공은 지수와 설명이다)
-def _sc_flowbar(수급, W=205, H=26):
-    # ⚠️ 2026-08-20 — "조금 크게" 요청으로 행 높이 23→26, 막대 두께 15→17.
-    #    W(가로 기준 폭)는 그대로 두되, 오른쪽 칼럼 자체를 CSS에서 넓혔다
-    #    (.sc2 grid-template-columns 1.12fr→1.4fr) — 그래야 svg가
-    #    viewBox 비율을 유지한 채 실제 렌더 크기가 커진다.
+def _sc_flowbar(수급, W=205, H=23):
     """0선 좌우 발산 막대 3줄. 왼쪽은 이름, 오른쪽은 금액 자리로 비워둔다.
     ⚠️ 비워두지 않으면 막대 끝과 금액 글자가 겹친다."""
     def _n(v):
@@ -456,8 +377,8 @@ def _sc_flowbar(수급, W=205, H=26):
         w = abs(v) / mx * half
         x = z if v >= 0 else z - w
         g.append(f'<text x="0" y="{y+11:.0f}" font-size="10.5" fill="#8b93a0" font-weight="700">{nm}</text>')
-        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="17" rx="3.5" fill="{c}"/>')
-        g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+17:.0f}" '
+        g.append(f'<rect x="{x:.0f}" y="{y+1:.0f}" width="{max(2,w):.0f}" height="15" rx="3" fill="{c}"/>')
+        g.append(f'<line x1="{z:.0f}" y1="{y-1:.0f}" x2="{z:.0f}" y2="{y+15:.0f}" '
                  f'stroke="#fff" stroke-opacity=".3"/>')
         g.append(f'<text x="{W}" y="{y+12:.0f}" font-size="10.5" fill="{c}" text-anchor="end" '
                  f'font-weight="800">{_flow_amt(v)}</text>')
@@ -959,26 +880,6 @@ def build_insight(프로의시선):
 
 # ── 마감 브리핑 (방송사별) ──
 # ── 실제 강세 레이더 (오늘 신규 포착만 표시) ──
-RADAR_라벨최대 = 18      # 이보다 길면 자른다(거의 없다). 예전엔 5였다.
-RADAR_한줄 = 8           # 한 줄에 넣을 글자 수 — 넘으면 두 줄로 나눈다
-
-
-def _radar_wrap(이름):
-    """레이더 라벨을 최대 두 줄로 나눈다.
-
-    ⚠️ 자르면 안 된다. '2차전지(나트륨이온)'을 '2차전지'로 자르면
-       옆 줄의 '2차전지(생산)'과 구별이 안 돼 그림이 거짓말을 한다.
-       띄어쓰기가 있으면 거기서, 없으면 글자 수로 나눈다.
-    """
-    이름 = (이름 or "").strip()
-    if len(이름) <= RADAR_한줄:
-        return 이름, ""
-    끊 = 이름.rfind(" ", 0, RADAR_한줄 + 1)
-    if 끊 < 3:                      # 앞 조각이 너무 짧으면 띄어쓰기를 무시한다
-        끊 = RADAR_한줄
-    return 이름[:끊].strip(), 이름[끊:].strip()
-
-
 def build_radar(강세레이더, 설정=None):
     if not 강세레이더:
         return '<div class="pending">⏳ 실제 강세 레이더 — 데이터 수집 준비중</div>'
@@ -1381,6 +1282,36 @@ def build_scorecard(채점표, 어제날짜=""):
   </div>'''
 
 
+
+def _hdr_flow_badge(key):
+    """헤더 수급 막대 밑 배지 — 그 주체의 '오늘 성격' 한 줄.
+
+    ⚠️ 예전에는 _flow_highlight()를 썼는데 외국인·기관이 같은 문구로 나오고
+       매도인 날에 "매수 전환"이라 적히는 버그가 있었다(2026-08-19).
+       _fs_stat()은 **방향별 순위**를 쓰므로 매도인 날은 매도 기준으로 센다.
+
+    돌려주는 예: "20일 중 매도 2위 · 9일 만의 최대"
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        arr = [r.get(key) for r in h if isinstance(r, dict) and r.get(key) is not None]
+    except Exception:
+        return "&nbsp;"
+    st = _fs_stat(arr)
+    if not st:
+        return "&nbsp;"
+    앞 = f'{st["n"]}일 중 {st["dir"]} {st["rk"]}위'
+    _ico, 핵 = _fs_keyfact(st)
+    뒤 = ""
+    if st["back"] >= 3:
+        뒤 = f'{st["back"]}일 만의 최대'
+    elif st["연속"] >= 3:
+        뒤 = f'{st["연속"]}일 연속'
+    elif st["배수"] >= 1.5:
+        뒤 = f'평소 {st["배수"]:.1f}배'
+    return 앞 + (f'<span class="nw"> · {뒤}</span>' if 뒤 else "")
+
+
 def _flow_highlight(key, days_max=20):
     """수급 한 주체의 '가장 눈에 띄는 특징'을 최대 20일 범위에서 자동으로 고른다.
 
@@ -1648,8 +1579,8 @@ def _header_data(지수수급, 파생, 코수):
 
     # 수급 특징 — 최대 20일 범위에서 '가장 눈에 띄는 신호' 자동 선택(코드 계산).
     #   flow_history의 외현/기관을 읽어, 전환/최대/연속/순위 중 강한 것 하나를 문장으로.
-    외배지 = _flow_highlight("외현") if 외 is not None else "&nbsp;"
-    기배지 = _flow_highlight("기관") if 기 is not None else "&nbsp;"
+    외배지 = _hdr_flow_badge("외현") if 외 is not None else "&nbsp;"
+    기배지 = _hdr_flow_badge("기관") if 기 is not None else "&nbsp;"
 
     return {"코": 코, "닥": 닥, "실탄": 실탄, "외인": 외, "기관": 기,
             "외배지": 외배지, "기배지": 기배지,
@@ -2498,11 +2429,8 @@ def _mystock_payload():
         days.append(날짜)
         for nm, v in 사전.items():
             per.setdefault(nm, {})[날짜] = v[3] if len(v) > 3 else None
-            #  ⚠️ 5번째 칸 = 분류 근거(v-o1). 어느 테마 때문에 이 구역이 됐는지.
-            #     HO가 화면만 보고 오분류를 잡아낼 수 있어야 한다.
             meta[nm] = [v[0] if v else [], v[1] if len(v) > 1 else None,
-                        v[2] if len(v) > 2 else None, v[4] if len(v) > 4 else None,
-                        v[5] if len(v) > 5 else None]
+                        v[2] if len(v) > 2 else None, v[4] if len(v) > 4 else None]
     if not days:
         return None
     시장 = {}
@@ -2558,7 +2486,7 @@ def build_my_stocks(data):
  window.CP_PAINT=window.CP_PAINT||[];
  var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
  var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
- var WINDOWS=[[1,'당일'],[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=1;
+ var WINDOWS=[[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=5;
  function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
  function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
  // 내 관심종목이 속한 섹터 집합 — 계좌 구역·섹터 성적표·시총별 섹터가 함께 쓴다.
@@ -2577,11 +2505,7 @@ def build_my_stocks(data):
  function calc(nm,n){
   var r=P.ret[nm]; if(!r) return null;
   var idx=[]; for(var i=0;i<P.days.length;i++){if(r[i]!=null&&P.mkt[i]!=null)idx.push(i);}
-  idx=idx.slice(-n);
-  /* '당일' 탭은 하루뿐이라 2일 요건을 걸면 영원히 '축적 중'이 된다.
-     하루짜리의 초과수익은 (종목등락 − 코스피등락) 하나로 충분하다. */
-  var MIN=(n===1)?1:2;
-  if(idx.length<MIN) return {short:true,have:idx.length};
+  idx=idx.slice(-n); if(idx.length<2) return {short:true,have:idx.length};
   var tc=1,mc=1,w=0;
   idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100); if(r[i]>P.mkt[i])w++;});
   return {ex:(tc-mc)*100, ret:(tc-1)*100, win:w, tot:idx.length};
@@ -2623,8 +2547,6 @@ def build_my_stocks(data):
     '<div style="margin-top:4px">'+zones+'</div>'+
     (m[1]?'<div style="font-size:9.5px;color:#6f7784;margin-top:3px">'+
       (m[3]||'')+' · 시총 '+m[1]+'위 ('+(m[2]||'')+')</div>':'')+
-    (m[4]?'<div style="font-size:9px;color:#5f6773;margin-top:2px">↳ 구역 근거 · '+
-      m[4]+'</div>':'')+
     tags+'</div>'+right+'</div></div>';
   });
   box.innerHTML=html; drawChart(my); drawBrief(my); if(window.cpFire)cpFire();
@@ -2648,14 +2570,10 @@ def build_my_stocks(data):
    return;}
   var out='';
   my.forEach(function(nm){
-   var m=P.stocks[nm]||[[],null,null,null,null], c=calc(nm,20);
+   var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,20);
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
      'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
      'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('');
-   // ⚠️ 2026-08-20 — 태그만으로는 "왜 이 구역인지" 알 수 없어 오분류를 못 잡는다.
-   //    근거(m[4])를 태그 바로 밑에 작게 붙인다 — 화면만 보고 검증 가능하게.
-   var zoneWhy=m[4]?'<div style="margin-top:2px;font-size:9.5px;color:#5f6773">'+
-     '↳ 구역 근거 · '+m[4]+'</div>':'';
    var items='', n1=0, n2=0;
    NEWS.forEach(function(n){if(n.t.indexOf(nm)>=0){n1++;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
@@ -2700,7 +2618,7 @@ def build_my_stocks(data):
    }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
     '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+nm+'</div>'+
-    '<div style="margin-top:4px">'+zones+'</div>'+zoneWhy+items+
+    '<div style="margin-top:4px">'+zones+'</div>'+items+
     '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
     'border-left:2.5px solid #e0c060">'+
     '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.7">'+
@@ -2775,14 +2693,11 @@ def build_my_stocks(data):
     탭 = "".join(
         f'<span class="ms-tab" data-n="{n}" onclick="msWin({n})" '
         f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
-        f'cursor:pointer;font-weight:{800 if n==1 else 600};'
-        f'background:{"#2a3446" if n==1 else "#171c25"};'
-        f'color:{"#f0c65a" if n==1 else "#7d848f"};'
+        f'cursor:pointer;font-weight:{800 if n==5 else 600};'
+        f'background:{"#2a3446" if n==5 else "#171c25"};'
+        f'color:{"#f0c65a" if n==5 else "#7d848f"};'
         f'-webkit-tap-highlight-color:transparent">{이름}</span>'
-        # ⚠️ 탭이 4개가 되면서 라벨을 짧게 줄였다.
-        #    320px에서 한 칸이 약 72px인데 "이번 주 (5일)"는 90px이라 넘친다.
-        #    이름은 섹터 성적표(ZONE_WINDOWS)와 같은 말로 맞춘다.
-        for n, 이름 in [(1, "당일"), (5, "이번 주"), (20, "한 달"), (60, "분기")])
+        for n, 이름 in [(5, "이번 주 (5일)"), (20, "한 달 (20일)"), (60, "분기 (60일)")])
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
@@ -2819,10 +2734,7 @@ def build_my_stocks(data):
             '<b style="color:#9aa0aa">%p</b>는 코스피보다 얼마나 더 벌었나입니다. '
             '아래 작은 숫자는 실제 수익률, 그 아래는 그 기간 코스피를 이긴 날의 수입니다.<br>'
             '<b style="color:#8fd0e8">파란 태그</b>가 그 종목이 속한 구역입니다. '
-            '구역은 <b style="color:#9aa0aa">그날 뜬 테마가 아니라 회사의 본업</b>으로 정합니다 — '
-            '테마 전수 사전에서 가장 좁은(전용도 높은) 테마를 따르고, 애매하면 '
-            '최근 20일 동안 <b style="color:#9aa0aa">실제로 같이 움직인 구역</b>을 택합니다. '
-            '태그 밑 작은 글씨가 그 판정 근거입니다.<br>'
+            '한 종목이 두 구역에 걸치면 <b style="color:#9aa0aa">오늘 더 세게 움직인 구역</b>이 앞에 옵니다.<br>'
             '<b style="color:#9aa0aa">내 종목 평균</b>은 모든 종목을 같은 금액씩 샀다고 가정한 값입니다. '
             '실제 보유 비중은 받지 않으므로 참고용입니다.<br>'
             f'📰 뉴스와 📄 공시는 <b style="color:#9aa0aa">오늘</b> 그 종목이 언급된 것만 붙습니다.'
@@ -3431,8 +3343,7 @@ def build_sector_radar():
         # ⚠️ 다가온 섹터(꼴=="in")는 **모두 같은 박자로** 깜빡인다.
         #    같이 반짝여야 "오늘 여기가 달아올랐다"가 한 덩어리로 보인다.
         #    나머지는 시작을 어긋나게 해 조용히 명멸시킨다(요란함 방지).
-        # ⚠️ 위 CSS의 2.7s와 항상 같은 값을 써야 한다 — 다르면 어긋난 박자로 보인다.
-        _dly = "0s" if 꼴 == "in" else f"{(_di * 0.37) % 2.7:.2f}s"
+        _dly = "0s" if 꼴 == "in" else f"{(_di * 0.37) % 3.2:.2f}s"
         _cls = f'class="rdr-dot" style="animation-delay:{_dly}"'
         if 꼴 == "in":
             점 += (f'<circle cx="{nx:.0f}" cy="{ny:.0f}" r="13" fill="{색}" '
@@ -3449,20 +3360,13 @@ def build_sector_radar():
         anc = "middle" if abs(lx - cx) < 20 else ("start" if lx > cx else "end")
         # 라벨이 그림 밖으로 잘리지 않게: 이름을 줄이고 x를 안쪽으로 붙든다.
         #   (긴 이름은 아래 '어제 대비 움직임' 표에서 전체를 볼 수 있다)
-        # ⚠️ 예전엔 5글자에서 잘랐다(2026-08-19 지시로 폐기).
-        #    '2차전지(나트륨이온)'이 '2차전지'로, 'HBM(고대역폭메모리)'가 'HBM(고'로 나와
-        #    **무슨 섹터인지 알 수 없는 라벨**이 됐다. 자르는 대신 두 줄로 나눈다.
-        #    괄호 안 부연과 '대표주' 꼬리표만 떼고(정보량이 없다), 나머지는 다 보여준다.
         짧 = re.sub(r"[\(（].*", "", nm).strip() or nm
         짧 = re.sub(r"\s*대표주$", "", 짧).strip() or 짧
-        짧 = 짧[:RADAR_라벨최대]
-        lx = min(max(lx, -22), 382)
-        _l1, _l2 = _radar_wrap(짧)
-        _줄 = f'<tspan x="{lx:.0f}">{html.escape(_l1)}</tspan>'
-        if _l2:
-            _줄 += f'<tspan x="{lx:.0f}" dy="11.5">{html.escape(_l2)}</tspan>'
-        라벨 += (f'<text x="{lx:.0f}" y="{ly+2:.0f}" text-anchor="{anc}" font-size="10.5" '
-                 f'fill="#c9ced6" font-weight="600">{_줄}</text>')
+        짧 = 짧[:5]
+        lx = min(max(lx, 30), 320)
+        라벨 += (f'<text x="{lx:.0f}" y="{ly+4:.0f}" text-anchor="{anc}" font-size="11" '
+                 f'fill="#c9ced6" font-weight="600">{짧}'
+                 f'<tspan fill="{색}" font-size="10.5"> {표식}</tspan></text>')
         if 변화 > 최대접근[1]:
             최대접근 = (f"{nm} {어:.0f} → {오:.0f}", 변화)
         if -변화 > 최대이탈[1]:
@@ -3535,7 +3439,7 @@ def build_sector_radar():
             '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '오늘 관제탑에 가까워진 섹터</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
-            f'<svg width="404" height="310" viewBox="-27 25 404 310" style="flex:none;max-width:100%">'
+            f'<svg width="350" height="300" viewBox="0 25 350 300" style="flex:none;max-width:100%">'
             f'{링}{축}'
             # 중심(관제탑)은 섹터 점과 절대 헷갈리면 안 된다.
             #   섹터 점이 쓰는 색(금색=제자리 / 초록=접근 / 보라=이탈)과 겹치지 않는
@@ -4610,9 +4514,12 @@ def build_core(핵심편, data, 해석):
     # ⚠️ 내 관심종목 '등록' UI는 심층편으로 내렸다(2026-08-18).
     #    핵심편은 90초 브리핑이라 '입력하는 화면'이 흐름을 끊는다.
     #    등록은 심층편에서 하고, 핵심편은 그 결과(격자·성적표)만 보여준다.
-    격자블록 = (build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
-              + build_sector_scoreboard())
-    변속기블록 = build_flow_gearbox()
+    # ⚠️ '내 종목 구역'(격자)은 핵심편에서 뺐다(2026-08-19 HO 지시).
+    #    심층편에서 자세히 다루므로, 90초 브리핑에서는 흐름을 끊는다.
+    격자블록 = hide("핵심편격자",
+                  build_account_grid(data.get("계좌격자"), data.get("주도섹터"))
+                  + build_sector_scoreboard())
+    변속기블록 = hide("수급변속기", build_flow_gearbox())
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
@@ -4621,17 +4528,26 @@ def build_core(핵심편, data, 해석):
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
             + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
-            + (f'<p class="q90-why">{왜그런가}</p>' if 왜그런가 else '')
-            + f'<div class="q90-3">{삼줄}</div>'
+            # ⚠️ 배치 (2026-08-19 HO 지시)
+            #    ① 3줄 요약은 가린다 — 아래 '딱 N가지'와 역할이 겹친다
+            #    ② 📰 오늘 시장을 움직인 것들(팩트) → 🧭 왜 이렇게(해석) 순서로 붙인다
+            #       팩트 바로 다음에 해석이 와야 "아, 이래서 내렸구나"가 각인된다
+            #    ③ 😐 내 계좌만 왜 이러지(감정)는 그 뒤 — 이해한 다음에 공감이 온다
+            + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
             + 이슈블록
+            + (f'<p class="q90-why">{왜그런가}</p>' if 왜그런가 else '')
+            + 내종목
             + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
             + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
+            # ⚠️ 수급 코너는 **계기판 하나**로 압축했다(2026-08-19).
+            #    타일(외국인/기관/개인 수치)은 맨 위 헤더 막대와 같은 말이고,
+            #    노란 네모 1,2,3은 계기판 배지와 겹친다 → 둘 다 뺐다.
             + core_flow_gauge()
-            + f'<div class="mny-tiles">{타일HTML}</div>'
+            + hide("수급타일", f'<div class="mny-tiles">{타일HTML}</div>')
             + 변속기블록
-            + f'<div class="mny-feat">{특징}</div>' + 왜블록 + '</div>'
+            + hide("수급특징", f'<div class="mny-feat">{특징}</div>') + 왜블록 + '</div>'
             + 격자블록
-            + 내종목 + 뒤집블록 + 딱N블록 + 핵심디버전스
+            + 뒤집블록 + 딱N블록 + 핵심디버전스
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
             + 내일대응
             + '</div>'
@@ -5205,6 +5121,11 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "삼줄요약",           # 2026-08-19 — '딱 N가지'와 역할 중복
+    "수급타일",           # 2026-08-19 — 헤더 수급 막대와 같은 말
+    "수급특징",           # 2026-08-19 — 계기판 배지와 겹침
+    "핵심편격자",         # 2026-08-19 — 내 종목 구역·섹터 성적표는 심층편에서 다룬다
+    "수급변속기",         # 2026-08-19 — 계기판과 역할이 겹친다
     "새테마",               # 2026-08-19 — 어차피 '오늘의 주인공'에 같은 테마가 나온다
     "지수와수급나란히",     # 2026-08-18 — 통합 타임라인과 역할이 겹침
     "어제대비움직임",       # 2026-08-18 — 레이더 그림과 같은 내용을 표로 반복
@@ -6830,7 +6751,7 @@ a{{color:inherit;text-decoration:none}}
        숨 쉬듯 느리게, 투명도만 오간다(크기는 안 건드려 위치가 안 흔들린다).
        섹터마다 시작 시점을 어긋나게 해 한꺼번에 켜지지 않게 한다. */
 @keyframes rdrpulse{{0%,100%{{opacity:1}}50%{{opacity:.42}}}}
-.rdr-dot{{animation:rdrpulse 2.7s ease-in-out infinite}}
+.rdr-dot{{animation:rdrpulse 3.2s ease-in-out infinite}}
 @media (prefers-reduced-motion:reduce){{.rdr-dot{{animation:none}}}}
 /* 매집 레이더 기간 탭 */
 .ac-tabs{{display:flex;gap:.35rem;margin:.7rem 0 .6rem}}
@@ -6854,7 +6775,7 @@ a{{color:inherit;text-decoration:none}}
 .nt-foot b{{color:#9aa0aa}}
 /* 오늘의 성적표 SCORE B */
 .idx-card2.sc2wrap{{display:block}}
-.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:.5rem;align-items:center}}
+.sc2{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);gap:.6rem;align-items:center}}
 .sc2-l{{min-width:0}}
 .sc2-r{{min-width:0}}
 .sc2-tagbox{{margin:.7rem 0 0;padding:.65rem .1rem 0;border-top:1px solid rgba(255,255,255,.07)}}
