@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n15"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.20-n18"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -352,6 +352,19 @@ def theme_label(테마명):
 # ── 📊 오늘의 성적표 — SCORE B (2026-08-18) ────────────────
 #  왼쪽 칸: 지수 → 태그 → 한 줄 설명 (세로로 쌓아 빈 공간을 없앤다)
 #  오른쪽 칸: 수급 가로 막대 (작게 — 주인공은 지수와 설명이다)
+def _pct_signed(v):
+    """등락률에 부호를 붙인다. '2.42' → '+2.42%'
+
+    ⚠️ 예전에는 '상승/하락' 글자가 방향을 말해줬는데 그 글자를 뺐더니
+       부호가 없어 방향을 알 수 없게 됐다(2026-08-20 지적).
+    """
+    try:
+        f = float(str(v).replace(",", "").replace("%", ""))
+    except (TypeError, ValueError):
+        return f"{v}%" if v not in (None, "") else "—"
+    return f"{f:+.2f}%"
+
+
 def _sc_flowbar(수급, W=205, H=23):
     """0선 좌우 발산 막대 3줄. 왼쪽은 이름, 오른쪽은 금액 자리로 비워둔다.
     ⚠️ 비워두지 않으면 막대 끝과 금액 글자가 겹친다."""
@@ -433,7 +446,7 @@ def build_score_card(이름, 지수, 수급):
         <div class="sc2-l">
           <p class="ic-mkt">{이름}</p>
           <p class="ic-num">{지수.get('종가','—')}</p>
-          <p class="{idx_dir_class(지수)}">{지수.get('등락률','—')}%</p>
+          <p class="{idx_dir_class(지수)}">{_pct_signed(지수.get('등락률'))}</p>
         </div>
         <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
       </div>
@@ -500,28 +513,79 @@ def build_gauge(gauge, 오늘한줄평):
 _SECTOR_HIST_CACHE = None
 
 
+
+# ══════════════════════════════════════════════════════
+# 📅 archive 거래일 로더 — archive를 읽는 모든 코너의 단일 창구
+# ══════════════════════════════════════════════════════
+#  ⚠️ 이걸 안 쓰고 archive를 직접 훑으면 **휴장일 데이터가 섞인다.**
+#     워크플로가 토·일·공휴일에도 돌면 직전 거래일과 똑같은 파일이 쌓이는데,
+#     그대로 세면 "20일"이 20거래일이 아니게 되고 연속·평균·승패가 전부 부풀려진다.
+#     (2026-08-18 flow_history, 08-20 섹터 성적표·주인공 배지에서 연속 발견)
+#
+#  거르는 기준 두 가지 — collect_data.prune_flow_history()와 같은 논리다.
+#     ① 토·일   : 날짜만으로 확정 판정
+#     ② 직전 채택일과 **핵심 값이 완전히 동일** : 공휴일·대체공휴일이 여기서 걸린다
+_ARCHIVE_DAYS_CACHE = None
+
+
+def _day_fingerprint(d):
+    """그날 데이터의 지문. 두 파일이 같은 값이면 같은 날로 본다."""
+    g = (d.get("계좌격자") or {}).get("행") or []
+    격자 = tuple(sorted((r.get("테마"), r.get("전체")) for r in g if r.get("테마")))
+    주도 = tuple(s.get("테마명") for s in (d.get("주도섹터") or []))
+    수급 = tuple(sorted((d.get("지수수급") or {}).get("코스피_수급", {}).items()))
+    return (격자, 주도, 수급)
+
+
+def archive_days(days=None):
+    """archive의 **거래일만** 오래된 순으로 [(날짜, data dict)] 반환.
+
+    days를 주면 최근 days거래일만. (파일 개수가 아니라 거래일 개수다)
+    한 번 읽으면 캐시한다 — 한 리포트를 만드는 동안 여러 코너가 재사용한다.
+    """
+    global _ARCHIVE_DAYS_CACHE
+    if _ARCHIVE_DAYS_CACHE is None:
+        out, 직전 = [], None
+        for f in sorted(alist(r"data_\d{8}\.json")):
+            try:
+                with open(apath(f), encoding="utf-8") as fp:
+                    d = json.load(fp)
+            except Exception:
+                continue
+            ymd = str(d.get("날짜") or "")
+            try:
+                _d0 = datetime.strptime(ymd, "%Y%m%d")
+                if _d0.weekday() >= 5:
+                    continue                       # ① 토·일
+                # ①-b 공휴일 — 이 파일에 이미 있는 KRX_HOLIDAYS를 그대로 쓴다.
+                #     지문 비교만으로는 '금→토→일→월(공휴일)' 사슬에서
+                #     중간에 데이터가 보정되면 공휴일이 거래일로 통과한다.
+                #     (2026-08-17 대체공휴일이 실제로 통과했다)
+                _tb = KRX_HOLIDAYS.get(_d0.year)
+                if _tb and ymd in _tb:
+                    continue
+            except Exception:
+                pass
+            fp_ = _day_fingerprint(d)
+            if 직전 is not None and fp_ == 직전:
+                continue                           # ② 직전과 완전 동일 = 휴장일
+            직전 = fp_
+            out.append((ymd, d))
+        _ARCHIVE_DAYS_CACHE = out
+    return _ARCHIVE_DAYS_CACHE[-days:] if days else _ARCHIVE_DAYS_CACHE
+
+
 def _sector_history(days=20):
     """archive/data_*.json에서 최근 days일의 [ (날짜, [테마명 순위대로]) ] 를 읽는다.
     한 번 읽으면 캐시(같은 리포트 빌드 중 여러 섹터가 재사용)."""
     global _SECTOR_HIST_CACHE
     if _SECTOR_HIST_CACHE is not None:
         return _SECTOR_HIST_CACHE
-    hist = []
-    try:
-        import glob
-        files = sorted(glob.glob(os.path.join(ARCHIVE, "data_*.json")))
-        # 루트에도 있을 수 있어 합침(하위호환)
-        files += sorted(glob.glob("data_*.json"))
-        files = sorted(set(files))[-days:]
-        for f in files:
-            try:
-                with open(f, encoding="utf-8") as fp:
-                    주도 = (json.load(fp).get("주도섹터") or [])
-                hist.append([s.get("테마명") for s in 주도])
-            except Exception:
-                continue
-    except Exception:
-        pass
+    # ⚠️ 예전에는 '최근 20개 파일'을 읽었다. 휴장일 파일이 섞이면
+    #    8/14 하루가 4번 세어져 "20일 중 8일"의 분모·분자가 모두 부풀려진다.
+    #    → archive_days()로 **거래일 20일**만 가져온다.
+    hist = [[s.get("테마명") for s in (d.get("주도섹터") or [])]
+            for _ymd, d in archive_days(days)]
     _SECTOR_HIST_CACHE = hist
     return hist
 
@@ -548,7 +612,7 @@ def sector_strength_badge(테마명):
     else:
         급 = "📈 재등장"
     return (f'<span class="sc-str">{급} · '
-            f'{N}일 중 <b>{등장}일</b> 상위 · 평균 <b>{평균:.1f}위</b></span>')
+            f'{N}일 중 <b>{등장}일</b> 주인공 · 평균 <b>{평균:.1f}위</b></span>')
 
 
 def one_sector_card(a):
@@ -1653,7 +1717,7 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None, �
                     f'<div class="ix-bf" style="{side}:50%;width:{w:.1f}%;background:{색}"></div></div>'
                     f'<span class="ix-bv {vcls}">{_flow_amt(v)}<small>{배지}</small></span></div>')
 
-        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">수급 (±3조)</p>'
+        수급블록 = (f'<div class="ix-div"></div><p class="ix-grouplbl">코스피 수급 (±3조)</p>'
                   f'{flow_row("외국인", d["외인"], d["외배지"])}{flow_row("기관", d["기관"], d["기배지"])}'
                   f'<div class="ix-scale"><span>-3조</span><span>0</span><span>+3조</span></div>'
                   ) if (d["외인"] is not None or d["기관"] is not None) else ""
@@ -2248,10 +2312,9 @@ def _sector_scores(days=6):
        '권외'로 처리한다. 전 테마 저장이 시작되면 정확도가 올라간다.
     """
     out = []
-    for f in sorted(alist(r"data_\d{8}\.json"))[-days:]:
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    for _ymd, d in archive_days(days):
         try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
             m = {}
             for s in (d.get("주도섹터") or []):
                 nm, sc = s.get("테마명"), s.get("주도력점수")
@@ -2369,26 +2432,9 @@ def _zone_series():
          ② 직전 채택일과 격자 값이 완전히 동일하면 제외(공휴일)
     """
     구역 = {}
-    _직전 = None
-    for f in sorted(alist(r"data_\d{8}\.json")):
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
-        except Exception:
-            continue
-        날짜 = d.get("날짜")
-        try:
-            if datetime.strptime(str(날짜), "%Y%m%d").weekday() >= 5:
-                continue                      # 토·일
-        except Exception:
-            pass
-        _지문 = tuple(sorted(
-            (r.get("테마"), r.get("전체"))
-            for r in ((d.get("계좌격자") or {}).get("행") or [])
-            if r.get("테마")))
-        if _지문 and _지문 == _직전:
-            continue                          # 직전 거래일과 완전히 동일 = 휴장일
-        _직전 = _지문 or _직전
+    # 📅 자체 가드를 쓰지 않고 공용 로더로 통일했다(2026-08-20).
+    #    같은 필터가 여러 벌 있으면 하나를 고칠 때 다른 데가 빠진다.
+    for 날짜, d in archive_days():
         for r in ((d.get("계좌격자") or {}).get("행") or []):
             v, nm = r.get("전체"), r.get("테마")
             if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
@@ -2446,15 +2492,10 @@ def _mystock_payload():
      "stocks":{종목명:[구역들, 순위, 층, 시장]},
      "ret":{종목명:[일별 등락률...]}}   ← ret는 days와 같은 길이(없는 날 null)
     """
-    파일들 = sorted(alist(r"data_\d{8}\.json"))[-MYSTOCK_DAYS:]
     days, per = [], {}
     meta = {}
-    for f in 파일들:
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
-        except Exception:
-            continue
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    for _ymd, d in archive_days(MYSTOCK_DAYS):
         사전 = (d.get("계좌격자") or {}).get("종목사전") or {}
         if not 사전:
             continue
@@ -2497,11 +2538,44 @@ def build_my_stocks(data):
                 _오늘구역[_nm] = _v
     except Exception:
         _오늘구역 = {}
-    이름배열JS += "window.CP_SECT_TODAY=" + json.dumps(_오늘구역, ensure_ascii=False) + ";" 
+    이름배열JS += "window.CP_SECT_TODAY=" + json.dumps(_오늘구역, ensure_ascii=False) + ";"
+    # 종목 → 오늘 주도 테마명 (구역이 비었을 때 대신 보여준다)
+    _종목테마 = {}
+    try:
+        for _s in (data.get("주도섹터") or []):
+            _tn = _s.get("테마명")
+            for _x in (_s.get("종목") or []):
+                # 키가 '종목명'인 경우와 '명'인 경우가 섞여 있다
+                _n = (_x.get("종목명") or _x.get("명")) if isinstance(_x, dict) else _x
+                if _n and _n not in _종목테마:
+                    _종목테마[_n] = _tn
+    except Exception:
+        _종목테마 = {}
+    이름배열JS += "window.CP_STOCK_THEME=" + json.dumps(_종목테마, ensure_ascii=False) + ";"
+    # 종목 → 오늘 잡힌 레이더 이름 ('왜 움직였나' 판정에 쓴다)
+    _핫 = {}
+    try:
+        for _k, _lab in (("강세레이더", "강세 레이더"), ("매집레이더", "매집 레이더")):
+            _blk = data.get(_k) or {}
+            _all = []
+            for _v in (_blk.get("신규") or {}).values():
+                _all += _v or []
+            _all += (_blk.get("종목") or [])
+            for _t in _all:
+                _n = _t.get("종목명") or _t.get("명")
+                if _n and _n not in _핫:
+                    _핫[_n] = _lab
+    except Exception:
+        _핫 = {}
+    이름배열JS += "window.CP_HOT=" + json.dumps(_핫, ensure_ascii=False) + ";" 
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
-    뉴스 = [{"t": n.get("제목", ""), "u": n.get("링크", "")}
+    # ⚠️ 요약문(본문 앞부분)까지 넘긴다(2026-08-20).
+    #    제목에만 종목명이 있는 기사는 극소수다. 본문에서 언급되는 경우가 훨씬 많아
+    #    제목만 보면 "오늘 뉴스가 없습니다"가 계속 나온다.
+    뉴스 = [{"t": n.get("제목", ""), "u": n.get("링크", ""),
+            "d": (n.get("요약") or "")[:220], "s": n.get("출처", "")}
            for n in (data.get("뉴스원본") or []) if n.get("제목")]
     공시원 = data.get("공시")
     공시목록 = 공시원.get("목록") if isinstance(공시원, dict) else (공시원 or [])
@@ -2604,14 +2678,38 @@ def build_my_stocks(data):
   var out='';
   my.forEach(function(nm){
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,20);
-   var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
-     'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
-     'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('');
+   // ⚠️ 구역이 비면 아무것도 안 나와 "섹터가 왜 안 보이지"가 된다(2026-08-20).
+   //    구역이 없으면 **오늘 주도 테마 중 이 종목이 든 것**을 대신 보여주고,
+   //    그것도 없으면 '구역 미분류'라고 솔직히 적는다.
+   var zlist=(m[0]||[]).slice();
+   if(!zlist.length && window.CP_STOCK_THEME && window.CP_STOCK_THEME[nm])
+     zlist=[window.CP_STOCK_THEME[nm]];
+   var zones=zlist.length
+     ? zlist.map(function(z){return '<span style="display:inline-block;'+
+       'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
+       'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')
+     : '<span style="display:inline-block;font-size:10px;padding:2px 7px;'+
+       'border-radius:99px;background:#1a2029;color:#6f7784">구역 미분류</span>';
    var items='', n1=0, n2=0;
-   NEWS.forEach(function(n){if(n.t.indexOf(nm)>=0){n1++;
+   // ⚠️ 제목 + **본문(요약)** 둘 다에서 종목명을 찾는다(2026-08-20).
+   //    제목 매칭은 우선순위를 높여 위로 올리고, 많으면 상위 4건만 보여준다.
+   var hits=[];
+   NEWS.forEach(function(n){
+    var inT=(n.t||'').indexOf(nm)>=0, inD=((n.d||'').indexOf(nm)>=0);
+    if(inT||inD) hits.push({n:n, w:(inT?2:1)});
+   });
+   hits.sort(function(a,b){return b.w-a.w;});
+   n1=hits.length;
+   hits.slice(0,4).forEach(function(h){
+    var n=h.n;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
-     '<a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
-     'line-height:1.5;text-decoration:none">'+n.t+'</a></div>';}});
+     '<div><a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
+     'line-height:1.5;text-decoration:none">'+n.t+'</a>'+
+     (h.w===1?'<span style="font-size:9.5px;color:#6f7784"> · 본문 언급</span>':'')+
+     '</div></div>';
+   });
+   if(n1>4) items+='<p style="margin:4px 0 0;font-size:10px;color:#6f7784">'+
+     '외 '+(n1-4)+'건 더 있습니다</p>';
    DISC.forEach(function(g){if(g.c===nm){n2++;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
      '<a href="'+g.u+'" target="_blank" style="font-size:11px;color:#e0c060;'+
@@ -2636,6 +2734,32 @@ def build_my_stocks(data):
       '오늘은 이 종목에 붙은 뉴스·공시가 없었습니다.'+
       (zt?'<br>대신 소속 구역을 보면 — '+zt+'였습니다.':'')+'</p>';
    }
+   // ⚠️ 가장 먼저 "왜 움직였나"를 **하나로 단정**한다(2026-08-20 지시).
+   //    재료를 나열만 하면 "그래서 뭐 때문인데?"가 남는다.
+   //    우선순위: 공시 > 제목 뉴스 > 강세/매집 레이더 > 섹터 > 시장
+   var 원인='';
+   (function(){
+    var d0=(c&&c.today!==null&&c.today!==undefined)?c.today:null;
+    var 방향=(d0===null)?'움직':(d0>=0?'오르':'내리');
+    var 화살=(d0===null)?'':(d0>=0?'📈':'📉');
+    var 왜='';
+    if(n2>0) 왜='오늘 나온 <b>공시</b>가 직접적인 이유로 보입니다';
+    else if(hits.length&&hits[0].w===2) 왜='<b>'+hits[0].n.t.slice(0,26)+'</b> 뉴스가 가장 유력합니다';
+    else if(window.CP_HOT&&window.CP_HOT[nm]) 왜='오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 큰손이 붙은 자리입니다';
+    else if(hits.length) 왜='관련 <b>뉴스 본문</b>에 언급됐습니다';
+    else{
+     var zz=(m[0]||[]), bb=null;
+     if(window.CP_SECT_TODAY) zz.forEach(function(z){
+      var v=window.CP_SECT_TODAY[z];
+      if(v===undefined||v===null) return;
+      if(bb===null||Math.abs(v)>Math.abs(bb.v)) bb={z:z,v:v};
+     });
+     if(bb&&Math.abs(bb.v)>=1.5) 왜='개별 재료 없이 <b>'+bb.z+'</b> 구역 흐름('+fmt(bb.v)+'%)을 따라간 것으로 보입니다';
+     else 왜='뚜렷한 개별 재료 없이 <b>시장 흐름</b>을 따라간 것으로 보입니다';
+    }
+    원인='<p style="margin:0 0 6px;font-size:11.5px;color:#e8eaee;line-height:1.6">'+
+      화살+' <b>왜 '+방향+'았나</b> — '+왜+'.</p>';
+   })();
    var 분석='';
    if(c&&!c.short){
     var 승률=c.win/c.tot*100;
@@ -2648,6 +2772,34 @@ def build_my_stocks(data):
     if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
     else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
     else 분석+=' 오늘은 개별 재료가 없었으니, 주가는 대체로 소속 섹터를 따라갔을 가능성이 큽니다.';
+    // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
+    //    당일·5일·20일·60일을 다 계산해 **가장 인상적인 창**을 골라 덧붙인다.
+    //    (같은 방향이면 가장 긴 창, 방향이 엇갈리면 그 엇갈림 자체가 이야기다)
+    var 창=[[1,'오늘'],[5,'5일'],[20,'20일'],[60,'분기']], 결=[];
+    창.forEach(function(w){
+     var cc=calc(nm,w[0]);
+     if(cc&&cc.diff!==null&&cc.diff!==undefined) 결.push({k:w[1],d:cc.diff,n:w[0]});
+    });
+    if(결.length>=2){
+     var 최=결.slice().sort(function(a,b){return Math.abs(b.d)-Math.abs(a.d);})[0];
+     var 짧=결[0], 김=결[결.length-1];
+     if(짧.d!==null&&김.d!==null&&(짧.d>=0)!==(김.d>=0)){
+      분석+=' <b>'+김.k+'로는 '+fmt(김.d)+'%p인데 '+짧.k+'은 '+fmt(짧.d)+'%p</b>로 방향이 갈렸습니다 — 흐름이 바뀌는 자리일 수 있습니다.';
+     }else{
+      분석+=' 기간별로 보면 <b>'+최.k+'이 '+fmt(최.d)+'%p</b>로 가장 두드러집니다.';
+     }
+    }
+    // 소속 구역이 오늘 특별했다면 함께 짚는다
+    if(window.CP_SECT_TODAY){
+     var zz=(m[0]||[]), best=null;
+     zz.forEach(function(z){
+      var v=window.CP_SECT_TODAY[z];
+      if(v===undefined||v===null) return;
+      if(best===null||Math.abs(v)>Math.abs(best.v)) best={z:z,v:v};
+     });
+     if(best&&Math.abs(best.v)>=2)
+      분석+=' 소속 구역 <b>'+best.z+'</b>이 오늘 <b>'+fmt(best.v)+'%</b>로 움직인 점도 함께 보세요.';
+    }
    }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
     '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+nm+'</div>'+
@@ -2655,7 +2807,7 @@ def build_my_stocks(data):
     '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
     'border-left:2.5px solid #e0c060">'+
     '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.7">'+
-    '<b style="color:#e0c060">오늘 분석</b> — '+분석+'</p></div></div>';
+    원인+'<b style="color:#e0c060">오늘 분석</b> — '+분석+'</p></div></div>';
   });
   host.innerHTML=out;
  }
@@ -2730,7 +2882,9 @@ def build_my_stocks(data):
         f'background:{"#2a3446" if n==5 else "#171c25"};'
         f'color:{"#f0c65a" if n==5 else "#7d848f"};'
         f'-webkit-tap-highlight-color:transparent">{이름}</span>'
-        for n, 이름 in [(5, "이번 주 (5일)"), (20, "한 달 (20일)"), (60, "분기 (60일)")])
+        # ⚠️ '당일' 추가(2026-08-20) — 섹터 성적표와 같은 창 구성으로 맞춘다.
+    for n, 이름 in [(1, "당일"), (5, "이번 주 (5일)"),
+                    (20, "한 달 (20일)"), (60, "분기 (60일)")])
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
@@ -3221,10 +3375,10 @@ def build_crowd_compass(_구=None):
     # 잔고 추이 — archive에서 과거 신용잔고를 모아 선으로 그린다.
     #   "지금 21.9조"보다 "3주째 늘고 있다"가 훨씬 중요한 정보다.
     _hist = []
-    for _f in sorted(alist(r"data_\d{8}\.json"))[-40:]:
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    for _ymd, _d in archive_days(40):
         try:
-            with open(apath(_f), encoding="utf-8") as _fp:
-                _v = (json.load(_fp).get("신용잔고") or {}).get("잔고")
+            _v = (_d.get("신용잔고") or {}).get("잔고")
             if isinstance(_v, (int, float)):
                 _hist.append(_v)
         except Exception:
@@ -3459,7 +3613,7 @@ def build_sector_radar():
             '<span><svg width="26" height="10" viewBox="0 0 26 10" style="display:inline-block;'
             'vertical-align:-1px"><line x1="0" y1="5" x2="18" y2="5" stroke="#8b93a0" '
             'stroke-width="1.3" stroke-dasharray="3 3"/><path d="M26 5 L18 1.6 L18 8.4 Z" '
-            'fill="#8b93a0"/></svg> 어제→오늘 이동</span>'
+            'fill="#8b93a0"/></svg> 어제에서 오늘로 이동</span>'
             '</div>')
     # ⚠️ '이탈' 칸은 뺐다(2026-08-18). 이 코너의 질문은
     #    "오늘 어디가 달아올랐나" 하나다. 이탈까지 같이 두면 초점이 흐려진다.
@@ -3470,7 +3624,7 @@ def build_sector_radar():
             'padding:12px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">뜨는 현장</p>'
             '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '오늘 관제탑에 가까워진 섹터</p>'
+            '오늘 관제탑에 가까워진 주인공</p>'
             '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
             f'<svg width="350" height="300" viewBox="0 25 350 300" style="flex:none;max-width:100%">'
             f'{링}{축}'
@@ -3521,13 +3675,8 @@ def build_sector_radar():
 def _tier_series():
     """archive에서 {섹터: {날짜: {대형·중형·소형 등락률}}} 을 만든다."""
     out = {}
-    for f in sorted(alist(r"data_\d{8}\.json")):
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
-        except Exception:
-            continue
-        날짜 = d.get("날짜")
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    for 날짜, d in archive_days():
         for r in ((d.get("계좌격자") or {}).get("행") or []):
             nm, 칸 = r.get("테마"), (r.get("칸") or {})
             if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
@@ -3853,19 +4002,15 @@ CAP_KINDS = [("강세", "강세레이더", "#ff6b4a"), ("매집", "매집레이�
 
 def _cap_curves(일수, 시장):
     """{종류: {경과: 평균등락}} 과 지수 벤치마크 {경과: 평균등락}."""
-    파일들 = sorted(alist(r"data_\d{8}\.json"))[-일수:]
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    파일들 = archive_days(일수)
     종가 = _index_close_map()
     날짜들 = sorted(종가)
     _idx = 1 if 시장 == "코스닥" else 0
     곡선 = {k: {} for k, _, _ in CAP_KINDS}
     벤치 = {}
     쌍 = {k: {} for k, _, _ in CAP_KINDS}
-    for f in 파일들:
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                d = json.load(fp)
-        except Exception:
-            continue
+    for _ymd, d in 파일들:
         for 라벨, 키, _c in CAP_KINDS:
             for t in ((d.get(키) or {}).get("추적") or []):
                 g, r = t.get("경과"), t.get("이후등락")
@@ -4198,7 +4343,8 @@ def build_capture_path(개월=1, 시장=None, 종류="강세"):
     ⚠️ 성과 표시가 아니라 **지표 성능 공시**다. 최저 사례도 반드시 함께 낸다.
     """
     일수 = 22 if 개월 == 1 else 66
-    파일들 = sorted(alist(r"data_\d{8}\.json"))[-일수:]
+    # 📅 거래일만 — archive_days()가 휴장일 중복을 걸러준다
+    파일들 = archive_days(일수)
     if len(파일들) < 3:
         return ""
     # ⚠️ 3개월판은 이력이 충분할 때만 낸다.
@@ -4208,14 +4354,9 @@ def build_capture_path(개월=1, 시장=None, 종류="강세"):
     if 개월 == 3 and len(파일들) < 33:
         return ""
     쌍 = {}          # (종목,포착일) → (경과, 이후등락) 최신값
-    for f in 파일들:
-        try:
-            with open(apath(f), encoding="utf-8") as fp:
-                _d = json.load(fp)
-                _키 = "강세레이더" if 종류 == "강세" else "매집레이더"
-                tr = ((_d.get(_키) or {}).get("추적")) or []
-        except Exception:
-            continue
+    for _ymd, _d in 파일들:
+        _키 = "강세레이더" if 종류 == "강세" else "매집레이더"
+        tr = ((_d.get(_키) or {}).get("추적")) or []
         for t in tr:
             g, r = t.get("경과"), t.get("이후등락")
             if not (isinstance(g, int) and isinstance(r, (int, float))):
@@ -6857,6 +6998,17 @@ a{{color:inherit;text-decoration:none}}
 /* 헤더 수급 배지 — 각 줄은 반드시 한 줄로(줄바꿈 금지) */
 .ix-bv small .bdg1,.ix-bv small .bdg2{{display:block;white-space:nowrap;line-height:1.35}}
 .ix-bv small .bdg2{{color:#7d848f;font-size:9px}}
+/* ── 기간 탭 공통 (오늘·5일·20일·60일) ──
+   ⚠️ 코너마다 탭 모양이 제각각이면 같은 기능인 줄 모른다(2026-08-20 지시).
+      섹터 성적표·크기별·관심종목·수급 타임라인·매집 레이더가 전부 같은 모양을 쓴다. */
+.sb-tab,.zt-tab,.ms-tab,.fs-ptab,.ac-tab{{
+  flex:1;text-align:center;font-size:11.5px;font-weight:800;padding:.42rem .2rem;
+  border-radius:8px;background:#0d1118;border:1px solid #1e2531;color:#7d848f;
+  cursor:pointer;letter-spacing:-.01em;white-space:nowrap}}
+.sb-tab.on,.zt-tab.on,.ms-tab.on,.fs-ptab.on,.ac-tab.on,
+.sb-tab.active,.zt-tab.active,.ms-tab.active{{
+  background:#1b2432;border-color:#3a465c;color:#fff}}
+.ac-tab.off{{opacity:.4;cursor:default}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
 .q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
 .q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
@@ -7151,10 +7303,10 @@ a{{color:inherit;text-decoration:none}}
 
   {hide("새테마", build_new_theme(data.get('계좌격자')))}
 
-  <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 섹터</p>
+  <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 주인공</p>
   {hide("관제레이더", build_sector_radar())}
 
-  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 — 등록하고 바로 확인</p>
+  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 — 등록하고 추적하기</p>
   {build_my_stocks(data)}
   {build_stock_brief()}
 
@@ -7174,15 +7326,17 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
   {build_return_sector()}
 
-  <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
-  {build_insight(프로의시선)}
-  {build_divergence_block(data, 해석)}
-
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
   <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
   {build_crowd_compass(data.get('신용잔고'))}
+
+  <!-- ⚠️ 프로의 시선·판단은 수급·심리를 다 본 **뒤에** 온다(2026-08-20 지시).
+       근거(수급·나침반)를 먼저 깔고 그 위에서 판단을 말해야 설득이 된다. -->
+  <p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>
+  {build_insight(프로의시선)}
+  {build_divergence_block(data, 해석)}
 
   <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불 붙은 곳</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
