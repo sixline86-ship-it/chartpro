@@ -1,5 +1,5 @@
 # ============================================================
-# .github/workflows/daily.yml   (v5 — theme/upjong 인덱스 캐시 커밋 추가)
+# .github/workflows/daily.yml   (v4 — 발행 시각 앞당김 + 지연 대비 재시도)
 # 차트프로 관제탑 — 매일 자동 발행 시간표
 # ------------------------------------------------------------
 #   ① collect_data.py    숫자 수집 (DART·네이버·pykrx)
@@ -14,17 +14,11 @@
 #    정시가 아니라 **1~3시간 늦게** 깨어난 것이다.
 #    (특히 UTC 정각·30분은 전 세계 작업이 몰리는 혼잡 시간대)
 #
-# 🟢 v4의 대응
+# 🟢 이번 v4의 대응
 #    1) 시작 시각을 19:30 → 18:20으로 앞당겨 지연분을 흡수한다
 #    2) 혼잡한 정각·30분을 피해 :20 / :45 / :15 같은 어중간한 분에 건다
 #    3) 같은 날 4번 시도하고, 한 번 성공하면 나머지는 스스로 건너뛴다
 #       → 언제 깨어나든 "그날 가장 이른 시점"에 한 번만 발행된다
-#
-# 🟢 v5의 대응 (2026-08-19)
-#    collect_data.py가 theme_index.json / upjong_index.json (섹터 전수 사전,
-#    7일 캐시)과 sector_pin.json(수동 보정)을 쓰게 됐는데, git add 목록에
-#    빠져 있어 **매 실행마다 캐시가 커밋되지 않고 네이버 테마 270개를
-#    처음부터 다시 긁고 있었다.** 목록에 추가한다.
 # ============================================================
 name: 관제탑 일일 발행
 
@@ -224,11 +218,7 @@ jobs:
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
-          # ⚠️ v5 — theme_index.json / upjong_index.json (섹터 전수 사전 캐시,
-          #    7일 유효) 과 sector_pin.json(수동 보정)이 빠져 있었다.
-          #    빠지면 캐시가 저장 안 돼 매일 네이버 테마 270개를 처음부터 다시 긁는다.
-          git add -A archive index.html report_*.html flow_history.json market_history.json \
-                    theme_index.json upjong_index.json sector_pin.json thumb/*.png || true
+          git add -A archive index.html report_*.html flow_history.json market_history.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git pull --rebase --autostash || true
           git push
