@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n18"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.20-n19"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1058,6 +1058,8 @@ def build_accumulation(매집, 설정=None):
     스캔 = cfg.get("스캔범위") or {}
     조건 = dev_note(
         f"스캔 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 · "
+        f"<b>전일 종가 대비 코스피 4%↑ / 코스닥 5%↑</b> · "
+        f"ETF·ETN·스팩·우선주 제외 · "
         f"관찰 {cfg.get('기간','?')}거래일 │ "
         f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
         f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑<br>"
@@ -1122,8 +1124,8 @@ def build_accumulation(매집, 설정=None):
         🤝쌍끌이 = 둘 다 {매집.get("중기쌍끌이",12)}일↑ · 💼단독 = 한쪽 {매집.get("중기단독",14)}일↑ ·
         <b>⭐ = 5일 랭킹에도 동시 등재</b>(가장 강한 신호)</p>
       <div class="ac-two">
-        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {중기간}일</p>{중기랭킹("코스피")}</div>
-        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일</p>{중기랭킹("코스닥")}</div>
+        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {중기간}일 매집</p>{중기랭킹("코스피")}</div>
+        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일 매집</p>{중기랭킹("코스닥")}</div>
       </div>'''
 
     보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
@@ -1148,12 +1150,12 @@ def build_accumulation(매집, 설정=None):
         🤝쌍끌이 = 둘 다 {쌍최소}일↑ · 💼단독 = 한쪽 {단최소}일↑</p>
       <div class="ac-two">
         <div class="ac-col">
-          <p class="ac-col-t">📊 코스피 · 시총 대비</p>
+          <p class="ac-col-t">📊 코스피 · {기간}일 매집</p>
           <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
           {코스피행}
         </div>
         <div class="ac-col">
-          <p class="ac-col-t">📊 코스닥 · 시총 대비</p>
+          <p class="ac-col-t">📊 코스닥 · {기간}일 매집</p>
           <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
           {코스닥행}
         </div>
@@ -2321,7 +2323,11 @@ def _sector_scores(days=6):
                 if nm and isinstance(sc, (int, float)):
                     m[nm] = float(sc)
             if m:
-                out.append((d.get("날짜", f[5:13]), m))
+                # ⚠️ 예전 코드의 f[5:13](파일명 자르기)이 남아 있었다.
+                #    archive_days로 바꾸면서 f가 사라져 **매번 NameError → continue**로
+                #    통째로 버려졌고, 순위 섹터맵·돌아올 섹터·관제 레이더가 전부
+                #    빈 화면이 됐다(2026-08-20). try/except가 오류를 삼켜 안 보였다.
+                out.append((d.get("날짜") or _ymd, m))
         except Exception:
             continue
     return out
@@ -2626,7 +2632,7 @@ def build_my_stocks(data):
   my.forEach(function(nm){
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,curW);
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
-     'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
+     'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
      'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')||
      '<span style="font-size:10px;color:#6f7784">구역 미분류</span>';
    var right='';
@@ -2686,7 +2692,7 @@ def build_my_stocks(data):
      zlist=[window.CP_STOCK_THEME[nm]];
    var zones=zlist.length
      ? zlist.map(function(z){return '<span style="display:inline-block;'+
-       'font-size:10px;padding:2px 7px;margin-right:4px;border-radius:99px;'+
+       'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
        'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')
      : '<span style="display:inline-block;font-size:10px;padding:2px 7px;'+
        'border-radius:99px;background:#1a2029;color:#6f7784">구역 미분류</span>';
@@ -2740,7 +2746,7 @@ def build_my_stocks(data):
    var 원인='';
    (function(){
     var d0=(c&&c.today!==null&&c.today!==undefined)?c.today:null;
-    var 방향=(d0===null)?'움직':(d0>=0?'오르':'내리');
+    var 방향=(d0===null)?'움직였나?':(d0>=0?'올랐나?':'내렸나?');
     var 화살=(d0===null)?'':(d0>=0?'📈':'📉');
     var 왜='';
     if(n2>0) 왜='오늘 나온 <b>공시</b>가 직접적인 이유로 보입니다';
@@ -2758,7 +2764,7 @@ def build_my_stocks(data):
      else 왜='뚜렷한 개별 재료 없이 <b>시장 흐름</b>을 따라간 것으로 보입니다';
     }
     원인='<p style="margin:0 0 6px;font-size:11.5px;color:#e8eaee;line-height:1.6">'+
-      화살+' <b>왜 '+방향+'았나</b> — '+왜+'.</p>';
+      화살+' <b>왜 '+방향+'</b> — '+왜+'.</p>';
    })();
    var 분석='';
    if(c&&!c.short){
@@ -2883,8 +2889,9 @@ def build_my_stocks(data):
         f'color:{"#f0c65a" if n==5 else "#7d848f"};'
         f'-webkit-tap-highlight-color:transparent">{이름}</span>'
         # ⚠️ '당일' 추가(2026-08-20) — 섹터 성적표와 같은 창 구성으로 맞춘다.
-    for n, 이름 in [(1, "당일"), (5, "이번 주 (5일)"),
-                    (20, "한 달 (20일)"), (60, "분기 (60일)")])
+    # ⚠️ 다른 코너(섹터 성적표·크기별·수급 타임라인)와 **글자까지 똑같이** 맞춘다.
+    #    "이번 주"와 "5일"이 섞이면 같은 기능인 줄 모른다(2026-08-20 지시).
+    for n, 이름 in [(1, "당일"), (5, "5일"), (20, "20일"), (60, "60일")])
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
@@ -5678,6 +5685,40 @@ def _flow_comment():
     return f'<p class="mny-cmt">{" ".join(조각)}</p>'
 
 
+def _flow_spark3():
+    """실탄 3일 추이 미니 그래프 — 계기판 오른쪽 빈 공간에.
+
+    ⚠️ 계기판은 '오늘 하루'만 말한다. 어제·그제와 비교가 없으면
+       "0.7배"가 늘 그런 건지 오늘만 그런 건지 알 수 없다.
+       막대 3개면 충분하다 — 크게 그리면 계기판과 주인공을 다툰다.
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None][-3:]
+    except Exception:
+        return ""
+    if len(h) < 2:
+        return ""
+    vals = [r["실탄"] for r in h]
+    날 = [f'{r["날짜"][4:6]}/{r["날짜"][6:]}' for r in h]
+    W, H = 92, 54
+    mx = max(abs(v) for v in vals) or 1
+    z = 30
+    bw = 18
+    g = [f'<line x1="4" y1="{z}" x2="{W-4}" y2="{z}" stroke="#fff" stroke-opacity=".16"/>']
+    for i, v in enumerate(vals):
+        x = 8 + i * 28
+        y = z - (v / mx) * 22
+        c = FS_BUY if v >= 0 else FS_SELL
+        g.append(f'<rect x="{x:.0f}" y="{min(z,y):.1f}" width="{bw}" '
+                 f'height="{max(2,abs(y-z)):.1f}" rx="2.5" fill="{c}" '
+                 f'opacity="{1 if i==len(vals)-1 else .48}"/>')
+        g.append(f'<text x="{x+bw/2:.0f}" y="{H-3}" font-size="6.5" fill="#5b6472" '
+                 f'text-anchor="middle" font-weight="700">{날[i]}</text>')
+    return (f'<div class="fg-spark"><p class="fg-spark-t">최근 {len(vals)}일 실탄</p>'
+            f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg></div>')
+
+
 def core_flow_gauge():
     """핵심편 수급 머리 — 심층편과 **같은 계기**를 작게 얹는다.
 
@@ -5700,7 +5741,11 @@ def core_flow_gauge():
             f'<p class="core-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
             f'<p class="core-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
             f'<p class="core-g-k" style="border-color:{c}55;color:{c}">{ico} {key}</p>'
-            f'</div></div>')
+            f'</div>{_flow_spark3()}</div>'
+            # ⚠️ '실탄'은 우리가 만든 말이라 처음 보면 모른다. 계기판 밑에 한 줄로 설명한다.
+            f'<p class="fg-def">💡 <b>실탄</b>이란 — 외국인과 기관이 오늘 코스피에서 '
+            f'<b>실제로 주식을 사고판 돈의 합계</b>입니다. 개인은 이 둘의 거울(반대편)이라 '
+            f'더하면 정보가 지워져 빼고, 선물·비차익은 단위가 달라 합치지 않습니다.</p>')
 
 
 def build_flow_timeline(이력):
@@ -6660,7 +6705,8 @@ a{{color:inherit;text-decoration:none}}
 
 .q90-sub{{font-size:12px;color:#9aa0a8}}
 
-.q90-def{{font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
+/* ⚠️ 위 문장들과 붙어 보여 답답했다(2026-08-20). 위 여백을 준다. */
+.q90-def{{margin-top:1.15rem;font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
 .ix-head{{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}}
 .ix-head .up{{color:#ff6b4a}} .ix-head .down{{color:#5b9bff}} .ix-head .yl{{color:#e0c060}}
 .ix-mood{{display:flex;align-items:center;gap:12px;margin-bottom:14px}}
@@ -7009,6 +7055,14 @@ a{{color:inherit;text-decoration:none}}
 .sb-tab.active,.zt-tab.active,.ms-tab.active{{
   background:#1b2432;border-color:#3a465c;color:#fff}}
 .ac-tab.off{{opacity:.4;cursor:default}}
+/* 계기판 — 3일 추이 + 실탄 설명 */
+.core-g{{grid-template-columns:auto minmax(0,1fr) auto}}
+.fg-spark{{text-align:center;flex:0 0 auto}}
+.fg-spark svg{{width:92px}}
+.fg-spark-t{{font-size:8.5px;color:#7d848f;font-weight:700;margin:0 0 2px}}
+.fg-def{{font-size:10.5px;color:#8b93a0;line-height:1.7;margin:.55rem 0 0;padding-top:.5rem;border-top:1px solid rgba(255,255,255,.08)}}
+.fg-def b{{color:#c9d0d9}}
+@media (max-width:359px){{.core-g{{grid-template-columns:auto minmax(0,1fr)}}.fg-spark{{display:none}}}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
 .q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
 .q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
@@ -7311,10 +7365,10 @@ a{{color:inherit;text-decoration:none}}
   {build_stock_brief()}
 
 
-  <p class="sec-label"><small>내 자리</small>📊 내 종목 구역 다시 보기</p>
+  <p class="sec-label"><small>내 자리</small>📊 섹터 구역</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
 
-  <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표 다시 보기</p>
+  <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>
   {build_sector_scoreboard()}
 
   <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 대형이 끌었나</p>
