@@ -16,12 +16,11 @@ import re
 import json
 import os
 import io
-import time
 import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-o1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.19-n13"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -469,7 +468,7 @@ def compute_gauge(지수수급, 확산도_시장):
 #      네이버 페이지 구조는 종종 바뀐다. 첫 실행에서 0건이 나오면
 #      diagnostic 출력을 보고 셀렉터를 조정해야 한다.
 # ============================================================
-def _news_naver():
+def collect_news():
     url = "https://finance.naver.com/news/news_list.naver"
     # section_id=101(경제) / section_id2=258(증권) — "많이 본 뉴스"
     params = {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}
@@ -514,139 +513,7 @@ def _news_naver():
     else:
         print("  샘플:", 결과[0]["제목"][:40])
 
-    return [dict(x, 출처="네이버") for x in 결과[:30]]
-
-
-# ── 📰 뉴스 소스 확장 (v-o1) ────────────────────────────────
-#  ⚠️ 왜 늘렸나: 네이버 '많이 본 뉴스'는 조회수 순이라 연예·사건 기사가 섞이고,
-#     장중 종목 재료가 늦게 뜬다. 증권 전문 매체를 나란히 붙여
-#     **같은 사건을 두 곳이 다 다뤘는지**까지 볼 수 있게 한다.
-#  ⚠️ 한 곳이 죽어도 나머지로 리포트가 나가야 한다. 각 소스는 독립적으로 감싼다.
-#     0건이면 조용히 넘어가되 로그에는 반드시 남긴다(구조 변경을 눈치채야 하므로).
-
-_뉴스꼬리 = re.compile(r"\s*\d{4}-\d{2}-\d{2}[\s\d:]*$")
-
-
-def _news_clean(t):
-    """목록에 붙어 오는 발행시각 꼬리를 떼고 공백을 정리한다."""
-    t = _뉴스꼬리.sub("", (t or "").strip())
-    return re.sub(r"\s+", " ", t).strip()
-
-
-def _news_wowtv(최대=25):
-    """한국경제TV(wowtv) 증권 뉴스."""
-    url = "https://www.wowtv.co.kr/NewsCenter/News/NewsList"
-    결과, 본 = [], set()
-    try:
-        res = requests.get(url, headers=HEADERS,
-                           params={"subMenu": "stock", "menuSeq": 460}, timeout=12)
-        res.encoding = "utf-8"
-        soup = BeautifulSoup(res.text, "html.parser")
-        for a in soup.select("a[href*='/NewsCenter/News/Read']"):
-            제목 = _news_clean(a.get_text(" ", strip=True))
-            href = a.get("href", "")
-            if len(제목) < 8 or 제목 in 본:
-                continue
-            본.add(제목)
-            링크 = href if href.startswith("http") else ("https://www.wowtv.co.kr" + href)
-            결과.append({"제목": 제목, "링크": 링크, "출처": "한국경제TV"})
-            if len(결과) >= 최대:
-                break
-    except Exception as e:
-        print(f"  ⚠️ 한국경제TV 뉴스 실패: {type(e).__name__}")
-    print(f"  📰 한국경제TV {len(결과)}건")
-    return 결과
-
-
-def _news_einfomax(최대=25):
-    """연합인포맥스 — 증권 섹션.
-
-    ⚠️ 목록 페이지가 막히는 경우가 있어 RSS를 먼저 시도하고,
-       실패하면 목록 HTML로 넘어간다. 둘 다 실패해도 리포트는 나간다.
-    """
-    결과, 본 = [], set()
-    베이스 = "https://news.einfomax.co.kr"
-
-    def 담기(제목, href):
-        제목 = _news_clean(제목)
-        if len(제목) < 8 or 제목 in 본 or not href:
-            return
-        본.add(제목)
-        링크 = href if href.startswith("http") else (베이스 + href)
-        결과.append({"제목": 제목, "링크": 링크, "출처": "연합인포맥스"})
-
-    # ① RSS 먼저 — 구조가 단순해 잘 안 깨진다
-    for rss in ("/rss/S1N2.xml", "/rss/allArticle.xml"):
-        if 결과:
-            break
-        try:
-            r = requests.get(베이스 + rss, headers=HEADERS, timeout=12)
-            if r.status_code != 200:
-                continue
-            r.encoding = r.apparent_encoding or "utf-8"
-            soup = BeautifulSoup(r.text, "html.parser")
-            for it in soup.find_all("item"):
-                t = it.find("title")
-                l = it.find("link")
-                담기(t.get_text(strip=True) if t else "",
-                    (l.get_text(strip=True) if l else ""))
-                if len(결과) >= 최대:
-                    break
-        except Exception as e:
-            print(f"  ⚠️ 연합인포맥스 RSS({rss}) 실패: {type(e).__name__}")
-
-    # ② 목록 HTML
-    if not 결과:
-        try:
-            r = requests.get(베이스 + "/news/articleList.html", headers=HEADERS,
-                             params={"sc_section_code": "S1N2", "view_type": "sm"},
-                             timeout=12)
-            if r.status_code == 200:
-                r.encoding = r.apparent_encoding or "utf-8"
-                soup = BeautifulSoup(r.text, "html.parser")
-                for a in soup.select("a[href*='articleView.html']"):
-                    담기(a.get("title") or a.get_text(" ", strip=True), a.get("href", ""))
-                    if len(결과) >= 최대:
-                        break
-            else:
-                print(f"  ⚠️ 연합인포맥스 목록 HTTP {r.status_code}")
-        except Exception as e:
-            print(f"  ⚠️ 연합인포맥스 목록 실패: {type(e).__name__}")
-
-    print(f"  📰 연합인포맥스 {len(결과)}건")
-    return 결과
-
-
-def collect_news():
-    """세 소스를 합친다 — 네이버 · 한국경제TV · 연합인포맥스.
-
-    ⚠️ 섞는 순서가 곧 우선순위다. 앞의 것이 중복 제목을 선점한다.
-       증권 전문 매체를 앞에 두어 종목 재료가 먼저 오게 한다.
-    """
-    묶음 = []
-    for fn in (_news_wowtv, _news_einfomax, _news_naver):
-        try:
-            묶음.append(fn() or [])
-        except Exception as e:
-            print(f"  ⚠️ 뉴스 소스 실패({fn.__name__}): {type(e).__name__}")
-            묶음.append([])
-
-    합, 본 = [], set()
-    #  ⚠️ 한 매체가 목록을 통째로 차지하지 않게 **번갈아** 담는다.
-    #     그냥 이어 붙이면 앞 매체 25건이 다 들어가고 뒤는 잘린다.
-    for i in range(max((len(x) for x in 묶음), default=0)):
-        for 줄 in 묶음:
-            if i >= len(줄):
-                continue
-            핵 = re.sub(r"[^가-힣A-Za-z0-9]", "", 줄[i]["제목"])[:24]
-            if not 핵 or 핵 in 본:
-                continue
-            본.add(핵)
-            합.append(줄[i])
-
-    print(f"✅ 뉴스 원본 {len(합)}건 "
-          f"(한국경제TV {len(묶음[0])} · 연합인포맥스 {len(묶음[1])} · 네이버 {len(묶음[2])})")
-    return 합[:45]
+    return 결과[:30]  # TOP5만 쓰지만, 리포트와 안 겹치는 걸 고를 수 있게 후보는 넉넉히
 
 
 # ============================================================
@@ -739,45 +606,6 @@ def prune_flow_history(이력):
         print(f"   🧹 휴장일 정리: 주말 {버린주말}일 · 직전과 동일 {버린중복}일 제거 "
               f"→ 거래일 {len(나온것)}일치")
     return 나온것
-
-
-_MH_KEYS = ("코스피", "코스닥", "실탄", "외국인_코스피", "기관_코스피", "비차익")
-
-
-def prune_market_history(일별):
-    """market_history.json에서 휴장일에 잘못 들어간 줄을 걷어낸다.
-
-    ⚠️ 2026-08-19 발견 — flow_history에만 걸려 있던 방어가
-       **영구 누적 파일에는 빠져 있었다.** 실측 결과 23줄 중 4줄이 가짜였다.
-         7/25(토) = 7/24 복사 · 8/15(토)·8/16(일)·8/17(대체공휴일) = 8/14 복사
-       이 파일의 코스피등락이 '내 종목 초과수익'과 '섹터 성적표'의
-       벤치마크라서, 8/14 하루가 **네 번 반영**되고 승/패도 1일이 4승으로 셌다.
-
-    기준은 prune_flow_history와 같다 — 주말은 날짜로, 공휴일은 '값이 안 바뀜'으로.
-    ⚠️ 지우는 게 아니라 걸러 담는다. 원본 줄의 다른 필드는 손대지 않는다.
-    """
-    if not 일별:
-        return 일별
-    줄 = sorted([x for x in 일별 if x.get("날짜")], key=lambda x: x["날짜"])
-    남김, 버린주말, 버린중복 = [], 0, 0
-    for row in 줄:
-        try:
-            주말 = datetime.strptime(row["날짜"], "%Y-%m-%d").weekday() >= 5
-        except Exception:
-            주말 = False
-        if 주말:
-            버린주말 += 1
-            continue
-        앞 = 남김[-1] if 남김 else None
-        if 앞 and not all(row.get(k) is None for k in _MH_KEYS) \
-                and all(row.get(k) == 앞.get(k) for k in _MH_KEYS):
-            버린중복 += 1
-            continue
-        남김.append(row)
-    if 버린주말 or 버린중복:
-        print(f"   🧹 market_history 정리: 주말 {버린주말}일 · 직전과 동일 {버린중복}일 "
-              f"제거 → 거래일 {len(남김)}일치")
-    return 남김
 
 
 def backfill_flow_history(이력):
@@ -1037,9 +865,6 @@ def update_market_history(지수수급, 파생, 게이지, 등락수):
     본체["일별"] = [x for x in 본체["일별"] if x.get("날짜") != 오늘키]
     본체["일별"].append(행)
     본체["일별"].sort(key=lambda x: x.get("날짜", ""))
-    #  ⚠️ 영구 누적 파일이라고 해서 '가짜 줄까지' 영구 보관할 이유는 없다.
-    #     휴장일 복사본은 데이터가 아니라 잡음이다. 매 실행마다 걸러 담는다.
-    본체["일별"] = prune_market_history(본체["일별"])
     # ⚠️ 자르지 않는다 — 영구 보관이 이 파일의 존재 이유
 
     # ── 최초 1회 백필: 과거 data_*.json에서 복원 가능한 필드만 ──
@@ -2369,16 +2194,12 @@ def collect_marketcap_universe(pages=GRID_시총페이지):
     return 유니버스
 
 
-def _grid_theme_members(번호, 타입="theme"):
-    """네이버 그룹(테마·업종) 상세에서 구성 종목명만 뽑는다.
-
-    ⚠️ 타입 인자를 붙인 이유: 업종 페이지도 주소·표 구조가 같다.
-       사본을 하나 더 두면 한쪽만 고쳐 어긋나는 사고가 난다.
-    """
+def _grid_theme_members(번호):
+    """네이버 테마 상세에서 구성 종목명만 뽑는다."""
     이름들 = []
     try:
         dres = requests.get("https://finance.naver.com/sise/sise_group_detail.naver",
-                            headers=HEADERS, params={"type": 타입, "no": 번호}, timeout=12)
+                            headers=HEADERS, params={"type": "theme", "no": 번호}, timeout=12)
         dres.encoding = "euc-kr"
         soup = BeautifulSoup(dres.text, "html.parser")
         for a in soup.select("a[href*='code=']"):
@@ -2386,368 +2207,8 @@ def _grid_theme_members(번호, 타입="theme"):
             if nm and not _grid_is_excluded(nm):
                 이름들.append(nm)
     except Exception as e:
-        print(f"  ⚠️ {타입} 상세 {번호} 실패: {type(e).__name__}")
+        print(f"  ⚠️ 테마 상세 {번호} 실패: {type(e).__name__}")
     return list(dict.fromkeys(이름들))
-
-
-
-# ============================================================
-# 🧭 종목 → 섹터 **영구 사전**   (v-o1 신규 · 이번 개편의 핵심)
-# ------------------------------------------------------------
-# ⚠️ 무엇이 잘못돼 있었나 (2026-08-19 실측으로 확인)
-#
-#   예전 격자는 슬롯 멤버를 **"오늘 등락률 상위 테마 중 2개"**에서만 뽑았다.
-#   그래서 종목의 소속이 **날마다 통째로 바뀌었다.**
-#     · '2차전지·소재' 슬롯이 그날 쓴 테마 = 2차전지(생산) · 2차전지(나트륨이온)
-#       → 양극재 회사인 **엘앤에프가 '전기차' 테마에만 걸려 '자동차·부품'** 이 됐다.
-#     · 태양광 테마가 그날 상위에 없어 **한화솔루션·OCI홀딩스는 소속 없음**.
-#     · **방산 대표주 한화에어로스페이스조차 미분류**. '기타'가 2,977종목.
-#
-#   이건 「신규 테마」 칸에서 잡았던 바로 그 병(내용물이 매일 바뀜)이
-#   **15개 고정 슬롯 전체에서** 벌어지고 있었다는 뜻이다.
-#   섹터 성적표·순위 섹터맵·돌아올 섹터의 누적 통계가 전부 이 위에 서 있었다.
-#
-# ✅ 어떻게 바꿨나 — 주소는 고정, 사건만 매일 바뀐다
-#   ① 네이버 테마 **전수**(약 270개)를 훑어 종목→테마 역인덱스를 만든다.
-#      그날 떴는지와 무관하므로 소속이 흔들리지 않는다. 캐시 7일.
-#   ② 한 종목이 여러 슬롯에 걸리면 **전용도**로 고른다.
-#      구성 종목이 적은 테마일수록 그 회사의 정체성에 가깝다.
-#      ('2차전지(소재/부품)' 40종목 vs '전기차' 130종목 → 앞이 이긴다)
-#   ③ 그래도 근소하면 **동행 상관**(최근 20일 등락률)으로 가른다.
-#      "요즘 어느 테마와 같이 움직이나"를 뉴스가 아니라 **가격**으로 판정한다.
-#   ④ 테마에 하나도 안 걸리면 **업종**으로 폴백한다('기타' 대량 발생 차단).
-#   ⑤ 그래도 애매한 소수는 SECTOR_PIN에 손으로 못 박는다.
-#
-# ⚠️ 뉴스로 매일 재분류하지 않는 이유
-#   뉴스는 "오늘 왜 움직였나"는 알려주지만 "이 회사가 무슨 회사인가"는 못 알려준다.
-#   엘앤에프는 뉴스가 없는 날에도 양극재 회사다.
-#   소속을 매일 뉴스로 갈아치우면 「신규 테마」에서 겪은 사고가 그대로 재현된다.
-#   뉴스는 '오늘의 사건' 층에서만 쓴다.
-# ============================================================
-
-THEME_INDEX_PATH = "theme_index.json"     # 종목↔테마 역인덱스 (영구·캐시)
-UPJONG_INDEX_PATH = "upjong_index.json"   # 종목↔업종 역인덱스 (영구·캐시)
-INDEX_MAXAGE = 7                          # 일 — 테마 구성은 자주 안 바뀐다
-INDEX_간격 = 0.22                          # 초 — 네이버에 예의를 지킨다
-INDEX_최소보존 = 0.7                        # 수집량이 캐시의 이만큼 미만이면 캐시 유지
-
-SECTOR_PIN_PATH = "sector_pin.json"       # 운영자가 손으로 고치는 덧붙임 파일
-
-# 본업이 분명한데 테마 다중 소속 탓에 엉뚱한 칸으로 가던 종목들.
-# ⚠️ 여기 적힌 것은 어떤 계산보다도 **항상 우선**한다.
-SECTOR_PIN_기본 = {
-    # 2차전지 — '전기차' 테마에 같이 묶여 자동차로 새던 소재 회사들
-    "엘앤에프": "2차전지·소재",
-    "포스코퓨처엠": "2차전지·소재",
-    "에코프로비엠": "2차전지·소재",
-    "에코프로": "2차전지·소재",
-    "에코프로머티": "2차전지·소재",
-    "코스모신소재": "2차전지·소재",
-    "LG에너지솔루션": "2차전지·소재",
-    "삼성SDI": "2차전지·소재",
-    "SK온": "2차전지·소재",
-    "SKC": "2차전지·소재",
-    "SK아이이테크놀로지": "2차전지·소재",
-    "롯데에너지머티리얼즈": "2차전지·소재",
-    # 태양광 — 업종이 '화학'이라 화학으로 새던 회사들
-    "한화솔루션": "전력·신재생·원전",
-    "OCI홀딩스": "전력·신재생·원전",
-    "HD현대에너지솔루션": "전력·신재생·원전",
-    "두산에너빌리티": "전력·신재생·원전",
-    # 방산·조선 — 그날 방산 테마가 안 뜨면 통째로 미분류가 되던 회사들
-    "한화에어로스페이스": "조선·기계·방산",
-    "한국항공우주": "조선·기계·방산",
-    "LIG넥스원": "조선·기계·방산",
-    "현대로템": "조선·기계·방산",
-    "한화시스템": "조선·기계·방산",
-    "HD한국조선해양": "조선·기계·방산",
-    "HD현대중공업": "조선·기계·방산",
-    "한화오션": "조선·기계·방산",
-    "삼성중공업": "조선·기계·방산",
-}
-
-
-def load_sector_pin():
-    """기본 핀 + 저장소의 sector_pin.json을 합친다(파일이 이긴다)."""
-    핀 = dict(SECTOR_PIN_기본)
-    try:
-        if os.path.exists(SECTOR_PIN_PATH):
-            with open(SECTOR_PIN_PATH, encoding="utf-8") as f:
-                추가 = json.load(f) or {}
-            유효슬롯 = {s for s, _ in GRID_슬롯}
-            넣음 = 0
-            for 종목, 슬롯 in 추가.items():
-                #  ⚠️ '_'로 시작하는 키는 사람이 읽는 주석이다(설명·사용법·슬롯목록).
-                #     JSON에는 주석 문법이 없어 이 규칙으로 대신한다.
-                if str(종목).startswith("_") or not isinstance(슬롯, str):
-                    continue
-                if 슬롯 in 유효슬롯:
-                    핀[종목] = 슬롯
-                    넣음 += 1
-                else:
-                    print(f"  ⚠️ sector_pin.json — '{종목}'의 '{슬롯}'은 없는 슬롯이라 무시")
-            print(f"📌 수동 핀 {넣음}건 반영 (총 {len(핀)}건)")
-    except Exception as e:
-        print(f"  ⚠️ sector_pin.json 읽기 실패: {type(e).__name__}")
-    return 핀
-
-
-def _naver_group_list(타입="theme"):
-    """네이버 그룹 전체 목록 [(이름, 번호)] — 등락률과 무관한 **전수**."""
-    쌍 = []
-    본 = set()
-    페이지 = range(1, 9) if 타입 == "theme" else [1]
-    for page in 페이지:
-        try:
-            if 타입 == "theme":
-                res = requests.get("https://finance.naver.com/sise/theme.naver",
-                                   headers=HEADERS, params={"page": page}, timeout=12)
-            else:
-                res = requests.get("https://finance.naver.com/sise/sise_group.naver",
-                                   headers=HEADERS, params={"type": "upjong"}, timeout=12)
-            res.encoding = "euc-kr"
-            soup = BeautifulSoup(res.text, "html.parser")
-            links = soup.select("a[href*='sise_group_detail']")
-            if not links:
-                break
-            새것 = 0
-            for a in links:
-                m = re.search(r"no=(\d+)", a.get("href", ""))
-                이름 = clean_name(a.get_text(strip=True))
-                if not m or not 이름:
-                    continue
-                if m.group(1) in 본:
-                    continue
-                본.add(m.group(1))
-                쌍.append((이름, m.group(1)))
-                새것 += 1
-            if 새것 == 0:
-                break
-        except Exception as e:
-            print(f"  ⚠️ {타입} 목록 {page}쪽 실패: {type(e).__name__}")
-            break
-    return 쌍
-
-
-def build_group_index(타입="theme", force=False):
-    """{그룹명: [종목...]} 전수 인덱스. 7일 캐시.
-
-    ⚠️ 수집이 부실한 날(네이버 일시 장애 등) 캐시를 덮어쓰면
-       그날부터 섹터 분류가 통째로 무너진다. 이전보다 크게 줄면 **캐시를 지킨다.**
-    """
-    경로 = THEME_INDEX_PATH if 타입 == "theme" else UPJONG_INDEX_PATH
-    캐시 = {}
-    try:
-        if os.path.exists(경로):
-            with open(경로, encoding="utf-8") as f:
-                캐시 = json.load(f) or {}
-    except Exception:
-        캐시 = {}
-
-    묵은날 = 캐시.get("수집일")
-    신선 = False
-    if 묵은날 and not force:
-        try:
-            신선 = (datetime.now() - datetime.strptime(str(묵은날), "%Y%m%d")).days < INDEX_MAXAGE
-        except Exception:
-            신선 = False
-    if 신선 and 캐시.get("그룹"):
-        print(f"🗂️ {타입} 인덱스 캐시 사용 — {len(캐시['그룹'])}개 ({묵은날} 수집)")
-        return 캐시["그룹"]
-
-    쌍 = _naver_group_list(타입)
-    print(f"🔎 {타입} 전수 수집 {len(쌍)}개 — 상세 조회 중(약 {len(쌍)*INDEX_간격:.0f}초)...")
-    표 = {}
-    for i, (이름, 번호) in enumerate(쌍, 1):
-        멤버 = [n for n in _grid_theme_members(번호, 타입) if not _grid_is_excluded(n)]
-        if 멤버:
-            표[이름] = 멤버
-        time.sleep(INDEX_간격)
-        if i % 60 == 0:
-            print(f"   … {i}/{len(쌍)}")
-
-    옛것 = 캐시.get("그룹") or {}
-    if 옛것 and len(표) < len(옛것) * INDEX_최소보존:
-        print(f"  ⛔ 수집 {len(표)}개 < 캐시 {len(옛것)}개의 {INDEX_최소보존:.0%} "
-              f"— 부실 수집으로 보고 **캐시를 유지**한다")
-        return 옛것
-    if not 표:
-        return 옛것
-
-    try:
-        with open(경로, "w", encoding="utf-8") as f:
-            json.dump({"수집일": datetime.now().strftime("%Y%m%d"), "그룹": 표},
-                      f, ensure_ascii=False)
-    except Exception as e:
-        print(f"  ⚠️ {경로} 저장 실패: {type(e).__name__}")
-    print(f"🗂️ {타입} 인덱스 갱신 — {len(표)}개 그룹 / "
-          f"{len({n for v in 표.values() for n in v})}종목")
-    return 표
-
-
-def _reverse_index(그룹표):
-    """{그룹: [종목]} → ({종목: [그룹...]}, {그룹: 구성수})"""
-    역 = {}
-    크기 = {}
-    for g, 멤버 in (그룹표 or {}).items():
-        크기[g] = len(멤버)
-        for n in 멤버:
-            역.setdefault(n, []).append(g)
-    return 역, 크기
-
-
-def _slot_scores(종목, 역인덱스, 크기표):
-    """종목이 걸린 그룹들을 슬롯별 **전용도 점수**로 합산한다.
-
-    가중치 w = 40 / (구성종목수 + 40)
-      · 40종목짜리 '2차전지(소재/부품)' → 0.50
-      · 130종목짜리 '전기차'            → 0.24
-    좁은 테마일수록 그 회사의 정체성에 가깝다는 뜻이다.
-    같은 슬롯의 테마 여러 개에 걸리면 합산되므로 더 벌어진다.
-    """
-    점수, 근거 = {}, {}
-    for g in 역인덱스.get(종목, []):
-        슬롯 = grid_slot_of(g)
-        if not 슬롯:
-            continue
-        w = 40.0 / (크기표.get(g, 200) + 40.0)
-        점수[슬롯] = 점수.get(슬롯, 0.0) + w
-        근거.setdefault(슬롯, []).append(g)
-    return 점수, 근거
-
-
-def _recent_returns(일수=20):
-    """archive의 종목사전에서 {종목: [등락률...]} 최근 N거래일.
-
-    ⚠️ 새로 받아오는 자료가 아니다. 이미 매일 저장해온 값을 되읽는 것뿐이다.
-    """
-    try:
-        파일들 = sorted(f for f in os.listdir("archive")
-                      if f.startswith("data_") and f.endswith(".json"))[-일수:]
-    except Exception:
-        return {}, 0
-    계열 = {}
-    칸 = 0
-    for fn in 파일들:
-        try:
-            with open(os.path.join("archive", fn), encoding="utf-8") as f:
-                d = json.load(f)
-            사전 = ((d.get("계좌격자") or {}).get("종목사전")) or {}
-        except Exception:
-            continue
-        if not 사전:
-            continue
-        for n, v in 사전.items():
-            try:
-                계열.setdefault(n, {})[칸] = float(v[3])
-            except Exception:
-                pass
-        칸 += 1
-    return 계열, 칸
-
-
-def _pearson(a, b):
-    """두 수열의 상관계수. 표본이 짧으면 None."""
-    쌍 = [(x, y) for x, y in zip(a, b) if x is not None and y is not None]
-    if len(쌍) < 8:
-        return None
-    n = len(쌍)
-    ax = sum(x for x, _ in 쌍) / n
-    ay = sum(y for _, y in 쌍) / n
-    sxy = sum((x - ax) * (y - ay) for x, y in 쌍)
-    sxx = sum((x - ax) ** 2 for x, _ in 쌍)
-    syy = sum((y - ay) ** 2 for _, y in 쌍)
-    if sxx <= 0 or syy <= 0:
-        return None
-    return sxy / ((sxx * syy) ** 0.5)
-
-
-def build_sector_map(유니버스):
-    """종목명 → (슬롯, 근거문자열). 이 리포트의 **주소 지도**를 만든다."""
-    핀 = load_sector_pin()
-    테마표 = build_group_index("theme")
-    업종표 = build_group_index("upjong")
-    테마역, 테마크기 = _reverse_index(테마표)
-    업종역, 업종크기 = _reverse_index(업종표)
-
-    섹터맵, 후보맵, 근거맵 = {}, {}, {}
-    출처집계 = {"핀": 0, "테마": 0, "업종": 0, "미분류": 0}
-
-    for 종목 in 유니버스:
-        if 종목 in 핀:
-            섹터맵[종목] = 핀[종목]
-            근거맵[종목] = "수동 지정"
-            출처집계["핀"] += 1
-            continue
-        점수, 근거 = _slot_scores(종목, 테마역, 테마크기)
-        if 점수:
-            순 = sorted(점수.items(), key=lambda x: -x[1])
-            섹터맵[종목] = 순[0][0]
-            근거맵[종목] = " · ".join(근거[순[0][0]][:2])
-            후보맵[종목] = 순
-            출처집계["테마"] += 1
-            continue
-        # 테마에 하나도 안 걸린 종목 — 업종으로 폴백
-        u점수, u근거 = _slot_scores(종목, 업종역, 업종크기)
-        if u점수:
-            순 = sorted(u점수.items(), key=lambda x: -x[1])
-            섹터맵[종목] = 순[0][0]
-            근거맵[종목] = f"업종 {u근거[순[0][0]][0]}"
-            출처집계["업종"] += 1
-        else:
-            출처집계["미분류"] += 1
-
-    # ── 동행 상관으로 근소차를 가른다 ──────────────────────
-    #  "요즘 어느 테마와 같이 움직이나"를 가격으로 판정한다.
-    #  ⚠️ 1위와 2위가 뚜렷하게 벌어진 종목은 건드리지 않는다.
-    #     흔들 이유가 없는 것을 흔들면 주소가 다시 불안정해진다.
-    애매 = [n for n, 순 in 후보맵.items()
-           if len(순) >= 2 and 순[0][1] < 순[1][1] * SECTOR_동행_임계]
-    바뀜 = 0
-    if 애매:
-        계열, 칸수 = _recent_returns(SECTOR_동행_일수)
-        if 칸수 >= SECTOR_동행_최소일:
-            def 벡터(n):
-                d = 계열.get(n) or {}
-                return [d.get(i) for i in range(칸수)]
-            슬롯벡터 = {}
-            for 슬롯 in {s for s, _ in GRID_슬롯}:
-                멤버 = [n for n, v in 섹터맵.items() if v == 슬롯]
-                if len(멤버) < 5:
-                    continue
-                줄 = []
-                for i in range(칸수):
-                    값 = [계열[n][i] for n in 멤버 if i in (계열.get(n) or {})]
-                    줄.append(sum(값) / len(값) if len(값) >= 3 else None)
-                슬롯벡터[슬롯] = 줄
-            for n in 애매:
-                v = 벡터(n)
-                최고, 최고r = None, -2
-                for 슬롯, _ in 후보맵[n][:3]:
-                    if 슬롯 not in 슬롯벡터:
-                        continue
-                    r = _pearson(v, 슬롯벡터[슬롯])
-                    if r is not None and r > 최고r:
-                        최고, 최고r = 슬롯, r
-                if 최고 and 최고 != 섹터맵.get(n):
-                    섹터맵[n] = 최고
-                    근거맵[n] = f"최근 {칸수}일 동행(상관 {최고r:.2f})"
-                    바뀜 += 1
-            print(f"🔗 동행 판정 — 애매 {len(애매)}종목 중 {바뀜}종목 재배정 "
-                  f"(표본 {칸수}일)")
-        else:
-            print(f"🔗 동행 판정 보류 — 표본 {칸수}일 "
-                  f"(최소 {SECTOR_동행_최소일}일 필요) · 전용도만 적용")
-
-    print(f"🧭 섹터 사전 완성 — 핀 {출처집계['핀']} · 테마 {출처집계['테마']} · "
-          f"업종 {출처집계['업종']} · 미분류 {출처집계['미분류']} "
-          f"(분류율 {(len(유니버스)-출처집계['미분류'])/max(1,len(유니버스)):.0%})")
-    return 섹터맵, 후보맵, 근거맵
-
-
-SECTOR_동행_일수 = 20      # 동행 상관을 볼 창
-SECTOR_동행_최소일 = 10     # 이보다 짧으면 상관 판정을 하지 않는다(표본 부족)
-SECTOR_동행_임계 = 1.30     # 1위가 2위의 이 배수 미만이면 '애매'로 보고 상관으로 가른다
 
 
 def collect_account_grid(테마후보):
@@ -2763,25 +2224,21 @@ def collect_account_grid(테마후보):
     유효 = [c for c in (테마후보 or []) if c[2] is not None and not math.isnan(c[2])]
     유효.sort(key=lambda x: x[2], reverse=True)
 
-    # ── 슬롯 멤버 = **영구 사전**에서 역산한다 (v-o1) ────────────
-    #  ⚠️ 예전엔 "오늘 등락률 상위 테마 2개"의 구성종목이 곧 슬롯 멤버였다.
-    #     그래서 소속이 매일 바뀌었고, 누적 통계가 전부 그 위에 서 있었다.
-    #     이제는 반대다 — 소속을 먼저 확정하고, 오늘 뜬 테마는 라벨로만 쓴다.
-    섹터맵, 후보맵, 근거맵 = build_sector_map(set(유니버스.keys()))
-    슬롯멤버 = {}
-    for 종목, 슬롯 in 섹터맵.items():
-        슬롯멤버.setdefault(슬롯, set()).add(종목)
-
-    #  슬롯 이름표 — 오늘 그 슬롯에서 실제로 달아오른 네이버 테마.
-    #  ⚠️ 이건 **표시용**이다. 멤버 구성에는 아무 영향을 주지 않는다.
-    슬롯테마 = {}
+    슬롯멤버 = {}     # 슬롯명 → set(종목명)
+    슬롯테마 = {}     # 슬롯명 → [쓰인 네이버 테마명]
     사용된번호 = set()
+
     for 슬롯명, 키워드들 in GRID_슬롯:
         매칭 = [c for c in 유효 if any(k.lower() in c[0].lower() for k in 키워드들)]
-        if 매칭:
-            슬롯테마[슬롯명] = [c[0] for c in 매칭[:GRID_테마상세]]
-            for _, 번호, _ in 매칭[:GRID_테마상세]:
-                사용된번호.add(번호)
+        멤버 = set()
+        쓴테마 = []
+        for 테마명, 번호, _ in 매칭[:GRID_테마상세]:
+            멤버 |= set(_grid_theme_members(번호))
+            쓴테마.append(테마명)
+            사용된번호.add(번호)
+        if 멤버:
+            슬롯멤버[슬롯명] = 멤버
+            슬롯테마[슬롯명] = 쓴테마
 
     # 🆕 신규 슬롯 — 위 9칸 어디에도 안 걸린 테마 중 오늘 가장 강한 것 1개
     for 테마명, 번호, _ in 유효:
@@ -2803,21 +2260,13 @@ def collect_account_grid(테마후보):
     # ── 종목별 소속 구역(최대 2개) 사전 ──
     #   '내 종목' 코너에서 "이 종목이 어느 구역인가"를 즉시 보여주기 위함.
     #   테마 등락률이 높은 순으로 담아 '오늘 이 종목을 움직인 구역'이 먼저 오게 한다.
-    #  1순위는 확정 소속, 2순위는 "이 종목이 실제로 걸쳐 있는 다른 축"이다.
-    #  ⚠️ 2순위는 점수가 1순위의 절반은 넘을 때만 붙인다.
-    #     아무 관련 없는 꼬리 테마까지 태그로 달면 태그가 소음이 된다.
     종목구역 = {}
-    for n, 슬롯 in 섹터맵.items():
-        if n not in 유니버스:
-            continue
-        줄 = [슬롯]
-        순 = 후보맵.get(n) or []
-        for 후보슬롯, 점 in 순[:3]:
-            if 후보슬롯 != 슬롯 and len(줄) < 2:
-                최고 = 순[0][1] or 1
-                if 점 >= 최고 * 0.5:
-                    줄.append(후보슬롯)
-        종목구역[n] = 줄
+    for 슬롯명, 멤버 in 슬롯멤버.items():
+        for n in 멤버:
+            if n in 유니버스:
+                종목구역.setdefault(n, [])
+                if 슬롯명 not in 종목구역[n] and len(종목구역[n]) < 2:
+                    종목구역[n].append(슬롯명)
 
     분류됨 = set()
     행들 = []
@@ -2926,11 +2375,8 @@ def collect_account_grid(테마후보):
         #     종목별 과거 주가를 따로 안 받아도 되는 이유가 이것이다.
         #     배열로 담아 용량을 줄인다(키 반복 제거).
         "종목사전": {
-            #  ⚠️ 6번째 칸(분류 근거)을 붙였다. 배열 앞 5칸의 뜻은 그대로라
-            #     기존 화면 코드(m[0]~m[4])는 손대지 않아도 그대로 동작한다.
             n: [종목구역.get(n, []), v.get("순위"), v.get("층"),
-                round(v.get("등락률", 0), 2), v.get("시장"),
-                근거맵.get(n, "")]
+                round(v.get("등락률", 0), 2), v.get("시장")]
             for n, v in 유니버스.items()
         },
     }
