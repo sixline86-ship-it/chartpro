@@ -1,6 +1,6 @@
 {
   "날짜": "20260820",
-  "버전_collect": "v2026.08.20-n15",
+  "버전_collect": "v2026.08.20-n18",
   "공시": [
     {
       "회사명": "이엠앤아이",
@@ -411,92 +411,130 @@
   },
   "뉴스원본": [
     {
-      "제목": "여지는 남겼다…서울시는 대체부지 역제안, 국토부는 \"용적률 완화 검토\"",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964691&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "[올댓차이나] 대만 증시, 한일 반도체 강세 영향 사흘 만에 반등…0.48%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014139376&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "대만 타이베이 증시는 20일 한국과 일본에서 반도체가 강세를 보인데 힘입어 기술주에 매수가 유입하면서 3거래일 만에 반등 마감했다. 자취안(加權... 뉴시스 | 2026-08-20 20:59",
+      "출처": "네이버금융"
     },
     {
-      "제목": "\"스타 키우면 코스피로\" …코스닥의 잔인한 성공 공식",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005564374&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "[데일리안 오늘뉴스 종합] [단독] 한화에너지, 美 애리조나에 412MW 태양광·ESS 짓는다, 박근혜, 지선 이어 연찬회 등판까지?…새로운 '장동혁' 압박 전략인가, 대법관 서면 제청에 \"대법원장 책임 묻겠다\"는",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0003123686&office_id=119&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "▲ [단독] 한화에너지, 美 애리조나에 412MW 태양광·ESS 짓는다 한화에너지가 미국 애리조나주에 412메가와트(MW) 규모 태양광 발전과 ... 데일리안 | 2026-08-20 20:58",
+      "출처": "네이버금융"
     },
     {
-      "제목": "영풍·MBK \"서스틴베스트, 이사 선임 반대는 명백한 자기모순\"",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005805478&office_id=277&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "산은·우리운용, 딥테크에 8800억 쏜다…'15년 초장기펀드' 출격 [fn마켓워치]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005564403&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "국민성장펀드가 최대 15년간 첨단기술 기업에 투자하는 8800억원 규모의 '초장기 자금'을 푼다. 인공지능(AI)·반도체처럼 이미 돈이 몰리는 ... 파이낸셜뉴스 | 2026-08-20 20:56",
+      "출처": "네이버금융"
     },
     {
-      "제목": "\"CXMT 편입 유력\"…AI 붐에 떠오르는 '중국판 나스닥'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001263046&office_id=215&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "“살 것인가, 팔 것인가, 버틸 것인가”…자본시장서 20여년 버틴 펀드매니저의 선택은?",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005723779&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "목대균 KCGI자산운용 대표, 본인 경험담아 출간 20여년 자본시장 현장 이야기로 풀어낸 투자서 “급등락이 반복되는 한국 증시에 지금 필요한 건... 매일경제 | 2026-08-20 20:48",
+      "출처": "네이버금융"
     },
     {
-      "제목": "“하이닉스 470만원 간다니까” 40조원 쏘자…글로벌 IB “강력한 신호” 일제히 화답",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004653643&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "“본전 찾게 한번만 기회를” 7500선에 물린 개미 물량만 수십조원, 어쩌나 [투자360]",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002686409&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "코스피가 7000선을 밑돌며 투자심리가 얼어붙은 가운데 지수가 반등하더라도 빠르게 상승 추세로 전환하기는 쉽지 않을 것이란 전망이 나온다. 하락... 헤럴드경제 | 2026-08-20 20:40",
+      "출처": "네이버금융"
     },
     {
-      "제목": "의결권자문사 서스틴베스트, 고려아연 손 들어줬다",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000050017&office_id=648&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "한국은행, 신임 부총재에 권민수 부총재보 임명",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000949183&office_id=469&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "미국 최대 유통업체 월마트(WMT)는 20일(현지 시간) 실적 발표 후 프리마켓에서 하락 중이다. 회사는 전자상거래 성장과 관세 환급 효과에 힘입어 시장 예상을 웃도는 분... 이데일리 | 2026-08-20 20:30",
+      "출처": "네이버금융"
     },
     {
-      "제목": "씨티 \"환율 1,390원 아래선 국민연금 환헤지 확대 멈출 수도\"",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016262478&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "[마켓인]회사채 시장 온기 돌았는데…연말엔 다시 찬바람?",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006355254&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "한국은행은 신임 부총재에 권민수 국제금융·협력 담당 부총재보를 임명했다고 20일 밝혔다 . 권 신임 부총재는 1995년 한국은행에 입행한 이후 ... 한국일보 | 2026-08-20 20:26",
+      "출처": "네이버금융"
     },
     {
-      "제목": "40조 주주환원에 '삼전닉스' 초강세…코스피 6% 가까이 급등",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000897773&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "'한국적 럭셔리' GV90 공개…글로벌 럭셔리 전기 SUV 시장에 출사표",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964716&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "이 기사는 2026년08월20일 18시06분에 마켓인 프리미엄 콘텐츠로 선공개 되었습니다. 회사채 투자심리를 가늠할 수 있는 지표인 크레딧 스프... 이데일리 | 2026-08-20 20:08",
+      "출처": "네이버금융"
     },
     {
-      "제목": "SK하이닉스 자사주 소각이 살린 증시, 글로벌 금리 악재 속 추가반등 나올까",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005564329&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "한은 부총재에 '국제통' 권민수 부총재보 임명",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016262522&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "현대차그룹의 럭셔리 브랜드 제네시스가 초대형 전기 SUV를 공개했습니다. 파격적인 디자인과 첨단 기술로 전동화 시대 럭셔리의 새 기준을 제시하겠... MBN | 2026-08-20 20:07",
+      "출처": "네이버금융"
     },
     {
-      "제목": "MBK \"임시주총 자료 허위\" 법적 대응…고려아연 \"근거 밝혀야\"(종합)",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0009124637&office_id=421&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "[마켓인]홈플러스 전단채 재재심, 8월말 상정 불투명해졌다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006355252&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "\"국제금융사회에서 한국 입장 대변할 것\" 한국은행 신임 부총재에 권민수(56) 국제금융·협력 담당 부총재보가 임명됐다고 한은이 20일 밝혔다. ... 연합뉴스 | 2026-08-20 20:05",
+      "출처": "네이버금융"
     },
     {
-      "제목": "기업 합병가액 산정시 시가 대신 '공정가액' 적용…'주가 누르기' 차단",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0009124634&office_id=421&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "차량 번쩍 들어 빈자리에 주차…주차난 해결사로 등장한 로봇",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964715&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "이 기사는 2026년08월20일 18시01분에 마켓인 프리미엄 콘텐츠로 선공개 되었습니다. 홈플러스 전단채(ABSTB) 판매·발행 증권사에 대한... 이데일리 | 2026-08-20 20:03",
+      "출처": "네이버금융"
     },
     {
-      "제목": "[올댓차이나] 中 증시, 저가 매수세에 반등 마감…창업판 0.64%↑",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014139313&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "세입자는 전세, 집주인은 월세…정부가 보증하는 신개념 임대차 나온다",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964713&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "로봇이 이제 주차 고민도 덜어줄 것으로 보입니다. 운전자가 차를 세우면 로봇이 차량을 들어 올려 빈자리를 찾아 주차해주는 건데요. 같은 공간에 ... MBN | 2026-08-20 20:03",
+      "출처": "네이버금융"
     },
     {
-      "제목": "반도체만 보면 더 오를 것 같지만…“코스피 6000에 사고 7000에 팔아라” [머니닥터 시장진단]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005723759&office_id=009&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "1300원대로 뚝 떨어진 환율…연어도 커피 사장님도 \"한시름 덜었어요\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964710&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "세입자는 전세로 살고 싶지만 사기를 당할까 두렵고, 집주인은 월세를 받고 싶지만 세입자 구하기가 만만치 않죠. 이 두 요구를 충족시키는 신개념 ... MBN | 2026-08-20 20:01",
+      "출처": "네이버금융"
     },
     {
-      "제목": "상장사 합병가액 ‘시가’ 대신 ‘공정가액’ 적용…‘주가 누르기’ 꼼수 차단",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0003043452&office_id=029&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "하이닉스 주주환원·美 국채금리↓…코스피는 급반등",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0000897788&office_id=422&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "\"도대체 어디까지 오르는 거야\"라는 말이 나올 정도로 치솟던 원·달러 환율이 갑자기 1300원대로 뚝 떨어졌습니다. 한 달여 만에 150원 넘게... MBN | 2026-08-20 19:55",
+      "출처": "네이버금융"
     },
     {
-      "제목": "“이날을 기다렸다” SK하이닉스 역대급 ‘주주환원’에 증권가도 호평…“재평가 출발점” [투자360]",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0002686388&office_id=016&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "영풍·MBK \"서스틴베스트의 고려아연 감사위원 권고는 자기모순\"",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014139354&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "미국발 국채금리 충격에 급락했던 코스피가 하루 만에 6% 가까이 뛰었습니다. 40조원 규모의 주주환원책을 내놓은 SK하이닉스가 급등했고, 미국 ... 연합뉴스TV | 2026-08-20 19:54",
+      "출처": "네이버금융"
     },
     {
-      "제목": "한화운용, 리플·카나리캐피털과 ‘3자 연합’…디지털자산 사업 속도",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0004653638&office_id=011&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "[올댓차이나] 홍콩 증시, 美 장기금리 하락에 상승 마감… H주 0.91%↑",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014139353&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "영풍과 사모펀드(PEF) 운용사 MBK파트너스는 20일 고려아연 임시주주총회 감사위원 선임 안건과 관련해 자신들이 추천한 후보에 반대를 권고한 ... 뉴시스 | 2026-08-20 19:51",
+      "출처": "네이버금융"
     },
     {
-      "제목": "“PE도, 부동산도, 인프라도 AI”…대체투자, 분산 효과 '흔들'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0006355192&office_id=018&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "현실이 된 '100세 시대' 8600명 돌파…비결은 금주·금연·소식",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0001964707&office_id=057&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "홍콩 증시는 20일 전날 미국 장기금리 하락으로 매수 심리를 유지하면서 오름세를 이어간 채 마감했다. 항셍지수는 이날 전일 대비 203.42 포... 뉴시스 | 2026-08-20 19:50",
+      "출처": "네이버금융"
     },
     {
-      "제목": "\"코인 개미 설렌다\" 비트코인 11% 급등...7만1000달러대로",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005402690&office_id=008&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "유캐스트 등 3사 코스닥 상장예심 통과…니어스랩은 신규상장",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0016262512&office_id=001&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "'100세 시대'가 드디어 현실이 됐습니다. 100세 이상 어르신의 수가 10년 전보다 2.7배나 늘어 8천6백 명에 달한다고 하는데요. 장수 ... MBN | 2026-08-20 19:49",
+      "출처": "네이버금융"
     },
     {
-      "제목": "외국인 투심 안 꺾였다… 반도체 팔고 제약·뷰티 '줍줍'",
-      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0005564306&office_id=014&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1"
+      "제목": "비트코인 1억원 돌파…美 규제 기대에 '숏스퀴즈'까지",
+      "링크": "https://finance.naver.com/news/news_read.naver?article_id=0014139348&office_id=003&mode=LSS2D&type=0§ion_id=101§ion_id2=258§ion_id3=&date=20260820&page=1",
+      "요약": "한국거래소 코스닥시장본부는 티앤이코리아, 유캐스트, 엘리스그룹 등 3개사의 상장예비심사를 승인했다고 20일 밝혔다. 티앤이코리아는 2014년 설... 연합뉴스 | 2026-08-20 19:43",
+      "출처": "네이버금융"
     }
   ],
   "매크로": {
     "원달러환율": {
-      "값": 1393.18,
-      "등락률": -1.44,
+      "값": 1396.57,
+      "등락률": -1.2,
       "표시명": "원/달러 환율",
       "단위": ""
     },
     "WTI유가": {
-      "값": 86.66,
-      "등락률": 0.97,
+      "값": 87.19,
+      "등락률": 1.58,
       "표시명": "WTI 유가",
       "단위": "$"
     },
@@ -507,8 +545,8 @@
       "단위": "%"
     },
     "국제금": {
-      "값": 4546.8,
-      "등락률": 1.28,
+      "값": 4521.6,
+      "등락률": 0.72,
       "표시명": "국제 금",
       "단위": "$"
     }
@@ -553,36 +591,8 @@
           "배수": 3.0,
           "회전율": 0.3,
           "폭발": true,
-          "강세점수": 77.5,
+          "강세점수": 65.0,
           "재점화": 2
-        },
-        {
-          "종목명": "에이피알",
-          "코드": "278470",
-          "시장": "코스피",
-          "시총": 144511.0,
-          "거래대금": 1283.24928,
-          "거래량": 332448.0,
-          "현재가": 386000.0,
-          "등락률": 0.65,
-          "전일거래량": 149268,
-          "배수": 2.2,
-          "회전율": 0.9,
-          "강세점수": 50.0
-        },
-        {
-          "종목명": "삼성바이오로직스",
-          "코드": "207940",
-          "시장": "코스피",
-          "시총": 728620.0,
-          "거래대금": 984.7731,
-          "거래량": 62565.0,
-          "현재가": 1574000.0,
-          "등락률": 1.94,
-          "전일거래량": 28670,
-          "배수": 2.2,
-          "회전율": 0.1,
-          "강세점수": 8.6
         }
       ],
       "코스닥": [
@@ -963,28 +973,6 @@
         "이후등락": 0.0,
         "경과": 0,
         "차수": 2
-      },
-      {
-        "종목명": "에이피알",
-        "시장": "코스피",
-        "코드": "278470",
-        "포착일": "20260820",
-        "포착가": 386000.0,
-        "현재가": 386000.0,
-        "이후등락": 0.0,
-        "경과": 0,
-        "차수": 1
-      },
-      {
-        "종목명": "삼성바이오로직스",
-        "시장": "코스피",
-        "코드": "207940",
-        "포착일": "20260820",
-        "포착가": 1574000.0,
-        "현재가": 1574000.0,
-        "이후등락": 0.0,
-        "경과": 0,
-        "차수": 1
       },
       {
         "종목명": "알지노믹스",
@@ -4983,7 +4971,7 @@
                 "등": 1.78
               },
               {
-                "명": "케어젠",
+                "명": "펩트론",
                 "등": 0.0
               }
             ]
