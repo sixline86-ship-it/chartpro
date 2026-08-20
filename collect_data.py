@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n15"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.20-n18"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -468,59 +468,82 @@ def compute_gauge(지수수급, 확산도_시장):
 #      네이버 페이지 구조는 종종 바뀐다. 첫 실행에서 0건이 나오면
 #      diagnostic 출력을 보고 셀렉터를 조정해야 한다.
 # ============================================================
+NEWS_SOURCES = [
+    # (이름, URL, params, 인코딩, 링크셀렉터, 요약셀렉터)
+    #  ⚠️ 한 곳이 막혀도 나머지로 계속 간다. 수집원 하나가 죽어도 리포트는 나와야 한다.
+    ("네이버금융", "https://finance.naver.com/news/news_list.naver",
+     {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}, "euc-kr",
+     ["dd.articleSubject a", "a[href*='news_read']"], ["dd.articleSummary"]),
+    ("한국경제", "https://www.hankyung.com/finance", {}, None,
+     ["h2.news-tit a", "h3.news-tit a", "a.news-tit"], ["p.lead", "p.news-preview"]),
+    ("연합뉴스", "https://www.yna.co.kr/economy/finance-industry", {}, None,
+     ["a.tit-news", "strong.tit-news", "h2.tit a"], ["p.lead", "p.news-con"]),
+]
+
+
+def _clean(t):
+    return " ".join(str(t or "").split()).strip()
+
+
 def collect_news():
-    url = "https://finance.naver.com/news/news_list.naver"
-    # section_id=101(경제) / section_id2=258(증권) — "많이 본 뉴스"
-    params = {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}
+    """뉴스 원본 수집 — 제목 + **요약문**까지.
 
-    try:
-        res = requests.get(url, headers=HEADERS, params=params, timeout=10)
-        res.encoding = "euc-kr"
-        soup = BeautifulSoup(res.text, "html.parser")
-    except Exception as e:
-        print(f"⚠️ 뉴스 페이지 요청 실패: {e}")
-        return []
+    ⚠️ 예전에는 제목만 저장했다. 그래서 본문에만 종목명이 나오는 기사는
+       '내 종목 브리핑'에서 영원히 못 찾았다("뉴스가 없다"의 진짜 원인).
+       요약문을 함께 저장해 **본문 매칭**이 가능하게 한다.
+    """
+    결과, 중복 = [], set()
 
-    결과 = []
-    중복확인 = set()
-
-    # 1차 시도: dl.newsList 안의 dd.articleSubject a 태그
-    후보 = soup.select("dd.articleSubject a")
-    if not 후보:
-        # 2차 시도: 클래스명이 바뀌었을 경우 좀 더 느슨하게
-        후보 = soup.select("a[href*='news_read']")
-
-    for a in 후보:
-        제목 = a.get("title") or a.get_text(strip=True)
-        제목 = 제목.strip()
-        href = a.get("href", "")
-        if not 제목 or not href:
+    for 이름, url, params, enc, 링크셀, 요약셀 in NEWS_SOURCES:
+        try:
+            res = requests.get(url, headers=HEADERS, params=params or None, timeout=12)
+            if enc:
+                res.encoding = enc
+            soup = BeautifulSoup(res.text, "html.parser")
+        except Exception as e:
+            print(f"  ⚠️ 뉴스 수집 실패({이름}): {type(e).__name__}")
             continue
-        if href.startswith("/"):
-            링크 = "https://finance.naver.com" + href
-        else:
-            링크 = href
-        if 제목 in 중복확인:
-            continue
-        중복확인.add(제목)
-        결과.append({"제목": 제목, "링크": 링크})
 
-    print(f"✅ 뉴스 원본 {len(결과)}건 수집")
-    if len(결과) == 0:
-        # 진단 정보: 페이지가 비었는지, 구조가 바뀐 건지 힌트를 남긴다
-        print("  ⚠️ 0건 — 페이지 구조가 바뀌었을 수 있음. 응답 일부:")
-        print("  " + res.text[:300].replace("\n", " "))
-    else:
+        후보 = []
+        for sel in 링크셀:
+            후보 = soup.select(sel)
+            if 후보:
+                break
+
+        요약목록 = []
+        for sel in 요약셀:
+            요약목록 = [_clean(x.get_text(" ", strip=True)) for x in soup.select(sel)]
+            if 요약목록:
+                break
+
+        n0 = len(결과)
+        for i, a in enumerate(후보):
+            제목 = _clean(a.get("title") or a.get_text(" ", strip=True))
+            href = a.get("href", "")
+            if not 제목 or len(제목) < 6 or not href:
+                continue
+            if href.startswith("//"):
+                링크 = "https:" + href
+            elif href.startswith("/"):
+                from urllib.parse import urljoin
+                링크 = urljoin(url, href)
+            else:
+                링크 = href
+            if 제목 in 중복:
+                continue
+            중복.add(제목)
+            요약 = 요약목록[i] if i < len(요약목록) else ""
+            결과.append({"제목": 제목, "링크": 링크,
+                         "요약": 요약[:300], "출처": 이름})
+        print(f"  · {이름}: {len(결과)-n0}건")
+
+    print(f"✅ 뉴스 원본 {len(결과)}건 수집 (제목+요약)")
+    if 결과:
         print("  샘플:", 결과[0]["제목"][:40])
-
-    return 결과[:30]  # TOP5만 쓰지만, 리포트와 안 겹치는 걸 고를 수 있게 후보는 넉넉히
-
-
-# ============================================================
-# ⑥ 환율 · 유가 · 금리 (yfinance)
-# ------------------------------------------------------------
-#   숫자만 가져온다. 해석 문장은 build 단계나 Claude가 붙이지 않고
-#   그냥 "숫자 그대로" 보여준다 (해석이 필요 없는 단순 시세이므로).
+    else:
+        print("  ⚠️ 0건 — 수집원 3곳이 모두 실패했습니다. 구조 변경 의심.")
+    # ⚠️ 60건까지 남긴다. 관심종목이 본문에 걸릴 확률을 올리려면 후보가 넉넉해야 한다.
+    return 결과[:60]
 # ============================================================
 MACRO_TICKERS = {
     "원달러환율": {"심볼": "KRW=X", "표시명": "원/달러 환율", "단위": ""},
@@ -1403,6 +1426,19 @@ TRACK_DAYS = 20         # 포착 후 추적 기간(거래일). 이 기간 안에
 STR_MIN_시총 = 5000       # 억원
 STR_MIN_거래대금 = 500    # 억원
 STR_배수_하한 = 2.0       # 전일 대비 거래량 (하드 필터)
+
+# ⚠️ 전일 종가 대비 상승률 하한 (2026-08-20 신설, AND 조건)
+#    거래량만 보면 "거래는 터졌는데 주가는 안 오른 날"이 섞인다.
+#    실측: 최근 6일 포착 45건 중 8건(18%)이 3% 미만이었다(+0.65% 등).
+#    시장별로 다르게 잡는다 — 코스닥은 변동성이 구조적으로 크다.
+STR_MIN_상승 = {"코스피": 4.0, "코스닥": 5.0}   # %
+
+# ⚠️ 강세 레이더에서 뺄 종목 유형 (2026-08-20 신설)
+#    KODEX 미국나스닥100이 3일 연속 포착됐다. ETF는 지수를 따라가는 상품이라
+#    "오늘 불 붙은 곳"이 아니다. 스팩·우선주도 같은 이유로 뺀다.
+STR_제외패턴 = ("KODEX", "TIGER", "KBSTAR", "ARIRANG", "HANARO", "SOL ",
+                "PLUS ", "ACE ", "RISE ", "TIMEFOLIO", "KOSEF", "히어로즈",
+                "ETN", "ETF", "선물", "레버리지", "인버스", "스팩", "기업인수목적")
 STR_배수_가점 = 3.0       # 이 이상이면 가점
 STR_가점 = 15
 STR_W_회전, STR_W_상승 = 0.5, 0.5
@@ -1697,11 +1733,31 @@ def _score_accumulation(종목):
             s["성격아이콘"] = "🌱"
 
 
+def _str_excluded(이름):
+    """강세 레이더에서 뺄 종목인가 — ETF·ETN·스팩·우선주.
+
+    ⚠️ '오늘 불 붙은 곳'은 **개별 기업**이어야 한다.
+       지수를 따라가는 상품(ETF/ETN)은 아무리 거래량이 터져도 여기 있으면 안 된다.
+    """
+    if not 이름:
+        return True
+    n = str(이름)
+    for k in STR_제외패턴:
+        if k.upper() in n.upper():
+            return True
+    # 우선주 — 이름 끝이 '우', '우B', '1우' 등
+    if re.search(r"(우|우B|\d우B?)$", n):
+        return True
+    return False
+
+
 def collect_strength_radar():
     """실제 강세 레이더 — 2단 구조.
 
     ── 1단: 오늘 새로 포착 ──
-      1차 필터 : 시총 ≥ 5,000억 AND 거래대금 ≥ 500억 AND 상승 종목만
+      1차 필터 : 시총 ≥ 5,000억 AND 거래대금 ≥ 500억
+                 AND **전일 종가 대비 코스피 4% / 코스닥 5% 이상 상승**  (2026-08-20 추가)
+                 AND ETF·ETN·스팩·우선주 제외                        (2026-08-20 추가)
       2차 필터 : 전일 대비 거래량 2배 이상  (평소와 다른 날만)
                  ※ 거래대금은 주가 상승분이 섞여 부풀려진다. 순수 손바뀜은 거래량이 정확.
       점수     : 회전율점수 × 0.5 + 상승률점수 × 0.5  (각각 0~100 정규화)
@@ -1782,7 +1838,9 @@ def collect_strength_radar():
                 })
 
         후보 = [s for s in 종목들
-                if s["시총"] >= MIN_시총 and s["거래대금"] >= MIN_거래대금 and s["등락률"] > 0]
+                if s["시총"] >= MIN_시총 and s["거래대금"] >= MIN_거래대금
+                and s["등락률"] >= STR_MIN_상승.get(시장, 5.0)      # ② 상승률 하한(AND)
+                and not _str_excluded(s.get("종목명"))]             # ① ETF·스팩·우선주 제외
         print(f"📡 {시장}: 수집 {len(종목들)} → 1차 필터 통과 {len(후보)}")
 
         통과 = []
@@ -2103,6 +2161,22 @@ GRID_신규슬롯 = "신규 테마"   # 마지막 칸 — 15개 고정 슬롯 �
                               # ⚠️ 이모지를 쓰지 않는다 — 일부 환경에서 □로 깨진다
 
 
+# ⚠️ 키워드만으로는 못 가르는 복합 테마 — 여기 적은 게 정답이다.
+#    "우주태양광"처럼 두 슬롯 키워드를 동시에 가진 이름이 문제였다.
+#    새로 발견되면 여기 한 줄 추가하면 된다(로직은 안 건드려도 된다).
+GRID_예외 = [
+    ("우주태양광", "전력·신재생·원전"),      # '우주'가 아니라 태양광이 본질
+    ("페로브스카이트", "전력·신재생·원전"),   # 차세대 태양전지 소재
+    ("태양광", "전력·신재생·원전"),
+    ("풍력", "전력·신재생·원전"),
+    ("수소차", "자동차·부품"),               # '수소'(전력)가 아니라 자동차
+    ("전기차", "자동차·부품"),
+    ("자율주행", "자동차·부품"),
+    ("우주항공", "조선·기계·방산"),
+    ("항공우주", "조선·기계·방산"),
+]
+
+
 def grid_slot_of(테마명):
     """주도섹터(네이버 테마명) → 계좌 구역(고정 슬롯) 이름.
 
@@ -2119,10 +2193,26 @@ def grid_slot_of(테마명):
     if not 테마명:
         return None
     t = str(테마명).lower()
-    for 슬롯명, 키워드들 in GRID_슬롯:
-        if any(k.lower() in t for k in 키워드들):
-            return 슬롯명
-    return None
+
+    # ① 예외 표 — 키워드로는 못 가르는 복합 테마를 못 박는다.
+    #    ⚠️ 여기 있는 건 "정답"이다. 아래 점수 매칭보다 항상 우선한다.
+    for 패턴, 정답 in GRID_예외:
+        if 패턴.lower() in t:
+            return 정답
+
+    # ② 가장 **구체적인**(= 가장 긴) 키워드가 이긴다.
+    #    ⚠️ 예전에는 목록 순서상 먼저 나오는 슬롯이 무조건 이겼다.
+    #       "우주태양광"이 '우주'(조선·기계·방산)에 걸려 엉뚱한 구역으로 갔다.
+    #       (2026-08-20 한화솔루션·대주전자재료 오배정으로 발견)
+    최고 = None            # (키워드길이, -목록순서, 슬롯명)
+    for 순서, (슬롯명, 키워드들) in enumerate(GRID_슬롯):
+        for k in 키워드들:
+            kl = k.lower()
+            if kl in t:
+                후보 = (len(kl), -순서, 슬롯명)
+                if 최고 is None or 후보 > 최고:
+                    최고 = 후보
+    return 최고[2] if 최고 else None
 
 
 def _grid_is_excluded(이름):
