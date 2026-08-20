@@ -17,7 +17,7 @@ from datetime import datetime
 
 from PIL import Image, ImageDraw, ImageFont
 
-SCRIPT_VERSION = "v2026.08.19-n13"
+SCRIPT_VERSION = "v2026.08.20-n14"
 DATE = datetime.now().strftime("%Y%m%d")
 
 W, H = 1200, 630
