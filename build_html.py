@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n19"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n20"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -529,11 +529,36 @@ _ARCHIVE_DAYS_CACHE = None
 
 
 def _day_fingerprint(d):
-    """그날 데이터의 지문. 두 파일이 같은 값이면 같은 날로 본다."""
-    g = (d.get("계좌격자") or {}).get("행") or []
-    격자 = tuple(sorted((r.get("테마"), r.get("전체")) for r in g if r.get("테마")))
-    주도 = tuple(s.get("테마명") for s in (d.get("주도섹터") or []))
-    수급 = tuple(sorted((d.get("지수수급") or {}).get("코스피_수급", {}).items()))
+    """그날 데이터의 지문. 두 파일이 같은 값이면 같은 날로 본다.
+
+    ⚠️ 여기서 예외가 나면 **리포트 발행이 통째로 실패한다.**
+       archive_days()가 모든 코너의 입구라, 이 함수 하나가 죽으면 전부 죽는다.
+       그래서 어떤 값이 비어 있어도(None·리스트·문자열) 절대 터지지 않게 짠다.
+       (2026-08-21 실제 사고 — '코스피_수급'이 None인 날에 .items()를 호출해
+        AttributeError로 발행이 실패했다. `or {}` 는 키가 없을 때만 막아주고,
+        **값이 None이면 못 막는다.**)
+    """
+    def _safe(v, default):
+        return v if isinstance(v, type(default)) else default
+
+    try:
+        g = _safe((d.get("계좌격자") or {}).get("행"), [])
+        격자 = tuple(sorted(
+            (str(r.get("테마")), r.get("전체"))
+            for r in g if isinstance(r, dict) and r.get("테마")))
+    except Exception:
+        격자 = ()
+    try:
+        주도 = tuple(str(s.get("테마명"))
+                   for s in _safe(d.get("주도섹터"), [])
+                   if isinstance(s, dict))
+    except Exception:
+        주도 = ()
+    try:
+        _k = _safe(d.get("지수수급"), {}).get("코스피_수급")
+        수급 = tuple(sorted((str(a), str(b)) for a, b in _safe(_k, {}).items()))
+    except Exception:
+        수급 = ()
     return (격자, 주도, 수급)
 
 
@@ -2870,6 +2895,41 @@ def build_my_stocks(data):
  };
  window.msDel=function(nm){var my=get(),i=my.indexOf(nm);
   if(i>=0){my.splice(i,1); set(my); render();}};
+
+ /* 내보내기 / 불러오기
+    [WHY] localStorage는 기기·브라우저마다 따로다. PC에 넣어도 폰엔 없고,
+          카톡·텔레그램 인앱 브라우저는 아예 다른 저장소를 쓴다.
+          코드로 막을 수 없으니 **되살릴 수단**을 준다. */
+ window.msExport=function(){
+  var my=get();
+  if(!my.length){alert('먼저 종목을 등록해 주세요.'); return;}
+  var code='CP:'+my.join('|');
+  var msg='내 관심종목 '+my.length+'종목 백업 코드입니다. 복사해 두었다가 '
+        + '다른 기기에서 [불러오기]에 붙여넣으세요.';
+  // ⚠️ alert 문구에 줄바꿈을 넣지 않는다. 이 JS는 파이썬 문자열을 거쳐 HTML로
+  //    출력되는데, 그 과정에서 이스케이프가 풀려 **문자열 리터럴이 깨진다**
+  //    (2026-08-20 실제 사고 — 관심종목 JS 전체가 죽었다).
+  var ok=false;
+  try{ if(navigator.clipboard){navigator.clipboard.writeText(code); ok=true;} }catch(e){}
+  if(ok) alert(msg+' (이미 복사됨) — '+code);
+  else prompt(msg, code);
+ };
+ window.msImport=function(){
+  var t=prompt('내보내기로 받은 코드를 붙여넣어 주세요');
+  if(!t) return;
+  t=t.trim();
+  if(t.indexOf('CP:')!==0){alert('코드 형식이 아닙니다. CP: 로 시작해야 합니다.'); return;}
+  var names=t.slice(3).split('|').map(function(x){return x.trim();}).filter(Boolean);
+  var ok=[], bad=[];
+  names.forEach(function(n){
+   if(P.stocks[n]){ if(ok.indexOf(n)<0) ok.push(n); } else bad.push(n);
+  });
+  if(!ok.length){alert('불러올 수 있는 종목이 없습니다.'); return;}
+  if(ok.length>MAX) ok=ok.slice(0,MAX);
+  set(ok); render();
+  alert(ok.length+'종목을 불러왔습니다.'+(bad.length?' (건너뜀: '+bad.join(', ')+')':''));
+ };
+
  window.msWin=function(n){curW=n;
   document.querySelectorAll('.ms-tab').forEach(function(t){
    var on=+t.dataset.n===n;
@@ -2918,7 +2978,16 @@ def build_my_stocks(data):
             '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '내 종목은 시장을 이기고 있나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
-            '<div id="ms-list"></div><div id="ms-sum"></div><div id="ms-chart"></div>'
+            '<div id="ms-list"></div>'
+            # ⚠️ 관심종목은 이 기기에만 저장된다. 기기를 바꾸거나 앱 캐시를 지우면
+            #    사라진다(브라우저 사양이라 코드로 못 막는다).
+            #    → 짧은 코드로 옮겨 담을 수 있게 한다.
+            '<div class="ms-bk">'
+            '<button onclick="msExport()" class="ms-bk-b">📤 내보내기</button>'
+            '<button onclick="msImport()" class="ms-bk-b">📥 불러오기</button>'
+            '<span class="ms-bk-t">기기를 바꾸거나 앱 캐시를 지우면 목록이 사라집니다 — '
+            '코드를 복사해 두세요</span></div>'
+            '<div id="ms-sum"></div><div id="ms-chart"></div>'
             '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
             'border-radius:8px;border:1px solid #1e2531">'
             '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
@@ -7063,6 +7132,10 @@ a{{color:inherit;text-decoration:none}}
 .fg-def{{font-size:10.5px;color:#8b93a0;line-height:1.7;margin:.55rem 0 0;padding-top:.5rem;border-top:1px solid rgba(255,255,255,.08)}}
 .fg-def b{{color:#c9d0d9}}
 @media (max-width:359px){{.core-g{{grid-template-columns:auto minmax(0,1fr)}}.fg-spark{{display:none}}}}
+/* 관심종목 백업 */
+.ms-bk{{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0 0;padding-top:9px;border-top:1px solid rgba(255,255,255,.08)}}
+.ms-bk-b{{font-size:11px;font-weight:800;padding:5px 10px;border-radius:7px;background:#0f131a;border:1px solid #2a3446;color:#c9ced6;cursor:pointer}}
+.ms-bk-t{{font-size:9.5px;color:#6f7784;line-height:1.5;flex:1;min-width:140px}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
 .q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
 .q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
