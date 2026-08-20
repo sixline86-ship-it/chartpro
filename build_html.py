@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.19-n13"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.20-n14"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1300,16 +1300,19 @@ def _hdr_flow_badge(key):
     st = _fs_stat(arr)
     if not st:
         return "&nbsp;"
+    # ⚠️ 이 자리는 폭이 100px밖에 안 된다. 길면 두 줄로 접힌다(2026-08-19 지적).
+    #    "20일 중 매수 6위"까지만 넣고 나머지는 **둘째 줄에 따로** 준다.
+    #    (한 줄에 억지로 두 정보를 넣으면 반드시 접힌다)
     앞 = f'{st["n"]}일 중 {st["dir"]} {st["rk"]}위'
-    _ico, 핵 = _fs_keyfact(st)
     뒤 = ""
     if st["back"] >= 3:
         뒤 = f'{st["back"]}일 만의 최대'
     elif st["연속"] >= 3:
-        뒤 = f'{st["연속"]}일 연속'
+        뒤 = f'{st["연속"]}일 연속 {st["dir"]}'
     elif st["배수"] >= 1.5:
         뒤 = f'평소 {st["배수"]:.1f}배'
-    return 앞 + (f'<span class="nw"> · {뒤}</span>' if 뒤 else "")
+    return (f'<span class="bdg1">{앞}</span>'
+            + (f'<span class="bdg2">{뒤}</span>' if 뒤 else ""))
 
 
 def _flow_highlight(key, days_max=20):
@@ -1542,7 +1545,7 @@ def _head_icon(코등, 링색, 이모, 관제점수=None, 관제구간=None, 태
 
 
 
-def _header_data(지수수급, 파생, 코수):
+def _header_data(지수수급, 파생, 코수, 사건명=None):
     """헤더 5종이 공통으로 쓰는 값을 한 번에 계산한다(코드 계산 · 항상 최신)."""
     지 = (지수수급 or {}).get("지수") or {}
     파생 = 파생 or {}
@@ -1573,7 +1576,12 @@ def _header_data(지수수급, 파생, 코수):
         성격부제 = 태그[2]
     else:
         코등 = 코["등"] or 0
-        이름 = ("함께 오른 하루" if 코등 > 0 else "함께 내린 하루" if 코등 < 0 else "숨 고른 하루")
+        # ⚠️ "함께 오른 하루"는 매일 똑같아 아무 정보가 없다(2026-08-19 지적).
+        #    오늘의 사건명(예: "6852 환호, 실탄은 마이너스")을 그대로 쓴다.
+        #    사건명은 Claude가 매일 새로 짓는 제목이라 자동으로 매번 달라진다.
+        _ev = (사건명 or "").strip().strip("〈〉<> ").strip()
+        이름 = _ev or ("함께 오른 하루" if 코등 > 0 else
+                       "함께 내린 하루" if 코등 < 0 else "숨 고른 하루")
         이모 = ("🔴" if 코등 > 0 else "🔵" if 코등 < 0 else "⚪")
         성격부제 = "코스피·코스닥 지수 흐름 요약"
 
@@ -1595,10 +1603,10 @@ def _flow_line(실탄):
     return f"{_flow_amt(실탄)} {word}", cls
 
 
-def build_index_header(지수수급, 파생, 코수, style=None, 관제=None):
+def build_index_header(지수수급, 파생, 코수, style=None, 관제=None, 사건명=None):
     """핵심편 최상단 지수 헤더 — style 상수로 5가지 레이아웃 중 하나를 그린다."""
     style = style or HEADER_STYLE
-    d = _header_data(지수수급, 파생, 코수)
+    d = _header_data(지수수급, 파생, 코수, 사건명)
     코, 닥 = d["코"], d["닥"]
     실탄문, 실탄cls = _flow_line(d["실탄"])
 
@@ -4325,7 +4333,8 @@ def build_core(핵심편, data, 해석):
     rows = _load_market_history()
 
     # ── 지수 헤더 (스타일은 HEADER_STYLE 상수로 전환) ──
-    지수스트립 = build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"))
+    지수스트립 = build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"),
+                                   사건명=(해석.get("사건명") or ""))
 
     def _f(v):
         try:
@@ -4521,21 +4530,39 @@ def build_core(핵심편, data, 해석):
                   + build_sector_scoreboard())
     변속기블록 = hide("수급변속기", build_flow_gearbox())
 
+    # ── 🧭 왜 이렇게 움직였을까요 ──
+    #  '왜그런가'(초보용 인과)와 '수급왜'(수급 관점)가 같은 말을 두 번 하고 있었다.
+    #  둘을 한 상자에 담아 '오늘 시장을 움직인 것들' 바로 뒤에 둔다.
+    #  구독자가 "아, 이래서 올랐구나"를 여기서 한 번에 이해하게 하는 자리다.
+    _수급왜 = (핵심편.get("수급왜") or "").strip()
+    _조각 = [x for x in ((왜그런가 or "").strip(), _수급왜) if x]
+    해석블록 = ""
+    if _조각:
+        _본문 = "".join(f'<p class="q90-why-b">{t}</p>' for t in _조각)
+        해석블록 = ('<div class="q90-whybox">'
+                  '<p class="q90-why-h">🧭 왜 이렇게 움직였을까요</p>'
+                  f'{_본문}</div>')
+
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
             + 지수스트립
             + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
-            + (f'<p class="q90-feel">{공감}</p>' if 공감 else '')
+            # ⚠️ 공감문구는 '내 계좌만 왜 이러지' 코너로 흡수했다(2026-08-19).
+            #    감정을 다루는 자리가 두 군데로 갈리면 둘 다 힘을 잃는다.
             # ⚠️ 배치 (2026-08-19 HO 지시)
             #    ① 3줄 요약은 가린다 — 아래 '딱 N가지'와 역할이 겹친다
             #    ② 📰 오늘 시장을 움직인 것들(팩트) → 🧭 왜 이렇게(해석) 순서로 붙인다
             #       팩트 바로 다음에 해석이 와야 "아, 이래서 내렸구나"가 각인된다
             #    ③ 😐 내 계좌만 왜 이러지(감정)는 그 뒤 — 이해한 다음에 공감이 온다
+            # ⚠️ 배치 (2026-08-19 확정)
+            #    📰 팩트 → 🧭 해석 → 📈 섹터 성적표 → 😐 감정 → 💰 수급
+            #    "왜 그랬는지 이해한 다음에 위로가 온다"는 순서다.
             + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
             + 이슈블록
-            + (f'<p class="q90-why">{왜그런가}</p>' if 왜그런가 else '')
+            + 해석블록
+            + hide("핵심편섹터", build_sector_scoreboard())
             + 내종목
             + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
             + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
@@ -4545,7 +4572,10 @@ def build_core(핵심편, data, 해석):
             + core_flow_gauge()
             + hide("수급타일", f'<div class="mny-tiles">{타일HTML}</div>')
             + 변속기블록
-            + hide("수급특징", f'<div class="mny-feat">{특징}</div>') + 왜블록 + '</div>'
+            # ⚠️ 왜블록(🧭 왜 이렇게)은 위쪽 해석블록으로 합쳤다(2026-08-19).
+            #    여기서는 계기판 밑에 **수급 특징 한 줄**만 남긴다.
+            + hide("수급특징", f'<div class="mny-feat">{특징}</div>')
+            + _flow_comment() + '</div>'
             + 격자블록
             + 뒤집블록 + 딱N블록 + 핵심디버전스
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
@@ -5443,6 +5473,41 @@ def _fs_timeline_svg(이력, p, W=380):
     g.append(f'<text x="{X(q-1):.1f}" y="{H-6}" font-size="7" fill="#c9d0d9" '
              f'text-anchor="middle" font-weight="800">{날[-1]}</text>')
     return f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg>'
+
+
+def _flow_comment():
+    """계기판 밑 한 줄 코멘트 — 오늘 수급의 특징을 짧게 짚는다.
+
+    ⚠️ 긴 설명은 위쪽 '🧭 왜 이렇게 움직였을까요'가 맡는다.
+       여기는 **계기판 숫자를 말로 풀어주는 한두 줄**이면 충분하다.
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
+    except Exception:
+        return ""
+    st = _fs_stat([r["실탄"] for r in h])
+    if not st:
+        return ""
+    외 = _fs_stat([r["외현"] for r in h if r.get("외현") is not None])
+    기 = _fs_stat([r["기관"] for r in h if r.get("기관") is not None])
+    c = FS_BUY if st["v"] >= 0 else FS_SELL
+    조각 = []
+    if 외 and 기 and (외["v"] >= 0) != (기["v"] >= 0):
+        큰 = "외국인" if abs(외["v"]) >= abs(기["v"]) else "기관"
+        작 = "기관" if 큰 == "외국인" else "외국인"
+        조각.append(f'<b>{큰}</b>이 <b>{작}</b>과 정반대로 움직여 실탄이 '
+                    f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 남았습니다.')
+    else:
+        조각.append(f'외국인·기관이 <b>같은 방향</b>이라 실탄이 '
+                    f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 쌓였습니다.')
+    if st["배수"] >= 1.5:
+        조각.append(f'규모는 평소의 <b>{st["배수"]:.1f}배</b>로 <b>유별난 하루</b>입니다.')
+    elif st["배수"] < 0.6:
+        조각.append(f'다만 규모는 평소의 <b>{st["배수"]:.1f}배</b>라 <b>화력은 약했습니다</b>.')
+    else:
+        조각.append(f'규모는 평소의 <b>{st["배수"]:.1f}배</b>로 평범합니다.')
+    return f'<p class="mny-cmt">{" ".join(조각)}</p>'
 
 
 def core_flow_gauge():
@@ -6441,7 +6506,7 @@ a{{color:inherit;text-decoration:none}}
 .ix-bt{{flex:1;height:18px;background:rgba(255,255,255,.05);border-radius:5px;position:relative;overflow:hidden}}
 .ix-bz{{position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(255,255,255,.18)}}
 .ix-bf{{position:absolute;top:0;bottom:0;border-radius:4px}}
-.ix-bv{{width:100px;text-align:right;font-size:13.5px;font-weight:900;flex-shrink:0;line-height:1.05}}
+.ix-bv{{width:118px;text-align:right;font-size:13.5px;font-weight:900;flex-shrink:0;line-height:1.05}}
 .ix-bv small{{font-size:10px;color:#9aa0a8;font-weight:600;display:block;margin-top:5px;word-break:keep-all;line-height:1.4}}
 .ix-scale{{display:flex;justify-content:space-between;font-size:8.5px;color:#6b7078;padding-left:57px;padding-right:109px}}
 .ix-flow{{display:flex;justify-content:space-between;align-items:center;margin-top:11px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}}
@@ -6762,6 +6827,18 @@ a{{color:inherit;text-decoration:none}}
 .ac-tab.off{{opacity:.4;cursor:default}}
 .ac-body{{display:none}}
 .ac-body.on{{display:block}}
+/* 헤더 수급 배지 — 각 줄은 반드시 한 줄로(줄바꿈 금지) */
+.ix-bv small .bdg1,.ix-bv small .bdg2{{display:block;white-space:nowrap;line-height:1.35}}
+.ix-bv small .bdg2{{color:#7d848f;font-size:9px}}
+/* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
+.q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
+.q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
+.q90-why-b{{font-size:13px;color:#c9ced6;line-height:1.8;margin:0 0 8px}}
+.q90-why-b:last-child{{margin-bottom:0}}
+.q90-why-b b{{color:#fff;font-weight:800}}
+/* 계기판 밑 한 줄 코멘트 */
+.mny-cmt{{font-size:11.5px;color:#9aa0aa;line-height:1.75;margin:9px 0 0;padding-top:9px;border-top:1px solid rgba(255,255,255,.08)}}
+.mny-cmt b{{color:#e8eaee}}
 /* 🆕 어디에도 안 걸린 새 테마 */
 .nt-box{{background:#141922;border:1px solid #2a3342;border-left:3px solid #ef4444;border-radius:12px;padding:12px 14px;margin:10px 0 0}}
 .nt-k{{font-size:11px;color:#8b93a0;font-weight:700;margin:0}}
