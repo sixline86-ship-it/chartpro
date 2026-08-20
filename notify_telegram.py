@@ -1,243 +1,109 @@
 # ============================================================
-# make_thumb.py  (v2026.08.12-a)
+# notify_telegram.py  (v2026.08.12-a)
 # ------------------------------------------------------------
-# 카톡·텔레그램 공유 카드용 썸네일 PNG를 매일 생성한다 (1200×630).
-#   레이아웃 A안: 다크 그라디언트 배경 + 한줄평(강조어 주황) + 날짜
-#                + 하단 금색 바 + 공감문구
-#   글 재료: report_YYYYMMDD.json (한줄평 · 핵심편.공감문구)
-#   출력: thumb/YYYYMMDD.png  → report HTML의 og:image가 이 파일을 가리킨다
-#   폰트: assets/fonts/NanumGothic-*.ttf (저장소 동봉)
-#         → 없으면 시스템 Noto Sans CJK로 대체
+# 리포트가 발행된 뒤, 텔레그램으로 완성 알림을 보낸다.
+#   - 오늘 report_YYYYMMDD.json 에서 관제지수·한줄평을 읽어
+#     간단한 메시지 + 리포트 링크를 전송한다.
+#   - 토큰/chat_id 는 환경변수(GitHub Secrets)에서 읽는다.
 # ============================================================
 
 import json
 import os
-import re
+import requests
 from datetime import datetime
 
-from PIL import Image, ImageDraw, ImageFont
-
-SCRIPT_VERSION = "v2026.08.20-n15"
+SCRIPT_VERSION = "v2026.08.20-n18"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
 DATE = datetime.now().strftime("%Y%m%d")
+REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
+               if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
+               else f"report_{DATE}.json")
 
-W, H = 1200, 630
-BG_TOP, BG_BOT = (34, 38, 45), (43, 48, 56)          # #22262d → #2b3038
-INK = (240, 240, 238)                                  # 본문 흰색
-SUB = (154, 160, 168)                                  # 회색
-ACCENT = (255, 154, 128)                               # 강조 주황 #ff9a80
-GOLD = (224, 192, 96)                                  # 금색 바 #e0c060
+# 배포된 리포트 주소
+#   ⚠️ index.html(고정 주소)이 아니라 **날짜별 페이지**로 보낸다.
+#   텔레그램·카톡은 같은 URL의 미리보기를 캐싱해서, 고정 주소로 보내면
+#   어제의 썸네일·제목이 그대로 뜬다. 날짜가 다르면 캐시가 원천적으로 안 생긴다.
+SITE_URL = "https://sixline86-ship-it.github.io/chartpro/"
+REPORT_URL = f"{SITE_URL}report_{DATE}.html"
 
-FONT_DIR = os.path.join("assets", "fonts")
-FONT_URL = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/{}"
-FALLBACKS = [
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-]
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 
-ARCHIVE = "archive"
+def build_message():
+    """붙여넣기용 캡션.
 
-
-def apath(name):
-    """읽기용 경로 — archive/에 있으면 그것을, 없으면 루트를 쓴다(하위 호환).
-
-    ⚠️ v-13-d에서 날짜별 json을 archive/로 옮겼는데 make_thumb만 이 변경을
-       안 따라가서, report_YYYYMMDD.json을 루트에서 못 찾아 폴백 문구
-       "오늘의 시장 관제 리포트"로 빈 썸네일을 만들던 사고가 있었다(08-13).
+    ⚠️ 역할 분담 원칙(v-l5) — 같은 문장이 세 번 반복되던 문제를 고쳤다.
+       카톡에 이 글을 붙여넣으면 화면에 네 자리가 생긴다.
+         ① 이 캡션 (말풍선)      ② 썸네일 그림  ③ 미리보기 제목  ④ 미리보기 설명
+       예전에는 ①③이 한줄평, ②도 한줄평이라 **같은 말이 세 번** 나왔다.
+       그래서 자리마다 서로 다른 것만 담게 나눴다.
+         ① 캡션      = 브랜드 + 날짜 + 링크   (여기)
+         ② 썸네일    = 한줄평 + 공감문구      (make_thumb.py)
+         ③ 제목      = 오늘의 정의            (build_html.py og:title)
+         ④ 설명      = 관제지수               (build_html.py og:description)
     """
-    p = os.path.join(ARCHIVE, name)
-    return p if os.path.exists(p) else name
+    _요일 = "월화수목금토일"[datetime.strptime(DATE, "%Y%m%d").weekday()]
+    날짜표기 = f"{int(DATE[4:6])}월 {int(DATE[6:])}일({_요일}) 마감"
+    return f"🗼 차트프로 관제탑 · {날짜표기}\n\n{REPORT_URL}"
 
 
-def ensure_font(name):
-    """폰트 파일을 확보한다 — 저장소에 없으면 **자동으로 내려받는다.**
-
-    폰트를 저장소에 올리지 않아도 되게 하려는 장치다.
-    (수동 업로드는 실수가 잦고, 폰트가 없으면 한글이 전부 □□□로 깨진다)
-    받은 파일은 assets/fonts/ 에 캐시되어 다음 실행부터는 바로 쓴다.
-    네트워크가 막히면 시스템 폰트로 넘어간다.
-    """
-    p = os.path.join(FONT_DIR, name)
-    if os.path.exists(p) and os.path.getsize(p) > 100000:
-        return p
-    try:
-        import urllib.request
-        os.makedirs(FONT_DIR, exist_ok=True)
-        urllib.request.urlretrieve(FONT_URL.format(name), p)
-        if os.path.getsize(p) > 100000:
-            print(f"   ⬇️ 폰트 자동 다운로드: {name}")
-            return p
-        os.remove(p)
-    except Exception as e:
-        print(f"   ⚠️ 폰트 다운로드 실패({type(e).__name__}) — 시스템 폰트로 대체")
-    return None
-
-
-def font(name, size):
-    """나눔고딕 우선(없으면 자동 다운로드), 그마저 안 되면 시스템 폰트."""
-    p = ensure_font(name)
-    if p:
-        return ImageFont.truetype(p, size)
-    for fb in FALLBACKS:
-        if os.path.exists(fb):
-            try:
-                return ImageFont.truetype(fb, size, index=1)   # index 1 = KR
-            except Exception:
-                return ImageFont.truetype(fb, size)
-    print("   ⚠️ 한글 폰트를 찾지 못했습니다 — 글자가 깨질 수 있습니다")
-    return ImageFont.load_default()
-
-
-def _numeric_fallback():
-    """해석글이 없을 때 쓰는 '숫자로 만든' 제목.
-
-    ⚠️ 예전에는 '오늘의 시장 관제 리포트'라는 고정 문구를 썼다.
-       그러면 카톡·텔레그램 미리보기가 매일 똑같아 보여서, 구독자 입장에선
-       "어제 거 아닌가?" 싶고 열어볼 이유가 사라진다.
-       Claude 해석글이 실패해도 파이썬이 계산한 숫자는 항상 있으므로
-       그 숫자로 최소한의 '오늘다움'을 만든다. (숫자는 기계가 — 프로젝트 원칙)
-    """
-    try:
-        with open(apath(f"data_{DATE}.json"), encoding="utf-8") as f:
-            d = json.load(f)
-    except Exception:
-        return "오늘의 시장 관제 리포트", ""
-    지수 = (d.get("지수수급") or {}).get("지수") or {}
-    코 = 지수.get("코스피") or {}
-    관 = (d.get("관제지수") or {})
-
-    def _num(v):
-        """'2.42', '6,977.94' 같은 문자열도 숫자로 — 수집 데이터는 문자열 저장이다."""
-        if isinstance(v, (int, float)):
-            return float(v)
-        try:
-            return float(str(v).replace(",", "").replace("%", "").strip())
-        except Exception:
-            return None
-
-    등 = _num(코.get("등락률"))
-    if 등 is None:
-        return "오늘의 시장 관제 리포트", ""
-    # 수집기가 부호를 빼고 방향을 따로 주는 경우가 있어 방향으로 부호를 복원한다.
-    if 코.get("등락방향") == "하락" and 등 > 0:
-        등 = -등
-    방향 = "오른" if 등 > 0 else ("내린" if 등 < 0 else "제자리인")
-    제목 = f"코스피 {등:+.2f}%, {방향} 하루"
-    if 관.get("점수") is not None:
-        부제 = f"관제지수 {관.get('점수')} {관.get('구간') or ''}".strip()
-    else:
-        부제 = f"종가 {코.get('종가')}" if 코.get("종가") else ""
-    return 제목, 부제
-
-
-def load_texts():
-    한줄, 공감 = None, None
-    경로 = apath(f"report_{DATE}.json")      # archive/ 우선, 없으면 루트
-    try:
-        with open(경로, encoding="utf-8") as f:
-            d = json.load(f)
-        해석 = d.get("해석글") or {}
-        한줄 = 해석.get("한줄평")
-        공감 = (해석.get("핵심편") or {}).get("공감문구")
-    except Exception as e:
-        # ⚠️ 조용히 넘기면 빈 껍데기 썸네일이 만들어져도 아무도 모른다(실측 사고).
-        #    반드시 로그로 드러내 다음 사람이 원인을 즉시 알 수 있게 한다.
-        print(f"   ⚠️ 썸네일 글 재료를 못 읽었습니다({type(e).__name__}: {경로}) "
-              f"— 오늘 수치로 만든 폴백 문구를 씁니다")
-    if not 한줄:
-        한줄, 대체부제 = _numeric_fallback()
-        공감 = 공감 or 대체부제
-        print(f"   📌 폴백 제목: {한줄}")
-    return 한줄.strip(), (공감 or "").strip()
-
-
-def wrap(draw, text, fnt, max_w):
-    """단어 단위 줄바꿈 — 한 줄이 max_w를 넘지 않게."""
-    lines, cur = [], ""
-    for word in text.split():
-        cand = (cur + " " + word).strip()
-        if draw.textlength(cand, font=fnt) <= max_w:
-            cur = cand
-        else:
-            if cur:
-                lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
-    return lines[:3]      # 최대 3줄 — 넘치면 잘라도 카드가 깨지는 것보단 낫다
-
-
-def pick_accent(한줄):
-    """한줄평에서 강조할 어절 하나 — 따옴표 안 > 숫자 포함 > 가장 긴 어절."""
-    m = re.search(r"['\u2018\u2019\"\u201c\u201d]([^'\u2018\u2019\"\u201c\u201d]{2,12})['\u2018\u2019\"\u201c\u201d]", 한줄)
-    if m:
-        return m.group(1)
-    for w in 한줄.split():
-        if re.search(r"\d", w):
-            return w
-    words = 한줄.split()
-    return max(words, key=len) if words else ""
+def _thumb_path():
+    """오늘 썸네일 파일 경로 (없으면 None)."""
+    p = os.path.join("thumb", f"{DATE}.png")
+    return p if os.path.exists(p) else None
 
 
 def main():
-    한줄, 공감 = load_texts()
+    if not TOKEN or not CHAT_ID:
+        print("⚠️ TELEGRAM_TOKEN / TELEGRAM_CHAT_ID 가 없어 알림을 건너뜁니다.")
+        return
 
-    img = Image.new("RGB", (W, H), BG_TOP)
-    draw = ImageDraw.Draw(img)
-    # 세로 그라디언트
-    for y in range(H):
-        t = y / H
-        c = tuple(round(a + (b - a) * t) for a, b in zip(BG_TOP, BG_BOT))
-        draw.line([(0, y), (W, y)], fill=c)
+    msg = build_message()
 
-    # 상단: 브랜드 + 날짜
-    f_brand = font("NanumGothic-Bold.ttf", 34)
-    f_date = font("NanumGothic-Regular.ttf", 30)
-    draw.text((70, 62), "차트프로 관제탑", font=f_brand, fill=SUB)
-    요일 = "월화수목금토일"[datetime.now().weekday()]
-    날짜문 = f"{int(DATE[4:6])}월 {int(DATE[6:])}일 ({요일}) 마감"
-    dw = draw.textlength(날짜문, font=f_date)
-    draw.text((W - 70 - dw, 66), 날짜문, font=f_date, fill=SUB)
+    # ── ① 썸네일이 있으면 sendPhoto로 '직접 업로드' ──────────────
+    #  ⚠️ 왜 바꿨나: 예전에는 sendMessage + link_preview_options만 보냈다.
+    #     그러면 텔레그램이 우리 페이지를 **직접 크롤링해서** og:image를 읽어야
+    #     썸네일이 뜬다. 그런데
+    #       · GitHub Pages 배포가 아직 안 끝났거나
+    #       · 텔레그램이 그 URL을 이미 캐시해 뒀거나
+    #       · 크롤러가 늦게 오면
+    #     그림 없이 글자만 나간다. 실제로 계속 그랬다.
+    #  → 파일을 우리가 직접 올려버리면 크롤링·캐시와 무관하게 100% 나온다.
+    사진 = _thumb_path()
+    if 사진:
+        try:
+            with open(사진, "rb") as f:
+                r = requests.post(
+                    f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                    data={"chat_id": CHAT_ID, "caption": msg},
+                    files={"photo": (os.path.basename(사진), f, "image/png")},
+                    timeout=30,
+                )
+            if r.status_code == 200:
+                print(f"✅ 텔레그램 전송 완료 (썸네일 직접 첨부: {사진}) [{SCRIPT_VERSION}]")
+                return
+            print(f"⚠️ sendPhoto 실패 HTTP {r.status_code}: {r.text[:200]} — 글만 재시도합니다")
+        except Exception as e:
+            print(f"⚠️ sendPhoto 오류: {type(e).__name__}: {e} — 글만 재시도합니다")
+    else:
+        print(f"⚠️ 썸네일 파일 없음(thumb/{DATE}.png) — 글만 보냅니다")
 
-    # 중앙: 한줄평 (강조어만 주황)
-    f_main = font("NanumGothic-ExtraBold.ttf", 76)
-    lines = wrap(draw, 한줄, f_main, W - 140)
-    if len(lines) == 3:                       # 3줄이면 글자를 줄여 2~3줄 안정화
-        f_main = font("NanumGothic-ExtraBold.ttf", 62)
-        lines = wrap(draw, 한줄, f_main, W - 140)
-    강조 = pick_accent(한줄)
-    line_h = int(f_main.size * 1.32)
-    total_h = line_h * len(lines)
-    y = (H - total_h) // 2 - 20
-    for line in lines:
-        x = 70
-        if 강조 and 강조 in line:
-            before, after = line.split(강조, 1)
-            if before:
-                draw.text((x, y), before, font=f_main, fill=INK)
-                x += draw.textlength(before, font=f_main)
-            draw.text((x, y), 강조, font=f_main, fill=ACCENT)
-            x += draw.textlength(강조, font=f_main)
-            if after:
-                draw.text((x, y), after, font=f_main, fill=INK)
+    # ── ② 사진이 없거나 실패하면 기존 방식(링크 미리보기)으로 폴백 ──
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{TOKEN}/sendMessage",
+            json={"chat_id": CHAT_ID, "text": msg,
+                  "link_preview_options": {"url": REPORT_URL,
+                                           "prefer_large_media": True,
+                                           "show_above_text": True}},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            print("✅ 텔레그램 알림 전송 완료 (링크 미리보기)")
         else:
-            draw.text((x, y), line, font=f_main, fill=INK)
-        y += line_h
-
-    # 하단: 금색 바 + 공감문구
-    bar_y = H - 150
-    draw.rounded_rectangle([70, bar_y, 78, bar_y + 74], radius=4, fill=GOLD)
-    if 공감:
-        f_feel = font("NanumGothic-Bold.ttf", 40)
-        draw.text((100, bar_y + 14), 공감, font=f_feel, fill=(200, 205, 212))
-    f_foot = font("NanumGothic-Regular.ttf", 24)
-    draw.text((100, H - 52), "매일 저녁 · 숫자로 검증하는 시장 관제", font=f_foot, fill=SUB)
-
-    os.makedirs("thumb", exist_ok=True)
-    out = os.path.join("thumb", f"{DATE}.png")
-    img.save(out, "PNG")
-    print(f"✅ 썸네일 생성: {out}  ({W}×{H}) [{SCRIPT_VERSION}]")
+            print(f"⚠️ 텔레그램 전송 실패 HTTP {r.status_code}: {r.text[:200]}")
+    except Exception as e:
+        print(f"⚠️ 텔레그램 전송 오류: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
