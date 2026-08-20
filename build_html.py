@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n14"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.20-n15"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1668,7 +1668,8 @@ def build_index_header(지수수급, 파생, 코수, style=None, 관제=None, �
                              태그색=d.get("태그색"))
 
         return (f'<div class="ix-head"><div class="ix-mood">{아이콘HTML}'
-                f'<div class="ix-mood-txt"><p class="ix-mood-t">오늘은 <span class="yl">{d["성격이름"]}</span></p>'
+                # ⚠️ 앞의 "오늘은"은 매일 똑같아 자리만 먹는다(2026-08-20 지시). 뺐다.
+                f'<div class="ix-mood-txt"><p class="ix-mood-t"><span class="yl">{d["성격이름"]}</span></p>'
                 f'<p class="ix-mood-s">{d["성격부제"]}</p></div></div>'
                 f'<div class="ix-bars"><p class="ix-grouplbl">지수 (±4%)</p>'
                 f'{row("코스피",코)}{row("코스닥",닥)}'
@@ -2162,7 +2163,7 @@ def build_top_picks(해석):
     return ('<div style="background:#12161d;border:1px solid #f0c65a33;border-left:3px solid #f0c65a;'
             'border-radius:0 12px 12px 0;padding:13px 14px;margin:0 0 14px">'
             f'<p style="margin:0 0 9px;font-size:16.5px;font-weight:800;color:#f0c65a">'
-            f'오늘 시장에서 딱 {한글수} 가지만 보십시오</p>'
+            f'오늘 {한글수} 가지만 기억하세요</p>'
             f'<ul style="margin:0;padding:0;list-style:none">{줄}</ul></div>')
 
 
@@ -2355,8 +2356,20 @@ ZONE_EXCLUDE = {"신규 테마", "신규 주도"}   # 구 이름도 함께(과�
 
 
 def _zone_series():
-    """{구역명: {날짜: 등락률}} 과 {날짜: 시장등락률}을 만든다."""
+    """{구역명: {날짜: 등락률}} 과 {날짜: 시장등락률}을 만든다.
+
+    ⚠️ 휴장일 오염 제거 (2026-08-20 발견)
+       워크플로가 토·일·공휴일에도 돌면 archive에 **직전 거래일과 똑같은
+       data_*.json** 이 쌓인다(8/15 토, 8/17 대체공휴일 등).
+       그대로 누적하면 5일·20일 탭의 승패·초과수익이 같은 날을 여러 번 세어
+       "오늘 장 것 같지 않은" 숫자가 나온다.
+       flow_history는 prune_flow_history()가 청소하지만, 여기는 archive를
+       직접 훑기 때문에 **같은 가드를 여기에도 걸어야 한다.**
+         ① 토·일은 날짜만으로 제외
+         ② 직전 채택일과 격자 값이 완전히 동일하면 제외(공휴일)
+    """
     구역 = {}
+    _직전 = None
     for f in sorted(alist(r"data_\d{8}\.json")):
         try:
             with open(apath(f), encoding="utf-8") as fp:
@@ -2364,6 +2377,18 @@ def _zone_series():
         except Exception:
             continue
         날짜 = d.get("날짜")
+        try:
+            if datetime.strptime(str(날짜), "%Y%m%d").weekday() >= 5:
+                continue                      # 토·일
+        except Exception:
+            pass
+        _지문 = tuple(sorted(
+            (r.get("테마"), r.get("전체"))
+            for r in ((d.get("계좌격자") or {}).get("행") or [])
+            if r.get("테마")))
+        if _지문 and _지문 == _직전:
+            continue                          # 직전 거래일과 완전히 동일 = 휴장일
+        _직전 = _지문 or _직전
         for r in ((d.get("계좌격자") or {}).get("행") or []):
             v, nm = r.get("전체"), r.get("테마")
             if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
@@ -3507,6 +3532,7 @@ def _tier_series():
             nm, 칸 = r.get("테마"), (r.get("칸") or {})
             if nm in ZONE_EXCLUDE:      # 매일 내용물이 바뀌는 칸 — 누적 금지
                 continue
+            # (휴장일 중복은 위 _tier_skip 가드에서 이미 걸러진다)
             vals = {t: (칸.get(t) or {}).get("등락률") for t in ("대형", "중형", "소형")}
             if nm and all(isinstance(v, (int, float)) for v in vals.values()):
                 out.setdefault(nm, {})[날짜] = vals
@@ -4333,8 +4359,9 @@ def build_core(핵심편, data, 해석):
     rows = _load_market_history()
 
     # ── 지수 헤더 (스타일은 HEADER_STYLE 상수로 전환) ──
-    지수스트립 = build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"),
-                                   사건명=(해석.get("사건명") or ""))
+    지수스트립 = (build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"),
+                                    사건명=(해석.get("사건명") or ""))
+                + core_flow_gauge() + _flow_comment())
 
     def _f(v):
         try:
@@ -4564,18 +4591,18 @@ def build_core(핵심편, data, 해석):
             + 해석블록
             + hide("핵심편섹터", build_sector_scoreboard())
             + 내종목
-            + '<div class="mny"><p class="mny-h">💰 오늘 수급, 평소와 뭐가 달랐나</p>'
-            + '<p class="mny-sub">최근 20거래일과 비교했습니다</p>'
+            # ⚠️ 계기판을 헤더 막대 바로 밑으로 올렸으므로(2026-08-20)
+            #    여기 제목·부제는 뺐다. 막대 → 계기판 흐름이 이미 설명이다.
+            + '<div class="mny">'
             # ⚠️ 수급 코너는 **계기판 하나**로 압축했다(2026-08-19).
             #    타일(외국인/기관/개인 수치)은 맨 위 헤더 막대와 같은 말이고,
             #    노란 네모 1,2,3은 계기판 배지와 겹친다 → 둘 다 뺐다.
-            + core_flow_gauge()
             + hide("수급타일", f'<div class="mny-tiles">{타일HTML}</div>')
             + 변속기블록
             # ⚠️ 왜블록(🧭 왜 이렇게)은 위쪽 해석블록으로 합쳤다(2026-08-19).
             #    여기서는 계기판 밑에 **수급 특징 한 줄**만 남긴다.
             + hide("수급특징", f'<div class="mny-feat">{특징}</div>')
-            + _flow_comment() + '</div>'
+            + '</div>'
             + 격자블록
             + 뒤집블록 + 딱N블록 + 핵심디버전스
             + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
