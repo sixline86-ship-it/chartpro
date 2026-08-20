@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.20-n18"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.20-n19"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -1586,6 +1586,10 @@ def collect_accumulation_radar():
                 시총 = to_num(row.get("시가총액"))
                 코드 = 코드맵.get(이름)
                 if not 이름 or not 코드 or 시총 is None:
+                    continue
+                # ⚠️ ETF·ETN·스팩·우선주 제외 (2026-08-20).
+                #    '조용히 모으는 손'도 개별 기업이어야 한다. 강세 레이더와 같은 기준.
+                if _str_excluded(이름):
                     continue
                 유니버스.append((이름, 코드, 시장, 시총))
                 모은수 += 1
