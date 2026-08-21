@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n22"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n23"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -3829,7 +3829,7 @@ def _cyc_stat(rk):
 
 
 def build_sector_map():
-    """🗺️ 섹터 순위맵 — 주도권이 어떻게 돌았나."""
+    """🗺️ 섹터 순위 타일 — 주도권이 어떻게 돌았나."""
     날짜, 순위, 초과 = _cyc_rank()
     if not 날짜:
         return ""
@@ -3927,7 +3927,7 @@ def build_sector_map():
 </script>"""
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 순위맵</p>'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 순위 타일</p>'
             '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '주도권이 어떻게 돌았나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>' + 패널 +
@@ -7482,7 +7482,7 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 누가 이끌었나?</p>
   {build_slope_chart(data.get('계좌격자'))}
 
-  <p class="sec-label"><small>순환 분석</small>🗺️ 섹터 순위맵 — 주도권이 어떻게 돌았나</p>
+  <p class="sec-label"><small>순환 분석</small>🗺️ 섹터 순위 타일 — 주도권이 어떻게 돌았나</p>
   {build_sector_map()}
 
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
