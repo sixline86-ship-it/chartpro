@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n20"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n21"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -2166,7 +2166,7 @@ def build_account_grid(격자, 주도섹터=None):
 
     return ('<div style="background:#161a22;border:1px solid #232a36;border-radius:14px;'
             'padding:14px 14px 12px;margin:0 0 14px">'
-            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 종목 구역</p>'
+            '<p style="margin:0 0 2px;font-size:12px;color:#8b93a0;letter-spacing:.02em">내 종목 지도</p>'
             '<p style="margin:0 0 10px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
             '오늘 내 종목은 어디에 있었나</p>'
             # min-width를 없애 화면 폭에 맞춘다 — 모바일에서 한눈에 다 보이게.
@@ -2788,8 +2788,9 @@ def build_my_stocks(data):
      if(bb&&Math.abs(bb.v)>=1.5) 왜='개별 재료 없이 <b>'+bb.z+'</b> 구역 흐름('+fmt(bb.v)+'%)을 따라간 것으로 보입니다';
      else 왜='뚜렷한 개별 재료 없이 <b>시장 흐름</b>을 따라간 것으로 보입니다';
     }
-    원인='<p style="margin:0 0 6px;font-size:11.5px;color:#e8eaee;line-height:1.6">'+
-      화살+' <b>왜 '+방향+'</b> — '+왜+'.</p>';
+    // 원인은 별도 문단이 아니라 '오늘 분석' 안 첫 문장으로 들어간다(2026-08-21).
+    // 분석과 원인이 따로 있으면 같은 얘기를 두 번 읽게 된다.
+    원인='<b>'+화살+' 왜 '+방향+'</b> '+왜+'. ';
    })();
    var 분석='';
    if(c&&!c.short){
@@ -2838,7 +2839,7 @@ def build_my_stocks(data):
     '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
     'border-left:2.5px solid #e0c060">'+
     '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.7">'+
-    원인+'<b style="color:#e0c060">오늘 분석</b> — '+분석+'</p></div></div>';
+    '<b style="color:#e0c060">오늘 분석</b> — '+원인+분석+'</p></div></div>';
   });
   host.innerHTML=out;
  }
@@ -3782,7 +3783,9 @@ def _tier_cum(일별, n):
 #  섹터별 '일별 순위'에서 체류·주기를 계산해 다음 순번을 가늠한다.
 #  ⚠️ 예측이 아니라 순서 관찰이다. 주기는 자주 깨진다.
 CYC_TOP = 5           # 상위 N위를 '주도권 안'으로 본다
-CYC_WINS = [(20, "20일"), (60, "60일"), (120, "120일")]
+# ⚠️ 다른 코너(섹터 성적표·크기별·관심종목)와 **같은 창 구성**으로 맞춘다(2026-08-21).
+#    코너마다 기간이 다르면 같은 기능인 줄 모른다.
+CYC_WINS = [(1, "당일"), (5, "5일"), (20, "20일"), (60, "60일")]
 
 
 def _cyc_rank():
@@ -3826,7 +3829,7 @@ def _cyc_stat(rk):
 
 
 def build_sector_map():
-    """🗺️ 순위 섹터맵 — 주도권이 어떻게 돌았나."""
+    """🗺️ 섹터 순위맵 — 주도권이 어떻게 돌았나."""
     날짜, 순위, 초과 = _cyc_rank()
     if not 날짜:
         return ""
@@ -3924,7 +3927,7 @@ def build_sector_map():
 </script>"""
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">순위 섹터맵</p>'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 순위맵</p>'
             '<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '주도권이 어떻게 돌았나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>' + 패널 +
@@ -4315,7 +4318,7 @@ def build_slope_chart(격자):
             축 = "".join(
                 f'<line x1="{X[t]}" y1="{T-8}" x2="{X[t]}" y2="{H-B+8}" stroke="#232a36" '
                 f'stroke-width="1"/><text x="{X[t]}" y="{T-14}" text-anchor="middle" '
-                f'font-size="11" fill="#9aa0aa">{t}</text>' for t in X)
+                f'font-size="13.5" font-weight="900" fill="#e8eaee">{t}</text>' for t in X)
             영 = (f'<line x1="34" y1="{Y(0):.0f}" x2="344" y2="{Y(0):.0f}" stroke="#3a4150" '
                  f'stroke-dasharray="4 4"/>') if lo < 0 < hi else ""
 
@@ -4370,7 +4373,7 @@ def build_slope_chart(격자):
             'padding:13px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 크기별</p>'
             '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '대형에서 소형으로 갈 때 무슨 일이</p>'
+            '대형, 중형, 소형 누가 강한가?</p>'
             f'<div style="display:flex;gap:6px;margin:10px 0 9px">{탭}</div>'
             + 패널 +
             '<p style="margin:8px 0 0;font-size:10.5px;color:#6f7784;line-height:1.6">'
@@ -7438,16 +7441,16 @@ a{{color:inherit;text-decoration:none}}
   {build_stock_brief()}
 
 
-  <p class="sec-label"><small>내 자리</small>📊 섹터 구역</p>
+  <p class="sec-label"><small>내 자리</small>📊 섹터 지도</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
 
   <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>
   {build_sector_scoreboard()}
 
-  <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 대형이 끌었나</p>
+  <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 누가 이끌었나?</p>
   {build_slope_chart(data.get('계좌격자'))}
 
-  <p class="sec-label"><small>순환 분석</small>🗺️ 순위 섹터맵 — 주도권이 어떻게 돌았나</p>
+  <p class="sec-label"><small>순환 분석</small>🗺️ 섹터 순위맵 — 주도권이 어떻게 돌았나</p>
   {build_sector_map()}
 
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
