@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n40"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.22-p2"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1401,7 +1401,7 @@ def _hdr_flow_badge(key):
     elif st["연속"] >= 3:
         뒤 = f'{st["연속"]}일 연속 {st["dir"]}'
     elif st["배수"] >= 1.5:
-        뒤 = f'평소 {st["배수"]:.1f}배'
+        뒤 = f'평소 {_배수말(st["배수"])}'
     return (f'<span class="bdg1">{앞}</span>'
             + (f'<span class="bdg2">{뒤}</span>' if 뒤 else ""))
 
@@ -3113,6 +3113,94 @@ def build_stock_brief():
             '별일 없는 날은 짧게 끝납니다.</p></div>')
 
 
+# 🗓️ 섹터 분류 기준 변경 안내 — 이 날짜까지만 띄운다(지나면 자동으로 사라진다).
+#   ⚠️ 원칙 3 "틀린 걸 지우지 않는다" — 기준이 바뀌면 조용히 바꾸지 않고 밝힌다.
+#   2026-08-22: 구역 배정을 '오늘의 네이버 테마' → '업종(WICS)+수동 핀'으로 바꿨다.
+#   그 전에는 S7 테마 때문에 삼성생명이 반도체로, 수소차 테마 때문에 기아가
+#   전력·신재생·원전으로 잡혔다. 표본도 6종목 → 166종목으로 늘어 숫자 자체가 달라진다.
+SECTOR_RULE_CHANGED = "20260822"
+SECTOR_RULE_NOTE_UNTIL = "20260912"      # 3주 뒤 자동 종료
+
+
+def sector_rule_note():
+    """섹터 분류 기준이 바뀌었음을 알리는 안내 상자(기간 지나면 빈 문자열)."""
+    try:
+        if DATE > SECTOR_RULE_NOTE_UNTIL:
+            return ""
+    except Exception:
+        return ""
+    return ('<div style="background:#1a1710;border:1px solid #3d3320;border-radius:10px;'
+            'padding:11px 12px;margin:0 0 10px">'
+            '<p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#f0c65a">'
+            '🗓️ 2026-08-22부터 섹터 분류 기준이 바뀌었습니다</p>'
+            '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+            '예전에는 <b>그날의 네이버 테마</b>로 섹터를 정했습니다. 그래서 삼성생명이 '
+            '<b>반도체</b>에, 기아·현대차가 <b>전력·신재생·원전</b>에 들어가는 일이 있었습니다. '
+            '이제는 <b>업종(표준 산업분류)</b>을 주소로 씁니다. '
+            '섹터당 종목 수가 크게 늘어(예: 반도체 6종목 → 166종목) '
+            '<b>이전 리포트의 섹터 숫자와는 이어지지 않습니다.</b> '
+            '지난 기록을 지우지 않고 그대로 두되, 이 점을 밝혀둡니다.</p></div>')
+
+
+def build_sector_brief():
+    """📈 오늘 섹터 한 줄 — 핵심편용 요약.
+
+    ⚠️ 왜 만들었나 (2026-08-22)
+      핵심편과 심층편에 **완전히 같은** 섹터 성적표 카드가 두 번 나왔다.
+      탭·체크박스·선 그래프·보는 방법까지 전부 같아서 '요약'이 아니라 '복붙'이었다.
+      그렇다고 핵심편에서 통째로 빼면 「팩트 → 해석 → 섹터 → 감정」 흐름이 끊긴다.
+      → 핵심편에는 **오늘 가장 센 곳/가장 약한 곳 한 줄**만 남기고,
+        판단에 필요한 표는 심층편 한 곳에서만 보여준다.
+    """
+    구역, 시장 = _zone_series()
+    if not 구역 or not 시장:
+        return ""
+    통계 = []
+    for nm, 일별 in 구역.items():
+        st = _zone_stat(일별, 시장, 1)      # 당일 창
+        if st:
+            통계.append((nm, st[0]))        # (섹터명, 초과수익%p)
+    if len(통계) < 4:
+        return ""
+    통계.sort(key=lambda x: -x[1])
+    상, 하 = 통계[:3], 통계[-3:][::-1]
+
+    def 칩(items, 색):
+        return "".join(
+            f'<span style="display:inline-flex;align-items:center;gap:3px;'
+            f'background:#1b2230;border:1px solid #262e3c;border-radius:999px;'
+            f'padding:3px 9px;margin:3px 4px 0 0;font-size:11.5px;color:#c9ced6">'
+            f'<b style="color:{sector_color(nm)}">●</b>{nm}'
+            f'<b style="color:{색}">{v:+.1f}%p</b></span>'
+            for nm, v in items)
+
+    # ⚠️ 라벨을 데이터로 정한다 — 2026-08-22.
+    #    "시장을 이긴 자리"라고 써놓고 값이 −1.1%p면 그 자체가 거짓말이다.
+    #    실제로 코스피가 오른 날 전 섹터가 코스피에 지는 경우가 있다
+    #    (2026-08-21: 코스피 +0.88%인데 대형주 몇 종목만 올려서 전 섹터 초과수익 음수).
+    if 상[0][1] > 0:
+        위라벨 = "시장을 이긴 자리"
+    else:
+        위라벨 = "그나마 덜 밀린 자리 — 오늘은 코스피를 이긴 섹터가 없습니다"
+    아래라벨 = "시장에 가장 크게 진 자리" if 하[0][1] < 0 else "가장 덜 오른 자리"
+
+    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            'padding:13px 14px;margin:10px 0 0">'
+            '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 성적</p>'
+            '<p style="margin:0 0 8px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '📈 오늘, 자리가 갈랐습니다'
+            '<span style="font-size:11.5px;font-weight:600;color:#8b93a0">'
+            ' · 코스피 대비 초과수익</span></p>'
+            f'<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">{위라벨}</p>'
+            f'<div style="margin:0 0 9px">{칩(상, FS_BUY if 상[0][1] > 0 else "#8b93a0")}</div>'
+            f'<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">{아래라벨}</p>'
+            f'<div>{칩(하, FS_SELL)}</div>'
+            '<p style="margin:9px 0 0;font-size:11px;color:#8b93a0;line-height:1.5">'
+            '내 종목이 아래쪽에 있다면 <b style="color:#c9ced6">종목 선택이 아니라 '
+            '자리가 불리했다</b>는 뜻입니다 · 전체 순위와 기간별 추이는 '
+            '<b style="color:#f0c65a">심층편 &lt;섹터 성적표&gt;</b>에 있습니다</p></div>')
+
+
 def build_sector_scoreboard():
     """📊 섹터 성적표 — 순위 막대 + 선 그래프를 한 카드로.
 
@@ -3388,6 +3476,7 @@ def build_sector_scoreboard():
 
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
+            + sector_rule_note() +
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 성적표</p>'
             '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '어느 섹터가 시장을 이겼나 '
@@ -4768,7 +4857,7 @@ def _anomaly_signals(data):
             st실 = _fs_stat([x["실탄"] for x in h])
             if st실 and st실["배수"] >= 2.0:
                 후보.append((82, "#flow", "규모",
-                             f'실탄이 평소의 <b>{st실["배수"]:.1f}배</b> — 유별나게 큰 하루입니다'))
+                             f'실탄이 평소의 <b>{_배수말(st실["배수"])}</b> — 유별나게 큰 하루입니다'))
             _r = basket_ratio(t.get("비차익"), t.get("실탄"))
             if _r is not None and abs(_r) >= 150:
                 후보.append((75, "#flow", "비차익",
@@ -5171,7 +5260,7 @@ def build_core(핵심편, data, 해석):
             #    한 상자에 담고 있어, 둘 다 넣으면 같은 제목·같은 내용이 두 번 나온다.
             #    (2026-08-21 미리보기에서 실제로 중복이 확인됐다)
             + 해석블록
-            + hide("핵심편섹터", build_sector_scoreboard())
+            + hide("핵심편섹터간략", build_sector_brief())
             + 내종목
             # ⚠️ 계기판을 헤더 막대 바로 밑으로 올렸으므로(2026-08-20)
             #    여기 제목·부제는 뺐다. 막대 → 계기판 흐름이 이미 설명이다.
@@ -5487,6 +5576,7 @@ def detect_divergences(data):
     코등 = f((지.get("코스피") or {}).get("등락률"))
     닥등 = f((지.get("코스닥") or {}).get("등락률"))
     외 = f(코수.get("외국인")); 기 = f(코수.get("기관계"))
+    개인 = f(코수.get("개인"))          # 🆕 2026-08-22 — 아래 ①에서 사실 확인용
     실탄오늘 = (외 + 기) if (외 is not None and 기 is not None) else None
 
     h = load_json("flow_history.json") or []
@@ -5499,12 +5589,23 @@ def detect_divergences(data):
 
     # ① 지수 상승 vs 20일 실탄 유출 (고점 경계)
     if 코등 is not None and 코등 > 0.3 and 실탄20 is not None and 실탄20 < 0 and len(h20) >= 8:
+        # ⚠️ 2026-08-22 수정 — 예전에는 개인 수급을 **확인하지 않고**
+        #    "개인이 밀어올린 상승"이라고 단정했다. 실제로 2026-08-21에는
+        #    코스피 개인이 −1.17조 순매도인데도 이 문장이 그대로 나갔다.
+        #    → 오늘 개인이 실제로 순매수일 때만 그렇게 쓴다. 아니면 사실만 말한다.
+        if 개인 is not None and 개인 > 0:
+            누가 = ("외국인·기관이 아니라 <b>개인이 밀어올린</b> 상승일 수 있어")
+        elif 개인 is not None and 개인 < 0:
+            누가 = (f"오늘은 개인마저 <b>{_flow_amt(개인)}</b> 팔았습니다. "
+                   f"즉 <b>소수 종목에만 돈이 몰린</b> 상승이라")
+        else:
+            누가 = "무엇이 지수를 올렸는지 <b>수급으로는 확인되지 않아</b>"
         signals.append((
             "warn", "⚠️",
             "지수는 오르는데, 큰돈은 빠지는 중",
             f"코스피가 <b>{코등:+.1f}%</b> 올랐지만 최근 {len(h20)}일 실탄은 "
-            f"<b>{_flow_amt(실탄20)}</b> 빠져나갔습니다. 외국인·기관이 아니라 개인이 밀어올린 "
-            f"상승일 수 있어, <b>지속력은 지켜봐야</b> 합니다."))
+            f"<b>{_flow_amt(실탄20)}</b> 빠져나갔습니다. {누가}, "
+            f"<b>지속력은 지켜봐야</b> 합니다."))
 
     # ② 오늘 외국인 매수 vs 20일 누적 매도 (바닥 전환 초기)
     if 외 is not None and 외 > 0 and 외20 is not None and 외20 < 0 and len(h20) >= 8:
@@ -5525,6 +5626,8 @@ def detect_divergences(data):
                 f"코스피는 <b>{코등:+.1f}%</b>인데 코스닥은 <b>{닥등:+.1f}%</b>입니다. "
                 f"돈이 일부 대형주에만 몰린 <b>쏠림 장세</b>라, 지수만 보고 '좋았다'고 "
                 f"느끼면 실제 체감과 어긋납니다."))
+        # ⚠️ 이 가지는 코등>0.5 AND 닥등<0 일 때만 들어온다 —
+        #    즉 "대형주만 웃고"라는 말이 데이터로 항상 참이다. (2026-08-22 점검 완료)
         elif abs(갭) >= 1.5:
             signals.append((
                 "watch", "👀",
@@ -5770,6 +5873,10 @@ HIDDEN_CHAPTERS = {
     "수급타일",           # 2026-08-19 — 헤더 수급 막대와 같은 말
     "수급특징",           # 2026-08-19 — 계기판 배지와 겹침
     "핵심편격자",         # 2026-08-19 — 내 종목 구역·섹터 성적표는 심층편에서 다룬다
+    "핵심편섹터",         # 🆕 2026-08-22 — 심층편과 **글자 하나까지 똑같은** 카드가
+                        #    두 번 렌더돼 원칙 5("같은 그림을 두 번 보여주지 않는다")를
+                        #    어기고 있었다. 체크박스 id도 겹쳐 선 그래프 연동이 흔들린다.
+                        #    핵심편에는 아래 build_sector_brief()로 한 줄만 남긴다.
     "수급변속기",         # 2026-08-19 — 계기판과 역할이 겹친다
     "새테마",               # 2026-08-19 — 어차피 '오늘의 주인공'에 같은 테마가 나온다
     "지수와수급나란히",     # 2026-08-18 — 통합 타임라인과 역할이 겹침
@@ -5791,16 +5898,38 @@ def hidden_note():
             " (build_html.py의 HIDDEN_CHAPTERS에서 해제) -->")
 
 
+FLOW_창 = 20          # 🆕 2026-08-22 — 순위를 세는 창. generate_report와 반드시 같아야 한다.
+
+
+def _배수말(배수):
+    """평소 대비 크기를 사람이 읽는 말로 바꾼다.
+
+    ⚠️ 2026-08-21 실제 사고: 실탄 721억 / 평소 25,975억 = 0.0277배를
+       "{:.1f}배"로 찍어 화면에 **"0.0배"**가 나왔다. 같은 화면 본문은
+       "3% 수준"이라고 써서 독자 눈에는 계산 오류로 보였다.
+       → 0.1배 미만은 배수 대신 **퍼센트**로 말한다.
+    """
+    if not 배수:
+        return "—"
+    if 배수 < 0.1:
+        return f"{배수 * 100:.0f}%"
+    return f"{배수:.1f}" + "배"
+
+
 def _fs_stat(arr, 평소일수=20):
     """주체 하나의 오늘 성적 — 방향별 순위·상위%·N일 만의 최대·연속일수·평소 배수.
 
     ⚠️ 매도인 날에 '매수 기준 15위'라고 쓰면 정반대로 읽힌다.
        매수면 큰 순, 매도면 작은 순으로 세어 **그 방향에서 몇 번째인가**를 말한다.
     """
-    arr = [v for v in arr if v is not None]
-    n = len(arr)
-    if n == 0:
+    전체 = [v for v in arr if v is not None]
+    if not 전체:
         return None
+    # ⚠️ 2026-08-22 — 순위를 세는 창을 "오늘 포함 최근 20거래일"로 못 박는다.
+    #    예전에는 넘어온 배열 전체(21일)로 셌는데 generate_report는 20일로 세서,
+    #    같은 날 실탄이 화면엔 "매수 11위/21일", Claude 글엔 "20일 중 13위"로 갈렸다.
+    arr = 전체[-FLOW_창:]
+    n = len(arr)
     v = arr[-1]
     rk = (sorted(arr, reverse=True) if v >= 0 else sorted(arr)).index(v) + 1
     back = 1
@@ -5810,7 +5939,8 @@ def _fs_stat(arr, 평소일수=20):
             back = j
         else:
             break
-    기준 = arr[-(평소일수 + 1):-1] if n >= 6 else arr[:-1]
+    # 평소(=비교 기준)는 오늘을 뺀 직전 20거래일. generate_report의 평균()과 같은 규칙.
+    기준 = 전체[-(평소일수 + 1):-1] if len(전체) >= 6 else 전체[:-1]
     평소 = (sum(abs(x) for x in 기준) / len(기준)) if 기준 else 0
     연속 = 1
     for i in range(n - 1, 0, -1):
@@ -5867,7 +5997,7 @@ def _fs_gauge(st, W=118):
              f'<path d="M{cx-3.4} {cy} L{cx} {cy-r+6} L{cx+3.4} {cy} Z" fill="{c}"/></g>')
     g.append(f'<circle cx="{cx}" cy="{cy}" r="5" fill="#0f131a" stroke="{c}" stroke-width="2.4"/>')
     g.append(f'<text x="{cx}" y="{cy+22}" font-size="15" fill="{c}" font-weight="900" '
-             f'text-anchor="middle">{배수:.1f}배</text>')
+             f'text-anchor="middle">{_배수말(배수)}</text>')
     g.append(f'<text x="{cx}" y="{cy+33}" font-size="7.5" fill="#7d848f" font-weight="700" '
              f'text-anchor="middle">평소 대비</text>')
     return f'<svg class="fs-g" viewBox="-6 -4 144 108" style="width:{W}px">{"".join(g)}</svg>'
@@ -5902,7 +6032,7 @@ def _fs_keyfact(st):
     if st["연속"] >= 3:
         return "🔁", f'{st["연속"]}일 연속 {st["dir"]}'
     if st["배수"] >= 1.5:
-        return "⚡", f'평소의 {st["배수"]:.1f}배'
+        return "⚡", f'평소의 {_배수말(st["배수"])}'
     if st["배수"] and st["배수"] < 0.6:
         return "💤", "평소보다 조용한 하루"
     return "·", "평범한 규모"
@@ -5919,7 +6049,7 @@ def _fs_subrow(name, st, col, MX):
           <p class="fs-sub-v" style="color:{c}">{_flow_amt(st["v"])}</p>
         </div>
         <p class="fs-sub-x"><span class="fs-key" style="border-color:{c}55;color:{c}">{ico} {key}</span>
-          {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일 · 평소 하루치의 <b>{st["배수"]:.1f}배</b></p>
+          {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일 · 평소 하루치의 <b>{_배수말(st["배수"])}</b></p>
       </div>'''
 
 
@@ -6198,11 +6328,11 @@ def _flow_comment():
         조각.append(f'외국인·기관이 <b>같은 방향</b>이라 실탄이 '
                     f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 쌓였습니다.')
     if st["배수"] >= 1.5:
-        조각.append(f'규모는 평소의 <b>{st["배수"]:.1f}배</b>로 <b>유별난 하루</b>입니다.')
+        조각.append(f'규모는 평소의 <b>{_배수말(st["배수"])}</b>로 <b>유별난 하루</b>입니다.')
     elif st["배수"] < 0.6:
-        조각.append(f'다만 규모는 평소의 <b>{st["배수"]:.1f}배</b>라 <b>화력은 약했습니다</b>.')
+        조각.append(f'다만 규모는 평소의 <b>{_배수말(st["배수"])}</b>라 <b>화력은 약했습니다</b>.')
     else:
-        조각.append(f'규모는 평소의 <b>{st["배수"]:.1f}배</b>로 평범합니다.')
+        조각.append(f'규모는 평소의 <b>{_배수말(st["배수"])}</b>로 평범합니다.')
     return f'<p class="mny-cmt">{" ".join(조각)}</p>'
 
 
@@ -6393,7 +6523,7 @@ def build_flow_signal(파생, 지수수급, 해석=None):
     상태 = ("매수 우위" if 방향양 else "매도 우위")
     if 배수 and 배수 >= FLOW_강한배수:
         상태 = ("강한 매수" if 방향양 else "강한 매도")
-    배수문 = f" · 평소의 {배수:.1f}배" if (배수 and N >= 6) else ""
+    배수문 = f" · 평소의 {_배수말(배수)}" if (배수 and N >= 6) else ""
     vc = "pos" if 방향양 else "neg"
 
     # ── 체크②: 선물 동의 ──
@@ -6462,11 +6592,11 @@ def build_flow_signal(파생, 지수수급, 해석=None):
     동사 = "들어왔습니다" if 방향양 else "빠져나갔습니다"
     if 배수 and N >= 6:
         if 배수 >= 2.5:
-            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{배수:.1f}배</b> — 눈에 띄게 큰 하루입니다."
+            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{_배수말(배수)}</b> — 눈에 띄게 큰 하루입니다."
         elif 배수 >= FLOW_강한배수:
-            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{배수:.1f}배</b>로 평소보다 큽니다."
+            크기말 = f"최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 <b>{_배수말(배수)}</b>로 평소보다 큽니다."
         elif 배수 >= 0.6:
-            크기말 = f"규모는 최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)과 <b>비슷한 수준</b>({배수:.1f}배)입니다."
+            크기말 = f"규모는 최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)과 <b>비슷한 수준</b>({_배수말(배수)})입니다."
         else:
             크기말 = (f"다만 규모는 최근 {len(기준들)}거래일 하루 평균({평소실탄:,.0f}억)의 "
                     f"<b>{배수*100:.0f}%</b> 수준으로 조용한 편입니다.")
