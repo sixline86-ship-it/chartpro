@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n26"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n35"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -2624,7 +2624,8 @@ def build_my_stocks(data):
  window.CP_PAINT=window.CP_PAINT||[];
  var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
  var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
- var WINDOWS=[[5,'이번 주'],[20,'한 달'],[60,'분기']], curW=5;
+ // ⚠️ 기본은 **당일**. 다른 코너와 같은 창 구성·같은 이름으로 맞춘다(2026-08-21).
+ var WINDOWS=[[1,'당일'],[5,'5일'],[20,'20일'],[60,'60일']], curW=1;
  function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
  function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
  // 내 관심종목이 속한 섹터 집합 — 계좌 구역·섹터 성적표·시총별 섹터가 함께 쓴다.
@@ -3494,6 +3495,18 @@ def build_crowd_compass(_구=None):
                    f'{증문}</span></span></div>'
                    f'<p style="margin:5px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
                    f'{해석}</p>' + 추이HTML + '</div>')
+    else:
+        # ⚠️ 없으면 조용히 빼지 않는다(2026-08-21 지시).
+        #    빠지면 "왜 안 보이지"를 알 수가 없다. **없다는 사실 자체를 알린다.**
+        신용HTML = ('<div style="margin-top:9px;padding:9px 10px;background:#1a1610;'
+                   'border:1px solid #3a3020;border-radius:8px">'
+                   '<div style="display:flex;justify-content:space-between;align-items:center">'
+                   '<span style="font-size:11.5px;color:#8b93a0">신용융자 잔고</span>'
+                   '<span style="font-size:12px;font-weight:800;color:#e0c060">미수집</span></div>'
+                   '<p style="margin:5px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
+                   '빚내서 산 돈이 얼마나 쌓였는지를 보는 지표입니다. '
+                   '<b style="color:#9aa0aa">아직 수집원을 붙이는 중</b>이라 오늘은 표시하지 못합니다 — '
+                   '없는 숫자를 지어내지 않기 위해 비워 둡니다.</p></div>')
 
     def _칸(라벨, v):
         c = "#ff6b4a" if v >= 0 else "#5b9bff"
@@ -4633,6 +4646,132 @@ def build_capture_path(개월=1, 시장=None, 종류="강세"):
             '</div>')
 
 
+
+def _anomaly_signals(data):
+    """🚨 오늘만 나타난 신호 — 최대 3줄, 그중 종목 언급은 딱 1줄.
+
+    ⚠️ 구성 규칙 (2026-08-21 확정)
+       ① **종목 1줄** — 오늘 가장 인상적인 종목 하나(많아야 둘).
+          후보: 오늘의 주인공 / 강세 레이더 / 매집 레이더 중 **가장 센 것 하나만**
+       ② **오늘 리포트의 최대 이슈 1줄** — 시장 전체 차원의 이상 신호
+       ③ **나머지 1줄** — 있으면 넣고 없으면 생략
+       총 2~3줄. 그 이상은 눈이 못 따라간다.
+
+    ⚠️ 종목명을 여러 줄에 흩뿌리면 **어디를 봐야 할지 모르게 된다.**
+       (2026-08-21 실제로 4개가 나와 지적받음)
+
+    ⚠️ 하나도 없으면 빈 리스트를 돌려주고, 코너 자체를 띄우지 않는다.
+       매일 나오는 코너는 특별함이 없어 아무도 안 누른다.
+    """
+    def _nm_ok(n):
+        """ETF·스팩·우선주는 이름에서 거른다(옛 데이터 방어)."""
+        n = str(n or "")
+        if not n:
+            return False
+        for k in ("KODEX", "TIGER", "KBSTAR", "ARIRANG", "HANARO", "ACE ",
+                  "RISE ", "PLUS ", "SOL ", "KOSEF", "ETN", "스팩", "레버리지", "인버스"):
+            if k.upper() in n.upper():
+                return False
+        return True
+
+    종목줄, 이슈줄 = None, []
+    try:
+        # ═══ ① 종목 1줄 — 세 후보 중 가장 센 것 하나 ═══
+        #     우선순위: 강세(오늘 터진 것) > 매집(조용히 쌓인 것) > 주인공(테마)
+        강 = []
+        for v in ((data.get("강세레이더") or {}).get("신규") or {}).values():
+            for x in (v or []):
+                if _nm_ok(x.get("종목명")):
+                    강.append((x.get("종목명"), x.get("등락률")))
+        강.sort(key=lambda t: -(t[1] or 0))
+        if 강:
+            n, v = 강[0]
+            더 = f' 외 {len(강)-1}종목' if len(강) > 1 else ''
+            종목줄 = ("#radar", "불난자리",
+                     f'<b>{n}</b>' + (f'가 <b>+{v:.1f}%</b>' if isinstance(v, (int, float)) else '')
+                     + f'{더} — 거래량과 주가가 함께 터졌습니다')
+        else:
+            쌍 = [x for x in ((data.get("매집레이더") or {}).get("종목") or [])
+                  if x.get("유형") == "쌍끌이" and _nm_ok(x.get("종목명"))]
+            쌍.sort(key=lambda x: -(x.get("시총대비") or 0))
+            if 쌍:
+                종목줄 = ("#acc", "매집",
+                         f'<b>{쌍[0].get("종목명")}</b>' +
+                         (f' 외 {len(쌍)-1}종목' if len(쌍) > 1 else '') +
+                         ' — 외국인·기관이 <b>둘 다</b> 조용히 사 모았습니다')
+            else:
+                주 = (data.get("주도섹터") or [])
+                if 주 and 주[0].get("테마명"):
+                    종 = [x.get("종목명") for x in (주[0].get("종목") or [])
+                          if _nm_ok(x.get("종목명"))]
+                    if 종:
+                        종목줄 = ("#sectors", "주인공",
+                                 f'<b>{주[0]["테마명"]}</b>가 오늘 시장을 끌었습니다 — '
+                                 f'<b>{종[0]}</b> 중심으로')
+
+        # ═══ ②③ 시장 전체 차원의 이상 신호 (종목명 없이) ═══
+        만점 = [s_.get("테마명") for s_ in (data.get("주도섹터") or [])
+                if (s_.get("확산도") or 0) >= 100]
+        if len(만점) >= 3:
+            이슈줄.append(("#sectors", "확산",
+                          f'<b>{len(만점)}개 섹터</b>가 확산도 100% — '
+                          f'그 안에서는 <b>안 오른 종목이 하나도 없었습니다</b>'))
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
+        if h:
+            for key, nm in (("외현", "외국인"), ("기관", "기관")):
+                arr = [x.get(key) for x in h if x.get(key) is not None]
+                st = _fs_stat(arr)
+                if st and st["연속"] >= 4:
+                    이슈줄.append(("#flow", "연속",
+                                  f'{nm}이 <b>{st["연속"]}일 연속 {st["dir"]}</b> — '
+                                  f'한 방향으로 굳어지고 있습니다'))
+                    break
+            st실 = _fs_stat([x["실탄"] for x in h])
+            if st실 and st실["배수"] >= 2.0:
+                이슈줄.append(("#flow", "규모",
+                              f'실탄이 평소의 <b>{st실["배수"]:.1f}배</b> — '
+                              f'유별나게 큰 하루입니다'))
+    except Exception:
+        pass
+
+    out = ([종목줄] if 종목줄 else []) + 이슈줄[:2]
+    return out[:3]
+
+def _tomorrow_line(data):
+    """🌅 내일 볼 것 — **숫자 기준선 하나**로 못 박는다.
+
+    ⚠️ "확인하세요"는 채점할 수 없다. **넘느냐 마느냐**로 써야
+       다음날 자동으로 맞았는지 셀 수 있다.
+    """
+    try:
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("외현") is not None]
+        if not h:
+            return ""
+        외 = _fs_stat([x["외현"] for x in h])
+        기 = _fs_stat([x["기관"] for x in h if x.get("기관") is not None])
+        if not 외:
+            return ""
+        # 기준선 = 최근 20일 평균 규모의 절반 (반올림해서 읽기 쉽게)
+        선 = max(1000, round(외["평소"] * 0.5 / 1000) * 1000)
+        if 외["v"] >= 0:
+            본문 = (f'외국인 순매수가 <b>{선:,.0f}억을 넘으면</b> 오늘 흐름이 이어지는 것으로 봅니다. '
+                   f'<b>마이너스로 돌아서면</b> 오늘은 하루짜리였던 겁니다.')
+        else:
+            본문 = (f'외국인 순매도가 <b>{선:,.0f}억 안으로 줄면</b> 진정 신호로 봅니다. '
+                   f'<b>더 커지면</b> 이탈이 이어지는 중입니다.')
+        if 기 and 기["연속"] >= 3:
+            본문 += f' 함께 볼 것 — <b>기관이 {기["연속"]}일 연속 {기["dir"]}</b>를 멈추는지.'
+        _만기, _ = expiry_note()
+        if _만기:
+            본문 += (' ⚠️ 내일은 <b>만기일</b>입니다 — 비차익이 기계적으로 튀니 '
+                    '그 숫자로 판단하지 마세요.')
+        return 본문
+    except Exception:
+        return ""
+
+
 def build_core(핵심편, data, 해석):
     """핵심편 '90초 브리핑' — 리포트 최상단.
 
@@ -4738,7 +4877,12 @@ def build_core(핵심편, data, 해석):
         for it in (해석.get("핵심이슈") or [])[:4])
     이슈블록 = (f'<div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p>'
               f'<p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p>{이슈들}</div>'
-              ) if 이슈들 else ""
+              ) if 이슈들 else (
+                  # ⚠️ 재사용 모드에선 핵심이슈가 없어 코너가 통째로 사라졌다(2026-08-21).
+                  #    자리를 지키고 "왜 없는지"를 알려준다.
+                  '<div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p>'
+                  '<p class="iss90-s">오늘 이슈 정리가 아직 준비되지 않았습니다 — '
+                  '아래 숫자와 표는 모두 오늘 것입니다</p></div>')
 
     특징 = "".join(
         f'<p class="mf"><span class="mf-i">{i}</span><span>{t}</span></p>'
@@ -4825,9 +4969,23 @@ def build_core(핵심편, data, 해석):
         티저들.append(('#acc', '매집',
                      f'최근 5일 중 <span class="u">{일수}일</span>을 {주체}이 사들인 종목이 있습니다 — 꼭 확인하세요'
                      if 일수 else '조용히 돈이 쌓이는 곳이 있습니다 — 꼭 확인하세요'))
+    # ⚠️ 오늘만의 이상 신호가 있으면 그걸 우선한다. 없으면 코너 자체를 띄우지 않는다.
+    #    매일 나오는 코너는 특별함이 없어 아무도 안 누른다(2026-08-21).
+    이상 = _anomaly_signals(data)
+    if 이상:
+        이상HTML = ('<div class="q90-tease"><p class="qt-h">🚨 오늘만 나타난 신호입니다</p>'
+                   + "".join(f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span>'
+                             f'<span>{txt}</span><span class="qt-go">확인 ↓</span></a>'
+                             for h, t, txt in 이상) + '</div>')
+    else:
+        이상HTML = ""
     티저HTML = "".join(
         f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span><span>{txt}</span>'
         f'<span class="qt-go">확인 ↓</span></a>' for h, t, txt in 티저들[:3])
+
+    # 🌅 내일장 — **숫자 기준선 하나**로 못 박는다(2026-08-21).
+    #    "확인하세요"는 채점할 수 없다. 넘느냐 마느냐로 써야 다음날 자동 채점된다.
+    내일선 = _tomorrow_line(data)
 
     # 내일장 대응 — 핵심편만 읽는 사람을 위해 '내일 관찰 포인트'를 맨 끝에.
     #   ⚠️ 항상 지수만 보여주면 지루하다. 관전포인트 3개(지수/선물/프로그램)를
@@ -4862,8 +5020,11 @@ def build_core(핵심편, data, 해석):
         except Exception:
             _seed = 0
         pick = 후보들[_seed % len(후보들)]
+        # ⚠️ 숫자 기준선을 **맨 앞**에 둔다(2026-08-21). 이게 채점 가능한 유일한 문장이다.
+        _본문 = (f'<p class="tmr-line">{내일선}</p>' if 내일선 else '') + \
+               f'<p class="tmr-b">{pick}</p>'
         내일대응 = (f'<div class="tmr"><p class="tmr-h">🌅 {_NEXT_LABEL}장, 이것만 기억하세요</p>'
-                   f'<p class="tmr-b">{pick}</p></div>')
+                   f'{_본문}</div>')
 
     # ⚠️ 장 마감 전(09:00~15:30) 또는 개장 전에 돌면 지수·섹터가 전부 0%로 잡힌다.
     #    데이터가 아니라 실행 시각의 문제이므로, 조용히 넘기지 말고 명시한다.
@@ -4876,7 +5037,8 @@ def build_core(핵심편, data, 해석):
 
     공감 = 핵심편.get("공감문구") or ""
     왜그런가 = 핵심편.get("왜그런가") or ""
-    사건명블록 = build_headline(해석)
+    # ⚠️ 사건명은 신호등 옆에 이미 들어간다(2026-08-19). 위에 또 두면 같은 문장이 두 번.
+    사건명블록 = ""
     딱N블록 = build_top_picks(해석)
     # ⚠️ 배치 원칙(v-k4): 핵심편은 "오늘은 어떤 하루였나(헤더)" → "왜 그랬나(정의·공감·왜)"
     #    → "수급으로 확인" → "그래서 내 계좌는 어디에(좌표·레이더)" 순서로 읽힌다.
@@ -4927,6 +5089,9 @@ def build_core(핵심편, data, 해석):
             #    "왜 그랬는지 이해한 다음에 위로가 온다"는 순서다.
             + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
             + 이슈블록
+            # ⚠️ 왜블록은 넣지 않는다 — 해석블록이 이미 '왜그런가 + 수급왜'를
+            #    한 상자에 담고 있어, 둘 다 넣으면 같은 제목·같은 내용이 두 번 나온다.
+            #    (2026-08-21 미리보기에서 실제로 중복이 확인됐다)
             + 해석블록
             + hide("핵심편섹터", build_sector_scoreboard())
             + 내종목
@@ -4944,7 +5109,7 @@ def build_core(핵심편, data, 해석):
             + '</div>'
             + 격자블록
             + 뒤집블록 + 딱N블록 + 핵심디버전스
-            + f'<div class="q90-tease"><p class="qt-h">🚨 시간 되실 때, 이것만은 꼭 확인하세요</p>{티저HTML}</div>'
+            + 이상HTML
             + 내일대응
             + '</div>'
             + ('<div class="deep-cut" id="deep">'
@@ -5521,6 +5686,8 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "포착성적",           # 2026-08-21 — 표본이 쌓이면 되살릴 것
+    "군중나침반",         # 2026-08-21 — 신용잔고를 수급 타임라인으로 옮김
     "삼줄요약",           # 2026-08-19 — '딱 N가지'와 역할 중복
     "수급타일",           # 2026-08-19 — 헤더 수급 막대와 같은 말
     "수급특징",           # 2026-08-19 — 계기판 배지와 겹침
@@ -5776,14 +5943,9 @@ def _fs_timeline_svg(이력, p, W=380):
         if isinstance(v, (int, float)):
             _acc += v; _has = True
         C개.append(_acc)
-    if _has:
-        _lo2, _hi2 = min(vals + C개), max(vals + C개)
-        _sp2 = (_hi2 - _lo2) or 1
-        YA = lambda v: AB - (AB - AT) * (v - _lo2) / _sp2
-        zA = YA(0)
-        g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YA(v):.1f}" for k, v in enumerate(C개)) +
-                 f'" fill="none" stroke="{FS_IND}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>')
-        g.append(f'<circle cx="{X(q-1):.1f}" cy="{YA(C개[-1]):.1f}" r="3" fill="{FS_IND}"/>')
+    # ⚠️ 개인 선은 뺐다(2026-08-21 지시). 실탄(외국인+기관)의 거울이라
+    #    선이 하나 더 늘 뿐 새 정보가 없었다. 대신 아래 칸에 **신용잔고**를 넣는다.
+    _has = False
     if _has:
         _ity = _lbl_y(YA(C개[-1]) + 3)
         g.append(f'<text x="{W-PR+4}" y="{_ity:.1f}" font-size="8.5" fill="{FS_IND}" '
@@ -5950,8 +6112,10 @@ def _flow_spark3():
         g.append(f'<rect x="{x:.0f}" y="{min(z,y):.1f}" width="{bw}" '
                  f'height="{max(2,abs(y-z)):.1f}" rx="2.5" fill="{c}" '
                  f'opacity="{1 if i==len(vals)-1 else .48}"/>')
-        g.append(f'<text x="{x+bw/2:.0f}" y="{H-3}" font-size="6.5" fill="#5b6472" '
-                 f'text-anchor="middle" font-weight="700">{날[i]}</text>')
+        # ⚠️ 세 날짜를 다 적으면 6.5px로 뭉갠다. **오늘만** 적고 나머지는 비운다.
+        if i == len(vals) - 1:
+            g.append(f'<text x="{x+bw/2:.0f}" y="{H-3}" font-size="7.5" fill="#c9d0d9" '
+                     f'text-anchor="middle" font-weight="800">{날[i]}</text>')
     return (f'<div class="fg-spark"><p class="fg-spark-t">최근 {len(vals)}일 실탄</p>'
             f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg></div>')
 
@@ -6042,7 +6206,6 @@ def build_flow_timeline(이력):
       <div class="fs-lg">
         <span><i style="background:{FS_FOR}"></i>외국인 누적</span>
         <span><i style="background:{FS_INS}"></i>기관 누적</span>
-        <span><i style="background:{FS_IND}"></i>개인 누적</span>
         <span><i style="background:{FS_FUT}"></i>선물 누적</span>
         <span><i style="background:#6f7784"></i>코스피</span>
         <span><i style="background:#c8ced6"></i>비차익 — 점 = 측정된 날 · 점선 = 판정 보류 구간</span>
@@ -6523,7 +6686,7 @@ def build_flow_signal(파생, 지수수급, 해석=None):
     {build_flow_timeline(이력)}
     {build_atc_talk(해석)}
     <div class="fs-read">
-      <p class="fs-read-t">🧺 오늘의 비차익 판독</p>
+      <p class="fs-read-t">🧺 오늘의 프로그램 비차익 판독</p>
       <p class="fs-read-b">{바스켓읽기}</p>
     </div>
     <div class="fs-read stat">
@@ -6538,18 +6701,94 @@ def build_flow_signal(파생, 지수수급, 해석=None):
   </div>'''
 
 
-def build_macro_card(item, 해설=""):
+
+# ── 🌏 바깥 날씨 — 지표별 5일 추이 선 ──────────────────
+#  ⚠️ 숫자와 등락률만 있으면 "높은 건가 낮은 건가"를 모른다.
+#     5일 선 하나면 **오르던 중인지 내리던 중인지**가 바로 보인다.
+#     카드 오른쪽 빈 공간에 작게 넣는다(주인공은 여전히 숫자다).
+# ── 🌏 바깥 날씨 — 지표별 5일 추이 선 ──────────────────
+#  ⚠️ 숫자와 등락률만 있으면 "높은 건가 낮은 건가"를 모른다.
+#     5일 선 하나면 **오르던 중인지 내리던 중인지**가 바로 보인다.
+#  ⚠️ 색은 리포트 어디에도 안 쓰는 색으로 골랐다(2026-08-21).
+#     빨강·파랑(매수/매도), 자홍·민트(외국인/기관), 금색(선물)과 겹치면 뜻이 두 개가 된다.
+MACRO_LINE = {
+    "원달러환율": ("#7dd3fc", "환율"),   # 하늘 — 통화
+    "WTI유가":    ("#fb923c", "유가"),   # 주황 — 원유
+    "미국채10년": ("#c4b5fd", "금리"),   # 연보라 — 채권
+    "국제금":     ("#facc15", "금"),     # 노랑 — 금
+}
+
+
+def _macro_hist(key, days=5):
+    """archive에서 해당 지표의 최근 days거래일 (날짜, 값)."""
+    out = []
+    for _ymd, d in archive_days(days):
+        try:
+            it = (d.get("매크로") or {}).get(key)
+            v = (it or {}).get("값") if isinstance(it, dict) else None
+            if isinstance(v, (int, float)):
+                out.append((str(_ymd), float(v)))
+        except Exception:
+            continue
+    return out
+
+
+def _macro_spark(key, 표시명):
+    """5일 추이 선 — 날짜축·기준선·끝값까지 제대로 그린다.
+
+    ⚠️ 처음엔 점 몇 개만 잇고 끝냈는데, 그러면 **뭘 보라는 건지 모르는 그림**이 된다.
+       · 첫날 대비 오르내림을 **면(area)** 으로 채워 방향을 한눈에
+       · 첫날 값을 **점선 기준선**으로 깔아 "지금 위인지 아래인지"를 보이게
+       · 날짜(첫날·마지막날)와 **5일 변화율**을 함께 적는다
+    """
+    hs = _macro_hist(key)
+    if len(hs) < 3:
+        return ""
+    col, _nm = MACRO_LINE.get(key, ("#8b93a0", 표시명))
+    vs = [v for _, v in hs]
+    ds = [d for d, _ in hs]
+    W, H = 158, 58
+    L, R, T, B = 2, 2, 12, 15
+    hi, lo = max(vs), min(vs)
+    rng = (hi - lo) or (abs(hi) * 0.001 or 1)
+    X = lambda i: L + (W - L - R) * i / (len(vs) - 1)
+    Y = lambda v: T + (H - T - B) * (1 - (v - lo) / rng)
+    기준 = vs[0]
+    변화 = (vs[-1] - 기준) / 기준 * 100 if 기준 else 0
+    pts = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(vs))
+    면 = f"{X(0):.1f},{Y(기준):.1f} " + pts + f" {X(len(vs)-1):.1f},{Y(기준):.1f}"
+    g = [f'<polygon points="{면}" fill="{col}" opacity=".14"/>',
+         f'<line x1="{L}" y1="{Y(기준):.1f}" x2="{W-R}" y2="{Y(기준):.1f}" '
+         f'stroke="{col}" stroke-width="1" stroke-dasharray="3 3" opacity=".45"/>',
+         f'<polyline points="{pts}" fill="none" stroke="{col}" stroke-width="2" '
+         f'stroke-linejoin="round" stroke-linecap="round"/>',
+         f'<circle cx="{X(len(vs)-1):.1f}" cy="{Y(vs[-1]):.1f}" r="3" fill="{col}"/>',
+         f'<text x="{L}" y="{H-4}" font-size="7.5" fill="#6f7784" font-weight="700">'
+         f'{ds[0][4:6]}/{ds[0][6:]}</text>',
+         f'<text x="{W-R}" y="{H-4}" font-size="7.5" fill="#9aa0aa" font-weight="800" '
+         f'text-anchor="end">{ds[-1][4:6]}/{ds[-1][6:]}</text>',
+         f'<text x="{W-R}" y="8.5" font-size="8" fill="{col}" font-weight="800" '
+         f'text-anchor="end">{len(vs)}일 {변화:+.1f}%</text>']
+    return f'<svg class="mr-spark" viewBox="0 0 {W} {H}">{"".join(g)}</svg>'
+
+def build_macro_card(item, 해설="", _key=None):
     if not item:
         return '<div class="mr-card"><p class="mr-label">—</p><p class="mr-val">— (준비중)</p></div>'
     cls = "dn" if item["등락률"] < 0 else "up"
     단위 = item.get("단위", "")
     값표시 = f"{단위}{item['값']:,.2f}" if 단위 == "$" else f"{item['값']:,.2f}{단위}"
     해설HTML = f'<p class="mr-comment">{해설}</p>' if 해설 else ''
+    스파크 = _macro_spark(_key or item.get("표시명"), item.get("표시명"))
     return f'''
     <div class="mr-card">
-      <p class="mr-label">{item['표시명']}</p>
-      <p class="mr-val">{값표시}</p>
-      <span class="{cls}" style="font-size:11px;font-weight:700">{item['등락률']:+.2f}%</span>
+      <div class="mr-top">
+        <div class="mr-left">
+          <p class="mr-label">{item['표시명']}</p>
+          <p class="mr-val">{값표시}</p>
+          <span class="{cls}" style="font-size:11px;font-weight:700">{item['등락률']:+.2f}%</span>
+        </div>
+        {스파크}
+      </div>
       {해설HTML}
     </div>'''
 
@@ -7338,6 +7577,14 @@ a{{color:inherit;text-decoration:none}}
 .rs-grade{{font-size:11.5px;color:#c9ced6;line-height:1.75;margin:0 0 11px;padding:10px 12px;background:#141a22;border:1px solid #24303f;border-radius:10px}}
 .rs-grade.dim{{color:#8b93a0}}
 .rs-grade b{{color:#fff}}
+/* 🌏 바깥 날씨 — 5일 추이 선 */
+.mr-top{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
+.mr-left{{min-width:0}}
+.mr-spark{{width:158px;height:58px;flex:0 0 auto}}
+@media (max-width:359px){{.mr-spark{{display:none}}}}
+/* 🌅 내일장 숫자 기준선 */
+.tmr-line{{font-size:12.5px;color:#f0c65a;line-height:1.8;margin:0 0 9px;padding:10px 12px;background:#1a1610;border:1px solid #3a3020;border-radius:9px;font-weight:700}}
+.tmr-line b{{color:#fff}}
 /* 📡 관제교신 — 타임라인 아래 해석 */
 .atc{{background:#0e141c;border:1px solid #22303f;border-left:3px solid #22d3ee;border-radius:12px;padding:13px 15px;margin:12px 0 0}}
 .atc-p{{font-size:12.5px;color:#c9ced6;line-height:1.85;margin:0 0 10px}}
@@ -7607,10 +7854,10 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label"><small>환율 · 유가 · 금리 · 금</small>🌏 바깥 날씨</p>
   <div class="macro-row">
-    {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''))}
-    {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''))}
-    {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''))}
-    {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
+    {build_macro_card((data.get('매크로') or {}).get('원달러환율'), (해석.get('매크로해설') or {}).get('환율',''), '원달러환율')}
+    {build_macro_card((data.get('매크로') or {}).get('WTI유가'), (해석.get('매크로해설') or {}).get('유가',''), 'WTI유가')}
+    {build_macro_card((data.get('매크로') or {}).get('미국채10년'), (해석.get('매크로해설') or {}).get('금리',''), '미국채10년')}
+    {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''), '국제금')}
   </div>
 
   <!-- ⚠️ 수급을 주인공보다 먼저 본다(2026-08-21 지시).
@@ -7627,20 +7874,6 @@ a{{color:inherit;text-decoration:none}}
   {build_sectors(data.get('주도섹터'))}
   <!-- ⚠️ 접기 배경을 어둡게(#0f131a) 두니 주인공 카드(밝은 배경)와 따로 놀았다.
        (2026-08-19) → 카드와 같은 배경·테두리 변수를 쓰고, 금색 왼쪽 선으로만 구분한다. -->
-  <details style="margin:12px 0 0;padding:10px 12px;background:var(--bg);
-    border:.5px solid var(--line);border-left:3px solid rgba(240,198,90,.55);
-    border-radius:var(--rlg);box-shadow:0 1px 3px rgba(0,0,0,.03)">
-    <summary style="font-size:11.5px;color:#a07d1f;font-weight:700;cursor:pointer;
-      list-style:none">📖 오늘의 주인공과 섹터 성적표는 뭐가 다른가요?
-      <span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>
-    <p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">
-      <b style="color:#9aa0aa">오늘의 주인공</b>은 매일 바뀌는 <b>사건 현장</b>입니다.
-      거래대금까지 보기 때문에 <b>돈이 몰린 곳</b>을 잡습니다.<br>
-      <b style="color:#2c3340">섹터 성적표</b>는 안 바뀌는 <b>주소</b>입니다. 항상 같은 칸이라
-      어제·지난달과 비교됩니다.<br>
-      그래서 <b style="color:#2c3340">두 곳의 순위가 다를 수 있습니다.</b>
-      성적표에선 강한데 여기 없다면 — <b style="color:#a07d1f">올랐지만 돈은 안 붙은 상승</b>입니다.
-    </p></details>
 
   {_zone_trend_block}
 
@@ -7660,6 +7893,21 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>
   {build_sector_scoreboard()}
 
+  <details style="margin:12px 0 0;padding:10px 12px;background:var(--bg);
+    border:.5px solid var(--line);border-left:3px solid rgba(240,198,90,.55);
+    border-radius:var(--rlg);box-shadow:0 1px 3px rgba(0,0,0,.03)">
+    <summary style="font-size:11.5px;color:#a07d1f;font-weight:700;cursor:pointer;
+      list-style:none">📖 오늘의 주인공과 섹터 성적표는 뭐가 다른가요?
+      <span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>
+    <p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">
+      <b style="color:#9aa0aa">오늘의 주인공</b>은 매일 바뀌는 <b>사건 현장</b>입니다.
+      거래대금까지 보기 때문에 <b>돈이 몰린 곳</b>을 잡습니다.<br>
+      <b style="color:#2c3340">섹터 성적표</b>는 안 바뀌는 <b>주소</b>입니다. 항상 같은 칸이라
+      어제·지난달과 비교됩니다.<br>
+      그래서 <b style="color:#2c3340">두 곳의 순위가 다를 수 있습니다.</b>
+      성적표에선 강한데 여기 없다면 — <b style="color:#a07d1f">올랐지만 돈은 안 붙은 상승</b>입니다.
+    </p></details>
+
   <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 누가 이끌었나?</p>
   {build_slope_chart(data.get('계좌격자'))}
 
@@ -7669,8 +7917,8 @@ a{{color:inherit;text-decoration:none}}
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
   {build_return_sector()}
 
-  <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
-  {build_crowd_compass(data.get('신용잔고'))}
+  {hide("군중나침반", f'''<p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
+  {build_crowd_compass(data.get('신용잔고'))}''')}
 
   <!-- ⚠️ 프로의 시선·판단은 수급·심리를 다 본 **뒤에** 온다(2026-08-20 지시).
        근거(수급·나침반)를 먼저 깔고 그 위에서 판단을 말해야 설득이 된다. -->
@@ -7678,14 +7926,14 @@ a{{color:inherit;text-decoration:none}}
   {build_insight(프로의시선)}
   {build_divergence_block(data, 해석)}
 
-  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불 붙은 곳</p>
+  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불난 자리</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
   <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
-  <p class="sec-label"><small>포착 종목 성적</small>🛬 레이더는 잘 잡았나</p>
-  {build_capture_paths()}
+  {hide("포착성적", f'''<p class="sec-label"><small>포착 종목 성적</small>🛬 레이더는 잘 잡았나</p>
+  {build_capture_paths()}''')}
 
   <p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
   {build_briefings(해석.get('마감브리핑'))}
