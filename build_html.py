@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n35"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n39"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -2598,7 +2598,24 @@ def build_my_stocks(data):
                     _핫[_n] = _lab
     except Exception:
         _핫 = {}
-    이름배열JS += "window.CP_HOT=" + json.dumps(_핫, ensure_ascii=False) + ";" 
+    이름배열JS += "window.CP_HOT=" + json.dumps(_핫, ensure_ascii=False) + ";"
+    # 종목 → 오늘 시장 전체 맥락 (브리핑이 "볼 것"을 만들 때 쓴다)
+    _맥락 = {}
+    try:
+        _fh = load_json("flow_history.json") or []
+        _fh = [r for r in _fh if isinstance(r, dict) and r.get("실탄") is not None]
+        if _fh:
+            _외 = _fs_stat([x["외현"] for x in _fh if x.get("외현") is not None])
+            _기 = _fs_stat([x["기관"] for x in _fh if x.get("기관") is not None])
+            if _외:
+                _맥락["외국인"] = {"방향": _외["dir"], "연속": _외["연속"],
+                                 "금액": _flow_amt(_외["v"])}
+            if _기:
+                _맥락["기관"] = {"방향": _기["dir"], "연속": _기["연속"],
+                               "금액": _flow_amt(_기["v"])}
+    except Exception:
+        _맥락 = {}
+    이름배열JS += "window.CP_MARKET=" + json.dumps(_맥락, ensure_ascii=False) + ";" 
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
@@ -2660,7 +2677,7 @@ def build_my_stocks(data):
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
      'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
      'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')||
-     '<span style="font-size:10px;color:#6f7784">구역 미분류</span>';
+     '<span style="font-size:10px;color:#6f7784">지도 미분류</span>';
    var right='';
    if(c&&!c.short){exs.push(c.ex);
     var col=c.ex>=0?'#ff6b4a':'#5b9bff';
@@ -2712,7 +2729,7 @@ def build_my_stocks(data):
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,20);
    // ⚠️ 구역이 비면 아무것도 안 나와 "섹터가 왜 안 보이지"가 된다(2026-08-20).
    //    구역이 없으면 **오늘 주도 테마 중 이 종목이 든 것**을 대신 보여주고,
-   //    그것도 없으면 '구역 미분류'라고 솔직히 적는다.
+   //    그것도 없으면 '지도 미분류'라고 솔직히 적는다.
    var zlist=(m[0]||[]).slice();
    if(!zlist.length && window.CP_STOCK_THEME && window.CP_STOCK_THEME[nm])
      zlist=[window.CP_STOCK_THEME[nm]];
@@ -2721,7 +2738,7 @@ def build_my_stocks(data):
        'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
        'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')
      : '<span style="display:inline-block;font-size:10px;padding:2px 7px;'+
-       'border-radius:99px;background:#1a2029;color:#6f7784">구역 미분류</span>';
+       'border-radius:99px;background:#1a2029;color:#6f7784">지도 미분류</span>';
    var items='', n1=0, n2=0;
    // ⚠️ 제목 + **본문(요약)** 둘 다에서 종목명을 찾는다(2026-08-20).
    //    제목 매칭은 우선순위를 높여 위로 올리고, 많으면 상위 4건만 보여준다.
@@ -2804,10 +2821,43 @@ def build_my_stocks(data):
                  :'시장에 조금 뒤처지는 흐름입니다.'));
     if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
     else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
-    else 분석+=' 오늘은 개별 재료가 없었으니, 주가는 대체로 소속 섹터를 따라갔을 가능성이 큽니다.';
+    else {
+     // ⚠️ 재료가 없다고 "없었습니다"로 끝내면 이 코너의 값이 사라진다(2026-08-21).
+     //    구독자가 가장 궁금해하는 건 자기 종목이다. 재료가 없는 날일수록
+     //    **다음에 볼 것**을 대신 짚어줘야 한다.
+     분석+=' 오늘은 개별 재료가 없었습니다.';
+     var 볼것=[];
+     // ⓐ 소속 구역이 크게 움직였으면 그게 오늘의 이유다
+     if(window.CP_SECT_TODAY){
+      var zz2=(m[0]||[]), bb2=null;
+      zz2.forEach(function(z){
+       var v=window.CP_SECT_TODAY[z];
+       if(v===undefined||v===null) return;
+       if(bb2===null||Math.abs(v)>Math.abs(bb2.v)) bb2={z:z,v:v};
+      });
+      if(bb2&&Math.abs(bb2.v)>=1.0)
+       볼것.push('소속 구역 <b>'+bb2.z+'</b>이 '+fmt(bb2.v)+'% 움직였으니, 이 종목도 그 흐름을 따라갔을 가능성이 큽니다');
+     }
+     // ⓑ 시장 수급이 한 방향으로 굳어지는 중이면 그게 다음 변수다
+     if(window.CP_MARKET){
+      var mk=window.CP_MARKET;
+      ['외국인','기관'].forEach(function(who){
+       var o=mk[who];
+       if(o&&o.연속>=3&&볼것.length<2)
+        볼것.push('시장 전체로는 <b>'+who+'이 '+o.연속+'일 연속 '+o.방향+'</b> 중입니다 — 개별 재료가 없을 때는 이 흐름이 주가를 좌우합니다');
+      });
+     }
+     // ⓒ 레이더에 잡혔으면 그게 가장 강한 단서
+     if(window.CP_HOT&&window.CP_HOT[nm]&&볼것.length<2)
+      볼것.push('다만 오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 재료 없이 수급만 들어온 자리입니다');
+     if(볼것.length) 분석+=' '+볼것.join(' 또 ')+'.';
+     else 분석+=' 주가는 대체로 시장 흐름을 따라갔을 가능성이 큽니다.';
+    }
     // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
     //    당일·5일·20일·60일을 다 계산해 **가장 인상적인 창**을 골라 덧붙인다.
     //    (같은 방향이면 가장 긴 창, 방향이 엇갈리면 그 엇갈림 자체가 이야기다)
+    // ⚠️ 매번 20일만 말하면 모든 종목의 분석이 똑같아 보인다(2026-08-21 지적).
+    //    네 창을 다 계산해 **그 종목에서 가장 두드러진 창**을 골라 말한다.
     var 창=[[1,'오늘'],[5,'5일'],[20,'20일'],[60,'분기']], 결=[];
     창.forEach(function(w){
      var cc=calc(nm,w[0]);
@@ -5899,7 +5949,7 @@ def _fs_timeline_svg(이력, p, W=380):
 
     # ⚠️ viewBox 폭은 실제 표시 폭과 맞춰야 한다. 700으로 잡으면 390px 화면에서
     #    0.54배로 축소돼 11px 글자가 6px가 된다(안 읽힘).
-    H = 300
+    H = 372   # 신용잔고 레인(+72) 포함 — 2026-08-21
     # ⚠️ 오른쪽 여백(PR)은 선 이름표가 앉을 자리다. 0에 가깝게 잡으면
     #    선이 화면 끝까지 꽉 차서 '어느 선이 외국인인지'를 못 읽는다.
     PL, PR = 7, 46
@@ -6038,6 +6088,50 @@ def _fs_timeline_svg(이력, p, W=380):
     g.append(f'<rect x="{W-PR-136}" y="{CT+1}" width="132" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
     g.append(f'<text x="{W-PR-133}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 비중(%) · 금액</text>')
 
+    # ── 레인 D · 💳 신용융자 잔고 ─────────────────────────
+    #  왜 보나: 빚내서 산 돈이 쌓일수록 **반대매매 위험**이 커진다.
+    #    지수가 빠질 때 빚으로 산 물량이 강제로 나오면서 낙폭이 증폭된다.
+    #    개인의 조바심을 보여주는 유일한 지표라, 개인 순매수 선보다 정보가 많다.
+    #  ⚠️ 수집원이 아직 불안정하다. 값이 없으면 **레인 자리에 그 사실을 적는다.**
+    #     조용히 빼면 "왜 없지"를 알 수가 없다.
+    DT, DB = 296, 356
+    g.append(f'<line x1="{PL}" y1="{DT-8}" x2="{W-PR}" y2="{DT-8}" '
+             f'stroke="#fff" stroke-opacity=".07"/>')
+    _신 = []
+    try:
+        for _ymd, _d in archive_days(q):
+            _v = (_d.get("신용잔고") or {}).get("잔고")
+            _신.append(_v if isinstance(_v, (int, float)) else None)
+    except Exception:
+        _신 = []
+    _실값 = [v for v in _신 if v is not None]
+    if len(_실값) >= 3:
+        _hi, _lo = max(_실값), min(_실값)
+        _sp = (_hi - _lo) or 1
+        _Y = lambda v: DB - (DB - DT - 12) * (v - _lo) / _sp
+        _pts, _prev = [], None
+        for k, v in enumerate(_신):
+            if v is None:
+                continue
+            _pts.append(f"{X(k):.1f},{_Y(v):.1f}")
+        g.append(f'<polyline points="{" ".join(_pts)}" fill="none" stroke="{FS_IND}" '
+                 f'stroke-width="2" stroke-linejoin="round"/>')
+        _last = [v for v in _신 if v is not None][-1]
+        g.append(f'<circle cx="{X(q-1):.1f}" cy="{_Y(_last):.1f}" r="3" fill="{FS_IND}"/>')
+        _증 = (_실값[-1] - _실값[-2]) if len(_실값) >= 2 else 0
+        _c = FS_BUY if _증 >= 0 else FS_SELL
+        g.append(f'<text x="{W-PR+4}" y="{_Y(_last)+3:.1f}" font-size="8.5" '
+                 f'fill="{FS_IND}" font-weight="800">신용</text>')
+        g.append(f'<text x="{W-PR-4}" y="{DT+10:.1f}" font-size="8" fill="{_c}" '
+                 f'font-weight="800" text-anchor="end">{_flow_amt(_실값[-1])} '
+                 f'({_증:+,.0f}억)</text>')
+    else:
+        g.append(f'<text x="{(PL+W-PR)/2:.0f}" y="{(DT+DB)/2:.0f}" font-size="8.5" '
+                 f'fill="#6f7784" text-anchor="middle">신용융자 잔고는 아직 수집 전입니다 '
+                 f'— 없는 숫자를 지어내지 않습니다</text>')
+    g.append(f'<text x="{W-PR-133}" y="{DT+10:.1f}" font-size="7.5" fill="#8b93a0" '
+             f'font-weight="800">💳 신용융자 잔고 — 빚내서 산 돈</text>')
+
     # ── 공통 날짜축 ──
     step = max(1, q // 4)
     for k in range(0, q, step):
@@ -6171,7 +6265,15 @@ def build_atc_talk(해석):
     if 주목:
         블록 += f'<p class="atc-p">{주목}</p>'
     if 믿음:
-        블록 += f'<div class="atc-ask">{믿음}</div>'
+        # ⚠️ Claude가 <br>을 빼먹으면 세 항목이 한 줄로 붙어 못 읽는다(2026-08-21).
+        #    코드에서 **강제로 줄을 나눈다.** 글쓴이에게 맡기지 않는다.
+        _t = 믿음.replace("<br><br>", "\n").replace("<br>", "\n")
+        for _k in ("믿어도 되는 것", "의심스러운 것", "아직 모르는 것"):
+            _t = re.sub(r"\s*(?:<b>)?\s*\*{0,2}" + _k + r"\*{0,2}\s*(?:</b>)?\s*",
+                        "\n<b>" + _k + "</b> ", _t)
+        _줄 = [x.strip() for x in _t.split("\n") if x.strip()]
+        블록 += ('<div class="atc-ask">'
+                + "".join(f'<p class="atc-q">{x}</p>' for x in _줄) + '</div>')
     if 내일:
         블록 += f'<p class="atc-next">{내일}</p>'
     return f'<div class="atc">{블록}</div>'
@@ -6209,6 +6311,7 @@ def build_flow_timeline(이력):
         <span><i style="background:{FS_FUT}"></i>선물 누적</span>
         <span><i style="background:#6f7784"></i>코스피</span>
         <span><i style="background:#c8ced6"></i>비차익 — 점 = 측정된 날 · 점선 = 판정 보류 구간</span>
+        <span><i style="background:{FS_IND}"></i>신용융자 잔고 — 빚내서 산 돈</span>
       </div>
     </div>
     <script>(function(){{
@@ -7592,6 +7695,9 @@ a{{color:inherit;text-decoration:none}}
 .atc-lead{{color:#e8eaee}}
 .atc-p b,.atc-ask b{{color:#fff;font-weight:800}}
 .atc-ask{{font-size:12.5px;color:#c9ced6;line-height:1.85;margin:0 0 10px;padding:11px 12px;background:#121922;border-radius:9px;border:1px solid #1e2a36}}
+.atc-q{{margin:0 0 7px}}
+.atc-q:first-child{{margin-bottom:10px}}
+.atc-q:last-child{{margin-bottom:0}}
 .atc-next{{font-size:12.5px;color:#f0c65a;line-height:1.8;margin:0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);font-weight:700}}
 .atc-next b{{color:#fff}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
@@ -7944,7 +8050,7 @@ a{{color:inherit;text-decoration:none}}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label"><small>이슈 밖 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
+  <p class="sec-label"><small>더 볼 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
   {build_news(해석.get('핵심뉴스'))}
 
   {f'<p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
