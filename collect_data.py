@@ -17,10 +17,11 @@ import json
 import os
 import io
 import math
+import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n35"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.21-n39"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -468,21 +469,36 @@ def compute_gauge(지수수급, 확산도_시장):
 #      네이버 페이지 구조는 종종 바뀐다. 첫 실행에서 0건이 나오면
 #      diagnostic 출력을 보고 셀렉터를 조정해야 한다.
 # ============================================================
-NEWS_SOURCES = [
-    # (이름, URL, params, 인코딩, 링크셀렉터, 요약셀렉터)
-    #  ⚠️ 한 곳이 막혀도 나머지로 계속 간다. 수집원 하나가 죽어도 리포트는 나와야 한다.
-    ("네이버금융", "https://finance.naver.com/news/news_list.naver",
-     {"mode": "LSS2D", "section_id": "101", "section_id2": "258"}, "euc-kr",
-     ["dd.articleSubject a", "a[href*='news_read']"], ["dd.articleSummary"]),
-    ("한국경제", "https://www.hankyung.com/finance", {}, None,
-     ["h2.news-tit a", "h3.news-tit a", "a.news-tit"], ["p.lead", "p.news-preview"]),
-    ("연합뉴스", "https://www.yna.co.kr/economy/finance-industry", {}, None,
-     ["a.tit-news", "strong.tit-news", "h2.tit a"], ["p.lead", "p.news-con"]),
+# ── 📰 뉴스 수집원 ───────────────────────────────────────
+#  ⚠️ HTML 셀렉터는 실전에서 0건이었다(2026-08-21).
+#     한국경제 /finance는 404, 연합뉴스는 403(봇 차단).
+#     → **RSS**로 바꿨다. 구조가 고정이라 안 깨지고 차단도 덜하다.
+#  ⚠️ 새 매체를 넣기 전 반드시 실제로 열어보고 item 수를 확인할 것.
+NEWS_RSS = [
+    ("한국경제",   "https://www.hankyung.com/feed/finance"),
+    ("한국경제",   "https://www.hankyung.com/feed/economy"),
+    ("머니투데이", "https://rss.mt.co.kr/mt_news.xml"),
+    ("아시아경제", "https://www.asiae.co.kr/rss/stock.htm"),
 ]
+NEWS_NAVER = ("네이버금융", "https://finance.naver.com/news/news_list.naver",
+              {"mode": "LSS2D", "section_id": "101", "section_id2": "258"})
 
 
 def _clean(t):
     return " ".join(str(t or "").split()).strip()
+
+
+def _rss_items(xml):
+    """RSS <item>에서 (제목, 링크, 요약) 뽑기. 라이브러리 없이 정규식으로."""
+    out = []
+    for it in re.findall(r"<item[^>]*>(.*?)</item>", xml, re.S):
+        def _g(tag):
+            m = re.search(rf"<{tag}[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</{tag}>", it, re.S)
+            return _clean(re.sub(r"<[^>]+>", "", m.group(1))) if m else ""
+        t, l = _g("title"), _g("link")
+        if t and l and len(t) >= 6:
+            out.append((t, l, _g("description")[:300]))
+    return out
 
 
 def collect_credit_balance():
@@ -532,65 +548,72 @@ def collect_credit_balance():
     return None
 
 
-def collect_news():
-    """뉴스 원본 수집 — 제목 + **요약문**까지.
 
-    ⚠️ 예전에는 제목만 저장했다. 그래서 본문에만 종목명이 나오는 기사는
-       '내 종목 브리핑'에서 영원히 못 찾았다("뉴스가 없다"의 진짜 원인).
-       요약문을 함께 저장해 **본문 매칭**이 가능하게 한다.
+def collect_news():
+    """뉴스 원본 — 여러 매체 RSS + 네이버 금융.
+
+    ⚠️ 제목만 저장하면 본문에만 종목명이 나오는 기사를 못 찾는다.
+       ('내 종목 브리핑에 뉴스가 없다'의 진짜 원인) → **요약문까지 저장**한다.
+    ⚠️ 한 곳이 죽어도 나머지로 계속 간다. 로그에 매체별 건수를 반드시 찍는다.
     """
     결과, 중복 = [], set()
 
-    for 이름, url, params, enc, 링크셀, 요약셀 in NEWS_SOURCES:
-        try:
-            res = requests.get(url, headers=HEADERS, params=params or None, timeout=12)
-            if enc:
-                res.encoding = enc
-            soup = BeautifulSoup(res.text, "html.parser")
-        except Exception as e:
-            print(f"  ⚠️ 뉴스 수집 실패({이름}): {type(e).__name__}")
-            continue
-
-        후보 = []
-        for sel in 링크셀:
-            후보 = soup.select(sel)
-            if 후보:
-                break
-
-        요약목록 = []
-        for sel in 요약셀:
-            요약목록 = [_clean(x.get_text(" ", strip=True)) for x in soup.select(sel)]
-            if 요약목록:
-                break
-
+    for 이름, url in NEWS_RSS:
         n0 = len(결과)
-        for i, a in enumerate(후보):
-            제목 = _clean(a.get("title") or a.get_text(" ", strip=True))
-            href = a.get("href", "")
-            if not 제목 or len(제목) < 6 or not href:
-                continue
-            if href.startswith("//"):
-                링크 = "https:" + href
-            elif href.startswith("/"):
-                from urllib.parse import urljoin
-                링크 = urljoin(url, href)
-            else:
-                링크 = href
-            if 제목 in 중복:
-                continue
-            중복.add(제목)
-            요약 = 요약목록[i] if i < len(요약목록) else ""
-            결과.append({"제목": 제목, "링크": 링크,
-                         "요약": 요약[:300], "출처": 이름})
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=12)
+            res.encoding = res.apparent_encoding or "utf-8"
+            for t, l, d in _rss_items(res.text):
+                if t in 중복:
+                    continue
+                중복.add(t)
+                결과.append({"제목": t, "링크": l, "요약": d, "출처": 이름})
+        except Exception as e:
+            print(f"  ⚠️ 뉴스({이름}) 실패: {type(e).__name__}")
         print(f"  · {이름}: {len(결과)-n0}건")
 
-    print(f"✅ 뉴스 원본 {len(결과)}건 수집 (제목+요약)")
-    if 결과:
-        print("  샘플:", 결과[0]["제목"][:40])
-    else:
-        print("  ⚠️ 0건 — 수집원 3곳이 모두 실패했습니다. 구조 변경 의심.")
-    # ⚠️ 60건까지 남긴다. 관심종목이 본문에 걸릴 확률을 올리려면 후보가 넉넉해야 한다.
-    return 결과[:60]
+    # 네이버 금융 — 국내 증시 뉴스라 종목명이 자주 나온다. 보조로 함께 쓴다.
+    이름, url, params = NEWS_NAVER
+    n0 = len(결과)
+    try:
+        res = requests.get(url, headers=HEADERS, params=params, timeout=12)
+        res.encoding = "euc-kr"
+        soup = BeautifulSoup(res.text, "html.parser")
+        요약들 = [_clean(x.get_text(" ", strip=True)) for x in soup.select("dd.articleSummary")]
+        for k, a in enumerate(soup.select("dd.articleSubject a") or
+                              soup.select("a[href*='news_read']")):
+            t = _clean(a.get("title") or a.get_text(" ", strip=True))
+            href = a.get("href", "")
+            if not t or len(t) < 6 or not href or t in 중복:
+                continue
+            중복.add(t)
+            from urllib.parse import urljoin
+            결과.append({"제목": t, "링크": urljoin(url, href),
+                         "요약": (요약들[k] if k < len(요약들) else "")[:300],
+                         "출처": 이름})
+    except Exception as e:
+        print(f"  ⚠️ 뉴스({이름}) 실패: {type(e).__name__}")
+    print(f"  · {이름}: {len(결과)-n0}건")
+
+    print(f"✅ 뉴스 원본 {len(결과)}건 (제목+요약)")
+    if not 결과:
+        print("  ⚠️ 0건 — 수집원이 모두 실패했습니다. 구조 변경 의심.")
+    # ⚠️ 앞에서부터 자르면 **첫 매체만 남는다**(한경 80건 → 나머지 0건).
+    #    매체별로 번갈아 뽑아 골고루 섞는다. 그래야 이슈 해부 링크도 다양해진다.
+    from collections import defaultdict, Counter
+    _버킷 = defaultdict(list)
+    for _x in 결과:
+        _버킷[_x["출처"]].append(_x)
+    _섞, _i = [], 0
+    while len(_섞) < 90 and any(len(v) > _i for v in _버킷.values()):
+        for _k in list(_버킷):
+            if len(_버킷[_k]) > _i and len(_섞) < 90:
+                _섞.append(_버킷[_k][_i])
+        _i += 1
+    print("   섞은 뒤: " + " · ".join(f"{k} {v}건" for k, v in Counter(x["출처"] for x in _섞).items()))
+    return _섞
+
+
 # ============================================================
 MACRO_TICKERS = {
     "원달러환율": {"심볼": "KRW=X", "표시명": "원/달러 환율", "단위": ""},
@@ -1503,7 +1526,13 @@ ACC_POOL = None         # 후보 풀 상한. None = 상한 없음(조건 통과�
                         #   화면엔 각 랭킹 TOP5만 나오지만, 뽑는 범위가 좁으면
                         #   두 랭킹이 같은 종목만 반복하게 된다(풀 5개면 겹침 100%).
                         #   그래서 상한을 두지 않고 통과 종목 전부를 풀에 담는다.
-ACC_UNIVERSE = {"코스피": 100, "코스닥": 40}  # 시총 상위 몇 종목까지 스캔할지
+# ⚠️ 스캔 확대 (2026-08-21) — 140 → 180종목.
+#    코스닥을 40→60으로 늘린 이유: 매집은 중소형에서 더 자주 일어나는데
+#    40종목만 보면 대형주만 잡혀 '조용히 모으는 손'의 뜻이 흐려진다.
+ACC_UNIVERSE = {"코스피": 120, "코스닥": 60}   # 시총 상위 몇 종목까지 스캔할지
+# ⚠️ 종목당 1요청을 연속으로 때리면 네이버가 IP를 막을 수 있다.
+#    막히면 그날 매집 레이더가 통째로 빈다. 180종목에 27초 더 쓰고 안정성을 산다.
+ACC_SLEEP = 0.15
 
 
 def _fetch_investor_flow(code, days=ACC_LONG):
@@ -1649,6 +1678,7 @@ def collect_accumulation_radar():
     중기목록 = []
     실패 = 0
     for 이름, 코드, 시장, 시총 in 유니버스:
+        time.sleep(ACC_SLEEP)      # ⚠️ 차단 방지 — 빼지 말 것
         flow = _fetch_investor_flow(코드)
         if not flow:
             실패 += 1
@@ -1704,8 +1734,16 @@ def collect_accumulation_radar():
     if 실패:
         print(f"  ℹ️ {실패}종목은 수급 데이터 미확보(신규상장·데이터 부족 등)")
 
-    쌍끌이.sort(key=lambda x: x["합산"], reverse=True)
-    단독.sort(key=lambda x: x["합산"], reverse=True)
+    # ⚠️ 정렬은 금액(합산)이 아니라 **매집강도**로 한다(2026-08-21).
+    #    금액만 보면 대형주가 항상 위로 온다. 매집의 본질은 "조용히"라
+    #    **안 오르면서 담겼는가**까지 봐야 진짜 매집이 위로 온다.
+    #      매집강도 = 시총대비 ÷ (1 + 5일등락률/100)
+    #    같은 금액을 담았어도 덜 올랐을수록 점수가 높아진다.
+    for _x in 쌍끌이 + 단독:
+        _d = _x.get("5일등락률") or _x.get("등락률") or 0
+        _x["매집강도"] = round((_x.get("시총대비") or 0) / max(0.1, 1 + _d / 100), 4)
+    쌍끌이.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
+    단독.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
 
     # 조건을 통과한 종목을 전부 풀에 담는다(쌍끌이 먼저, 그다음 단독).
     # ⚠️ 예전엔 여기서 5~10개로 잘라버려서 두 랭킹이 같은 종목만 반복됐다.
@@ -1723,7 +1761,12 @@ def collect_accumulation_radar():
         print(f"   [{s['유형']}] {s['종목명']} {s['합산']:,.0f}억 "
               f"(외{s['외인일수']}일/기{s['기관일수']}일, 시총대비 {s['시총대비']}%)")
 
-    중기목록.sort(key=lambda x: x.get("시총대비") or 0, reverse=True)
+    # ⚠️ 중기도 **매집강도** 기준으로 정렬한다(2026-08-21).
+    #    안 오르면서 담긴 종목이 위로 올라온다.
+    for _x in 중기목록:
+        _d = _x.get("등락률") or _x.get("5일등락률") or 0
+        _x["매집강도"] = round((_x.get("시총대비") or 0) / max(0.1, 1 + _d / 100), 4)
+    중기목록.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
     if 중기목록:
         상위 = 중기목록[0]
         print(f"🏗️ 중기(20일) 매집 {len(중기목록)}종목 — 1위 {상위['종목명']} "
@@ -2160,7 +2203,11 @@ GRID_중형_끝 = 300        # 101~300위 / 301위 이하는 소형
 #    빈 페이지가 나오면 즉시 멈추므로 실제 요청 수는 상장 종목 수만큼만 늘어난다.
 GRID_시총페이지 = 40      # 시장별 크롤 페이지 수(50종목/페이지) → 사실상 전 종목
 GRID_최소종목 = 3         # 한 칸에 이보다 적으면 '표본 부족'(—) 처리
-GRID_테마상세 = 2         # 슬롯 하나당 상세를 열어볼 네이버 테마 개수
+GRID_테마상세 = 2         # 슬롯 하나당 **격자 표시용**으로 열어볼 테마 개수
+# ⚠️ 격자에 쓰는 테마는 2개면 충분하지만 **종목 사전**은 부족하다.
+#    2개만 열면 전체 3,624종목 중 83%가 구역 없이 남는다(2026-08-21 실측).
+#    ⚠️ 늘릴수록 요청이 는다. 15슬롯 × 6 = 90요청이 상한선.
+GRID_보강테마 = 6
 GRID_칸종목수 = 6         # 한 칸에서 화면에 펼쳐 보여줄 상위 종목 수
 
 # 테마 슬롯 9개 — 네이버 테마명에 아래 키워드가 들어가면 그 슬롯으로 본다.
@@ -2408,6 +2455,28 @@ def collect_account_grid(테마후보):
                 종목구역.setdefault(n, [])
                 if 슬롯명 not in 종목구역[n] and len(종목구역[n]) < 2:
                     종목구역[n].append(슬롯명)
+
+    # ⚠️ 위 루프는 **그날 주도 테마에 속한 종목만** 채운다(2026-08-21 발견).
+    #    실측: 3,624종목 중 2,999종목(83%)이 빈칸이었다.
+    #    → '내 관심종목'에 대형주까지 "구역 미분류"로 나왔다.
+    #    업종(WICS)으로 **기본 구역**을 채워 넣는다. 업종은 항상 있다.
+    #    주도 테마가 있으면 그게 앞에 오고, 업종은 뒤에 붙는다.
+    # ⚠️ 위 루프는 GRID_테마상세(슬롯당 2개) 제한 때문에
+    #    **전체 테마 중 30개만** 종목을 담는다. 나머지는 빈칸이 된다.
+    #    실측: 3,624종목 중 2,999종목(83%)이 미분류였다(2026-08-21).
+    #    → 슬롯에 걸린 **테마를 더 열어** 종목을 채운다.
+    _보강 = 0
+    for _슬, _kws in GRID_슬롯:
+        _매 = [c for c in 유효 if any(k.lower() in c[0].lower() for k in _kws)]
+        for _tn, _no, _ in _매[GRID_테마상세:GRID_테마상세 + GRID_보강테마]:
+            for n in _grid_theme_members(_no):
+                if n in 유니버스:
+                    종목구역.setdefault(n, [])
+                    if _슬 not in 종목구역[n] and len(종목구역[n]) < 2:
+                        종목구역[n].append(_슬)
+                        _보강 += 1
+    _빈 = sum(1 for n in 유니버스 if not 종목구역.get(n))
+    print(f"   🧭 구역 배정: 추가 테마로 {_보강}종목 보강 · 미분류 {_빈}종목")
 
     분류됨 = set()
     행들 = []
