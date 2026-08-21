@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n21"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n22"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -4553,6 +4553,33 @@ def build_core(핵심편, data, 해석):
        → 이제 **자리에 안내 상자를 남기고 빌드 로그에도 크게 경고**한다.
     """
     if not 핵심편:
+        # ⚠️ 오늘 해석글이 없으면 **가장 최근 거래일의 핵심편**을 빌려 쓴다(2026-08-21).
+        #    재사용(무료)으로 돌려도 90초 브리핑이 사라지지 않게 하기 위함이다.
+        #    ⚠️ 반드시 '어제 글'임을 화면에 밝힌다. 오늘 글인 척하면 거짓말이 된다.
+        _대체, _대체날 = None, None
+        try:
+            for _f in sorted(alist(r"report_\d{8}\.json"), reverse=True):
+                _ymd = _f[7:15]
+                if _ymd >= DATE:
+                    continue
+                with open(apath(_f), encoding="utf-8") as _fp:
+                    _k = ((json.load(_fp).get("해석글") or {}).get("핵심편")) or None
+                if _k:
+                    _대체, _대체날 = _k, _ymd
+                    break
+        except Exception:
+            _대체 = None
+        if _대체:
+            print(f"ℹ️ 오늘 해석글이 없어 {_대체날} 핵심편을 빌려 씁니다(화면에 명시).")
+            _배너 = (
+                '<div style="background:#2a1a12;border:1px solid #6b3f1f;border-radius:10px;'
+                'padding:9px 12px;margin:0 0 12px">'
+                '<p style="margin:0;font-size:11.5px;color:#f0c65a;font-weight:800">'
+                f'⚠️ 아래 90초 브리핑은 <b>{_대체날[4:6]}/{_대체날[6:]} 글</b>입니다</p>'
+                '<p style="margin:4px 0 0;font-size:10.5px;color:#c9ced6;line-height:1.6">'
+                '오늘 해석글이 아직 만들어지지 않아 직전 거래일 것을 그대로 싣습니다. '
+                '아래 <b>숫자와 표는 모두 오늘 것</b>이니 안심하고 보셔도 됩니다.</p></div>')
+            return _배너 + build_core(_대체, data, 해석)
         print("=" * 60)
         print("⚠️  핵심편 없음 — 오늘 해석글(archive/report_*.json)이 없습니다.")
         print("    워크플로를 'Claude 해석글 = 새로 생성(과금)'으로 다시 돌리세요.")
@@ -7405,6 +7432,11 @@ a{{color:inherit;text-decoration:none}}
     {build_macro_card((data.get('매크로') or {}).get('국제금'), (해석.get('매크로해설') or {}).get('금',''))}
   </div>
 
+  <!-- ⚠️ 수급을 주인공보다 먼저 본다(2026-08-21 지시).
+       "돈이 어디로 갔나"를 알고 나서 "어디가 떴나"를 봐야 인과가 맞다. -->
+  <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
+  {build_flow_signal(data.get('파생'), data.get('지수수급'))}
+
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
     <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
   {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
@@ -7455,9 +7487,6 @@ a{{color:inherit;text-decoration:none}}
 
   <p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>
   {build_return_sector()}
-
-  <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
-  {build_flow_signal(data.get('파생'), data.get('지수수급'))}
 
   <p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
   {build_crowd_compass(data.get('신용잔고'))}
