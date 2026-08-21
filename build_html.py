@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n23"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n26"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -3900,10 +3900,11 @@ def build_sector_map():
                 f'<span style="width:38px;flex:none;text-align:right;font-size:8.5px;'
                 f'color:#6f7784">누적%p</span></div></div>')
         탭 += (f'<span class="sm-tab" data-idx="{idx}" onclick="smTab({idx})" '
-              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
-              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
-              f'background:{"#2a3446" if 켬 else "#171c25"};'
-              f'color:{"#f0c65a" if 켬 else "#7d848f"}">{lab}</span>')
+              f'style="flex:1;text-align:center;font-size:11.5px;padding:.42rem .2rem;'
+              f'border-radius:8px;cursor:pointer;font-weight:800;white-space:nowrap;'
+              f'background:{"#1b2432" if 켬 else "#0d1118"};'
+              f'border:1px solid {"#3a465c" if 켬 else "#1e2531"};'
+              f'color:{"#fff" if 켬 else "#7d848f"}">{lab}</span>')
 
     JS = """<script>
 (function(){
@@ -3938,6 +3939,91 @@ def build_sector_map():
             '</div>' + JS)
 
 
+
+# ══════════════════════════════════════════════════════
+# 🔮 돌아올 섹터 — 예보 저장 · 적중률 채점
+# ══════════════════════════════════════════════════════
+#  ⚠️ 왜 필요한가 (2026-08-21)
+#     "이 섹터가 곧 온다"고 매일 말하면서 **맞았는지는 한 번도 안 세었다.**
+#     리포트의 정체성이 "자기 예보를 채점표로 남긴다"인데 이 코너만 빠져 있었다.
+#
+#  ⚠️ 절대 원칙 2 — 없는 비교는 만들지 않는다.
+#     과거 예보를 저장한 적이 없으므로 **지금 적중률을 계산하면 지어낸 숫자**다.
+#     오늘부터 쌓고, 표본 5회가 넘을 때까지는 "축적 중"만 말한다.
+RS_FILE = "return_sector_log.json"
+RS_HORIZON = 10        # 예보 후 몇 거래일 안에 상위권에 들면 '적중'인가
+RS_MIN_SAMPLE = 5      # 이 미만이면 적중률을 말하지 않는다
+
+
+def _rs_log():
+    try:
+        v = load_json(RS_FILE)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def rs_save_forecast(임박목록):
+    """오늘의 '임박' 예보를 기록한다. 같은 날 두 번 저장하지 않는다."""
+    if not 임박목록:
+        return
+    log = _rs_log()
+    if any(r.get("날짜") == DATE for r in log):
+        return
+    log.append({"날짜": DATE, "임박": list(임박목록)[:6], "채점": None})
+    try:
+        with open(RS_FILE, "w", encoding="utf-8") as f:
+            json.dump(log[-400:], f, ensure_ascii=False, indent=1)
+        print(f"   🔮 돌아올 섹터 예보 {len(임박목록)}건 기록")
+    except Exception as e:
+        print(f"   ⚠️ 예보 기록 실패: {type(e).__name__}")
+
+
+def rs_grade(날짜들, 순위):
+    """지난 예보를 채점한다 — 예보 후 RS_HORIZON 거래일 안에 CYC_TOP 안에 들었나.
+
+    반환: (적중, 총, 표본충분?)
+    """
+    log = _rs_log()
+    if not log or not 날짜들:
+        return 0, 0, False
+    idx = {d: i for i, d in enumerate(날짜들)}
+    적중 = 총 = 0
+    for r in log:
+        d0 = r.get("날짜")
+        if d0 not in idx:
+            continue
+        i0 = idx[d0]
+        if i0 + RS_HORIZON >= len(날짜들):
+            continue                       # 아직 결과가 안 나온 예보는 세지 않는다
+        for nm in (r.get("임박") or []):
+            rk = 순위.get(nm)
+            if not rk:
+                continue
+            총 += 1
+            창 = [v for v in rk[i0 + 1: i0 + 1 + RS_HORIZON] if v]
+            if 창 and min(창) <= CYC_TOP:
+                적중 += 1
+    return 적중, 총, 총 >= RS_MIN_SAMPLE
+
+
+def rs_grade_html(날짜들, 순위):
+    """적중률 한 줄. 표본이 모자라면 축적 상태만 정직하게 알린다."""
+    적중, 총, 충분 = rs_grade(날짜들, 순위)
+    if not 충분:
+        return ('<p class="rs-grade dim">⏳ 적중률은 '
+                f'예보 <b>{총}건</b>이 쌓였습니다 · '
+                f'<b>{RS_MIN_SAMPLE}건</b>부터 공개합니다 '
+                f'(예보 후 {RS_HORIZON}거래일 안에 상위 {CYC_TOP}위 진입 여부로 채점)</p>')
+    율 = 적중 / 총 * 100
+    c = FS_BUY if 율 >= 50 else FS_SELL
+    return ('<p class="rs-grade">📊 <b>지금까지의 적중률</b> — '
+            f'임박이라고 말한 <b>{총}번</b> 중 <b style="color:{c}">{적중}번</b>이 '
+            f'{RS_HORIZON}거래일 안에 상위 {CYC_TOP}위에 들었습니다 '
+            f'(<b style="color:{c}">{율:.0f}%</b>). '
+            '과거 기록이며 확률 예측이 아닙니다.</p>')
+
+
 def build_return_sector():
     """🔮 돌아올 섹터 — 주기로 본 다음 순번."""
     날짜, 순위, _ = _cyc_rank()
@@ -3968,7 +4054,9 @@ def build_return_sector():
     GRP = [("임박", "임박 섹터", "#ff6b4a", "평균 주기를 이미 넘겼습니다"),
            ("대기", "대기 섹터", "#5b9bff", "아직 순번이 오지 않았습니다"),
            ("지금", "지금 섹터", "#4ade80", "이미 상위권 안에 있습니다")]
-    본문 = ""
+    # 오늘의 '임박' 예보를 기록해 둔다 — 나중에 채점하기 위해서다
+    rs_save_forecast([n for n in 순위 if 그룹(n) == "임박"])
+    본문 = rs_grade_html(날짜, 순위)
     for key, 라벨, 색, 설명 in GRP:
         멤버 = [n for n in 순위 if 그룹(n) == key]
         if not 멤버:
@@ -4075,7 +4163,9 @@ def build_return_sector():
 #        각 카드에 [강세 레이더 평균] [매집 레이더 평균] [해당 지수] 세 곡선을 겹친다.
 #  ⚠️ 코스피 종목은 코스피와, 코스닥 종목은 코스닥과 비교해야 한다.
 #     지수를 섞으면 변동폭이 큰 코스닥이 불리하게 보인다.
-CAP_WINS = [(20, "20일"), (60, "60일"), (120, "120일")]
+# ⚠️ 5일 탭 추가(2026-08-21) — 포착 직후 며칠이 가장 중요한데 그걸 못 보고 있었다.
+#    다른 코너와 같은 창 구성으로 맞춘다.
+CAP_WINS = [(5, "5일"), (20, "20일"), (60, "60일"), (120, "120일")]
 CAP_KINDS = [("강세", "강세레이더", "#ff6b4a"), ("매집", "매집레이더", "#4ade80")]
 
 
@@ -4196,18 +4286,20 @@ def build_capture_paths():
         패널 += (f'<div class="cp-panel" data-idx="{idx}" '
                 f'style="display:{"block" if 켬 else "none"}">{본문}</div>')
         탭 += (f'<span class="cp-tab" data-idx="{idx}" onclick="cpTab({idx})" '
-              f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
-              f'cursor:pointer;font-weight:{800 if 켬 else 600};'
-              f'background:{"#2a3446" if 켬 else "#171c25"};'
-              f'color:{"#f0c65a" if 켬 else "#7d848f"}">{lab}</span>')
+              f'style="flex:1;text-align:center;font-size:11.5px;padding:.42rem .2rem;'
+              f'border-radius:8px;cursor:pointer;font-weight:800;white-space:nowrap;'
+              f'background:{"#1b2432" if 켬 else "#0d1118"};'
+              f'border:1px solid {"#3a465c" if 켬 else "#1e2531"};'
+              f'color:{"#fff" if 켬 else "#7d848f"}">{lab}</span>')
     JS = """<script>
 window.cpTab=function(i){
  document.querySelectorAll('.cp-panel').forEach(function(p){
   p.style.display=(p.dataset.idx==i)?'block':'none';});
  document.querySelectorAll('.cp-tab').forEach(function(t){
   var on=t.dataset.idx==i;
-  t.style.background=on?'#2a3446':'#171c25';
-  t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});};
+  t.style.background=on?'#1b2432':'#0d1118';
+  t.style.border='1px solid '+(on?'#3a465c':'#1e2531');
+  t.style.color=on?'#fff':'#7d848f';});};
 </script>"""
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
@@ -5409,6 +5501,10 @@ FS_BUY, FS_SELL = "#ff6b4a", "#5b9bff"       # 수급 — 밝은 톤
 IDX_UP, IDX_DN = "#c1432b", "#2e6bd6"        # 지수 — 진한 톤
 FS_FOR, FS_INS = "#f472e6", "#74f0d4"        # 외국인 / 기관
 FS_FUT = "#e0c060"                            # 선물
+FS_IND = "#a78bfa"                            # 개인 (연보라)
+#  ⚠️ 개인은 실탄(외국인+기관)의 **거울**이다. 현물시장이 제로섬이라
+#     둘은 대체로 반대로 움직인다. 그래서 매수/매도 색(빨강·파랑)이나
+#     외국인·기관 색과 겹치면 안 된다 → 따로 연보라를 쓴다.
 FS_TL_MIN = {5: 5, 20: 10, 60: 30}            # 이만큼 없으면 그림 대신 진행 막대
 _FS_TL_SEQ = [0]
 
@@ -5582,6 +5678,17 @@ def _fs_subrow(name, st, col, MX):
       </div>'''
 
 
+def _market_rows():
+    """market_history.json의 일별 배열. 개인 수급이 여기 있다."""
+    try:
+        m = load_json("market_history.json")
+    except Exception:
+        return []
+    if isinstance(m, dict):
+        return m.get("일별") or []
+    return m if isinstance(m, list) else []
+
+
 def _fs_timeline_svg(이력, p, W=380):
     """기간 p의 통합 타임라인 — 외국인/기관 누적 · 선물 누적 · 비차익 비중.
 
@@ -5601,6 +5708,18 @@ def _fs_timeline_svg(이력, p, W=380):
     선 = [x.get("외선") for x in sl]
     비 = [x.get("비차익") for x in sl]
     실 = [x.get("실탄") or 0 for x in sl]
+    # 개인은 flow_history에 없고 market_history에 있다 → 날짜로 맞춰 붙인다
+    개 = []
+    try:
+        # ⚠️ market_history는 '2026-08-20', flow_history는 '20260820' 형식이다.
+        #    그대로 맞추면 교집합이 0이 되어 개인 선이 통째로 안 그려진다(2026-08-21).
+        _mh = {str(r.get("날짜", "")).replace("-", ""): r
+               for r in (_market_rows() or [])}
+        for x in sl:
+            _v = (_mh.get(x.get("날짜")) or {}).get("개인_코스피")
+            개.append(_v if isinstance(_v, (int, float)) else None)
+    except Exception:
+        개 = [None] * q
 
     def cum(a):
         t, o = 0, []
@@ -5651,6 +5770,25 @@ def _fs_timeline_svg(이력, p, W=380):
         return y
     _kty = _lbl_y(YK(C코[-1]) + 3)
     g.append(f'<text x="{W-PR+4}" y="{_kty:.1f}" font-size="8.5" fill="#8b93a0" font-weight="800">코스피</text>')
+    # 개인 누적 — 값이 없는 날은 0으로 두지 않고 직전 값을 유지한다(선이 튀지 않게)
+    C개, _acc, _has = [], 0, False
+    for v in 개:
+        if isinstance(v, (int, float)):
+            _acc += v; _has = True
+        C개.append(_acc)
+    if _has:
+        _lo2, _hi2 = min(vals + C개), max(vals + C개)
+        _sp2 = (_hi2 - _lo2) or 1
+        YA = lambda v: AB - (AB - AT) * (v - _lo2) / _sp2
+        zA = YA(0)
+        g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YA(v):.1f}" for k, v in enumerate(C개)) +
+                 f'" fill="none" stroke="{FS_IND}" stroke-width="2" stroke-linejoin="round" opacity=".85"/>')
+        g.append(f'<circle cx="{X(q-1):.1f}" cy="{YA(C개[-1]):.1f}" r="3" fill="{FS_IND}"/>')
+    if _has:
+        _ity = _lbl_y(YA(C개[-1]) + 3)
+        g.append(f'<text x="{W-PR+4}" y="{_ity:.1f}" font-size="8.5" fill="{FS_IND}" '
+                 f'font-weight="800">개인</text>')
+
     for ser, col, nm, wd in ((C기, FS_INS, "기관", 2.4), (C외, FS_FOR, "외국인", 2.8)):
         g.append('<polyline points="' + " ".join(f"{X(k):.1f},{YA(v):.1f}" for k, v in enumerate(ser)) +
                  f'" fill="none" stroke="{col}" stroke-width="{wd}" stroke-linejoin="round"/>')
@@ -5847,6 +5985,34 @@ def core_flow_gauge():
             f'더하면 정보가 지워져 빼고, 선물·비차익은 단위가 달라 합치지 않습니다.</p>')
 
 
+
+def build_atc_talk(해석):
+    """📡 관제교신 — 타임라인 아래 해석 (2026-08-21 확정 문체).
+
+    ③ 관제탑 교신체 + ④ 질문-답변체 조합.
+    ⚠️ 이 리포트에서 가장 어려운 영역이라 **쉽고 재미있게** 푸는 것이 목적이다.
+       딱딱한 증권사 문체를 쓰지 않기로 했다.
+    ⚠️ Claude가 쓰는 글이라 '재사용' 모드에서는 안 나온다(graceful — 빈 문자열).
+    """
+    t = (해석 or {}).get("관제교신") or {}
+    항적 = (t.get("항적보고") or "").strip()
+    주목 = (t.get("주목지점") or "").strip()
+    믿음 = (t.get("믿어도되나") or "").strip()
+    내일 = (t.get("내일볼것") or "").strip()
+    if not (항적 or 주목):
+        return ""
+    블록 = ""
+    if 항적:
+        블록 += f'<p class="atc-p atc-lead">{항적}</p>'
+    if 주목:
+        블록 += f'<p class="atc-p">{주목}</p>'
+    if 믿음:
+        블록 += f'<div class="atc-ask">{믿음}</div>'
+    if 내일:
+        블록 += f'<p class="atc-next">{내일}</p>'
+    return f'<div class="atc">{블록}</div>'
+
+
 def build_flow_timeline(이력):
     """기간 탭(5·20·60) + 통합 타임라인. 이력 부족 탭은 진행 막대."""
     N = len(이력)
@@ -5876,6 +6042,7 @@ def build_flow_timeline(이력):
       <div class="fs-lg">
         <span><i style="background:{FS_FOR}"></i>외국인 누적</span>
         <span><i style="background:{FS_INS}"></i>기관 누적</span>
+        <span><i style="background:{FS_IND}"></i>개인 누적</span>
         <span><i style="background:{FS_FUT}"></i>선물 누적</span>
         <span><i style="background:#6f7784"></i>코스피</span>
         <span><i style="background:#c8ced6"></i>비차익 — 점 = 측정된 날 · 점선 = 판정 보류 구간</span>
@@ -5895,7 +6062,7 @@ def build_flow_timeline(이력):
     }})();</script>'''
 
 
-def build_flow_signal(파생, 지수수급):
+def build_flow_signal(파생, 지수수급, 해석=None):
     """수급 관제신호: 오늘 실탄 판정 + 3질문 체크 + 20거래일 누적 그래프.
 
     해석 문장까지 전부 규칙 기반(코드 생성)이다 — 숫자 코너에 AI 창작이 끼면
@@ -6354,6 +6521,7 @@ def build_flow_signal(파생, 지수수급):
     </div>
     <div class="fs-splittitle">🕒 하나의 타임라인 <span>— 지수 + 수급 + 선물 + 비차익</span></div>
     {build_flow_timeline(이력)}
+    {build_atc_talk(해석)}
     <div class="fs-read">
       <p class="fs-read-t">🧺 오늘의 비차익 판독</p>
       <p class="fs-read-b">{바스켓읽기}</p>
@@ -7166,6 +7334,19 @@ a{{color:inherit;text-decoration:none}}
 .ms-bk{{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:10px 0 0;padding-top:9px;border-top:1px solid rgba(255,255,255,.08)}}
 .ms-bk-b{{font-size:11px;font-weight:800;padding:5px 10px;border-radius:7px;background:#0f131a;border:1px solid #2a3446;color:#c9ced6;cursor:pointer}}
 .ms-bk-t{{font-size:9.5px;color:#6f7784;line-height:1.5;flex:1;min-width:140px}}
+/* 🔮 돌아올 섹터 적중률 */
+.rs-grade{{font-size:11.5px;color:#c9ced6;line-height:1.75;margin:0 0 11px;padding:10px 12px;background:#141a22;border:1px solid #24303f;border-radius:10px}}
+.rs-grade.dim{{color:#8b93a0}}
+.rs-grade b{{color:#fff}}
+/* 📡 관제교신 — 타임라인 아래 해석 */
+.atc{{background:#0e141c;border:1px solid #22303f;border-left:3px solid #22d3ee;border-radius:12px;padding:13px 15px;margin:12px 0 0}}
+.atc-p{{font-size:12.5px;color:#c9ced6;line-height:1.85;margin:0 0 10px}}
+.atc-p:last-child{{margin-bottom:0}}
+.atc-lead{{color:#e8eaee}}
+.atc-p b,.atc-ask b{{color:#fff;font-weight:800}}
+.atc-ask{{font-size:12.5px;color:#c9ced6;line-height:1.85;margin:0 0 10px;padding:11px 12px;background:#121922;border-radius:9px;border:1px solid #1e2a36}}
+.atc-next{{font-size:12.5px;color:#f0c65a;line-height:1.8;margin:0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);font-weight:700}}
+.atc-next b{{color:#fff}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
 .q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
 .q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
@@ -7435,7 +7616,7 @@ a{{color:inherit;text-decoration:none}}
   <!-- ⚠️ 수급을 주인공보다 먼저 본다(2026-08-21 지시).
        "돈이 어디로 갔나"를 알고 나서 "어디가 떴나"를 봐야 인과가 맞다. -->
   <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
-  {build_flow_signal(data.get('파생'), data.get('지수수급'))}
+  {build_flow_signal(data.get('파생'), data.get('지수수급'), 해석)}
 
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
     <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
