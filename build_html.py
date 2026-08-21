@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n39"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.21-n40"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -4528,7 +4528,7 @@ def build_slope_chart(격자):
             'padding:13px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 크기별</p>'
             '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '대형, 중형, 소형 누가 강한가?</p>'
+            '섹터내 대형, 중형, 소형 누가 강했나?</p>'
             f'<div style="display:flex;gap:6px;margin:10px 0 9px">{탭}</div>'
             + 패널 +
             '<p style="margin:8px 0 0;font-size:10.5px;color:#6f7784;line-height:1.6">'
@@ -4698,23 +4698,20 @@ def build_capture_path(개월=1, 시장=None, 종류="강세"):
 
 
 def _anomaly_signals(data):
-    """🚨 오늘만 나타난 신호 — 최대 3줄, 그중 종목 언급은 딱 1줄.
+    """🚨 오늘만 나타난 신호 — **오늘 리포트에서 가장 인상적인 2~3가지.**
 
-    ⚠️ 구성 규칙 (2026-08-21 확정)
-       ① **종목 1줄** — 오늘 가장 인상적인 종목 하나(많아야 둘).
-          후보: 오늘의 주인공 / 강세 레이더 / 매집 레이더 중 **가장 센 것 하나만**
-       ② **오늘 리포트의 최대 이슈 1줄** — 시장 전체 차원의 이상 신호
-       ③ **나머지 1줄** — 있으면 넣고 없으면 생략
-       총 2~3줄. 그 이상은 눈이 못 따라간다.
+    ⚠️ 이 코너의 정체 (2026-08-21 확정)
+       **종목만 보여주는 코너가 아니다.** 오늘 리포트 전체를 훑어
+       "이건 평소와 다르다" 싶은 것을 골라 주는 자리다.
+       재료는 **지수·수급·섹터·정책·종목** 어디서든 나올 수 있다.
 
-    ⚠️ 종목명을 여러 줄에 흩뿌리면 **어디를 봐야 할지 모르게 된다.**
-       (2026-08-21 실제로 4개가 나와 지적받음)
-
-    ⚠️ 하나도 없으면 빈 리스트를 돌려주고, 코너 자체를 띄우지 않는다.
-       매일 나오는 코너는 특별함이 없어 아무도 안 누른다.
+    ⚠️ 뽑는 원칙
+       ① **평소와 다른 것**만 (매일 나오는 건 신호가 아니다)
+       ② 종목 언급은 **많아야 1줄** — 여러 줄에 흩뿌리면 초점이 사라진다
+       ③ 총 2~3줄. 하나도 없으면 **코너 자체를 띄우지 않는다**
+       ④ 강한 순으로 정렬해 위에서부터 자른다
     """
     def _nm_ok(n):
-        """ETF·스팩·우선주는 이름에서 거른다(옛 데이터 방어)."""
         n = str(n or "")
         if not n:
             return False
@@ -4724,69 +4721,100 @@ def _anomaly_signals(data):
                 return False
         return True
 
-    종목줄, 이슈줄 = None, []
+    후보 = []      # (강도, 앵커, 태그, 문장) — 강도가 높을수록 인상적
+    종목줄 = None
     try:
-        # ═══ ① 종목 1줄 — 세 후보 중 가장 센 것 하나 ═══
-        #     우선순위: 강세(오늘 터진 것) > 매집(조용히 쌓인 것) > 주인공(테마)
+        지 = ((data.get("지수수급") or {}).get("지수") or {})
+        def _등(k):
+            try:
+                return float(str((지.get(k) or {}).get("등락률") or "").replace("%", ""))
+            except (TypeError, ValueError):
+                return None
+        코, 닥 = _등("코스피"), _등("코스닥")
+
+        # ── 지수 ── 코스피·코스닥이 반대로 가거나 격차가 크게 벌어진 날
+        if 코 is not None and 닥 is not None:
+            갭 = abs(코 - 닥)
+            if (코 >= 0) != (닥 >= 0):
+                후보.append((95, "#score", "디커플링",
+                             f'코스피 <b>{코:+.2f}%</b> · 코스닥 <b>{닥:+.2f}%</b> — '
+                             f'두 시장이 <b>반대로 갔습니다</b>'))
+            elif 갭 >= 2.0:
+                후보.append((80, "#score", "격차",
+                             f'코스피와 코스닥 격차가 <b>{갭:.1f}%p</b> — '
+                             f'같은 시장인데 딴 나라처럼 움직였습니다'))
+
+        # ── 수급 ── 연속·규모·비차익
+        h = load_json("flow_history.json") or []
+        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
+        if h:
+            t = h[-1]
+            for key, nm in (("외현", "외국인"), ("기관", "기관")):
+                arr = [x.get(key) for x in h if x.get(key) is not None]
+                st = _fs_stat(arr)
+                if not st:
+                    continue
+                if st["연속"] >= 4:
+                    후보.append((85, "#flow", "연속",
+                                 f'{nm}이 <b>{st["연속"]}일 연속 {st["dir"]}</b> — '
+                                 f'한 방향으로 굳어지고 있습니다'))
+                elif st["연속"] == 1 and st["n"] >= 5:
+                    _앞 = [v for v in arr[:-1]][-6:]
+                    _같 = sum(1 for v in _앞 if (v >= 0) != (st["v"] >= 0))
+                    if _같 >= 4:
+                        후보.append((88, "#flow", "전환",
+                                     f'{nm}이 <b>{_같}일 만에 {st["dir"]}로 돌아섰습니다</b> — '
+                                     f'방향이 바뀌는 자리일 수 있습니다'))
+            st실 = _fs_stat([x["실탄"] for x in h])
+            if st실 and st실["배수"] >= 2.0:
+                후보.append((82, "#flow", "규모",
+                             f'실탄이 평소의 <b>{st실["배수"]:.1f}배</b> — 유별나게 큰 하루입니다'))
+            _r = basket_ratio(t.get("비차익"), t.get("실탄"))
+            if _r is not None and abs(_r) >= 150:
+                후보.append((75, "#flow", "비차익",
+                             f'비차익이 실탄의 <b>{abs(_r):.0f}%</b> — '
+                             f'종목이 아니라 <b>지수를 통째로</b> 사고판 날입니다'))
+
+        # ── 섹터 ── 확산도 만점이 여럿
+        만점 = [x.get("테마명") for x in (data.get("주도섹터") or [])
+                if (x.get("확산도") or 0) >= 100]
+        if len(만점) >= 3:
+            후보.append((70, "#sectors", "확산",
+                         f'<b>{len(만점)}개 섹터</b>가 확산도 100% — '
+                         f'그 안에서는 <b>안 오른 종목이 하나도 없었습니다</b>'))
+
+        # ── 종목 (최대 1줄) ── 강세 > 매집 > 주인공
         강 = []
         for v in ((data.get("강세레이더") or {}).get("신규") or {}).values():
             for x in (v or []):
                 if _nm_ok(x.get("종목명")):
                     강.append((x.get("종목명"), x.get("등락률")))
-        강.sort(key=lambda t: -(t[1] or 0))
+        강.sort(key=lambda t_: -(t_[1] or 0))
         if 강:
-            n, v = 강[0]
+            n_, v_ = 강[0]
             더 = f' 외 {len(강)-1}종목' if len(강) > 1 else ''
-            종목줄 = ("#radar", "불난자리",
-                     f'<b>{n}</b>' + (f'가 <b>+{v:.1f}%</b>' if isinstance(v, (int, float)) else '')
+            종목줄 = (60, "#radar", "불난자리",
+                     f'<b>{n_}</b>' + (f'가 <b>+{v_:.1f}%</b>' if isinstance(v_, (int, float)) else '')
                      + f'{더} — 거래량과 주가가 함께 터졌습니다')
         else:
             쌍 = [x for x in ((data.get("매집레이더") or {}).get("종목") or [])
                   if x.get("유형") == "쌍끌이" and _nm_ok(x.get("종목명"))]
-            쌍.sort(key=lambda x: -(x.get("시총대비") or 0))
+            쌍.sort(key=lambda x: -(x.get("매집강도") or x.get("시총대비") or 0))
             if 쌍:
-                종목줄 = ("#acc", "매집",
+                종목줄 = (55, "#acc", "매집",
                          f'<b>{쌍[0].get("종목명")}</b>' +
                          (f' 외 {len(쌍)-1}종목' if len(쌍) > 1 else '') +
                          ' — 외국인·기관이 <b>둘 다</b> 조용히 사 모았습니다')
-            else:
-                주 = (data.get("주도섹터") or [])
-                if 주 and 주[0].get("테마명"):
-                    종 = [x.get("종목명") for x in (주[0].get("종목") or [])
-                          if _nm_ok(x.get("종목명"))]
-                    if 종:
-                        종목줄 = ("#sectors", "주인공",
-                                 f'<b>{주[0]["테마명"]}</b>가 오늘 시장을 끌었습니다 — '
-                                 f'<b>{종[0]}</b> 중심으로')
-
-        # ═══ ②③ 시장 전체 차원의 이상 신호 (종목명 없이) ═══
-        만점 = [s_.get("테마명") for s_ in (data.get("주도섹터") or [])
-                if (s_.get("확산도") or 0) >= 100]
-        if len(만점) >= 3:
-            이슈줄.append(("#sectors", "확산",
-                          f'<b>{len(만점)}개 섹터</b>가 확산도 100% — '
-                          f'그 안에서는 <b>안 오른 종목이 하나도 없었습니다</b>'))
-        h = load_json("flow_history.json") or []
-        h = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
-        if h:
-            for key, nm in (("외현", "외국인"), ("기관", "기관")):
-                arr = [x.get(key) for x in h if x.get(key) is not None]
-                st = _fs_stat(arr)
-                if st and st["연속"] >= 4:
-                    이슈줄.append(("#flow", "연속",
-                                  f'{nm}이 <b>{st["연속"]}일 연속 {st["dir"]}</b> — '
-                                  f'한 방향으로 굳어지고 있습니다'))
-                    break
-            st실 = _fs_stat([x["실탄"] for x in h])
-            if st실 and st실["배수"] >= 2.0:
-                이슈줄.append(("#flow", "규모",
-                              f'실탄이 평소의 <b>{st실["배수"]:.1f}배</b> — '
-                              f'유별나게 큰 하루입니다'))
     except Exception:
         pass
 
-    out = ([종목줄] if 종목줄 else []) + 이슈줄[:2]
-    return out[:3]
+    후보.sort(key=lambda t_: -t_[0])
+    # ⚠️ 종목줄은 **최대 1개**만. 나머지는 시장 차원 신호로 채운다.
+    묶음 = 후보[:3]
+    if 종목줄:
+        묶음 = 후보[:2] + [종목줄]
+        묶음.sort(key=lambda t_: -t_[0])
+    return [(a, b, c) for _, a, b, c in 묶음[:3]]
 
 def _tomorrow_line(data):
     """🌅 내일 볼 것 — **숫자 기준선 하나**로 못 박는다.
