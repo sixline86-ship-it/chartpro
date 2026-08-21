@@ -20,7 +20,7 @@ import math
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.21-n23"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.21-n26"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -483,6 +483,53 @@ NEWS_SOURCES = [
 
 def _clean(t):
     return " ".join(str(t or "").split()).strip()
+
+
+def collect_credit_balance():
+    """💳 신용융자 잔고 — 빚내서 산 돈이 얼마나 쌓였나.
+
+    왜 보나: 신용잔고가 쌓일수록 **반대매매 위험**이 커진다.
+      지수가 빠질 때 빚으로 산 물량이 강제로 나오면서 낙폭이 증폭된다.
+      군중 나침반이 이 숫자를 '개인의 조바심'으로 읽는다.
+
+    ⚠️ 못 구해도 절대 죽지 않는다. None을 돌려주면 코너만 안 나온다.
+       (샌드박스에서 페이지 구조를 확인할 수 없었다 — 첫 실행 로그를 보고 조정할 것)
+
+    반환: {"잔고": 억원, "증감": 억원} 또는 None
+    """
+    후보 = [
+        ("네이버 신용융자", "https://finance.naver.com/sise/sise_deposit.naver"),
+    ]
+    for 이름, url in 후보:
+        try:
+            res = requests.get(url, headers=HEADERS, timeout=12)
+            res.encoding = "euc-kr"
+            표들 = pd.read_html(io.StringIO(res.text))
+        except Exception as e:
+            print(f"  ⚠️ 신용잔고({이름}) 수집 실패: {type(e).__name__}")
+            continue
+
+        for 표 in 표들:
+            try:
+                문자 = 표.to_string()
+                if "신용" not in 문자:
+                    continue
+                # 숫자만 뽑아 가장 큰 값을 잔고로 본다(단위: 억원 가정)
+                수 = []
+                for _, row in 표.iterrows():
+                    for v in row.tolist():
+                        t = str(v).replace(",", "").strip()
+                        if re.fullmatch(r"-?\d+(\.\d+)?", t):
+                            수.append(float(t))
+                수 = [x for x in 수 if abs(x) > 10000]      # 신용잔고는 조 단위(억원 기준 1만↑)
+                if len(수) >= 2:
+                    잔고, 직전 = 수[0], 수[1]
+                    print(f"  ✅ 신용잔고 {잔고:,.0f}억 (전일 대비 {잔고-직전:+,.0f}억) — {이름}")
+                    return {"잔고": round(잔고), "증감": round(잔고 - 직전)}
+            except Exception:
+                continue
+    print("  ⚠️ 신용잔고 미확보 — 코너는 표시되지 않습니다(페이지 구조 확인 필요).")
+    return None
 
 
 def collect_news():
@@ -2561,6 +2608,7 @@ if __name__ == "__main__":
         "주도섹터": 테마결과.get("주도섹터", []),
         "관제지수": 게이지,
         "뉴스원본": 뉴스원본,
+        "신용잔고": collect_credit_balance(),
         "매크로": 매크로,
         "파생": 파생,
         "강세레이더": 강세레이더,
