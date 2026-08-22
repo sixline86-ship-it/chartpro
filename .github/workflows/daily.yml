@@ -81,7 +81,10 @@ env:
   # 🔔 회원(구독자)에게 실제로 발송을 시작하면 'true'로 바꾸세요.
   #    true = 해석글 생성 실패 시 텔레그램 발송을 막습니다(깨진 내용이 회원에게 안 감).
   #    false(지금) = 실패해도 그대로 보냅니다 — 테스트 중이라 본인이 직접 눈으로 확인하려는 용도.
-  TELEGRAM_SKIP_ON_FAIL: 'false'
+  # 🆕 2026-08-22 — 'false'였다. 해석글이 없어도 텔레그램이 나가서
+  #    구독자에게 **없는 페이지(404) 링크**가 발송됐다(실제 사고).
+  #    이제 해석글이 없으면 무조건 막고, 운영자에게만 알린다.
+  TELEGRAM_SKIP_ON_FAIL: 'true'
 
 jobs:
   publish:
@@ -137,11 +140,50 @@ jobs:
 
       # ── ① 숫자 수집 ──
       - name: 데이터 수집
+        id: collect
         if: steps.guard.outputs.run == 'yes'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         run: python collect_data.py
+
+      # 🆕 2026-08-22 — 수집이 죽으면 그 뒤는 전부 무의미하다. 운영자에게만 알리고 끝낸다.
+      - name: 수집 실패 알림 (운영자 전용)
+        if: failure() && steps.guard.outputs.run == 'yes'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py collect_fail
+
+      # ══════════════════════════════════════════════════════════
+      # 🚨 휴장 가드 — 2026-08-22 신설
+      #   cron은 월~금에만 돌지만 **달력상 평일인데 장이 안 서는 날**이 있다
+      #   (임시공휴일·선거일·임시휴장). 그날 그냥 돌면 지수 0%·수급 0원인
+      #   엉터리 데이터로 Claude가 글까지 써서(=과금) 구독자에게 나간다.
+      #   collect_data.py가 거래대금·등락종목수로 사후 판정해 HOLIDAY_FLAG를 남긴다.
+      #   ⚠️ 반드시 **해석글 생성(과금) 앞에** 둔다.
+      # ══════════════════════════════════════════════════════════
+      - name: 휴장 여부 확인
+        id: holiday
+        if: steps.guard.outputs.run == 'yes'
+        run: |
+          if [ -f "HOLIDAY_FLAG" ]; then
+            echo "closed=yes" >> "$GITHUB_OUTPUT"
+            echo "reason=$(cat HOLIDAY_FLAG)" >> "$GITHUB_OUTPUT"
+            echo "🚨 휴장으로 판단 — 이후 단계를 모두 건너뜁니다: $(cat HOLIDAY_FLAG)"
+          else
+            echo "closed=no" >> "$GITHUB_OUTPUT"
+            echo "✅ 정상 거래일"
+          fi
+
+      - name: 휴장 알림 (운영자 전용)
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed == 'yes'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py holiday "${{ steps.holiday.outputs.reason }}"
 
       # ── ② 해석글 생성 (실패해도 다음 단계로) ──
       # 💰 유일하게 돈이 드는 단계.
@@ -149,6 +191,7 @@ jobs:
       - name: 해석글 생성 (Claude)
         if: >-
           steps.guard.outputs.run == 'yes' &&
+          steps.holiday.outputs.closed != 'yes' &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.claude, '새로 생성'))
         continue-on-error: true
@@ -168,7 +211,7 @@ jobs:
       # ⚠️ '재사용'인데 오늘 해석글이 아예 없으면 핵심편이 빈 채로 나간다.
       #    그 상태로 발행되면 구독자가 "핵심편이 사라졌다"고 느낀다 → 미리 크게 경고한다.
       - name: 해석글 없음 경고
-        if: steps.guard.outputs.run == 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
           TODAY=$(date +%Y%m%d)
           if [ ! -f "archive/report_${TODAY}.json" ]; then
@@ -178,7 +221,7 @@ jobs:
           fi
 
       - name: 리포트 HTML 생성
-        if: steps.guard.outputs.run == 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
           TODAY=$(date +%Y%m%d)
           python build_html.py
@@ -192,6 +235,7 @@ jobs:
             echo "::notice title=index.html 보호::해석글이 없어 index.html을 그대로 두었습니다. 오늘 화면은 report_${TODAY}.html 로 확인하세요. (정식 발행하려면 'Claude 해석글 = 새로 생성')"
           fi
       - name: 공유 썸네일 생성
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: python make_thumb.py
 
       # ── 안전장치: 해석글 실패 시 텔레그램만 스킵 ──
@@ -200,7 +244,7 @@ jobs:
       #   그대로 노출되면 안 되므로 여기서 막는다.
       - name: 해석글 성공 여부 확인
         id: interp_check
-        if: steps.guard.outputs.run == 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
           TODAY=$(date +%Y%m%d)
           if [ -f "archive/report_${TODAY}.json" ]; then
@@ -214,7 +258,10 @@ jobs:
 
       # ── ④ 자동 커밋 → Pages 배포 ──
       - name: 자동 커밋 & 배포
-        if: steps.guard.outputs.run == 'yes'
+        # 🆕 2026-08-22 — 휴장일엔 커밋도 하지 않는다.
+        #    지수 0%·수급 0원인 data_*.json이 archive에 남으면
+        #    20일 누적 통계·섹터 성적표가 그 0값에 오염된다.
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
@@ -227,6 +274,18 @@ jobs:
           git pull --rebase --autostash || true
           git push
 
+      # 🆕 2026-08-22 — 해석글이 없으면 구독자 발송을 막고 운영자에게만 알린다.
+      - name: 해석글 없음 알림 (운영자 전용)
+        if: >-
+          steps.guard.outputs.run == 'yes' &&
+          steps.holiday.outputs.closed != 'yes' &&
+          steps.interp_check.outputs.ok != 'yes'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py no_interp
+
       # ── Pages 배포 전파 대기 ──
       #   git push 직후 바로 텔레그램을 보내면, GitHub Pages가 아직 새 페이지를
       #   배포 중일 수 있다(수십 초 소요). 그 틈에 텔레그램이 링크를 미리 크롤링하면
@@ -234,6 +293,7 @@ jobs:
       - name: Pages 배포 대기
         if: >-
           steps.guard.outputs.run == 'yes' &&
+          steps.holiday.outputs.closed != 'yes' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
@@ -244,6 +304,7 @@ jobs:
       - name: 텔레그램 알림 전송
         if: >-
           steps.guard.outputs.run == 'yes' &&
+          steps.holiday.outputs.closed != 'yes' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
