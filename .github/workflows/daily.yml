@@ -220,8 +220,9 @@ jobs:
           git config user.email "bot@chartpro.local"
           # ⚠️ 누적 파일은 반드시 여기 있어야 한다. 빠지면 매일 초기화된다.
           #    return_sector_log.json = 돌아올 섹터 예보 기록(적중률 채점용, 2026-08-21 추가)
+          #    watch_tally.json        = 관전포인트 예보 누적 승패(2026-08-22 추가)
           git add -A archive index.html report_*.html flow_history.json market_history.json \
-                  return_sector_log.json strata_history.json thumb/*.png || true
+                  return_sector_log.json watch_tally.json core_accum_log.json strata_history.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git pull --rebase --autostash || true
           git push
