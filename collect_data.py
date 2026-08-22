@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.22-r7"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.22-r8"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -2947,7 +2947,66 @@ if __name__ == "__main__":
         "마감브리핑": 마감브리핑,
     }
 
+    # ══════════════════════════════════════════════════════════
+    # 🚨 휴장 감지 — 2026-08-22 신설
+    # ----------------------------------------------------------
+    #  ⚠️ 왜 필요한가
+    #    cron은 월~금에만 돌지만, **달력상 평일인데 장이 안 열리는 날**이 있다.
+    #      · 임시공휴일(선거일·대체공휴일) · 재해/시스템 장애 임시 휴장
+    #    이런 날 그냥 돌면 지수 0%·수급 0원·섹터 0종목인 **엉터리 데이터**로
+    #    Claude가 글까지 써서(=과금) 유료 구독자에게 발송된다. 치명적이다.
+    #
+    #  ⚠️ 왜 공휴일 목록만으로는 부족한가
+    #    임시공휴일은 미리 알 수 없다. 그래서 **수집한 결과로 사후 판정**한다.
+    #    "거래대금이 0이거나 비정상적으로 작다"는 어떤 이유의 휴장이든 잡아낸다.
+    #
+    #  판정 결과는 data 파일에 `휴장의심`으로 남기고, 워크플로가 이걸 읽어
+    #  **해석글 생성(과금) 전에** 중단한다.
+    # ══════════════════════════════════════════════════════════
+    def _억(v):
+        """'28,897,810백만' 같은 문자열에서 숫자만 뽑는다. 실패하면 None."""
+        try:
+            n = float(re.sub(r"[^0-9.\-]", "", str(v)))
+            return n if n > 0 else 0.0
+        except (TypeError, ValueError):
+            return None
+
+    _z = (전체.get("지수수급") or {}).get("지수") or {}
+    _대금 = [_억((_z.get(k) or {}).get("거래대금")) for k in ("코스피", "코스닥")]
+    _대금 = [x for x in _대금 if x is not None]
+    _총대금 = sum(_대금) if _대금 else None
+
+    _등락 = 전체.get("등락종목수") or {}
+    _종목수 = 0
+    for _m in _등락.values():
+        if isinstance(_m, dict):
+            _종목수 += sum(v for v in _m.values() if isinstance(v, (int, float)))
+
+    _사유 = []
+    if _총대금 is None:
+        _사유.append("거래대금을 읽지 못함")
+    elif _총대금 <= 0:
+        _사유.append("거래대금 0")
+    # 정상일은 코스피만 2,800만 백만(=28조) 수준. 평소의 5% 미만이면 장이 없었다고 본다.
+    elif _총대금 < 1_000_000:
+        _사유.append(f"거래대금이 비정상적으로 작음({_총대금:,.0f}백만)")
+    if _종목수 <= 0:
+        _사유.append("등락 종목 수 0")
+
+    전체["휴장의심"] = {"판정": bool(_사유), "사유": _사유,
+                    "총거래대금_백만": _총대금, "등락종목수합": _종목수}
+
     경로 = asave(f"data_{DATE}.json")
     with open(경로, "w", encoding="utf-8") as f:
         json.dump(전체, f, ensure_ascii=False, indent=2)
     print(f"\n🎉 완료! → {경로}")
+
+    if _사유:
+        print("🚨 휴장 의심 — " + " · ".join(_사유))
+        print("   해석글 생성(과금)과 발송을 건너뜁니다.")
+        with open("HOLIDAY_FLAG", "w", encoding="utf-8") as f:
+            f.write(" · ".join(_사유))
+    else:
+        print(f"✅ 정상 거래일 확인 (거래대금 {_총대금:,.0f}백만 · {_종목수:,}종목)")
+        if os.path.exists("HOLIDAY_FLAG"):
+            os.remove("HOLIDAY_FLAG")
