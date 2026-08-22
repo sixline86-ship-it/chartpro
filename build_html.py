@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.22-p2"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.22-r7"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -454,7 +454,7 @@ def build_score_card(이름, 지수, 수급):
     </div>'''
 
 
-def build_gauge(gauge, 오늘한줄평):
+def build_gauge(gauge, 오늘한줄평, 지수=None):
     if not gauge:
         return '<div class="gauge-box"><p style="color:#9aa0a8">⏳ 관제지수 데이터 없음</p></div>'
     점수 = gauge["점수"]
@@ -483,10 +483,37 @@ def build_gauge(gauge, 오늘한줄평):
         배지HTML = '<div class="gz-badges">' + "".join(
             f'<span class="gz-badge">{b}</span>' for b in 배지들) + '</div>'
 
+    # 🆕 2026-08-22 HO 지시 — 심층편 「오늘의 성적표」를 핵심편으로 옮기면서
+    #    심층편 첫머리에 지수가 사라졌다. 관제지수 카드 **오른쪽 빈 공간**에
+    #    코스피·코스닥의 지수와 등락률만 간략히 넣는다. (스타일 A)
+    #    ⚠️ 여기는 '요약'이다 — 수급·태그·설명은 넣지 않는다. 그건 핵심편 성적표 몫.
+    지수칸 = ""
+    if 지수:
+        줄들 = []
+        for 라벨, 키 in (("코스피", "코스피"), ("코스닥", "코스닥")):
+            d = (지수 or {}).get(키) or {}
+            종가, 등락 = d.get("종가"), d.get("등락률")
+            if 종가 is None and 등락 is None:
+                continue
+            try:
+                _v = float(str(등락).replace(",", ""))
+            except (TypeError, ValueError):
+                _v = None
+            색 = "#8b93a0" if _v is None else (IDX_UP if _v >= 0 else IDX_DN)
+            등락문 = "—" if _v is None else f"{_v:+.2f}%"
+            종가문 = "—" if 종가 is None else f"{float(str(종가).replace(',', '')):,.2f}"
+            줄들.append(
+                f'<div class="gz-idx-row"><span class="gz-idx-n">{라벨}</span>'
+                f'<span class="gz-idx-v">{종가문}</span>'
+                f'<span class="gz-idx-p" style="color:{색}">{등락문}</span></div>')
+        if 줄들:
+            지수칸 = f'<div class="gz-idx">{"".join(줄들)}</div>'
+
     return f'''
   <div class="gauge-box">
     <div class="gz-top">
       <div class="gz-numwrap"><p class="gz-num">{점수}</p><p class="gz-lab">{구간} {이모지}</p></div>
+      {지수칸}
       <div class="gz-bodywrap">
         <p class="gz-title">📡 관제지수 (0~100) — 오늘 시장의 온도</p>
         <div class="gz-track">
@@ -947,17 +974,20 @@ def build_news(핵심뉴스):
 def build_insight(프로의시선):
     if not 프로의시선:
         return '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'
+    # 🆕 2026-08-22 — 프롬프트는 과거→현재→미래 1막/2막/3막으로 쓰라고 하는데
+    #    화면엔 그 구조가 안 보여서, 글이 흔들려도 독자도 개발자도 못 알아챘다.
+    #    라벨을 화면에도 노출해 구조를 눈으로 검증할 수 있게 한다.
     렌즈들 = [
-        ("조용한 강세", 프로의시선.get("조용한_강세", "")),
-        ("짖지 않은 개", 프로의시선.get("짖지_않은_개", "")),
-        ("다음 시나리오", 프로의시선.get("다음_시나리오", "")),
+        ("1막 · 과거", "조용한 강세", 프로의시선.get("조용한_강세", "")),
+        ("2막 · 현재", "짖지 않은 개", 프로의시선.get("짖지_않은_개", "")),
+        ("3막 · 미래", "다음 시나리오", 프로의시선.get("다음_시나리오", "")),
     ]
     rows = []
-    for 이름, 내용 in 렌즈들:
+    for 막, 이름, 내용 in 렌즈들:
         if not 내용:
             continue
         rows.append(f'''
-    <div class="si-item"><span class="si-lens">{이름}</span><span>{내용}</span></div>''')
+    <div class="si-item"><span class="si-lens"><b class="si-act">{막}</b>{이름}</span><span>{내용}</span></div>''')
     if not rows:
         return '<div class="pending">⏳ 프로의 시선 — 데이터 부족</div>'
     return f'''
@@ -975,7 +1005,11 @@ def build_radar(강세레이더, 설정=None):
     설정 = (설정 or {}).get("강세", {})
     조건 = dev_note(
         f"시총 ≥ {설정.get('최소시총','?'):,}억 · 거래대금 ≥ {설정.get('최소거래대금','?'):,}억 · "
-        f"상승 종목만 · 전일 대비 거래량 ≥ {설정.get('거래량배수','?')}배 │ "
+        # 🆕 2026-08-22 — "상승 종목만"으로 뭉뚱그려져 있어 핵심 조건인
+        #    상승률 하한이 안 보였다(코스피 4% / 코스닥 5%).
+        f"<b>전일 종가 대비 코스피 {(설정.get('최소상승') or {}).get('코스피', 4)}%↑ / "
+        f"코스닥 {(설정.get('최소상승') or {}).get('코스닥', 5)}%↑</b> · "
+        f"전일 대비 거래량 ≥ {설정.get('거래량배수','?')}배 │ "
         f"점수 = 회전율×{설정.get('회전비중','?')} + 상승률×{설정.get('상승비중','?')} "
         f"(각각 0~100 정규화) + 거래량 {설정.get('가점배수','?')}배↑ 시 +{설정.get('가점','?')}점 │ "
         f"추적 {설정.get('추적일','?')}거래일"
@@ -1031,7 +1065,7 @@ def build_radar(강세레이더, 설정=None):
     return f"""
   <div class="rd-box">
     <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
-      시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 거래량 2배 이상</b> 종목 중에서,
+      시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 코스피 4%↑ / 코스닥 5%↑</b> · <b>거래량 2배 이상</b> 종목 중에서,
       회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
     {조건}
     {신규HTML}
@@ -1083,7 +1117,11 @@ def build_accumulation(매집, 설정=None):
     스캔 = cfg.get("스캔범위") or {}
     조건 = dev_note(
         f"스캔 = 시총 상위 코스피 {스캔.get('코스피','?')} + 코스닥 {스캔.get('코스닥','?')}종목 · "
-        f"<b>전일 종가 대비 코스피 4%↑ / 코스닥 5%↑</b> · "
+        # ⚠️ 2026-08-22 수정 — 여기 "코스피 4%↑ / 코스닥 5%↑"가 적혀 있었는데
+        #    그건 **강세 레이더(불난 자리)의 조건**이다. 매집 레이더는 상승률 필터가
+        #    아예 없다(조용히 담기는 자리를 찾는 게 목적이라 오히려 반대다).
+        #    설명이 틀리면 독자가 코너 성격을 정반대로 이해한다.
+        f"<b>상승률 조건 없음</b>(조용히 담기는 자리를 찾는 코너라 오르지 않아도 됩니다) · "
         f"ETF·ETN·스팩·우선주 제외 · "
         f"관찰 {cfg.get('기간','?')}거래일 │ "
         f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
@@ -1153,6 +1191,31 @@ def build_accumulation(매집, 설정=None):
         <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일 매집</p>{중기랭킹("코스닥")}</div>
       </div>'''
 
+    # ── 🆕 2026-08-22 장기(60일) 매집 — 20일과 같은 규칙, 기간만 확장 ──
+    #    ⚠️ 데이터가 없으면 블록이 비고, 아래 탭도 자동으로 꺼진다(off).
+    장기 = 매집.get("장기종목") or []
+    장기블록 = ""
+    if 장기:
+        장기간 = 매집.get("장기기간", 60)
+        def 장기랭킹(시장):
+            목록 = [x for x in 장기 if x.get("시장") == 시장]
+            목록 = sorted(목록, key=lambda x: x.get("시총대비") or 0, reverse=True)[:5]
+            if not 목록:
+                return f'<p class="rd-empty">{시장} — 조건 만족 종목 없음</p>'
+            return "".join(
+                행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+                  f' · 누적 +{_fmt_eok(s.get("합산"))}')
+                for i, s in enumerate(목록, 1))
+        장기블록 = f'''
+      <p class="ac-long-s">{장기간}일은 <b>"분기 내내 이어진 방향"</b>입니다.
+        세 달을 같은 쪽으로 담았다면 단기 이벤트가 아니라 <b>구조적인 판단</b>일 가능성이 큽니다.<br>
+        🤝쌍끌이 = 둘 다 {매집.get("장기쌍끌이",36)}일↑ · 💼단독 = 한쪽 {매집.get("장기단독",42)}일↑ ·
+        정렬은 <b>매집강도</b>(많이 담겼는데 덜 오른 순)</p>
+      <div class="ac-two">
+        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {장기간}일 매집</p>{장기랭킹("코스피")}</div>
+        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {장기간}일 매집</p>{장기랭킹("코스닥")}</div>
+      </div>'''
+
     보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
           f'(🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}) — '
           f'코스피 {코스피수} · 코스닥 {코스닥수}. 각 시장에서 시총 대비 상위 5개입니다.</p>')
@@ -1166,8 +1229,10 @@ def build_accumulation(매집, 설정=None):
       💼 단독 = 한쪽만 {단최소}일 이상</p>
     {조건}
     <div class="ac-tabs" data-g="{_AC_GID}">
-      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 {기간}일 매집 종목</div>
-      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ {매집.get("중기기간",20)}일 매집 종목</div>
+      <!-- 🆕 2026-08-22 HO 지시 — 탭 이름을 "N일 매집"으로 통일 + 60일 추가 -->
+      <div class="ac-tab on" data-g="{_AC_GID}" data-p="s">🔥 {기간}일 매집</div>
+      <div class="ac-tab{"" if 중기블록 else " off"}" data-g="{_AC_GID}" data-p="l">🏗️ {매집.get("중기기간",20)}일 매집</div>
+      <div class="ac-tab{"" if 장기블록 else " off"}" data-g="{_AC_GID}" data-p="x">🗿 {매집.get("장기기간",60)}일 매집</div>
     </div>
     <div class="ac-body on" data-g="{_AC_GID}" data-p="s">
       <p class="ac-long-s">{기간}일은 <b>"이번 주에 막 들어온 돈"</b>입니다.
@@ -1188,7 +1253,10 @@ def build_accumulation(매집, 설정=None):
       {보충}
     </div>
     <div class="ac-body" data-g="{_AC_GID}" data-p="l">
-      {중기블록 or '<p class="rd-empty">중기(20일) 매집은 이력이 더 쌓이면 열립니다.</p>'}
+      {중기블록 or '<p class="rd-empty">20일 매집은 이력이 더 쌓이면 열립니다.</p>'}
+    </div>
+    <div class="ac-body" data-g="{_AC_GID}" data-p="x">
+      {장기블록 or '<p class="rd-empty">60일 매집은 이력이 더 쌓이면 열립니다.</p>'}
     </div>
     <script>(function(){{
       var root=document.currentScript.parentNode;
@@ -1347,30 +1415,136 @@ def build_story_bridge():
             f'<span class="st-txt"><b>지금까지의 줄거리</b> — {본문}.</span></div>')
 
 
+# ── 🔭 다음 거래일 예보 (구 관전포인트) ──
+WATCH_COLORS = {
+    "수급":   ("#85B7EB", "#0c447c"),
+    "섹터":   ("#F0997B", "#4A1B0C"),
+    "이벤트": ("#97C459", "#173404"),
+}
+
+
+def build_watchpoints(포인트들, 라벨=""):
+    """다음 거래일 예보 — 기준선 + 어느 쪽인지 + 반증 조건.
+
+    🆕 2026-08-22 전면 개편. 예전엔 "①외국인 수급을 지켜보세요" 같은
+       문자열 배열을 그대로 찍었다. 그건 채점이 안 되고, 언제 써도 안 틀리고,
+       매일 소재가 같았다. **틀릴 수 없는 예고는 맞춰도 가치가 없다.**
+       → 영역(수급/섹터/이벤트) · 기준선(숫자) · 예보(어느 쪽) · 반증(틀렸다면)
+         네 가지를 갖춘 카드로 바꾼다.
+    ⚠️ 구버전 호환: 항목이 문자열이면 예전 형식이므로 그대로 한 줄로 보여준다
+       (과거 archive를 다시 빌드해도 안 깨지게).
+    """
+    if not 포인트들:
+        return ('<div class="pending">⏳ 다음 거래일 예보 — '
+                'Claude 해석 연동 후 자동 생성</div>')
+    카드 = []
+    for pt in 포인트들:
+        if isinstance(pt, str):
+            카드.append(f'<div class="watch-item"><span>{pt}</span></div>')
+            continue
+        if not isinstance(pt, dict):
+            continue
+        영역 = str(pt.get("영역") or "").strip()
+        배경, 글자 = WATCH_COLORS.get(영역, ("#B4B2A9", "#2C2C2A"))
+        기준선 = str(pt.get("기준선") or "").strip()
+        예보 = str(pt.get("예보") or "").strip()
+        반증 = str(pt.get("반증") or "").strip()
+        if not 예보:
+            continue
+        머리 = ""
+        if 영역:
+            머리 += (f'<span style="font-size:9.5px;font-weight:800;color:{글자};'
+                    f'background:{배경};border-radius:4px;padding:2px 6px">{영역}</span>')
+        if 기준선:
+            머리 += f'<span style="font-size:11px;color:#8b93a0">기준선 {기준선}</span>'
+        반증줄 = ""
+        if 반증:
+            반증줄 = (f'<p style="margin:0;font-size:11px;color:#7d848f;line-height:1.55">'
+                    f'✗ {반증}</p>')
+        카드.append(
+            f'<div style="background:#0f131a;border-radius:8px;padding:10px 11px;'
+            f'margin-bottom:8px">'
+            f'<div style="display:flex;gap:6px;align-items:center;margin-bottom:5px">'
+            f'{머리}</div>'
+            f'<p style="margin:0 0 5px;font-size:12.5px;color:#e8eaee;line-height:1.65">'
+            f'{예보}</p>{반증줄}</div>')
+    if not 카드:
+        return ('<div class="pending">⏳ 다음 거래일 예보 — 데이터 부족</div>')
+    _제목 = f"{라벨}, 저는 이렇게 봅니다" if 라벨 else "다음 거래일, 저는 이렇게 봅니다"
+    return (f'<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+            f'padding:13px 14px;margin:10px 0 0">'
+            f'<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">다음 거래일 예보</p>'
+            f'<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            f'{_제목}</p>'
+            f'<p style="margin:0 0 11px;font-size:10.5px;color:#e0c060">'
+            f'다음 거래일에 ○×로 채점해 그대로 공개합니다</p>'
+            f'{"".join(카드)}</div>')
+
+
 # ── 어제의 채점표 ──
 def build_scorecard(채점표, 어제날짜=""):
     if not 채점표:
         return ""  # 첫 발행이면 아예 섹션을 숨긴다
     rows = []
     for it in 채점표:
-        결과 = it.get("결과", "△")
-        cls = {"○": "sc-o", "×": "sc-x"}.get(결과, "sc-t")
+        결과 = it.get("결과", "×")
+        # 🆕 2026-08-22 — △(부분 충족) 폐지. ○/× 둘 중 하나이고,
+        #    데이터를 못 구해 판정 자체가 불가능한 것만 '측정불가'로 회색 처리한다.
+        측정불가 = str(결과).replace(" ", "") in ("측정불가", "-", "—", "")
+        기호 = "○" if 결과 == "○" else ("✕" if not 측정불가 else "—")
+        cls = "sc-o" if 결과 == "○" else ("sc-t" if 측정불가 else "sc-x")
         rows.append(f'''
     <div class="score-row">
-      <span class="score-mark {cls}">{결과}</span>
+      <span class="score-mark {cls}">{기호}</span>
       <div class="score-body">
         <p class="score-item">{it.get('항목','')}</p>
         <p class="score-why">{it.get('근거','')}</p>
       </div>
     </div>''')
-    맞은수 = sum(1 for it in 채점표 if it.get("결과") == "○")
+    유효 = [it for it in 채점표
+            if str(it.get("결과", "")).replace(" ", "") not in ("측정불가", "-", "—", "")]
+    맞은수 = sum(1 for it in 유효 if it.get("결과") == "○")
+    틀린수 = len(유효) - 맞은수
+    누적 = rs_watch_tally(맞은수, 틀린수)
     return f'''
   <div class="score-box">
-    <p class="score-head">📋 어제 예고한 관전포인트를 오늘 결과로 채점했습니다
-      <span class="score-tally">{맞은수} / {len(채점표)} 적중</span></p>
+    <p class="score-head">📋 어제 예보, {맞은수}승 {틀린수}패였습니다
+      <span class="score-tally">{맞은수} / {len(유효)} 적중</span></p>
     {"".join(rows)}
-    <p class="score-foot">※ 예보 → 채점 → 새 예보. 매일 이어집니다. 채점은 사실 확인이지 수익률 평가가 아닙니다.</p>
+    <p class="score-foot">{누적}※ 예보 → 채점 → 새 예보. 매일 이어집니다.
+      <b style="color:#c9ced6">틀린 것도 지우지 않고 그대로 둡니다.</b></p>
   </div>'''
+
+
+WATCH_TALLY_FILE = "watch_tally.json"
+
+
+def rs_watch_tally(오늘맞음, 오늘틀림):
+    """예보 누적 성적을 파일에 쌓고 한 줄로 돌려준다.
+
+    🆕 2026-08-22 — "틀린 걸 지우지 않는다"를 숫자로 증명하는 자리.
+    ⚠️ 같은 날짜를 두 번 세지 않도록 날짜를 키로 저장한다(재발행·재빌드 대비).
+    ⚠️ daily.yml의 git add 목록에 watch_tally.json이 없으면 매일 초기화된다.
+    """
+    try:
+        기록 = {}
+        if os.path.exists(WATCH_TALLY_FILE):
+            with open(WATCH_TALLY_FILE, encoding="utf-8") as f:
+                기록 = json.load(f) or {}
+        기록[str(DATE)] = {"맞음": 오늘맞음, "틀림": 오늘틀림}
+        with open(WATCH_TALLY_FILE, "w", encoding="utf-8") as f:
+            json.dump(기록, f, ensure_ascii=False, indent=1)
+        누맞 = sum(v.get("맞음", 0) for v in 기록.values())
+        누틀 = sum(v.get("틀림", 0) for v in 기록.values())
+        총 = 누맞 + 누틀
+        if 총 < 3:
+            return (f'<b style="color:#c9ced6">누적 {누맞}승 {누틀}패</b> — '
+                    f'적중률은 표본이 더 쌓이면 공개합니다<br>')
+        return (f'<b style="color:#c9ced6">누적 {누맞}승 {누틀}패 · '
+                f'적중률 {누맞/총*100:.0f}%</b><br>')
+    except Exception as e:
+        print(f"   ⚠️ 예보 누적 집계 실패 — {type(e).__name__}")
+        return ""
 
 
 
@@ -1692,6 +1866,196 @@ def _flow_line(실탄):
     cls = "up" if 실탄 >= 0 else "down"
     word = "순매수" if 실탄 >= 0 else "순매도"
     return f"{_flow_amt(실탄)} {word}", cls
+
+
+CORE_ACC_FILE = "core_accum_log.json"
+
+
+def _core_accum_recent():
+    """어제(직전 발행일) 핵심편에 노출한 매집 종목 이름 집합.
+
+    ⚠️ daily.yml의 git add 목록에 core_accum_log.json이 없으면 매일 초기화되어
+       중복 회피가 작동하지 않는다.
+    """
+    try:
+        if not os.path.exists(CORE_ACC_FILE):
+            return set()
+        with open(CORE_ACC_FILE, encoding="utf-8") as f:
+            기록 = json.load(f) or {}
+        과거 = sorted(k for k in 기록 if str(k) < str(DATE))
+        return set(기록.get(과거[-1]) or []) if 과거 else set()
+    except Exception as e:
+        print(f"   ⚠️ 매집 노출 이력 읽기 실패 — {type(e).__name__} (중복 회피 없이 진행)")
+        return set()
+
+
+def _core_accum_save(이름들):
+    """오늘 노출한 종목을 기록한다(같은 날 재빌드해도 덮어쓰기라 안전)."""
+    try:
+        기록 = {}
+        if os.path.exists(CORE_ACC_FILE):
+            with open(CORE_ACC_FILE, encoding="utf-8") as f:
+                기록 = json.load(f) or {}
+        기록[str(DATE)] = sorted(이름들)
+        for k in sorted(기록)[:-30]:      # 최근 30일치만 보관
+            기록.pop(k, None)
+        with open(CORE_ACC_FILE, "w", encoding="utf-8") as f:
+            json.dump(기록, f, ensure_ascii=False, indent=1)
+    except Exception as e:
+        print(f"   ⚠️ 매집 노출 이력 저장 실패 — {type(e).__name__}")
+
+
+def build_core_accum(매집):
+    """🐢 핵심편용 — 20일 매집 종목을 코스피·코스닥 1개씩만.
+
+    🆕 2026-08-22 HO 지시. 심층편 매집 레이더는 표 전체를 보여주지만,
+       핵심편에서는 **각 시장 대표 1개씩**만 뽑아 맛보기로 둔다.
+    ⚠️ 정렬 기준은 심층편과 동일하게 '매집강도'다.
+       매집강도 = 시총대비 ÷ (1 + 기간등락률/100)
+       → 같은 금액을 담았어도 **덜 올랐을수록** 위로 온다.
+         "샀다"가 아니라 "조용히 모았다"를 찾는 게 이 코너의 목적이기 때문이다.
+    ⚠️ 상승률 조건은 없다. (그건 강세 레이더 조건이다 — 혼동 주의)
+    """
+    중기 = (매집 or {}).get("중기종목") or []
+    if not 중기:
+        return ""
+    기간 = (매집 or {}).get("중기기간", 20)
+
+    # 🆕 2026-08-22 HO 지시 — **어제 노출한 종목은 건너뛰고 다음 순위로.**
+    #    20일 매집은 성격상 며칠씩 같은 종목이 1위를 지킨다. 그대로 두면
+    #    핵심편에 매일 같은 이름이 나와 "새 정보가 없는 코너"가 된다.
+    #    ⚠️ 어제 것만 피한다(2일 전은 다시 나와도 된다) — 너무 오래 막으면
+    #       정작 가장 강한 매집 종목이 영영 안 보인다.
+    _최근 = _core_accum_recent()
+
+    def _고르기(시장, 제외):
+        후보 = sorted([s for s in 중기 if s.get("시장") == 시장
+                     and s.get("매집강도") is not None],
+                    key=lambda s: s["매집강도"], reverse=True)
+        if not 후보:
+            return None
+        for s in 후보:
+            if s.get("종목명") not in 제외:
+                return s
+        return 후보[0]        # 전부 겹치면 어쩔 수 없이 1위를 쓴다
+
+    뽑기, _쓴이름 = [], set()
+    for 시장 in ("코스피", "코스닥"):
+        # 어제 종목 + 오늘 이미 뽑은 종목을 함께 제외 → 두 시장 간 중복도 막는다
+        _s = _고르기(시장, _최근 | _쓴이름)
+        if _s:
+            뽑기.append(_s)
+            _쓴이름.add(_s.get("종목명"))
+    _core_accum_save(_쓴이름)
+    if not 뽑기:
+        return ""
+
+    색맵 = {"코스피": "#f0c65a", "코스닥": "#74f0d4"}
+    행들 = []
+    for s in 뽑기:
+        nm = s.get("종목명", "—")
+        c = 색맵.get(s.get("시장"), "#c9ced6")
+        등 = s.get("장기등락률")
+        등문 = "—" if 등 is None else f"{등:+.1f}%"
+        등색 = "#8b93a0" if 등 is None else ("#ff6b4a" if 등 >= 0 else "#5b9bff")
+        유형 = "🤝 쌍끌이" if s.get("유형") == "쌍끌이" else f"💼 {s.get('유형','단독')}"
+        행들.append(
+            f'<div style="padding:10px 11px;margin-top:7px;'
+            f'background:rgba(9,14,19,.66);'
+            f'border-radius:9px;border-left:3px solid {c}">'
+            f'<div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">'
+            f'<span style="font-size:10.5px;color:#8b93a0">{s.get("시장","")}</span>'
+            f'<b style="font-size:15px;color:{c}">{nm}</b>'
+            f'<span style="font-size:10.5px;color:#8b93a0">{유형}</span></div>'
+            f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+            f'외국인·기관이 {기간}일간 <b style="color:#e8eaee">'
+            f'{_flow_amt(s.get("합산"))}</b>를 담았어요 '
+            f'(시총의 {s.get("시총대비", 0):.2f}%) · 그동안 주가는 '
+            f'<b style="color:{등색}">{등문}</b></p></div>')
+
+    # 🆕 2026-08-22 HO 지시 — 이 코너가 핵심편의 **메인**이라 배경을 따로 준다.
+    #    (다른 카드는 #141922 단색, 여기는 청록 그라데이션 + 굵은 테두리)
+    #    조건 설명은 심층편 매집 레이더에 있으므로 여기선 뺀다.
+    return (f'<div style="background:linear-gradient(160deg,#16232b,#131a24);'
+            f'border:1.5px solid #2b4a52;border-radius:14px;'
+            f'padding:15px 15px 14px;margin:12px 0 0;'
+            f'box-shadow:0 0 0 1px rgba(116,240,212,.07)">'
+            f'<p style="margin:0 0 3px;font-size:11.5px;color:#74f0d4;font-weight:700">'
+            f'매집 레이더</p>'
+            f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
+            f'<span class="cp-turtle">🐢</span> 외국인, 기관이 조용히 매집하는 종목</p>'
+            # 🆕 2026-08-22 — 회색이라 묻혀 보인다는 지적. 눈에 띄는 배지로.
+            f'<p style="display:inline-block;margin:2px 0 11px;font-size:11px;'
+            f'font-weight:700;color:#0d1a17;background:#74f0d4;'
+            f'border-radius:999px;padding:3px 10px">'
+            f'2종목만 보여드려요 · 더 많은 종목은 심층편에 있어요</p>'
+            f'{"".join(행들)}</div>')
+
+
+def build_closing(해석, 날짜표기=""):
+    """🗼 관제탑에서 내려다본 오늘 — 리포트를 닫는 마지막 교신.
+
+    🆕 2026-08-22 — 예전 「✍️ 오늘을 한 문장으로」를 확장했다.
+    ⚠️ 왜 바꿨나
+       리포트는 신호등 → 무슨 일 → 왜 → 섹터 → 내 종목 → 내일 예보로 흐르는데,
+       예보 다음에 격언 한 줄만 오면 감정이 한 번 식었다가 다시 뜨는 모양이 된다.
+       마지막 자리는 **하루를 닫고 내일로 넘기는** 역할이어야 한다.
+    구성 — ① 오늘을 한 문장으로  ② 이 하루가 흐름의 어디쯤인가  ③ 닫는 인사
+       ②③이 비면 ①만 나온다(재사용 모드에서도 안 깨진다).
+    """
+    문장 = (해석.get("오늘의_한문장") or "").strip()
+    위치 = (해석.get("오늘의_위치") or "").strip()
+    인사 = (해석.get("닫는인사") or "").strip()
+    if not 문장:
+        문장 = "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)"
+
+    위치줄 = ""
+    if 위치:
+        위치줄 = (f'<p style="margin:13px 0 0;padding-top:12px;'
+                f'border-top:.5px solid rgba(255,255,255,.1);'
+                f'font-size:12.5px;color:#c9ced6;line-height:1.75">'
+                f'<b style="color:#22d3ee">📍 오늘 이 하루는</b> {위치}</p>')
+    인사줄 = ""
+    if 인사:
+        인사줄 = (f'<p style="margin:11px 0 0;font-size:12.5px;color:#9aa3ae;'
+                f'line-height:1.7;font-style:italic">{인사}</p>')
+
+    return f'''
+  <p class="sec-label"><small>마지막 교신</small>🗼 관제탑에서 내려다본 오늘</p>
+  <div class="quote-box">
+    <div class="quote-mark">“</div>
+    <p class="quote-text">{문장}</p>
+    {위치줄}{인사줄}
+    <p class="quote-sub">— 차트프로 관제탑, {날짜표기}</p>
+  </div>'''
+
+
+def build_signal_head(지수수급, 파생, 코수, 관제=None, 사건명=None):
+    """🚦 신호등 + 오늘의 사건명 — 핵심편 맨 위.
+
+    ⚠️ 2026-08-22 사고 복구 — 핵심편 헤더를 「오늘의 성적표」 카드로 교체하면서
+       build_index_header()를 통째로 걷어냈는데, **신호등이 그 안에 있어서**
+       같이 사라졌다. 신호등은 지수 막대와 별개 자산이므로 함수로 떼어내
+       성적표 위에 그대로 되살린다.
+    """
+    try:
+        d = _header_data(지수수급, 파생, 코수, 사건명)
+        코등 = (d["코"]["등"] if isinstance(d.get("코"), dict) else None) or 0
+        링색 = {"good": "#ff6b4a", "warn": "#e0c060", "info": "#5b9bff"}.get(
+            d.get("태그색"),
+            "#ff6b4a" if 코등 > 0 else "#5b9bff" if 코등 < 0 else "#9aa0a8")
+        _관 = 관제 or {}
+        아이콘HTML = _head_icon(코등, 링색, d["이모"],
+                             관제점수=_관.get("점수"), 관제구간=_관.get("구간"),
+                             태그색=d.get("태그색"))
+        return (f'<div class="ix-head" style="margin-bottom:.6rem">'
+                f'<div class="ix-mood">{아이콘HTML}'
+                f'<div class="ix-mood-txt"><p class="ix-mood-t">'
+                f'<span class="yl">{d["성격이름"]}</span></p>'
+                f'<p class="ix-mood-s">{d["성격부제"]}</p></div></div></div>')
+    except Exception as e:
+        print(f"   ⚠️ 신호등 렌더 실패 — {type(e).__name__} (나머지는 정상 발행)")
+        return ""
 
 
 def build_index_header(지수수급, 파생, 코수, style=None, 관제=None, 사건명=None):
@@ -2080,8 +2444,7 @@ def build_account_grid(격자, 주도섹터=None):
         불배지 = (f'<span style="color:#ff9a3c;font-size:9px;flex:none" '
                 f'title="오늘 뜨는 현장: {", ".join(_불)}">&nbsp;🔥</span>') if _불 else ''
         테마명 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
-                 f'white-space:nowrap">{_풀}</span>{불배지}'
-                 f'<span style="color:#e0c060;font-size:9px;flex:none">&nbsp;▾</span>')
+                 f'white-space:nowrap">{_풀}</span>{불배지}{ZONE_ARROW}')
         테마명_평 = (f'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'
                    f'white-space:nowrap">{_풀}</span>{불배지}')
 
@@ -2996,9 +3359,11 @@ def build_my_stocks(data):
     탭 = "".join(
         f'<span class="ms-tab" data-n="{n}" onclick="msWin({n})" '
         f'style="flex:1;text-align:center;font-size:11px;padding:6px 0;border-radius:7px;'
-        f'cursor:pointer;font-weight:{800 if n==5 else 600};'
-        f'background:{"#2a3446" if n==5 else "#171c25"};'
-        f'color:{"#f0c65a" if n==5 else "#7d848f"};'
+        # 🆕 2026-08-22 — JS는 curW=1(당일)로 시작하는데 화면 강조만 5일에
+        #    걸려 있어, 실제로는 당일 값인데 5일 탭이 켜져 보이는 불일치였다.
+        f'cursor:pointer;font-weight:{800 if n==1 else 600};'
+        f'background:{"#2a3446" if n==1 else "#171c25"};'
+        f'color:{"#f0c65a" if n==1 else "#7d848f"};'
         f'-webkit-tap-highlight-color:transparent">{이름}</span>'
         # ⚠️ '당일' 추가(2026-08-20) — 섹터 성적표와 같은 창 구성으로 맞춘다.
     # ⚠️ 다른 코너(섹터 성적표·크기별·수급 타임라인)와 **글자까지 똑같이** 맞춘다.
@@ -3142,6 +3507,257 @@ def sector_rule_note():
             '지난 기록을 지우지 않고 그대로 두되, 이 점을 밝혀둡니다.</p></div>')
 
 
+_ZONE_MEM_CACHE = {}
+
+
+def _zone_members():
+    """{섹터명: [(종목명, 등락률), ...]} — 오늘 격자에서 대표 종목을 뽑아 둔다.
+
+    🆕 2026-08-22 — 「돌아올 섹터」·「섹터 성적표」에서 섹터명을 누르면
+       그 섹터에 뭐가 들었는지 보여주기 위한 재료. 섹터 지도(격자)가
+       이미 쓰는 계좌격자.행의 칸별 '종목'을 그대로 재활용한다 —
+       새 수집이 전혀 필요 없다.
+    """
+    if _ZONE_MEM_CACHE:
+        return _ZONE_MEM_CACHE
+    try:
+        일 = archive_days(1)
+        if not 일:
+            return {}
+        _, d = 일[-1]
+        for r in ((d.get("계좌격자") or {}).get("행") or []):
+            nm = r.get("테마")
+            if not nm:
+                continue
+            목록 = []
+            for 층 in ("대형", "중형", "소형"):
+                for x in ((r.get("칸") or {}).get(층) or {}).get("종목") or []:
+                    if x.get("명") is not None:
+                        목록.append((x["명"], x.get("등")))
+            if 목록:
+                목록.sort(key=lambda t: -(t[1] if isinstance(t[1], (int, float)) else -99))
+                _ZONE_MEM_CACHE[nm] = 목록
+    except Exception as e:
+        print(f"   ⚠️ 섹터 구성종목 준비 실패 — {type(e).__name__} (코너는 그대로 동작)")
+    return _ZONE_MEM_CACHE
+
+
+def zone_member_panel(섹터명, pid, 최대=8, 여백=95):
+    """섹터명을 눌렀을 때 펼쳐지는 대표 종목 패널. 종목이 없으면 빈 문자열.
+
+    여백: 왼쪽 들여쓰기(px). 돌아올 섹터는 이름칸 폭(95)에 맞추고,
+          섹터 성적표는 행 전체 폭을 쓰므로 0으로 준다.
+    """
+    목록 = (_zone_members().get(섹터명) or [])[:최대]
+    if not 목록:
+        return ""
+    칩 = "".join(
+        f'<span style="display:inline-block;font-size:10.5px;color:#d5d9e0;'
+        f'background:#141922;border:1px solid #232a36;border-radius:5px;'
+        f'padding:2px 7px;margin:0 4px 4px 0;white-space:nowrap">{n} '
+        f'<b style="color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
+        f'{(v or 0):+.1f}%</b></span>'
+        for n, v in 목록)
+    return (f'<div id="{pid}" style="display:none;margin:2px 0 8px {여백}px;'
+            f'padding:8px 9px;background:#0f131a;border-radius:6px">'
+            f'<p style="margin:0 0 5px;font-size:10.5px;color:#e0c060;font-weight:700">'
+            f'{섹터명} 대표 종목 '
+            f'<span style="color:#6f7784;font-weight:600">· 다시 누르면 닫혀요</span></p>'
+            f'<div>{칩}</div></div>')
+
+
+ZTOG_JS = ('<script>function ztog(id){var e=document.getElementById(id);'
+           'if(e)e.style.display=(e.style.display==="none"?"block":"none");}</script>')
+
+# 🆕 2026-08-22 — "누르면 종목이 나온다"는 신호.
+#    섹터 지도 / 섹터 성적표 / 돌아올 섹터 **세 곳이 똑같은 모양**을 써야
+#    구독자가 "아, 이거 누르는 거구나"를 한 번만 배우고 전부에 적용할 수 있다.
+#    원래 섹터 지도에만 있던 금색 ▾를 기준으로 삼되, 9px은 작아서 안 보인다는
+#    지적으로 12px로 키웠다. 세 곳 모두 이 상수 하나만 쓴다 — 따로 쓰면 또 어긋난다.
+ZONE_ARROW = ('<span style="color:#e0c060;font-size:12px;font-weight:900;'
+              'flex:none;margin-left:3px">&nbsp;▾</span>')
+
+
+def build_sector_ladder():
+    """🪜 섹터 순위 사다리 — 최근 며칠 순위 이동을 선 하나로 보여준다.
+
+    ⚠️ 2026-08-22 신설 — "순환매·주도주 감을 잡는 게 이 리포트의 메인"이라는
+       지적으로, 표(성적표)보다 먼저 눈에 들어올 '동선' 그림을 핵심편에 둔다.
+       재료는 이미 계산되는 _zone_series()를 그대로 쓴다 — 새 수집 불필요.
+       (섹터 순위 타일과 같은 원천 데이터, 표현만 다르다 — 원칙 5 위반 아님:
+        저긴 표, 여긴 선. 저긴 심층편, 여긴 핵심편 요약.)
+    """
+    구역, 시장 = _zone_series()
+    if not 구역:
+        return ""
+    전체날짜 = sorted(set().union(*[set(v) for v in 구역.values()]))
+    일별순위, 일별개수 = {}, {}
+    for d in 전체날짜:
+        오늘값 = [(nm, v.get(d)) for nm, v in 구역.items() if v.get(d) is not None]
+        if len(오늘값) < 8:      # 격자가 부실한 날(휴장 잔재 등)은 순위에서 뺀다
+            continue
+        오늘값.sort(key=lambda x: -x[1])
+        일별순위[d] = {nm: i + 1 for i, (nm, _) in enumerate(오늘값)}
+        일별개수[d] = len(오늘값)
+
+    사용일 = sorted(일별순위)[-5:]     # 최근 5거래일 (HO 지시 2026-08-22)
+    if len(사용일) < 3:
+        return ""     # 표본 부족 — 조용히 생략(축적되면 자동으로 나타난다)
+
+    오늘 = 사용일[-1]
+    # 🆕 2026-08-22 HO 지시 — 6개는 선이 엉켜 오히려 못 읽는다. **오늘 상위 3개만.**
+    #    "지금 주도주가 뭔가"에 답하는 게 목적이지 순위표를 보여주는 게 아니다.
+    표시 = sorted(일별순위[오늘], key=lambda nm: 일별순위[오늘][nm])[:3]   # 오늘 상위 3개
+    최대순위 = max(일별개수.values())
+
+    # 🆕 2026-08-22 — 라벨 글자를 키우면서 오른쪽 자리도 함께 넓혔다(148 → 210).
+    #    아래쪽 라벨이 밀려 내려갈 수 있으므로 세로 여유도 더 준다.
+    # 🆕 2026-08-22 — 우여백 300은 과했다. 선이 좌우로 짜부라져 흐름이 안 보였다.
+    #    viewBox를 넓혀(680→980) **그래프 폭은 넉넉히 두고** 오른쪽 이름 자리만 얹는다.
+    # 🆕 2026-08-22 — 이름 자리를 줄이고(300→252) 좌우 여백도 좁혀 선을 더 벌린다.
+    W, 좌여백, 우여백 = 1020, 40, 296
+    가용폭 = W - 좌여백 - 우여백
+    x간격 = (가용폭 / (len(사용일) - 1)) if len(사용일) > 1 else 0
+    # 🆕 2026-08-22 — 날짜·그래프가 위 문장에 붙어 보인다는 지적으로 더 내린다.
+    Y0, 행높이 = 104, 15.5
+    # ⚠️ 높이는 **표시하는 3개 섹터가 실제로 지나간 순위 범위**로 잡는다.
+    #    예전엔 전체 섹터수(16)를 그대로 곱해 아래가 통째로 비었다.
+    _쓴순위 = [일별순위[d][nm] for nm in 표시 for d in 사용일 if nm in 일별순위[d]]
+    H = Y0 + max(max(_쓴순위, default=1), 3) * 행높이 + 66
+
+    def xy(i, rk):
+        return 좌여백 + i * x간격, Y0 + (rk - 1) * 행높이
+
+    팔레트 = ["#f0c65a", "#ff6b4a", "#5b9bff", "#4ade80", "#f472e6", "#74f0d4"]
+    선들, 점들 = [], []
+    # (섹터명, 색, 좌표목록) — 라벨 겹침을 먼저 푼 뒤 그 결과로 선을 그린다
+    코스 = []
+    for ci, nm in enumerate(표시):
+        col = 팔레트[ci % len(팔레트)]
+        pts = [(i, 일별순위[d][nm]) for i, d in enumerate(사용일) if nm in 일별순위[d]]
+        if len(pts) >= 2:
+            코스.append([nm, col, pts, xy(*pts[-1])[1]])   # 마지막 원소 = 끝점 y
+
+    # 🆕 2026-08-22 HO 지적 — 글자만 벌리고 선은 그대로라 선끼리 붙어 안 보인다.
+    #    순위가 1·2·3위로 붙으면 끝점 y도 15.5px 간격이라 선 3개가 겹쳐 보인다.
+    #    → **라벨 위치를 먼저 확정하고, 선의 끝점도 그 위치로 끌어올린다.**
+    #      선과 라벨이 같은 높이에서 만나므로 어느 선이 어느 섹터인지도 명확해진다.
+    라벨높이 = 46
+    코스.sort(key=lambda t: t[3])
+    for i in range(1, len(코스)):
+        if 코스[i][3] - 코스[i - 1][3] < 라벨높이:
+            코스[i][3] = 코스[i - 1][3] + 라벨높이
+
+    라벨들 = []
+    for nm, col, pts, 끝y in 코스:
+        path, prev = "", None
+        for k, (i, rk) in enumerate(pts):
+            x, y = xy(i, rk)
+            if k == len(pts) - 1:
+                y = 끝y                     # 마지막 점만 라벨 높이에 맞춰 벌린다
+            if prev is None:
+                path = f"M {x:.0f} {y:.0f} "
+            else:
+                px, py = prev
+                mx = (px + x) / 2
+                path += f"C {mx:.0f} {py:.0f}, {mx:.0f} {y:.0f}, {x:.0f} {y:.0f} "
+            prev = (x, y)
+        선들.append(f'<path d="{path}" fill="none" stroke="{col}" stroke-width="3.4" '
+                    f'stroke-linecap="round" opacity="0.9"/>')
+        lx = xy(pts[-1][0], 1)[0]
+        점들.append(f'<circle cx="{lx:.0f}" cy="{끝y:.0f}" r="5" fill="{col}" '
+                    f'stroke="#12161d" stroke-width="1.5"/>')
+        # 🆕 2026-08-22 — SVG는 화면 폭에 맞춰 축소되므로 font-size를 키워도
+        #    실제로는 작게 보인다. 섹터명은 **아래 HTML 목록**이 크게 보여주니
+        #    그래프에는 순위 변동(▲▼)만 남겨 선이 가려지지 않게 한다.
+        # 🆕 2026-08-22 — 섹터명을 다시 넣는다. SVG가 축소돼 작아 보이므로
+        #    viewBox 기준 글자를 크게 잡고(26) 오른쪽 자리도 넉넉히 준다.
+        라벨들.append(
+            # 🆕 2026-08-22 — 순위 변동(▲7 등) 표시는 뺐다(HO 지시).
+            #    선의 오르내림이 이미 같은 정보를 보여주고 있어 숫자가 중복이었다.
+            #    섹터명만 남기니 라벨이 훨씬 깔끔하고 크게 보인다.
+            f'<text x="{lx+16:.0f}" y="{끝y:.0f}" dominant-baseline="central" '
+            f'font-size="31" font-weight="800" fill="{col}">{nm}</text>')
+
+    날짜라벨 = "".join(
+        f'<text x="{좌여백 + i * x간격:.0f}" y="46" text-anchor="middle" font-size="22" '
+        f'font-weight="700" fill="#9aa3ae">'
+        f'{"오늘" if i == len(사용일) - 1 else d[4:6] + "/" + d[6:]}</text>'
+        for i, d in enumerate(사용일))
+
+    # ── 🆕 2026-08-22 — 사다리 섹터를 눌러 대표 종목을 볼 수 있게 ──
+    #    ⚠️ SVG <text> 안에는 다른 코너와 똑같은 금색 ▾ 화살표를 넣을 수 없다
+    #       (SVG는 HTML 요소를 품지 못하고, 폰트·정렬이 달라 모양도 안 맞는다).
+    #       → 그래프 바로 아래에 **HTML 줄**을 따로 두고 거기에 화살표를 붙인다.
+    #       세 코너(지도·성적표·돌아올섹터)와 같은 ZONE_ARROW를 쓰므로 모양이 같다.
+    # 🆕 2026-08-22 HO 지시 — 눌러야 보이던 대표 종목을 **항상 펼쳐서** 보여준다.
+    #    "주도 섹터가 뭔지"보다 "그래서 어떤 종목인지"가 독자의 실제 관심사라,
+    #    한 번 더 누르게 만들 이유가 없다.
+    사다리목록 = ""
+    _줄 = []
+    for nm, col, pts, 끝y in 코스:
+        목록 = (_zone_members().get(nm) or [])[:6]
+        if not 목록:
+            continue
+        칩 = "".join(
+            f'<span style="display:inline-block;font-size:11px;color:#d5d9e0;'
+            f'background:#141922;border:1px solid #232a36;border-radius:5px;'
+            f'padding:2px 7px;margin:0 4px 4px 0;white-space:nowrap">{n} '
+            f'<b style="color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
+            f'{(v or 0):+.1f}%</b></span>'
+            for n, v in 목록)
+        _줄.append(
+            f'<div style="padding:8px 9px;margin-top:6px;background:#0f131a;'
+            f'border-radius:8px;border-left:3px solid {col}">'
+            f'<p style="margin:0 0 5px;font-size:13px;font-weight:800;color:#e8eaee">'
+            f'{nm}</p><div>{칩}</div></div>')
+    if _줄:
+        사다리목록 = ('<p style="margin:11px 0 0;font-size:11px;color:#e0c060">'
+                  '이 섹터들, 어떤 종목이 담겨 있냐면요</p>' + "".join(_줄))
+
+    # ── 🆕 2026-08-22 — '가장 밀린 자리' 한 줄을 이 카드 안으로 합친다 ──
+    #    예전엔 build_sector_brief()가 칩으로 상위3/하위3을 따로 보여줬는데,
+    #    사다리와 상위 섹터가 겹쳐 핵심편에서 같은 순위를 두 번 말하고 있었다.
+    #    → 상위는 그림(사다리), 하위는 텍스트 한 줄. 형태를 달리해 중복감을 없앤다.
+    하위줄 = ""
+    if 시장:
+        _통계 = []
+        for nm, 일별 in 구역.items():
+            _st = _zone_stat(일별, 시장, 1)      # 당일 창
+            if _st:
+                _통계.append((nm, _st[0]))        # (섹터명, 초과수익%p)
+        if len(_통계) >= 6:
+            _통계.sort(key=lambda x: x[1])
+            _하 = _통계[:3]
+            _칩 = " · ".join(
+                f'<b style="color:{sector_color(nm)}">{nm}</b> '
+                f'<span style="color:#8b93a0">{v:+.1f}%p</span>' for nm, v in _하)
+            하위줄 = ('<p style="margin:9px 0 0;padding-top:9px;'
+                    'border-top:.5px solid rgba(255,255,255,.08);'
+                    'font-size:11.5px;color:#7d848f;line-height:1.6">'
+                    f'⤷ 오늘 가장 밀린 자리 — {_칩}<br>'
+                    '<span style="font-size:10.5px">내 종목이 여기 있다면 '
+                    '<b style="color:#c9ced6">종목이 아니라 자리가 불리했던 것</b>이에요 · '
+                    '순환매에서는 이 자리가 다음 순번이 되기도 해요</span></p>')
+
+    return ZTOG_JS + f'''
+  <div style="background:#141922;border:1px solid #232a36;border-radius:12px;
+              padding:13px 14px;margin:10px 0 0">
+    <p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">오늘 주도 섹터</p>
+    <p style="margin:0 0 6px;font-size:17px;font-weight:800;color:#f2f4f7">
+      🪜 오늘 상위 섹터, 며칠째 이 자리일까요</p>
+    <svg viewBox="0 0 {W} {H}" style="width:100%;height:auto">
+      {날짜라벨}
+      {"".join(선들)}{"".join(점들)}{"".join(라벨들)}
+    </svg>
+    <p style="margin:8px 0 0;font-size:11px;color:#7d848f;line-height:1.5">
+      선이 위로 갈수록 그날 순위가 높았다는 뜻이에요 · 전체 {최대순위}개 섹터 중 순위 ·
+      계속 위쪽이면 주도주 지속, 최근 올라오는 중이면 다음 주도주 후보예요</p>
+    {사다리목록}
+    {하위줄}
+  </div>'''
+
+
 def build_sector_brief():
     """📈 오늘 섹터 한 줄 — 핵심편용 요약.
 
@@ -3256,6 +3872,25 @@ def build_sector_scoreboard():
                      f'<div style="position:absolute;right:50%;width:{wd:.1f}%;height:100%;'
                      f'background:{c};border-radius:3px 0 0 3px"></div>')
                 체크 = "checked" if nm in 기본선 else ""
+                # 🆕 2026-08-22 — 섹터명을 누르면 대표 종목이 펼쳐진다.
+                #    체크박스(선 그래프 토글)와 역할이 다르니 이름 <div>에만 onclick.
+                #    ⚠️ 성적표는 탭 4개(당일/5/20/60)가 같은 섹터를 반복 렌더하므로
+                #       id가 겹치지 않게 전역 일련번호를 쓴다.
+                _GRID_SEQ[0] += 1
+                _pid = f"sbm{_GRID_SEQ[0]}"
+                _panel = zone_member_panel(nm, _pid, 여백=0)
+                # 🆕 2026-08-22 — 이름과 화살표 분리(위 돌아올 섹터와 같은 이유).
+                _이름 = (f'<div class="sb-name" onclick="ztog(\'{_pid}\')" '
+                       f'style="font-size:11px;color:#e8eaee;font-weight:700;'
+                       f'display:flex;align-items:center;gap:1px;'
+                       f'border-radius:4px;padding:1px 3px;cursor:pointer;'
+                       f'-webkit-tap-highlight-color:transparent">'
+                       f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;'
+                       f'white-space:nowrap">{nm}</span>{ZONE_ARROW}</div>'
+                       if _panel else
+                       f'<div class="sb-name" style="font-size:11px;color:#e8eaee;'
+                       f'font-weight:700;overflow:hidden;text-overflow:ellipsis;'
+                       f'white-space:nowrap;border-radius:4px;padding:1px 3px">{nm}</div>')
                 줄.append(
                     f'<div class="sb-row{"" if 보임 else " sb-more"}" data-zone="{nm}" '
                     f'style="display:{"flex" if 보임 else "none"};align-items:center;gap:6px;'
@@ -3264,9 +3899,7 @@ def build_sector_scoreboard():
                     f'{체크} onchange="sbTog({idx})" '
                     f'style="flex:none;width:14px;height:14px;accent-color:{색맵[nm]};cursor:pointer">'
                     f'<div style="width:78px;flex:none;min-width:0">'
-                    f'<div class="sb-name" style="font-size:11px;color:#e8eaee;font-weight:700;'
-                    f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-                    f'border-radius:4px;padding:1px 3px">{nm}</div>'
+                    f'{_이름}'
                     f'<div style="font-size:9px;color:#7d848f">{승}승 {총-승}패 · {승/총*100:.0f}%</div></div>'
                     f'<div style="flex:1;position:relative;height:17px;background:#161b24;'
                     f'border-radius:3px;min-width:40px">'
@@ -3274,7 +3907,8 @@ def build_sector_scoreboard():
                     f'background:#3a4150"></div>{바}</div>'
                     f'<div style="width:48px;flex:none;text-align:right">'
                     f'<div style="font-size:11.5px;font-weight:800;color:{c}">{초:+.1f}%p</div>'
-                    f'<div style="font-size:9px;color:#7d848f">{수:+.1f}%</div></div></div>')
+                    f'<div style="font-size:9px;color:#7d848f">{수:+.1f}%</div></div></div>'
+                    + _panel)
 
             더보기 = ""
             숨김수 = len(통계) - len(기본선 & set(t[0] for t in 통계))
@@ -3474,14 +4108,18 @@ def build_sector_scoreboard():
 })();
 </script>"""
 
-    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+    return (ZTOG_JS
+            + '<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
-            + sector_rule_note() +
+            # 🆕 2026-08-22 HO 지시 — 분류 변경 안내 배너 제거.
+            #    (함수 sector_rule_note()는 남겨 둔다 — §8 삭제 금지)
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">섹터 성적표</p>'
             '<p style="margin:0 0 3px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '어느 섹터가 시장을 이겼나 '
             '<span style="font-size:11.5px;font-weight:600;color:#8b93a0">'
             '· 시장 대비 초과수익률</span></p>'
+            '<p style="margin:0 0 3px;font-size:10.5px;color:#e0c060">'
+            '👆 섹터 이름을 누르면 대표 종목이 나옵니다</p>'
             f'<div style="display:flex;gap:6px;margin:10px 0 8px">{탭}</div>'
             '<label style="display:flex;align-items:center;gap:6px;margin-bottom:6px;'
             'font-size:11px;color:#8b93a0;cursor:pointer">'
@@ -4217,8 +4855,13 @@ def build_return_sector():
             멤버.sort(key=lambda n: (dday(n) if dday(n) is not None else 999))
         else:
             멤버.sort(key=lambda n: -(위상(n) or 0))
-        rows = ""
-        for nm in 멤버:
+        # 🆕 2026-08-22 HO 지시 — 그룹마다 "가장 핫한/가장 임박한" 상위 2개만 먼저
+        #    보여주고, 나머지는 더보기로 접는다. 정렬은 이미 위에서 그 기준대로
+        #    돼 있으니(대기=D-day 임박순, 나머지=위상 높은순) 앞 2개를 자르기만
+        #    하면 된다.
+        앞2, 뒤나머지 = 멤버[:2], 멤버[2:]
+
+        def _row(nm):
             c = sector_color(nm); p = min(1.25, (위상(nm) or 0)); pos = p / 1.25 * 100
             d = dday(nm)
             뱃 = "지금" if key == "지금" else ("임박" if key == "임박" else
@@ -4232,12 +4875,30 @@ def build_return_sector():
                        f'이탈 후 {_s["경과"]}일 · {_차문}')
             else:
                 주기문 = f'등판 {_s["회수"]}회 — 주기를 말하기엔 표본이 적습니다'
-            rows += (f'<div class="rs-row" data-zone="{nm}" '
-                     f'style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'
+            # 🆕 2026-08-22 — 섹터명을 누르면 대표 종목이 펼쳐진다(섹터 지도와 같은 방식).
+            #    "돌아올 섹터라는데, 그래서 뭘 사라는 거지?"에 답이 없던 문제를 메운다.
+            _pid = f"rsm_{_GRID_SEQ[0]}_{abs(hash(nm)) % 99999}"
+            _GRID_SEQ[0] += 1
+            _panel = zone_member_panel(nm, _pid)
+            # 🆕 2026-08-22 — 섹터명이 길면 ellipsis가 화살표까지 잘라먹었다.
+            #    이름과 화살표를 **분리**해서, 줄어드는 건 이름만이고
+            #    화살표(flex:none)는 항상 자리를 지키게 한다.
+            _이름셀 = (f'<span class="rs-name" onclick="ztog(\'{_pid}\')" '
+                     f'style="width:88px;flex:none;min-width:0;display:flex;'
+                     f'align-items:center;justify-content:flex-end;gap:1px;'
+                     f'font-size:10.5px;font-weight:600;color:#e8eaee;'
+                     f'padding:1px 3px;border-radius:4px;cursor:pointer;'
+                     f'-webkit-tap-highlight-color:transparent">'
+                     f'<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;'
+                     f'white-space:nowrap">{nm}</span>{ZONE_ARROW}</span>'
+                     if _panel else
                      f'<span class="rs-name" style="width:88px;flex:none;min-width:0;'
                      f'font-size:10.5px;font-weight:600;color:#e8eaee;text-align:right;'
                      f'padding:1px 3px;border-radius:4px;overflow:hidden;'
-                     f'text-overflow:ellipsis;white-space:nowrap">{nm}</span>'
+                     f'text-overflow:ellipsis;white-space:nowrap">{nm}</span>')
+            return (f'<div class="rs-row" data-zone="{nm}" '
+                     f'style="display:flex;align-items:center;gap:7px;margin-bottom:5px">'
+                     f'{_이름셀}'
                      f'<div style="flex:1;min-width:0;position:relative;height:14px;'
                      f'background:#0f131a;border-radius:7px;overflow:hidden">'
                      f'<div style="position:absolute;left:80%;right:0;top:0;bottom:0;'
@@ -4250,7 +4911,21 @@ def build_return_sector():
                      f'<span style="width:34px;flex:none;text-align:right;font-size:10.5px;'
                      f'font-weight:800;color:{색};white-space:nowrap">{뱃}</span></div>'
                      f'<p style="margin:-2px 0 6px 95px;font-size:9.5px;color:#7d848f">'
-                     f'{주기문}</p>')
+                     f'{주기문}</p>{_panel}')
+
+        rows = "".join(_row(nm) for nm in 앞2)
+        더보기 = ""
+        if 뒤나머지:
+            gid = f"rsMore_{key}"
+            더보기 = (f'<div class="hidden-block" id="{gid}">'
+                     f'{"".join(_row(nm) for nm in 뒤나머지)}</div>'
+                     f'<button class="more-btn" style="margin:2px 0 6px 95px;font-size:10px;'
+                     f'padding:.25rem .6rem;max-width:calc(100% - 95px);white-space:nowrap;'
+                     f'overflow:hidden;text-overflow:ellipsis" '
+                     f'onclick="toggleMore(\'{gid}\',this,'
+                     f'\'▾ {라벨} {len(뒤나머지)}개 더보기\')">▾ {라벨} {len(뒤나머지)}개 더보기</button>')
+        rows += 더보기
+
         본문 += (f'<div style="margin-bottom:12px">'
                 f'<div style="display:flex;align-items:baseline;gap:7px;margin-bottom:6px">'
                 f'<span style="font-size:12.5px;font-weight:800;color:{색}">{라벨}</span>'
@@ -4296,11 +4971,14 @@ def build_return_sector():
   document.addEventListener('DOMContentLoaded',paint)}
 })();
 </script>"""
-    return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
+    return (ZTOG_JS
+            + '<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
             '<p style="margin:0 0 2px;font-size:11.5px;color:#8b93a0">돌아올 섹터</p>'
-            '<p style="margin:0 0 11px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '<p style="margin:0 0 4px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '다음 순번은 어디인가</p>'
+            '<p style="margin:0 0 11px;font-size:10.5px;color:#e0c060">'
+            '👆 섹터 이름을 누르면 대표 종목이 나옵니다</p>'
             f'<div id="rs-body" style="position:relative;padding-top:14px">{본문}</div>'
             '<p style="margin:14px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
             '막대는 <b style="color:#c9ced6">주기 트랙</b>입니다 — 왼쪽 끝이 상위권에서 빠진 날, '
@@ -5003,9 +5681,23 @@ def build_core(핵심편, data, 해석):
     코수 = 지수수급.get("코스피_수급") or {}
     rows = _load_market_history()
 
-    # ── 지수 헤더 (스타일은 HEADER_STYLE 상수로 전환) ──
-    지수스트립 = (build_index_header(지수수급, data.get("파생"), 코수, 관제=data.get("관제지수"),
-                                    사건명=(해석.get("사건명") or ""))
+    # ── 지수 헤더 ──
+    # 🆕 2026-08-22 HO 지시 — 핵심편 헤더 막대와 심층편 「오늘의 성적표」가
+    #    같은 지수·수급을 **다른 그림**으로 두 번 보여줘 헷갈린다는 지적.
+    #    → 핵심편도 심층편과 **똑같은 성적표 카드**를 쓴다. 같은 정보는 같은 모양으로.
+    #    ⚠️ 계기판(core_flow_gauge)은 그대로 둔다 — 실탄은 성적표에 없는 정보다.
+    #    ⚠️ 🚦신호등은 **반드시 유지**한다. 옛 헤더 안에 들어 있어서 헤더를 걷어낼 때
+    #       같이 사라진 적이 있다(2026-08-22 사고). 지금은 별도 함수로 분리했다.
+    _지수 = (지수수급 or {}).get("지수") or {}
+    _코, _닥 = _지수.get("코스피", {}), _지수.get("코스닥", {})
+    _닥수 = (지수수급 or {}).get("코스닥_수급") or {}
+    신호등블록 = build_signal_head(지수수급, data.get("파생"), 코수,
+                              관제=data.get("관제지수"),
+                              사건명=(해석.get("사건명") or ""))
+    # ⚠️ id="score"는 「오늘 확인해야 할 신호」의 '확인 ↓' 이동 목적지다.
+    지수스트립 = (f'<div class="idx-grid" id="score">'
+                f'{build_score_card("KOSPI", _코, 코수)}'
+                f'{build_score_card("KOSDAQ", _닥, _닥수)}</div>'
                 + core_flow_gauge() + _flow_comment())
 
     def _f(v):
@@ -5042,13 +5734,19 @@ def build_core(핵심편, data, 해석):
         f'<div class="i9"><span class="i9-t {태그색.get(it.get("태그"), "tg-sup")}">{it.get("태그","")}</span>'
         f'<span>{it.get("내용","")}</span></div>'
         for it in (해석.get("핵심이슈") or [])[:4])
-    이슈블록 = (f'<div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p>'
-              f'<p class="iss90-s">뉴스에서 오늘 실제로 주가에 영향을 준 것만 추렸습니다</p>{이슈들}</div>'
+    # ── 📰 오늘 시장을 움직인 것들 + 🧭 왜 이렇게 움직였을까요 = 한 카드 ──
+    # 🆕 2026-08-22 HO 지시 — 둘을 합친다.
+    #    팩트(태그별 소주제)를 먼저 보여주고, 같은 상자 안에서 바로
+    #    "그래서 왜 그랬냐면요"로 닫는다. 카드가 둘로 나뉘어 있으면
+    #    독자가 팩트만 보고 스크롤을 내려 '왜'를 놓친다.
+    #    소주제(반도체·수급·산업·글로벌 등) 분류는 그대로 유지한다.
+    이슈블록 = (f'<div class="iss90"><p class="iss90-h">📰 오늘, 시장에 무슨 일이 있었냐면요</p>'
+              f'<p class="iss90-s">뉴스 중에서 오늘 진짜로 주가를 움직인 것만 골랐어요</p>{이슈들}</div>'
               ) if 이슈들 else (
                   # ⚠️ 재사용 모드에선 핵심이슈가 없어 코너가 통째로 사라졌다(2026-08-21).
                   #    자리를 지키고 "왜 없는지"를 알려준다.
-                  '<div class="iss90"><p class="iss90-h">📰 오늘 시장을 움직인 것들</p>'
-                  '<p class="iss90-s">오늘 이슈 정리가 아직 준비되지 않았습니다 — '
+                  '<div class="iss90"><p class="iss90-h">📰 오늘, 시장에 무슨 일이 있었냐면요</p>'
+                  '<p class="iss90-s">오늘 이슈 정리가 아직 준비되지 않았어요 — '
                   '아래 숫자와 표는 모두 오늘 것입니다</p></div>')
 
     특징 = "".join(
@@ -5140,7 +5838,7 @@ def build_core(핵심편, data, 해석):
     #    매일 나오는 코너는 특별함이 없어 아무도 안 누른다(2026-08-21).
     이상 = _anomaly_signals(data)
     if 이상:
-        이상HTML = ('<div class="q90-tease"><p class="qt-h">🚨 오늘만 나타난 신호입니다</p>'
+        이상HTML = ('<div class="q90-tease"><p class="qt-h">🚨 오늘 확인해야 할 신호</p>'
                    + "".join(f'<a class="qt" href="{h}"><span class="qt-tag">{t}</span>'
                              f'<span>{txt}</span><span class="qt-go">확인 ↓</span></a>'
                              for h, t, txt in 이상) + '</div>')
@@ -5206,7 +5904,9 @@ def build_core(핵심편, data, 해석):
     왜그런가 = 핵심편.get("왜그런가") or ""
     # ⚠️ 사건명은 신호등 옆에 이미 들어간다(2026-08-19). 위에 또 두면 같은 문장이 두 번.
     사건명블록 = ""
-    딱N블록 = build_top_picks(해석)
+    # 🆕 2026-08-22 HO 지시 — 「오늘 N가지만 기억하세요」 가림.
+    #    되살리려면 HIDDEN_CHAPTERS에서 "딱N"만 빼면 된다.
+    딱N블록 = hide("딱N", build_top_picks(해석))
     # ⚠️ 배치 원칙(v-k4): 핵심편은 "오늘은 어떤 하루였나(헤더)" → "왜 그랬나(정의·공감·왜)"
     #    → "수급으로 확인" → "그래서 내 계좌는 어디에(좌표·레이더)" 순서로 읽힌다.
     #    · 수급 변속기는 수급 타일 바로 밑(같은 맥락)으로 이동
@@ -5225,25 +5925,25 @@ def build_core(핵심편, data, 해석):
                   + build_sector_scoreboard())
     변속기블록 = hide("수급변속기", build_flow_gearbox())
 
-    # ── 🧭 왜 이렇게 움직였을까요 ──
-    #  '왜그런가'(초보용 인과)와 '수급왜'(수급 관점)가 같은 말을 두 번 하고 있었다.
-    #  둘을 한 상자에 담아 '오늘 시장을 움직인 것들' 바로 뒤에 둔다.
-    #  구독자가 "아, 이래서 올랐구나"를 여기서 한 번에 이해하게 하는 자리다.
-    _수급왜 = (핵심편.get("수급왜") or "").strip()
-    _조각 = [x for x in ((왜그런가 or "").strip(), _수급왜) if x]
-    해석블록 = ""
-    if _조각:
-        _본문 = "".join(f'<p class="q90-why-b">{t}</p>' for t in _조각)
-        해석블록 = ('<div class="q90-whybox">'
-                  '<p class="q90-why-h">🧭 왜 이렇게 움직였을까요</p>'
-                  f'{_본문}</div>')
+    # ── 🧭 「그래서 왜 이렇게 움직였냐면요」 코너 삭제 (2026-08-22 HO 지시) ──
+    #  이제 각 이슈(반도체·수급·산업·글로벌…)의 '내용' 안에서 '왜'까지 끝낸다.
+    #  별도 코너로 두면 같은 원인을 두 번 말하게 되고, 독자는 이슈를 읽고 나서
+    #  아래에서 또 원인 설명을 만나 "아까 읽은 건가?" 하게 된다.
+    #  ⚠️ 필드(왜그런가·수급왜) 자체는 지우지 않는다 — 심층편·이모지 회피 로직이
+    #     참조하고 있고, 되살릴 때를 위해 남겨 둔다(§8 삭제 금지).
+    움직인것들 = f'<div class="movers90">{이슈블록}</div>' if 이슈블록 else ""
+
+    # 🆕 2026-08-22 HO 지시 — 「오늘은 '○○'인 날이에요」를 **신호등 바로 밑**으로.
+    #    예전엔 성적표·계기판을 다 지나서야 나왔는데, 신호등(색)과 정의(말)는
+    #    "오늘이 어떤 하루였나"를 각각 색과 문장으로 말하는 한 쌍이라 붙여야 한다.
+    정의블록 = (f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
+             + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>'
+                if 핵심편.get("정의풀이") else ''))
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
             '<span class="q90-badge">⏱️ 90초 브리핑</span>'
             '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
-            + 지수스트립
-            + f'<p class="q90-def">{핵심편.get("오늘의정의","")}</p>'
-            + (f'<p class="q90-gloss">{핵심편.get("정의풀이")}</p>' if 핵심편.get("정의풀이") else '')
+            + 신호등블록 + 정의블록 + 지수스트립
             # ⚠️ 공감문구는 '내 계좌만 왜 이러지' 코너로 흡수했다(2026-08-19).
             #    감정을 다루는 자리가 두 군데로 갈리면 둘 다 힘을 잃는다.
             # ⚠️ 배치 (2026-08-19 HO 지시)
@@ -5255,12 +5955,14 @@ def build_core(핵심편, data, 해석):
             #    📰 팩트 → 🧭 해석 → 📈 섹터 성적표 → 😐 감정 → 💰 수급
             #    "왜 그랬는지 이해한 다음에 위로가 온다"는 순서다.
             + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
-            + 이슈블록
-            # ⚠️ 왜블록은 넣지 않는다 — 해석블록이 이미 '왜그런가 + 수급왜'를
-            #    한 상자에 담고 있어, 둘 다 넣으면 같은 제목·같은 내용이 두 번 나온다.
-            #    (2026-08-21 미리보기에서 실제로 중복이 확인됐다)
-            + 해석블록
-            + hide("핵심편섹터간략", build_sector_brief())
+            # 🆕 2026-08-22 — 📰팩트 + 🧭해석을 한 카드(움직인것들)로 합쳤다.
+            + 움직인것들
+            # 🆕 2026-08-22 — 핵심편 섹터 코너를 **하나로** 줄였다.
+            #    예전엔 칩(build_sector_brief)과 사다리가 같은 상위 섹터를
+            #    두 번 말해서, 심층편 성적표·순위타일까지 합치면 같은 순위가
+            #    네 가지 그림으로 반복됐다(원칙 5 위반).
+            #    → 상위는 사다리 그림, 하위는 그 카드 안 한 줄로 흡수했다.
+            + hide("핵심편섹터사다리", build_sector_ladder())
             + 내종목
             # ⚠️ 계기판을 헤더 막대 바로 밑으로 올렸으므로(2026-08-20)
             #    여기 제목·부제는 뺐다. 막대 → 계기판 흐름이 이미 설명이다.
@@ -5275,9 +5977,17 @@ def build_core(핵심편, data, 해석):
             + hide("수급특징", f'<div class="mny-feat">{특징}</div>')
             + '</div>'
             + 격자블록
-            + 뒤집블록 + 딱N블록 + 핵심디버전스
+            # 🆕 2026-08-22 HO 지시
+            #  · 핵심디버전스(「지수는 오르는데 큰돈은 빠지는 중 — 심층편에서 자세히」) 삭제
+            #    → 티저만 던지고 답을 심층편으로 미루니 핵심편에서 얻는 게 없었다.
+            #  · 내일대응(「○요일장, 이것만 기억하세요」) 삭제
+            #    → 아래 관전포인트(예보)와 역할이 겹친다. 예보가 더 구체적이라 그쪽만 남긴다.
+            #  · 관전포인트를 핵심편 **맨 끝**으로. "오늘"을 다 읽고 "내일"로 닫는 순서.
+            + 뒤집블록 + 딱N블록
             + 이상HTML
-            + 내일대응
+            # 🆕 2026-08-22 HO 지시 — 「오늘만 나타난 신호」 바로 밑에 매집 종목 맛보기.
+            + build_core_accum(data.get("매집레이더"))
+            + build_watchpoints(해석.get("관전포인트"), _NEXT_LABEL)
             + '</div>'
             + ('<div class="deep-cut" id="deep">'
                '<span class="deep-arrow">⌄</span>'
@@ -5867,8 +6577,13 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "심층편성적표",       # 🆕 2026-08-22 — 핵심편 헤더가 같은 카드를 쓴다(중복)
+    "심층편관전포인트",   # 🆕 2026-08-22 — 예보를 핵심편 맨 끝으로 옮겼다(중복)
+    "그들은뭐라했나",     # 🆕 2026-08-22 HO 지시
+    "딱N",                # 🆕 2026-08-22 HO 지시 — 「오늘 N가지만 기억하세요」
     "포착성적",           # 2026-08-21 — 표본이 쌓이면 되살릴 것
     "군중나침반",         # 2026-08-21 — 신용잔고를 수급 타임라인으로 옮김
+    "섹터크기별",         # 🆕 2026-08-22 HO 지시 — 심층편에서 가림
     "삼줄요약",           # 2026-08-19 — '딱 N가지'와 역할 중복
     "수급타일",           # 2026-08-19 — 헤더 수급 막대와 같은 말
     "수급특징",           # 2026-08-19 — 계기판 배지와 겹침
@@ -6389,7 +7104,10 @@ def core_flow_gauge():
     c = FS_BUY if st["v"] >= 0 else FS_SELL
     ico, key = _fs_keyfact(st)
     return (f'<div class="core-g">'
-            f'<div class="core-g-l">{_fs_gauge(st, 104)}</div>'
+            # 🆕 2026-08-22 HO 지시 — 계기판만 덩그러니 있으면 "이게 뭘 재는 건지"를
+            #    모른다. 게이지 위에 무엇을 재는 계기인지 이름을 붙인다.
+            f'<div class="core-g-l"><p class="core-g-cap">코스피 실탄</p>'
+            f'{_fs_gauge(st, 104)}</div>'
             f'<div class="core-g-r">'
             f'<p class="core-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
             f'<p class="core-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
@@ -6973,10 +7691,13 @@ def build_flow_signal(파생, 지수수급, 해석=None):
 #  ⚠️ 색은 리포트 어디에도 안 쓰는 색으로 골랐다(2026-08-21).
 #     빨강·파랑(매수/매도), 자홍·민트(외국인/기관), 금색(선물)과 겹치면 뜻이 두 개가 된다.
 MACRO_LINE = {
-    "원달러환율": ("#7dd3fc", "환율"),   # 하늘 — 통화
-    "WTI유가":    ("#fb923c", "유가"),   # 주황 — 원유
-    "미국채10년": ("#c4b5fd", "금리"),   # 연보라 — 채권
-    "국제금":     ("#facc15", "금"),     # 노랑 — 금
+    # 🆕 2026-08-22 — 파스텔이 화면에서 너무 흐리다는 지적으로 진한 톤으로 교체.
+    #    기존 지수(#c1432b·#2e6bd6)·개인(#a78bfa)·관심종목(#f0c65a)과 안 겹치는
+    #    범위에서 골랐다.
+    "원달러환율": ("#0ea5e9", "환율"),   # 진한 하늘 — 통화
+    "WTI유가":    ("#ea580c", "유가"),   # 진한 주황 — 원유
+    "미국채10년": ("#7c3aed", "금리"),   # 진한 보라 — 채권
+    "국제금":     ("#ca8a04", "금"),     # 진한 금 — 금
 }
 
 
@@ -7060,6 +7781,13 @@ def build_html(data, report):
     닥 = 지수.get("코스닥", {})
     코수 = (data.get("지수수급") or {}).get("코스피_수급") or {}
     닥수 = (data.get("지수수급") or {}).get("코스닥_수급") or {}
+    # 🆕 2026-08-22 — 예보 카드 제목에 쓸 다음 거래일 표기.
+    #    build_core 안에도 같은 계산이 있지만 그건 그 함수의 지역변수라 여기선 못 쓴다.
+    try:
+        _NEXT = trading_day_context(
+            datetime.strptime(data.get("날짜") or DATE, "%Y%m%d").date())["다음거래일표현"]
+    except Exception:
+        _NEXT = "내일"
     해석 = (report or {}).get("해석글", {})
     오늘의시장 = 해석.get("오늘의_시장", "— (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)")
     오늘한줄평 = 해석.get("한줄평", "— (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)")
@@ -7199,6 +7927,13 @@ a{{color:inherit;text-decoration:none}}
 .gz-num{{font-size:40px;font-weight:800;color:#7fa8e8;line-height:1}}
 .gz-lab{{font-size:12px;font-weight:700;color:#7fa8e8;margin-top:3px}}
 .gz-bodywrap{{flex:1;min-width:230px}}
+/* 🆕 2026-08-22 — 관제지수 카드 오른쪽 지수 요약(스타일 A). 지수+등락률만. */
+.gz-idx{{flex:none;border-left:1px solid rgba(255,255,255,.09);padding-left:16px;align-self:center}}
+/* 라벨·종가·등락률 3열 그리드. 종가는 오른쪽 정렬해 자릿수가 달라도 세로로 맞는다. */
+.gz-idx-row{{display:grid;grid-template-columns:auto minmax(58px,auto) 54px;align-items:baseline;column-gap:9px;padding:3px 0}}
+.gz-idx-n{{font-size:11.5px;color:#8b93a0}}
+.gz-idx-v{{font-size:12.5px;color:#e8eaee;font-variant-numeric:tabular-nums;text-align:right}}
+.gz-idx-p{{font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;text-align:right}}
 .gz-title{{font-size:12px;font-weight:700;color:#c8ccd2;margin-bottom:9px}}
 .gz-track{{position:relative;height:12px;border-radius:6px;display:flex;overflow:visible}}
 .gz{{height:100%;width:20%}}
@@ -7329,10 +8064,15 @@ a{{color:inherit;text-decoration:none}}
 .silent-head{{font-size:12.5px;font-weight:800;color:#c9c4f0;margin-bottom:.6rem}}
 .si-item{{display:flex;gap:9px;padding:7px 0;border-bottom:.5px solid rgba(255,255,255,.08);font-size:12.5px;line-height:1.75;color:#dfe3e8}}
 .si-item:last-child{{border-bottom:none;padding-bottom:0}}
-.si-lens{{font-size:10px;font-weight:700;background:rgba(255,255,255,.12);color:#c9c4f0;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content}}
+.si-lens{{font-size:10px;font-weight:700;background:rgba(255,255,255,.12);color:#c9c4f0;padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;margin-top:3px;height:fit-content;display:flex;flex-direction:column;gap:1px;align-items:center}}
+.si-act{{font-size:8px;font-weight:900;color:#8b93a0;letter-spacing:.03em}}
 .study-src{{font-size:10.5px;font-weight:600;color:#5b8a2a;background:#dcebc8;display:inline-block;padding:2px 9px;border-radius:99px;margin:2px 0 6px}}
 .study-box{{background:linear-gradient(135deg,#EAF3DE,#f2f7e8);border-radius:var(--rlg);padding:.95rem 1.1rem;margin-bottom:1rem;font-size:12.5px;color:#3B6D11;line-height:1.8}}
 .hidden-block{{display:none}} .hidden-block.open{{display:block}}
+/* 🆕 2026-08-22 — "확인 ↓"으로 이동했을 때 제목이 화면 맨 위에 딱 붙어
+   잘려 보이던 문제. 앵커 대상에 위 여백을 준다. */
+html{{scroll-behavior:smooth}}
+#score,#flow,#radar,#acc,#watch,#deep{{scroll-margin-top:64px}}
 .more-btn{{display:block;width:100%;text-align:center;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:7px 0;cursor:pointer;font-family:var(--font-sans);margin-bottom:1rem}}
 .macro-row{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:1rem}}
 .mr-card{{background:var(--bg2);border-radius:var(--rmd);padding:.7rem .9rem}}
@@ -7473,7 +8213,9 @@ a{{color:inherit;text-decoration:none}}
 .q90-sub{{font-size:12px;color:#9aa0a8}}
 
 /* ⚠️ 위 문장들과 붙어 보여 답답했다(2026-08-20). 위 여백을 준다. */
-.q90-def{{margin-top:1.15rem;font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
+/* 🆕 2026-08-22 — 신호등 바로 밑으로 올라오면서 위 여백을 줄였다.
+   신호등(색)과 정의(말)는 한 쌍이라 붙어 보여야 한다. */
+.q90-def{{margin-top:.35rem;font-size:21px;font-weight:800;color:#fff;line-height:1.45;letter-spacing:-.02em;margin-bottom:.5rem}}
 .ix-head{{margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(255,255,255,.1)}}
 .ix-head .up{{color:#ff6b4a}} .ix-head .down{{color:#5b9bff}} .ix-head .yl{{color:#e0c060}}
 .ix-mood{{display:flex;align-items:center;gap:12px;margin-bottom:14px}}
@@ -7505,6 +8247,18 @@ a{{color:inherit;text-decoration:none}}
 .hi-light .hi-dot{{width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,255,255,.25)}}
 .hi-light .hi-dot.on{{background:var(--gc);animation:hiblink 1.5s ease-in-out infinite}}
 @keyframes hiblink{{0%,100%{{box-shadow:0 0 18px var(--gc),0 0 6px var(--gc);opacity:1;transform:scale(1.12)}}50%{{box-shadow:0 0 2px var(--gc);opacity:.32;transform:scale(1)}}}}
+/* 🆕 2026-08-22 — 레이더 두 코너의 이모지에 성격을 담은 움직임을 준다.
+   ⚠️ prefers-reduced-motion을 켠 사용자에게는 멈춘다(멀미·발작 유발 방지). */
+@keyframes cpFlame{{0%,100%{{transform:scale(1) rotate(-3deg);filter:brightness(1)}}
+ 25%{{transform:scale(1.15) rotate(2deg);filter:brightness(1.25)}}
+ 50%{{transform:scale(.96) rotate(-2deg);filter:brightness(.95)}}
+ 75%{{transform:scale(1.1) rotate(3deg);filter:brightness(1.15)}}}}
+@keyframes cpTurtle{{0%{{transform:translateX(0)}}45%{{transform:translateX(7px)}}
+ 50%{{transform:translateX(7px) rotate(-4deg)}}95%{{transform:translateX(0)}}
+ 100%{{transform:translateX(0) rotate(0)}}}}
+.cp-flame{{display:inline-block;animation:cpFlame 1.1s ease-in-out infinite;transform-origin:50% 90%}}
+.cp-turtle{{display:inline-block;animation:cpTurtle 3.4s ease-in-out infinite}}
+@media (prefers-reduced-motion:reduce){{.cp-flame,.cp-turtle{{animation:none}}}}
 .hi-shield{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
 .hi-arrow{{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}}
 .hi-badge{{width:46px;height:46px;border-radius:11px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#20242b}}
@@ -7682,7 +8436,7 @@ a{{color:inherit;text-decoration:none}}
 .qt .u{{color:var(--up-soft)}}
 
 .q90-stale{{font-size:11.5px;line-height:1.7;color:#8a6d3b;background:#fcf6e3;border:.5px solid #e6d7a8;border-radius:var(--rmd);padding:.7rem .85rem;margin-bottom:.8rem}}
-.q90-gloss{{font-size:12px;color:#9aa0a8;line-height:1.7;margin:-.2rem 0 .6rem}}
+.q90-gloss{{font-size:12px;color:#9aa0a8;line-height:1.7;margin:-.2rem 0 1rem}}
 .mine-f2{{font-size:13px;font-weight:800;color:#fff;margin-top:.5rem}}
 .q90-cut{{text-align:center;font-size:12px;color:var(--sub);background:var(--bg2);border:.5px solid var(--line);border-radius:99px;padding:9px 0;margin:.6rem 0 0}}
 .deep-cut{{display:flex;align-items:center;justify-content:center;gap:16px;margin:1.2rem 0 .2rem;padding:1rem 1rem;background:linear-gradient(180deg,#2a2e36,#20242b);border-radius:14px;border:1px solid rgba(224,192,96,.25)}}
@@ -7786,12 +8540,13 @@ a{{color:inherit;text-decoration:none}}
 /* 핵심편 수급 머리 — 심층편과 같은 계기 */
 .core-g{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;margin:.5rem 0 .7rem;padding:.6rem .2rem;border-bottom:.5px solid rgba(255,255,255,.08)}}
 .core-g-l{{text-align:center}}
+.core-g-cap{{font-size:9.5px;font-weight:800;color:#8b93a0;margin:0 0 1px;letter-spacing:.02em;white-space:nowrap}}
 .core-g-l svg{{max-width:96px}}
 .core-g-x{{font-size:11px;font-weight:900;margin:.1rem 0 0}}
 .core-g-v{{font-size:23px;font-weight:900;margin:0;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:1.1}}
 .core-g-s{{font-size:10.5px;color:#8b93a0;margin:.2rem 0 0}}
 .core-g-s b{{color:#c9d0d9}}
-.core-g-k{{display:inline-block;font-size:10px;font-weight:800;padding:.15rem .5rem;border-radius:20px;border:1px solid #2a3342;background:#0d1118;margin:.35rem 0 0}}
+.core-g-k{{display:inline-block;font-size:10px;font-weight:800;padding:.15rem .5rem;border-radius:20px;border:1px solid #2a3342;background:#0d1118;margin:.35rem 0 0;white-space:nowrap}}   /* 🆕 2026-08-22 — "평소보다 조용한 하루"가 "하루"만 다음 줄로 떨어지던 문제. 배지 문구는 10자 안팎이라 한 줄 강제해도 좁은 화면에서 안 넘친다 */
 /* 뜨는 현장 레이더 — 섹터 점이 천천히 명멸한다 */
 /*   ⚠️ 빠르게 깜빡이면 요란하고 눈이 아프다. 3.2초 주기 ease-in-out으로
        숨 쉬듯 느리게, 투명도만 오간다(크기는 안 건드려 위치가 안 흔들린다).
@@ -7859,6 +8614,11 @@ a{{color:inherit;text-decoration:none}}
 .atc-next{{font-size:12.5px;color:#f0c65a;line-height:1.8;margin:0;padding-top:10px;border-top:1px solid rgba(255,255,255,.08);font-weight:700}}
 .atc-next b{{color:#fff}}
 /* 🧭 왜 이렇게 움직였을까요 — 팩트 바로 뒤, 핵심편에서 가장 중요한 자리 */
+/* 🆕 2026-08-22 — 📰팩트 + 🧭해석을 한 덩어리로 묶는 바깥 카드.
+   안쪽 두 블록의 위/아래 여백을 죽여 "한 이야기"로 붙여 보이게 한다. */
+.movers90{{background:#12171f;border:1px solid #232a36;border-radius:14px;padding:.55rem .6rem;margin-top:.8rem}}
+.movers90 .iss90{{margin-top:0;background:transparent;padding:.35rem .45rem}}
+.movers90 .q90-whybox{{margin:.3rem 0 0;border-radius:10px}}
 .q90-whybox{{background:#141a22;border:1px solid #24303f;border-left:3px solid #e0c060;border-radius:12px;padding:12px 14px;margin:12px 0 0}}
 .q90-why-h{{font-size:14px;font-weight:900;color:#f0c65a;margin:0 0 7px;letter-spacing:-.02em}}
 .q90-why-b{{font-size:13px;color:#c9ced6;line-height:1.8;margin:0 0 8px}}
@@ -8072,6 +8832,15 @@ a{{color:inherit;text-decoration:none}}
   .rp-title{{font-size:16px}}
   .gz-num{{font-size:34px}}
   .gz-bodywrap{{min-width:100%}}
+  /* 좁은 화면에선 지수 요약을 아래로 내리고 가로 전체를 쓴다 */
+  /* 🆕 2026-08-22 — 좁은 화면에서 지수를 게이지 아래로 내렸더니 "25·한파" 오른쪽이
+     통째로 비었다. 점수와 지수를 **같은 줄**에 두고, 게이지 바만 다음 줄로 내린다. */
+  .gz-numwrap{{flex:none}}
+  /* 🆕 2026-08-22 — 전체 폭으로 늘려 좌우로 벌어지던 것을 고쳤다.
+     블록을 **오른쪽으로 밀어 붙이고**(margin-left:auto) 위쪽 여백도 준다. */
+  .gz-idx{{flex:none;margin-left:auto;margin-top:16px;padding-left:14px;border-left:none;
+    padding-left:0;align-self:flex-start;order:0}}
+  .gz-bodywrap{{order:3}}
   .gz-row{{grid-template-columns:84px 38px 1fr;row-gap:2px}}
   .gz-ev{{grid-column:1/-1;color:#9aa0a8}}
   .idx-grid{{grid-template-columns:1fr;gap:8px}}
@@ -8103,13 +8872,17 @@ a{{color:inherit;text-decoration:none}}
   {build_core(해석.get('핵심편'), data, 해석)}
 
   <div class="deep-wrap">
-  {build_gauge(data.get('관제지수'), 오늘한줄평)}
+  {build_gauge(data.get('관제지수'), 오늘한줄평, 지수)}
 
-  <p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
+  <!-- 🆕 2026-08-22 — 핵심편 헤더가 같은 성적표 카드를 쓰게 되면서 여기는 중복이 됐다.
+       ⚠️ 예전엔 여기에 빈 <div id="score">만 남겨뒀는데, 「확인 ↓」을 누르면
+          **아무것도 없는 자리**로 이동했다. id는 실제 내용이 있는
+          핵심편 성적표 카드(.idx-grid)로 옮겼다. -->
+  {hide("심층편성적표", f'''<p class="sec-label"><small>지수 + 수급</small>📊 오늘의 성적표</p>
   <div class="idx-grid">
     {build_score_card("KOSPI", 코, 코수)}
     {build_score_card("KOSDAQ", 닥, 닥수)}
-  </div>
+  </div>''')}
 
   <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
 
@@ -8126,7 +8899,8 @@ a{{color:inherit;text-decoration:none}}
 
   <!-- ⚠️ 수급을 주인공보다 먼저 본다(2026-08-21 지시).
        "돈이 어디로 갔나"를 알고 나서 "어디가 떴나"를 봐야 인과가 맞다. -->
-  <p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
+  <p class="sec-label" id="flow"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
+  <!-- 🆕 2026-08-22 — "확인 ↓"(#flow)도 같은 이유로 죽어 있었다. -->
   {build_flow_signal(data.get('파생'), data.get('지수수급'), 해석)}
 
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
@@ -8172,8 +8946,8 @@ a{{color:inherit;text-decoration:none}}
       성적표에선 강한데 여기 없다면 — <b style="color:#a07d1f">올랐지만 돈은 안 붙은 상승</b>입니다.
     </p></details>
 
-  <p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 누가 이끌었나?</p>
-  {build_slope_chart(data.get('계좌격자'))}
+  {hide("섹터크기별", f'''<p class="sec-label"><small>섹터 성적</small>📐 섹터 크기별 — 누가 이끌었나?</p>
+  {build_slope_chart(data.get('계좌격자'))}''')}
 
   <p class="sec-label"><small>순환 분석</small>🗺️ 섹터 순위 타일 — 주도권이 어떻게 돌았나</p>
   {build_sector_map()}
@@ -8190,17 +8964,17 @@ a{{color:inherit;text-decoration:none}}
   {build_insight(프로의시선)}
   {build_divergence_block(data, 해석)}
 
-  <p class="sec-label" id="radar"><small>실제 강세 레이더</small>🔥 오늘 불난 자리</p>
+  <p class="sec-label" id="radar"><small>실제 강세 레이더</small><span class="cp-flame">🔥</span> 오늘 불난 자리</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
-  <p class="sec-label" id="acc"><small>매집 레이더</small>🐢 조용히 모으는 손</p>
+  <p class="sec-label" id="acc"><small>매집 레이더</small><span class="cp-turtle">🐢</span> 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
   {hide("포착성적", f'''<p class="sec-label"><small>포착 종목 성적</small>🛬 레이더는 잘 잡았나</p>
   {build_capture_paths()}''')}
 
-  <p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
-  {build_briefings(해석.get('마감브리핑'))}
+  {hide("그들은뭐라했나", f'''<p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
+  {build_briefings(해석.get('마감브리핑'))}''')}
 
   <p class="sec-label"><small>오늘의 중요 공시</small>📋 놓치면 아까운 공시</p>
   <div class="disc-box">
@@ -8208,26 +8982,24 @@ a{{color:inherit;text-decoration:none}}
     <p class="disc-note" style="margin-top:.6rem;font-size:9.5px">별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p>
   </div>
 
-  <p class="sec-label"><small>더 볼 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
+  <p class="sec-label"><small>챙겨볼 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
   {build_news(해석.get('핵심뉴스'))}
 
   {f'<p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
 
   {build_story_bridge()}
 
-  <p class="sec-label" id="watch"><small>{_NEXT_LABEL}의 관전 포인트</small>🗼 {_NEXT_LABEL} 이것만 보세요</p>
-  {(''.join(f'<div class="watch-item"><span>{pt}</span></div>' for pt in 해석.get('관전포인트'))) if 해석.get('관전포인트') else '<div class="pending">⏳ ①②③ 관전포인트 — Claude 해석 연동 후 자동 생성</div>'}
+  <!-- 🆕 2026-08-22 — 관전포인트(예보)를 핵심편 맨 끝으로 옮겼다. 여기는 중복이라 가린다.
+       id="watch"는 다른 코너에서 거는 앵커라 자리는 남겨 둔다. -->
+  <div id="watch"></div>
+  {hide("심층편관전포인트", f'''<p class="sec-label"><small>{_NEXT_LABEL}의 관전 포인트</small>🗼 {_NEXT_LABEL} 이것만 보세요</p>
+  {build_watchpoints(해석.get('관전포인트'), _NEXT)}''')}
 
   <p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>
   {build_study(오늘의공부)}
 
-  <!-- 오늘의 한 문장 (필사 코너) -->
-  <p class="sec-label"><small>오늘의 한 문장</small>✍️ 오늘을 한 문장으로</p>
-  <div class="quote-box">
-    <div class="quote-mark">“</div>
-    <p class="quote-text">{오늘의문장}</p>
-    <p class="quote-sub">— 차트프로 관제탑, {날짜}</p>
-  </div>
+  <!-- 🗼 마지막 교신 — 하루를 닫고 내일로 넘기는 자리 (2026-08-22) -->
+  {build_closing(해석, 날짜)}
 
   </div><!-- /deep-wrap -->
 
