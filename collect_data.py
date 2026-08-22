@@ -1,3 +1,4 @@
+import random
 # ============================================================
 # collect_data.py  (v2 — 주도섹터 점수제 + 관제지수)
 # ------------------------------------------------------------
@@ -21,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.22-p2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.22-r7"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -482,6 +483,8 @@ NEWS_RSS = [
 ]
 NEWS_NAVER = ("네이버금융", "https://finance.naver.com/news/news_list.naver",
               {"mode": "LSS2D", "section_id": "101", "section_id2": "258"})
+NEWS_매체당상한 = 20   # 🆕 2026-08-22 — 한국경제가 피드 2개라 물량이 배로 쌓이는 것을
+                       #    라운드로빈 전에 미리 잘라 원천 차단한다.
 
 
 def _clean(t):
@@ -600,13 +603,29 @@ def collect_news():
         print("  ⚠️ 0건 — 수집원이 모두 실패했습니다. 구조 변경 의심.")
     # ⚠️ 앞에서부터 자르면 **첫 매체만 남는다**(한경 80건 → 나머지 0건).
     #    매체별로 번갈아 뽑아 골고루 섞는다. 그래야 이슈 해부 링크도 다양해진다.
+    #
+    # 🆕 2026-08-22 수정 — "라운드로빈으로 섞는데도 계속 한경 위주로 뽑힌다"는
+    #    지적으로 원인 둘을 더 찾았다.
+    #    ① 한국경제만 RSS 피드가 2개(economy·finance)라 출처가 합쳐지면 물량이
+    #       다른 매체의 거의 2배였다. → 매체당 상한(NEWS_매체당상한)을 걸어
+    #       라운드로빈 이전에 이미 물량 격차를 없앤다.
+    #    ② 라운드마다 뽑는 순서가 항상 "한국경제→머니투데이→아시아경제→
+    #       네이버금융"으로 고정이라, 한경이 '뉴스원본' 리스트 맨 앞을 계속
+    #       차지했다. Claude가 앞쪽 항목을 더 많이 참조하는 경향과 만나면
+    #       실질적으로 매일 한경 위주로 뽑히는 구조였다.
+    #       → 라운드마다 매체 순서를 무작위로 섞어 특정 매체가 항상
+    #         앞자리를 갖지 못하게 한다.
     from collections import defaultdict, Counter
     _버킷 = defaultdict(list)
     for _x in 결과:
         _버킷[_x["출처"]].append(_x)
+    for _k in _버킷:
+        _버킷[_k] = _버킷[_k][:NEWS_매체당상한]
     _섞, _i = [], 0
     while len(_섞) < 90 and any(len(v) > _i for v in _버킷.values()):
-        for _k in list(_버킷):
+        _순서 = list(_버킷)
+        random.shuffle(_순서)          # 🆕 매 라운드 순서를 섞어 특정 매체 고정 선두 방지
+        for _k in _순서:
             if len(_버킷[_k]) > _i and len(_섞) < 90:
                 _섞.append(_버킷[_k][_i])
         _i += 1
@@ -1518,6 +1537,18 @@ ACC_DAYS = 5            # 단기 관찰 기간(거래일)
 ACC_LONG = 20           # 중기 관찰 기간(거래일) — 네이버 frgn 1페이지가 딱 20행이라 추가 요청 없음
 ACC_L_BOTH = 12         # 중기 쌍끌이: 20일 중 12일(60%) 이상 — 5일 기준(3/5=60%)과 같은 비율
 ACC_L_SOLO = 14         # 중기 단독: 14일(70%) — 5일 기준(4/5=80%)보다 살짝 완화. 20일 연속성은 훨씬 어렵다
+
+# 🆕 2026-08-22 — 장기(60일) 매집 추가.
+#   ⚠️ 네이버 frgn 표는 **1페이지당 20행**이다. 60일을 채우려면 page 2·3을 더 받아야 한다.
+#      종목당 요청이 1회 → 3회로 늘어난다(180종목 × 3 = 540요청). ACC_SLEEP가 있어
+#      수집 시간이 그만큼 길어진다. 부담되면 ACC_LONGEST를 None으로 두면 60일은 꺼진다.
+#   ⚠️ 샌드박스에서는 네이버가 403이라 페이지네이션을 **실측 검증하지 못했다**(인수인계 §3-⑥).
+#      그래서 실패해도 안전하게 만들었다 — 2·3페이지를 못 받으면 받은 만큼만 쓰고,
+#      60일치가 안 차면 장기목록은 그냥 비워 둔다(빈 탭은 화면에서 자동으로 꺼진다).
+ACC_LONGEST = 60        # 장기 관찰 기간(거래일). None이면 60일 기능 자체를 끈다
+ACC_PAGES = 3           # frgn 페이지 수 (20행 × 3 = 최대 60행)
+ACC_X_BOTH = 36         # 장기 쌍끌이: 60일 중 36일(60%) — 5·20일과 같은 비율
+ACC_X_SOLO = 42         # 장기 단독: 42일(70%) — 20일 기준(14/20)과 같은 비율
 ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
 ACC_SOLO_DAYS = 4       # 💼단독 인정 최소 일수 (조건이 하나뿐이라 더 엄격하게)
 ACC_DROP_LINE = -5.0    # 5일 등락률이 이 아래면 '하락 중 매집'(⚠️ 물타기 가능성)
@@ -1535,29 +1566,41 @@ ACC_UNIVERSE = {"코스피": 120, "코스닥": 60}   # 시총 상위 몇 종목�
 ACC_SLEEP = 0.15
 
 
-def _fetch_investor_flow(code, days=ACC_LONG):
+def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
     """종목별 외국인·기관 일별 순매매를 가져온다.
     네이버 '외국인·기관' 탭 표에는 순매매'량'(주식 수)이 있으므로
     종가를 곱해 금액(억원)으로 환산한다.
     반환: {"외국인": [일별 억원...], "기관": [...], "종가": 최근종가}
     """
     url = "https://finance.naver.com/item/frgn.naver"
-    try:
-        r = requests.get(url, headers=HEADERS,
-                         params={"code": code, "page": "1"}, timeout=10)
-        r.encoding = "euc-kr"
-        tables = read_html_safe(r.text)
-    except Exception:
-        return None
-
-    표 = None
-    for t in tables:
-        cols = " ".join(str(c) for c in t.columns)
-        if "외국인" in cols and "기관" in cols and "날짜" in cols:
-            표 = t
+    # 🆕 2026-08-22 — 60일을 위해 페이지를 여러 장 받아 이어 붙인다.
+    #    ⚠️ 필요한 만큼만 받는다. days<=20이면 예전과 똑같이 1장만 받아
+    #       요청 수가 늘지 않는다(20일 이하 호출은 성능 영향 0).
+    #    ⚠️ 2·3페이지가 실패해도 예외를 삼키고 **받은 만큼만** 쓴다.
+    필요장수 = max(1, min(ACC_PAGES, -(-int(days) // 20)))
+    조각 = []
+    for _pg in range(1, 필요장수 + 1):
+        try:
+            r = requests.get(url, headers=HEADERS,
+                             params={"code": code, "page": str(_pg)}, timeout=10)
+            r.encoding = "euc-kr"
+            tables = read_html_safe(r.text)
+        except Exception:
             break
-    if 표 is None:
+        _t = None
+        for t in tables:
+            cols = " ".join(str(c) for c in t.columns)
+            if "외국인" in cols and "기관" in cols and "날짜" in cols:
+                _t = t
+                break
+        if _t is None or _t.empty:
+            break
+        조각.append(_t)
+        if _pg < 필요장수:
+            time.sleep(ACC_SLEEP)
+    if not 조각:
         return None
+    표 = pd.concat(조각, ignore_index=True) if len(조각) > 1 else 조각[0]
 
     # 2단 헤더면 평탄화
     if isinstance(표.columns, pd.MultiIndex):
@@ -1597,16 +1640,25 @@ def _fetch_investor_flow(code, days=ACC_LONG):
 
     # 5일 등락률 — 이미 받아온 종가로 계산하므로 추가 요청이 없다.
     # (표는 최신일이 0번째, 가장 오래된 날이 마지막)
-    최근 = 종가들[0]
-    시작5 = 종가들[min(ACC_DAYS, len(종가들)) - 1]
-    시작N = 종가들[-1]
-    등락5 = (최근 - 시작5) / 시작5 * 100 if 시작5 else None
-    등락N = (최근 - 시작N) / 시작N * 100 if 시작N else None
+    # ⚠️ 2026-08-22 — 예전엔 "장기등락률"이 **배열 끝(전체 기간)** 기준이었다.
+    #    60일까지 받게 되면서 그대로 두면 20일 항목에 60일 등락률이 붙어
+    #    매집강도가 또 틀어진다. 기간별로 **각각** 계산한다.
+    def _등락(n):
+        if not 종가들:
+            return None
+        _s = 종가들[min(n, len(종가들)) - 1]
+        return (종가들[0] - _s) / _s * 100 if _s else None
 
-    return {"외국인": 외, "기관": 기,          # 최신일이 0번째, 최대 20일치
+    최근 = 종가들[0]
+    등락5 = _등락(ACC_DAYS)
+    등락20 = _등락(ACC_LONG)
+    등락60 = _등락(ACC_LONGEST) if ACC_LONGEST else None
+
+    return {"외국인": 외, "기관": 기,          # 최신일이 0번째
             "종가": 최근,
             "5일등락률": round(등락5, 2) if 등락5 is not None else None,
-            "장기등락률": round(등락N, 2) if 등락N is not None else None,
+            "장기등락률": round(등락20, 2) if 등락20 is not None else None,
+            "최장기등락률": round(등락60, 2) if 등락60 is not None else None,
             "일수": len(외)}
 
 
@@ -1676,6 +1728,7 @@ def collect_accumulation_radar():
 
     쌍끌이, 단독 = [], []
     중기목록 = []
+    장기목록 = []
     실패 = 0
     for 이름, 코드, 시장, 시총 in 유니버스:
         time.sleep(ACC_SLEEP)      # ⚠️ 차단 방지 — 빼지 말 것
@@ -1709,6 +1762,27 @@ def collect_accumulation_radar():
                               "유형": 중기[0], "합산": round(중기[1], 1),
                               "시총대비": round(중기[1] / 시총 * 100, 3) if 시총 else None,
                               "장기등락률": flow.get("장기등락률")})
+
+        # ── 장기(60일) 판정 — 2026-08-22. 20일과 **같은 규칙, 기간만 확장** ──
+        if ACC_LONGEST and len(외전체) >= ACC_LONGEST:
+            외60, 기60 = 외전체[:ACC_LONGEST], 기전체[:ACC_LONGEST]
+            외일60 = sum(1 for v in 외60 if v > 0)
+            기일60 = sum(1 for v in 기60 if v > 0)
+            외누60, 기누60 = sum(외60), sum(기60)
+            장기 = None
+            if 외일60 >= ACC_X_BOTH and 기일60 >= ACC_X_BOTH and 외누60 > 0 and 기누60 > 0:
+                장기 = ("쌍끌이", 외누60 + 기누60)
+            elif 외일60 >= ACC_X_SOLO and 외누60 > 0:
+                장기 = ("외국인 단독", 외누60)
+            elif 기일60 >= ACC_X_SOLO and 기누60 > 0:
+                장기 = ("기관 단독", 기누60)
+            if 장기:
+                장기목록.append({"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
+                              "외인일수": 외일60, "기관일수": 기일60,
+                              "외국인": round(외누60, 1), "기관": round(기누60, 1),
+                              "유형": 장기[0], "합산": round(장기[1], 1),
+                              "시총대비": round(장기[1] / 시총 * 100, 3) if 시총 else None,
+                              "최장기등락률": flow.get("최장기등락률")})
 
         기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
                "외인일수": 외일수, "기관일수": 기일수,
@@ -1764,14 +1838,32 @@ def collect_accumulation_radar():
     # ⚠️ 중기도 **매집강도** 기준으로 정렬한다(2026-08-21).
     #    안 오르면서 담긴 종목이 위로 올라온다.
     for _x in 중기목록:
-        _d = _x.get("등락률") or _x.get("5일등락률") or 0
+        # ⚠️ 2026-08-22 버그 수정 — 중기 항목의 등락률 필드명은 **장기등락률**인데
+        #    여기서 "등락률"·"5일등락률"만 찾아서 항상 0이 됐다. 그 결과
+        #    매집강도 = 시총대비 ÷ 1 = 시총대비 가 되어, 20일 탭에서는
+        #    **매집강도가 사실상 적용되지 않고 있었다**(많이 오른 종목이 그대로 위에 남음).
+        #    실측: LG생활건강 시총대비 3.783 · 20일 +25.96% → 저장값 3.783 (정답 3.003)
+        _d = (_x.get("장기등락률") if _x.get("장기등락률") is not None
+              else (_x.get("등락률") or _x.get("5일등락률") or 0))
         _x["매집강도"] = round((_x.get("시총대비") or 0) / max(0.1, 1 + _d / 100), 4)
     중기목록.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
+    # 장기도 같은 규칙 — 많이 담겼는데 덜 오른 순
+    for _x in 장기목록:
+        _d = (_x.get("최장기등락률") if _x.get("최장기등락률") is not None
+              else (_x.get("장기등락률") or 0))
+        _x["매집강도"] = round((_x.get("시총대비") or 0) / max(0.1, 1 + _d / 100), 4)
+    장기목록.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
+    if 장기목록:
+        print(f"🗿 장기({ACC_LONGEST}일) 매집 {len(장기목록)}종목 — 1위 {장기목록[0]['종목명']}")
+    elif ACC_LONGEST:
+        print(f"🗿 장기({ACC_LONGEST}일) 매집 0종목 (데이터 부족 시 탭은 자동으로 꺼집니다)")
     if 중기목록:
         상위 = 중기목록[0]
         print(f"🏗️ 중기(20일) 매집 {len(중기목록)}종목 — 1위 {상위['종목명']} "
               f"{상위['합산']:,.0f}억 (시총대비 {상위['시총대비']}%)")
     return {"종목": 종목, "중기종목": 중기목록, "중기기간": ACC_LONG,
+            "장기종목": 장기목록, "장기기간": ACC_LONGEST,
+            "장기쌍끌이": ACC_X_BOTH, "장기단독": ACC_X_SOLO,
             "중기쌍끌이": ACC_L_BOTH, "중기단독": ACC_L_SOLO,
             "기간": ACC_DAYS,
             "쌍끌이최소": ACC_BOTH_DAYS, "단독최소": ACC_SOLO_DAYS,
@@ -2839,6 +2931,9 @@ if __name__ == "__main__":
         "군중나침반": 군중나침반,
         "설정": {
             "강세": {"최소시총": STR_MIN_시총, "최소거래대금": STR_MIN_거래대금,
+                   # 🆕 2026-08-22 — 상승률 하한이 설정에 안 담겨 화면 설명에
+                   #    "상승 종목만"이라고만 나왔다. 실제 수치를 내보낸다.
+                   "최소상승": STR_MIN_상승,
                    "거래량배수": STR_배수_하한, "가점배수": STR_배수_가점,
                    "가점": STR_가점, "회전비중": STR_W_회전, "상승비중": STR_W_상승,
                    "추적일": TRACK_DAYS},
