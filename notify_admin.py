@@ -18,7 +18,7 @@ import os
 import sys
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.22-s8"   # ⬅ 다른 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.23-a1"   # ⬅ 다른 파일과 항상 같아야 한다.
 
 DATE = datetime.now().strftime("%Y%m%d")
 SITE_URL = "https://sixline86-ship-it.github.io/chartpro/"
@@ -33,7 +33,7 @@ CHAT_ID = ADMIN_ID or FALLBACK
 안내표 = {
     "holiday": (
         "🚨 오늘 휴장으로 판단됩니다",
-        "거래대금·등락 종목 수가 정상 거래일 수준이 아닙니다.\n"
+        "오늘 날짜의 수급 자료(외국인·기관)가 확인되지 않습니다.\n"
         "임시공휴일이거나 임시 휴장일 가능성이 큽니다.\n\n"
         "✅ 조치: 아무것도 안 했습니다. 과금도 발송도 없었습니다.\n"
         "   실제로 장이 열린 날이었다면 수집원(네이버·KRX) 장애를 의심하세요."
