@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.22-r8"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.22-s8"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1027,17 +1027,33 @@ def build_radar(강세레이더, 설정=None):
             폭발 = '<span class="rd-tag rd-boom">🔥 거래량 폭발</span>' if s.get("폭발") else ''
             재 = s.get("재점화")
             재HTML = f'<span class="rd-tag rd-re">🔄 {재}차 포착</span>' if 재 else ''
+            # 🆕 2026-08-22 — 어떤 기법으로 잡혔는지 배지로 표시.
+            _배지명 = {"돈이 몰린 종목": "💰 돈이 몰림", "V자 반등 종목": "📈 V자 반등"}
+            _색 = {"돈이 몰린 종목": "#f0c65a", "V자 반등 종목": "#74f0d4"}
+            _유들 = s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
+            유형HTML = "".join(
+                f'<span class="rd-tag" style="background:{_색.get(t,"#8b93a0")};'
+                f'color:#1a0f08;font-weight:800">{_배지명.get(t, t)}</span>'
+                for t in _유들)
+            # ⚠️ V자 반등은 **전일 종가 대비로는 하락일 수 있다.**
+            #    예전처럼 '+' 를 강제로 붙이면 "+-2.00%"가 되어 깨진다.
+            _cls = "up" if 등락 >= 0 else "dn"
+            # 시가 대비 장중 궤적 — V자 반등에서만 의미가 있다
+            _저, _종 = s.get("시가대비저점"), s.get("시가대비종가")
+            _궤적 = (f" · 시가 대비 <b>{_저:+.1f}% → {_종:+.1f}%</b>"
+                    if (_저 is not None and _종 is not None
+                        and "V자 반등 종목" in _유들) else "")
             return f"""
       <div class="rd-row">
         <span class="rd-rank">{rank}</span>
         <div class="rd-info">
-          <p class="rd-name">{s['종목명']}{재HTML}{폭발}</p>
+          <p class="rd-name">{s['종목명']}{유형HTML}{재HTML}{폭발}</p>
           <p class="rd-meta">회전율 {s.get('회전율','—')}% · 거래량 전일 <b>{s.get('배수','—')}배</b>
-            · 거래대금 {_fmt_eok(s.get('거래대금'))} · 시총 {_fmt_eok(s.get('시총'))}</p>
+            · 거래대금 {_fmt_eok(s.get('거래대금'))} · 시총 {_fmt_eok(s.get('시총'))}{_궤적}</p>
         </div>
         <div class="rd-nums">
           <span class="rd-score">{s.get('강세점수','—')}</span>
-          <span class="rd-chg up">+{등락:.2f}%</span>
+          <span class="rd-chg {_cls}">{등락:+.2f}%</span>
         </div>
       </div>"""
 
@@ -1064,13 +1080,19 @@ def build_radar(강세레이더, 설정=None):
 
     return f"""
   <div class="rd-box">
-    <p class="rd-lead">💰 <b>돈도 몰리고 실제로 오른 곳</b>만 추립니다.
-      시총 5,000억 이상 · 거래대금 500억 이상 · <b>전일 대비 코스피 4%↑ / 코스닥 5%↑</b> · <b>거래량 2배 이상</b> 종목 중에서,
-      회전율(거래대금÷시총)과 상승률을 <b>5:5</b>로 반영해 점수를 냈습니다.</p>
+    <p class="rd-lead">🔥 <b>서로 다른 두 기법</b>으로 잡습니다. 조건도 재는 기준도 완전히 다릅니다.<br>
+      <b style="color:#a07d1f">💰 돈이 몰림</b> — 거래대금 <b>1,000억↑</b> ·
+      전일 대비 거래량 <b>2배↑</b> · <b>전일 종가 대비 7%↑</b> 상승 ·
+      종가가 당일 <b>고가권(60% 이상)</b>에서 마감.<br>
+      <b style="color:#0f7a68">📈 V자 반등</b> — 시총 <b>3,000억↑</b> · 거래대금 <b>500억↑</b> ·
+      거래량 <b>1.5배↑</b> · <b>당일 시가 대비 −3%까지 밀렸다가 +4%↑로 마감</b>.
+      이쪽은 전일 종가 대비로는 <b>하락일 수도</b> 있습니다 — 장중 흐름을 보는 기법이라서입니다.</p>
     {조건}
     {신규HTML}
-    <p class="rd-foot">🔥 폭발 = 전일 대비 거래량 3배 이상 · 🔄 N차 포착 = 추적 중이던 종목의 재점화.
-      점수는 관찰 참고용이며 매수 신호가 아닙니다.</p>
+    <p class="rd-foot">🔄 N차 포착 = 추적 중이던 종목의 재점화 ·
+      한 종목이 <b>두 기법에 동시에</b> 걸리면 배지가 둘 다 붙습니다.<br>
+      ⚠️ 포착은 추천이 아닙니다. 두 기법의 성적을 5·20·60·120일로 추적해
+      어느 쪽이 유효한지 공개할 예정입니다.</p>
   </div>"""
 
 
@@ -1905,6 +1927,126 @@ def _core_accum_save(이름들):
         print(f"   ⚠️ 매집 노출 이력 저장 실패 — {type(e).__name__}")
 
 
+def build_core_strong(강세레이더):
+    """🔥 핵심편용 — 오늘 강세 포착 종목 2개만.
+
+    🆕 2026-08-22 HO 지시. 심층편 강세 레이더는 표 전체를 보여주지만,
+       핵심편에서는 **점수 상위 2종목**만 맛보기로 둔다.
+    ⚠️ 정렬은 심층편과 동일하게 '강세점수'(회전율×0.5 + 상승률×0.5).
+    ⚠️ 이 코너의 조건은 매집과 **정반대**다 — 매집은 상승률 조건이 없지만,
+       강세는 코스피 4%↑ / 코스닥 5%↑ 상승이 필수다. 설명문을 섞지 말 것.
+    ⚠️ 실측 성적이 D+1 −0.42%로 좋지 않다. 그래서 "추천"으로 읽히지 않게
+       하단 고지를 반드시 붙인다.
+    """
+    신규 = (강세레이더 or {}).get("신규") or {}
+    후보 = []
+    for 시장 in ("코스피", "코스닥"):
+        for s in (신규.get(시장) or []):
+            if isinstance(s, dict) and s.get("종목명"):
+                s = dict(s)
+                s.setdefault("시장", 시장)
+                후보.append(s)
+    if not 후보:
+        return ""
+    # 🆕 2026-08-22 HO 지시 — 핵심편은 **최대 2종목**까지만.
+    #    ⚠️ 무료 사용자는 핵심편만 본다. 전부 보여주면 유료로 갈 이유가 없어진다.
+    #    규칙: 「돈이 몰린 종목」1개 + 「V자 반등 종목」1개.
+    #          한쪽이 없으면 **다른 쪽에서 2개**를 채운다.
+    후보.sort(key=lambda s: s.get("강세점수") or 0, reverse=True)
+
+    def _유형(s):
+        return s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
+
+    뽑기, 쓴이름 = [], set()
+    for _t in ("돈이 몰린 종목", "V자 반등 종목"):
+        for s in 후보:
+            if s.get("종목명") in 쓴이름:
+                continue
+            if _t in _유형(s):
+                뽑기.append(s)
+                쓴이름.add(s["종목명"])
+                break
+    # 한쪽이 비었으면 남은 자리를 점수 순으로 채운다
+    for s in 후보:
+        if len(뽑기) >= 2:
+            break
+        if s.get("종목명") not in 쓴이름:
+            뽑기.append(s)
+            쓴이름.add(s["종목명"])
+    뽑기 = 뽑기[:2]
+
+    색맵 = {"코스피": "#f0c65a", "코스닥": "#74f0d4"}
+    행들 = []
+    for s in 뽑기:
+        nm = s.get("종목명", "—")
+        c = 색맵.get(s.get("시장"), "#c9ced6")
+        등 = s.get("등락률")
+        등문 = "—" if 등 is None else f"{등:+.1f}%"
+        배수 = s.get("배수")
+        배수문 = "—" if 배수 is None else f"{배수:.1f}배"
+        재점화 = s.get("재점화")
+        뱃지 = (f'<span style="font-size:10px;color:#ff6b4a">🔁 {재점화}차 재점화</span>'
+              if 재점화 and 재점화 > 1 else "")
+        # 🆕 2026-08-22 — 어떤 기법으로 잡혔는지 배지로 보여준다.
+        #    두 기법은 재는 기준부터 달라서(전일종가 vs 당일시가),
+        #    안 보여주면 왜 잡혔는지 알 수 없다.
+        #    ⚠️ 배지는 짧게 쓴다 — 카드 자체가 종목 목록이라 "종목"은 중복이고,
+        #       320px에서 이름이 길면 줄바꿈으로 카드가 지저분해진다.
+        _배지명 = {"돈이 몰린 종목": "💰 돈이 몰림", "V자 반등 종목": "📈 V자 반등"}
+        _유형색 = {"돈이 몰린 종목": "#f0c65a", "V자 반등 종목": "#74f0d4"}
+        # ⚠️ 한 종목이 두 유형에 동시에 걸릴 수 있다(독립 판정). 배지를 모두 단다.
+        _유들 = s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
+        if _유들:
+            뱃지 = "".join(
+                f'<span style="font-size:9.5px;font-weight:800;color:#1a0f08;'
+                f'background:{_유형색.get(t,"#8b93a0")};border-radius:4px;'
+                f'padding:2px 6px;margin-right:3px;white-space:nowrap">'
+                f'{_배지명.get(t, t)}</span>' for t in _유들) + 뱃지
+        # ⚠️ 등락률은 V자 반등에서 **음수일 수 있다.** 색을 나눈다.
+        _등색 = "#ff6b4a" if (등 or 0) >= 0 else "#5b9bff"
+        # ⚠️ 설명문도 기법마다 달라야 한다. V자 반등에 "돈이 몰렸어요"라고 쓰면
+        #    그 기법의 핵심(장중에 되돌렸다)을 못 전한다.
+        _저, _종 = s.get("시가대비저점"), s.get("시가대비종가")
+        if "V자 반등 종목" in _유들 and _저 is not None and _종 is not None:
+            _본문 = (f'장중 시가보다 <b style="color:#5b9bff">{_저:.1f}%</b>까지 밀렸다가 '
+                   f'<b style="color:#ff6b4a">{_종:+.1f}%</b>로 되돌리며 마감했어요')
+        else:
+            _본문 = (f'거래량이 평소의 <b style="color:#e8eaee">{배수문}</b>로 늘면서 '
+                   f'거래대금 <b style="color:#e8eaee">{_flow_amt(s.get("거래대금"))}</b>가 '
+                   f'몰렸어요')
+        행들.append(
+            f'<div style="padding:10px 11px;margin-top:7px;'
+            f'background:rgba(26,12,9,.55);'
+            f'border-radius:9px;border-left:3px solid {c}">'
+            f'<div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">'
+            f'<span style="font-size:10.5px;color:#8b93a0">{s.get("시장","")}</span>'
+            f'<b style="font-size:15px;color:{c}">{nm}</b>'
+            f'<b style="font-size:13px;color:{_등색}">{등문}</b>{뱃지}</div>'
+            f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+            f'{_본문}</p></div>')
+
+    return (f'<div style="background:linear-gradient(160deg,#2b1a16,#241713);'
+            f'border:1.5px solid #5a3229;border-radius:14px;'
+            f'padding:15px 15px 14px;margin:12px 0 0;'
+            f'box-shadow:0 0 0 1px rgba(255,107,74,.07)">'
+            f'<p style="margin:0 0 3px;font-size:11.5px;color:#ff6b4a;font-weight:700">'
+            f'강세 레이더</p>'
+            f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
+            f'<span class="cp-flame">🔥</span> 오늘 갑자기 불이 붙은 종목</p>'
+            # 🆕 2026-08-22 HO 지시 — "2종목만 보여드려요" 배지 제거.
+            #    유료판에서는 심층편이 바로 아래 있어 굳이 안내할 이유가 없다.
+            f'{"".join(행들)}'
+            f'<p style="margin:9px 0 0;padding-top:8px;'
+            f'border-top:.5px solid rgba(255,255,255,.08);'
+            f'font-size:10.5px;color:#7d848f;line-height:1.6">'
+            f'⚠️ 포착은 <b style="color:#c9ced6">추천이 아닙니다.</b> '
+            f'오늘 이런 움직임이 있었다는 사실만 알려드려요.<br>'
+            f'💰 <b>돈이 몰림</b>은 이미 크게 오른 자리라 다음 날 되밀리기도 하고, '
+            f'📈 <b>V자 반등</b>은 되돌린 힘이 이어질지 하루짜리인지 아직 모릅니다 — '
+            f'두 기법의 성적은 <b style="color:#c9ced6">5·20·60·120일로 추적해</b> '
+            f'그대로 공개할게요.</p></div>')
+
+
 def build_core_accum(매집):
     """🐢 핵심편용 — 20일 매집 종목을 코스피·코스닥 1개씩만.
 
@@ -1985,10 +2127,7 @@ def build_core_accum(매집):
             f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
             f'<span class="cp-turtle">🐢</span> 외국인, 기관이 조용히 매집하는 종목</p>'
             # 🆕 2026-08-22 — 회색이라 묻혀 보인다는 지적. 눈에 띄는 배지로.
-            f'<p style="display:inline-block;margin:2px 0 11px;font-size:11px;'
-            f'font-weight:700;color:#0d1a17;background:#74f0d4;'
-            f'border-radius:999px;padding:3px 10px">'
-            f'2종목만 보여드려요 · 더 많은 종목은 심층편에 있어요</p>'
+            # 🆕 2026-08-22 HO 지시 — "2종목만 보여드려요" 배지 제거.
             f'{"".join(행들)}</div>')
 
 
@@ -3373,7 +3512,11 @@ def build_my_stocks(data):
     return ('<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
             # ⚠️ 큰 제목은 입력창 바로 밑(ms-sug 다음)에 있다. 여기 또 두면 두 번 나온다.
-            '<p style="margin:0 0 6px;font-size:11.5px;color:#8b93a0">내 관심종목 등록</p>'
+            # 🆕 2026-08-22 HO 지시 — "내 관심종목 등록"이 다른 카드 소제목과
+            #    똑같은 크기(11.5px 회색)라 묻혀 보인다. 이 카드는 핵심편의
+            #    새 진입점이라 제목을 눈에 띄게 키운다("등록하기"로 행동 유도도 함께).
+            '<p style="margin:0 0 6px;font-size:17px;font-weight:800;color:#f0c65a">'
+            '📋 내 관심종목 등록하기</p>'
             '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
             '시장 대비 성적(5·20·60일), 그날의 뉴스와 공시, 소속 섹터 변화까지 '
@@ -5941,8 +6084,8 @@ def build_core(핵심편, data, 해석):
                 if 핵심편.get("정의풀이") else ''))
 
     return (장전경고 + 사건명블록 + '<div class="q90"><div class="q90-top">'
-            '<span class="q90-badge">⏱️ 90초 브리핑</span>'
-            '<span class="q90-sub">바쁘신 분들을 위한 핵심 요약편입니다</span></div>'
+            '<span class="q90-badge">⏱️ 3분 브리핑</span>'
+            '<span class="q90-sub">핵심 요약편입니다</span></div>'
             + 신호등블록 + 정의블록 + 지수스트립
             # ⚠️ 공감문구는 '내 계좌만 왜 이러지' 코너로 흡수했다(2026-08-19).
             #    감정을 다루는 자리가 두 군데로 갈리면 둘 다 힘을 잃는다.
@@ -5957,12 +6100,6 @@ def build_core(핵심편, data, 해석):
             + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
             # 🆕 2026-08-22 — 📰팩트 + 🧭해석을 한 카드(움직인것들)로 합쳤다.
             + 움직인것들
-            # 🆕 2026-08-22 — 핵심편 섹터 코너를 **하나로** 줄였다.
-            #    예전엔 칩(build_sector_brief)과 사다리가 같은 상위 섹터를
-            #    두 번 말해서, 심층편 성적표·순위타일까지 합치면 같은 순위가
-            #    네 가지 그림으로 반복됐다(원칙 5 위반).
-            #    → 상위는 사다리 그림, 하위는 그 카드 안 한 줄로 흡수했다.
-            + hide("핵심편섹터사다리", build_sector_ladder())
             + 내종목
             # ⚠️ 계기판을 헤더 막대 바로 밑으로 올렸으므로(2026-08-20)
             #    여기 제목·부제는 뺐다. 막대 → 계기판 흐름이 이미 설명이다.
@@ -5984,10 +6121,34 @@ def build_core(핵심편, data, 해석):
             #    → 아래 관전포인트(예보)와 역할이 겹친다. 예보가 더 구체적이라 그쪽만 남긴다.
             #  · 관전포인트를 핵심편 **맨 끝**으로. "오늘"을 다 읽고 "내일"로 닫는 순서.
             + 뒤집블록 + 딱N블록
-            + 이상HTML
-            # 🆕 2026-08-22 HO 지시 — 「오늘만 나타난 신호」 바로 밑에 매집 종목 맛보기.
-            + build_core_accum(data.get("매집레이더"))
+            # 🆕 2026-08-22 HO 지시 — 「다음 거래일 예보」를 뒤집어보기 **바로 뒤로**.
+            #    "오늘을 뒤집어 보면 → 그래서 내일은" 으로 이어지는 게 자연스럽고,
+            #    맨 끝에 두면 레이더 카드들에 묻혀 잘 안 읽힌다.
             + build_watchpoints(해석.get("관전포인트"), _NEXT_LABEL)
+            # 🆕 2026-08-22 HO 지시 — 「오늘 주도 섹터」(사다리)를 뒤집어보기 뒤로.
+            #    ⚠️ 섹터 코너는 핵심편에 이것 하나뿐이다(칩은 2026-08-22에 제거).
+            #       상위는 사다리 그림, 하위는 그 카드 안 한 줄로 흡수했다.
+            + hide("핵심편섹터사다리", build_sector_ladder())
+            # 🆕 2026-08-22 HO 지시 — 「오늘 확인해야 할 신호」 가림.
+            + hide("확인해야할신호", 이상HTML)
+            # 🆕 2026-08-22 HO 지시 — 레이더 두 코너를 나란히. **강세가 먼저, 매집이 뒤.**
+            #    성격이 정반대라(강세=이미 터진 것 / 매집=아직 안 터진 것)
+            #    붙여 놓으면 대비가 살아난다.
+            + build_core_strong(data.get("강세레이더"))
+            + build_core_accum(data.get("매집레이더"))
+            # 🆕 2026-08-22 HO 지시 — 핵심편 맨 끝에 관심종목 등록·종목 브리핑을 추가.
+            #    ⚠️ 예보(관전포인트)는 위 뒤집어보기 뒤로 옮겼다. 여기서 또 부르면
+            #       같은 카드가 두 번 나온다(실제로 한 번 그렇게 됐다).
+            #    ⚠️ 두 함수 다 **자체 카드 헤더를 이미 갖고 있어서** 별도 제목을
+            #       안 붙였다. 심층편에서 쓰던 `sec-label`은 밝은 배경(#1a1a1a
+            #       텍스트) 전용이라, 어두운 핵심편(q90)에 그대로 쓰면 글자가
+            #       배경에 묻혀 안 보인다 — 실제로 넣었다가 잡은 실수다.
+            #    ⚠️ 심층편에도 같은 코너가 그대로 남아 있다 — 지우지 않았다.
+            #       핵심편만 보는 무료 독자·바쁜 유료 독자를 위한 자리이고,
+            #       심층편까지 정독하는 독자에게는 다시 봐도 자연스러운 위치라
+            #       중복 삭제 대상으로 보지 않는다.
+            + build_my_stocks(data)
+            + build_stock_brief()
             + '</div>'
             + ('<div class="deep-cut" id="deep">'
                '<span class="deep-arrow">⌄</span>'
@@ -6577,6 +6738,7 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "확인해야할신호",     # 🆕 2026-08-22 HO 지시 — 「오늘 확인해야 할 신호」
     "심층편성적표",       # 🆕 2026-08-22 — 핵심편 헤더가 같은 카드를 쓴다(중복)
     "심층편관전포인트",   # 🆕 2026-08-22 — 예보를 핵심편 맨 끝으로 옮겼다(중복)
     "그들은뭐라했나",     # 🆕 2026-08-22 HO 지시
@@ -7033,22 +7195,61 @@ def _flow_comment():
     외 = _fs_stat([r["외현"] for r in h if r.get("외현") is not None])
     기 = _fs_stat([r["기관"] for r in h if r.get("기관") is not None])
     c = FS_BUY if st["v"] >= 0 else FS_SELL
+    # 🆕 2026-08-22 HO 지시 — 핵심편이므로 '~습니다'체를 **'~요'체**로 바꾸고
+    #    "그래서 어떤 하루였나"까지 한 마디 붙인다. 숫자만 읽어주면 계기판과 같은 말이다.
     조각 = []
     if 외 and 기 and (외["v"] >= 0) != (기["v"] >= 0):
         큰 = "외국인" if abs(외["v"]) >= abs(기["v"]) else "기관"
         작 = "기관" if 큰 == "외국인" else "외국인"
-        조각.append(f'<b>{큰}</b>이 <b>{작}</b>과 정반대로 움직여 실탄이 '
-                    f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 남았습니다.')
+        방향 = "사들이는" if (외["v"] if 큰 == "외국인" else 기["v"]) >= 0 else "파는"
+        조각.append(f'오늘은 <b>{큰}</b>이 {방향} 쪽이었고 <b>{작}</b>은 정반대였어요. '
+                    f'둘이 밀고 당긴 끝에 실탄은 '
+                    f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 남았고요.')
+    elif st["v"] >= 0:
+        조각.append(f'외국인·기관이 <b>둘 다 사는 쪽</b>이었어요. '
+                    f'그래서 실탄이 <b style="color:{c}">{_flow_amt(st["v"])}</b>만큼 쌓였죠.')
     else:
-        조각.append(f'외국인·기관이 <b>같은 방향</b>이라 실탄이 '
-                    f'<b style="color:{c}">{_flow_amt(st["v"])}</b>로 쌓였습니다.')
+        조각.append(f'외국인·기관이 <b>둘 다 파는 쪽</b>이었어요. '
+                    f'실탄이 <b style="color:{c}">{_flow_amt(st["v"])}</b>로 빠져나갔고요.')
+
     if st["배수"] >= 1.5:
-        조각.append(f'규모는 평소의 <b>{_배수말(st["배수"])}</b>로 <b>유별난 하루</b>입니다.')
+        조각.append(f'규모가 평소의 <b>{_배수말(st["배수"])}</b>예요. '
+                    f'이 정도면 <b>확실히 유별난 하루</b>죠.')
     elif st["배수"] < 0.6:
-        조각.append(f'다만 규모는 평소의 <b>{_배수말(st["배수"])}</b>라 <b>화력은 약했습니다</b>.')
+        조각.append(f'다만 규모가 평소의 <b>{_배수말(st["배수"])}</b>밖에 안 돼요. '
+                    f'방향은 정해졌는데 <b>힘이 실리진 않은</b> 하루예요.')
     else:
-        조각.append(f'규모는 평소의 <b>{_배수말(st["배수"])}</b>로 평범합니다.')
+        조각.append(f'규모는 평소의 <b>{_배수말(st["배수"])}</b> 정도라 평범한 편이에요.')
+
+    # 🆕 2026-08-22 HO 지시 — "그래서 이게 무슨 뜻이냐"를 한 마디 덧붙인다.
+    #    숫자만 읽어주면 계기판을 말로 옮긴 것에 지나지 않는다.
+    #    ⚠️ 개인 수급을 쓰려 했으나 flow_history.json에는 '개인' 필드가 **없다**
+    #       (외현·기관·외선·비차익·실탄만 있다). 없는 값을 추정해 쓰면
+    #       "개인이 밀어올렸다" 류의 오발화가 또 나온다 → 연속일수만 쓴다.
+    연속 = _fs_streak([r["실탄"] for r in h]) if len(h) >= 3 else 0
+    if 연속 >= 3:
+        조각.append(f'<b>{연속}일째 같은 방향</b>이라 흐름이 굳어지는 중이에요.')
+    elif 연속 == 2:
+        조각.append(f'어제에 이어 <b>이틀째 같은 방향</b>이에요 — '
+                    f'하루 더 이어지면 흐름으로 볼 만해요.')
+    elif 연속 == 1 and len(h) >= 2:
+        조각.append(f'어제와 <b>방향이 바뀐</b> 날이에요 — 하루짜리인지 '
+                    f'시작인지는 내일 봐야 알겠죠.')
     return f'<p class="mny-cmt">{" ".join(조각)}</p>'
+
+
+def _fs_streak(vals):
+    """실탄이 같은 방향으로 며칠째인지. (0이면 오늘 방향이 바뀐 것)"""
+    if not vals:
+        return 0
+    양수 = vals[-1] >= 0
+    n = 0
+    for v in reversed(vals):
+        if (v >= 0) == 양수:
+            n += 1
+        else:
+            break
+    return n
 
 
 def _flow_spark3():
@@ -7113,10 +7314,19 @@ def core_flow_gauge():
             f'<p class="core-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
             f'<p class="core-g-k" style="border-color:{c}55;color:{c}">{ico} {key}</p>'
             f'</div>{_flow_spark3()}</div>'
-            # ⚠️ '실탄'은 우리가 만든 말이라 처음 보면 모른다. 계기판 밑에 한 줄로 설명한다.
-            f'<p class="fg-def">💡 <b>실탄</b>이란 — 외국인과 기관이 오늘 코스피에서 '
-            f'<b>실제로 주식을 사고판 돈의 합계</b>입니다. 개인은 이 둘의 거울(반대편)이라 '
-            f'더하면 정보가 지워져 빼고, 선물·비차익은 단위가 달라 합치지 않습니다.</p>')
+            # 🆕 2026-08-22 HO 지시 — '실탄' 설명을 상시 노출에서 접기로.
+            #    ⚠️ 디자인은 「📖 내 종목 보는 방법」과 **동일한 details 포맷**으로 통일한다.
+            #       리포트 안에 "눌러서 펼치는 설명"이 두 가지 모양이면 학습 비용이 든다.
+            f'<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
+            f'border-radius:8px;border:1px solid #1e2531">'
+            f'<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
+            f'cursor:pointer;list-style:none">💡 실탄이란? '
+            f'<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
+            f'<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
+            f'외국인과 기관이 오늘 코스피에서 '
+            f'<b style="color:#9aa0aa">실제로 주식을 사고판 돈의 합계</b>입니다. '
+            f'개인은 이 둘의 거울(반대편)이라 더하면 정보가 지워져 빼고, '
+            f'선물·비차익은 단위가 달라 합치지 않습니다.</p></details>')
 
 
 
@@ -8126,6 +8336,8 @@ html{{scroll-behavior:smooth}}
 .rd-nums{{text-align:right;flex-shrink:0}}
 .rd-score{{display:block;font-size:15px;font-weight:800;color:#8a5a1f}}\n.rd-boom{{background:#FAECE7;color:#C1432B}}
 .rd-chg{{font-size:11px;font-weight:700}}
+/* 🆕 2026-08-22 — V자 반등은 전일 종가 대비로는 하락일 수 있다. 색을 나눈다. */
+.rd-chg.up{{color:#c1432b}} .rd-chg.dn{{color:#2e6bd6}}
 .ac-gap{{text-align:right;flex-shrink:0}}
 .ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
 .ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
