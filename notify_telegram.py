@@ -9,10 +9,11 @@
 
 import json
 import os
+import time      # ⚠️ 배포 확인 대기(wait_until_live) — 2026-08-24
 import requests
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-b1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.24-c1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
 DATE = datetime.now().strftime("%Y%m%d")
 REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
                if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
@@ -53,10 +54,46 @@ def _thumb_path():
     return p if os.path.exists(p) else None
 
 
+def wait_until_live(url, 최대초=180, 간격=15):
+    """GitHub Pages에 실제로 올라올 때까지 기다린다.
+
+    🆕 2026-08-24 — 구독자가 링크를 눌렀는데 404를 봤다.
+       원인은 오류가 아니라 **시차**였다.
+         18:10:26  커밋 완료 → 이 스크립트가 즉시 링크 발송
+         18:12:36  구독자 클릭 → Pages 빌드가 아직 안 끝나 404
+       커밋과 Pages 배포 사이에는 보통 1~3분이 걸린다.
+
+    ⚠️ 설계 원칙 — **기다리다 안 되면 그냥 보낸다(fail-open).**
+       링크가 조금 늦게 열리는 것보다 리포트가 아예 안 가는 게 훨씬 나쁘다.
+       못 기다린 경우에는 True/False로 알려서 운영자에게만 따로 알린다.
+
+    반환: True = 200 확인됨 / False = 시간 안에 확인 실패(그래도 발송은 진행)
+    """
+    시작 = time.time()
+    회 = 0
+    while time.time() - 시작 < 최대초:
+        회 += 1
+        try:
+            r = requests.head(url, timeout=10, allow_redirects=True)
+            if r.status_code == 200:
+                print(f"   ✅ 페이지 배포 확인 ({int(time.time()-시작)}초, {회}회 시도)")
+                return True
+            print(f"   ⏳ 아직 HTTP {r.status_code} — {간격}초 뒤 재확인")
+        except Exception as e:
+            print(f"   ⏳ 확인 실패({type(e).__name__}) — {간격}초 뒤 재확인")
+        time.sleep(간격)
+    print(f"   ⚠️ {최대초}초 안에 200을 못 봤습니다 — 그래도 발송은 진행합니다")
+    return False
+
+
 def main():
     if not TOKEN or not CHAT_ID:
         print("⚠️ TELEGRAM_TOKEN / TELEGRAM_CHAT_ID 가 없어 알림을 건너뜁니다.")
         return
+
+    # ── ⓪ 링크가 실제로 열리는지 먼저 확인 (최대 3분) ──
+    print(f"🔎 배포 확인: {REPORT_URL}")
+    라이브 = wait_until_live(REPORT_URL)
 
     msg = build_message()
 
@@ -104,6 +141,20 @@ def main():
             print(f"⚠️ 텔레그램 전송 실패 HTTP {r.status_code}: {r.text[:200]}")
     except Exception as e:
         print(f"⚠️ 텔레그램 전송 오류: {type(e).__name__}: {e}")
+
+    # ── ③ 배포 확인을 못 한 채 보냈다면 **운영자에게만** 알린다 ──
+    #  🆕 2026-08-24 — 구독자에게는 아무 티도 내지 않는다(리포트는 이미 갔다).
+    #     형이 "링크 눌렀는데 404였다"는 문의를 받기 **전에** 먼저 알게 하는 게 목적이다.
+    if not 라이브:
+        try:
+            import notify_admin
+            notify_admin.send(
+                "⚠️ <b>차트프로</b> — 페이지 배포 확인 실패\n\n"
+                f"{REPORT_URL}\n\n"
+                "3분 안에 200을 못 봤습니다. 리포트는 발송했으니\n"
+                "구독자가 잠깐 404를 볼 수 있습니다. 몇 분 뒤 직접 확인해 주세요.")
+        except Exception as e:
+            print(f"⚠️ 운영자 알림 실패: {type(e).__name__}: {e}")
 
 
 if __name__ == "__main__":
