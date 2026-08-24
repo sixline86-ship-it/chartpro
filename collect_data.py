@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-c1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.24-e1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -488,6 +488,23 @@ NEWS_RSS = [
     ("머니투데이", "https://rss.mt.co.kr/mt_news.xml"),
     ("아시아경제", "https://www.asiae.co.kr/rss/stock.htm"),
 ]
+
+# 🆕 2026-08-24 HO 요청 — 연합뉴스 복귀 시도.
+#  ⚠️ 과거 기록: 2026-08-21에 HTML 방식(yna.co.kr/economy/finance-industry)으로
+#     넣었다가 **실전 403(봇 차단)**으로 0건이 나와 RSS 전환 때 빠졌다.
+#     이번엔 RSS 주소로 다시 시도한다.
+#  ⚠️ 정확한 주소를 확정하지 못했다(샌드박스는 연합뉴스가 403이라 실측 불가.
+#     단, 이 샌드박스는 네이버·KRX도 전부 403이라 이 403은 판단 근거가 못 된다).
+#     → **후보를 여러 개 두고 먼저 되는 것을 쓴다.** 다 실패하면 조용히 건너뛴다.
+#  ⚠️ 다른 매체와 달리 한 곳만 채택한다 — 한국경제가 피드 2개라 물량이 배가 됐던
+#     전례가 있어서다(NEWS_매체당상한으로도 막지만, 애초에 안 만드는 게 낫다).
+#  📌 첫 실행 후 로그의 `· 연합뉴스: N건`을 확인할 것.
+#     0건이면 이 블록을 지우거나 주소를 바꾼다.
+NEWS_RSS_후보 = [
+    ("연합뉴스", ["https://www.yna.co.kr/rss/economy.xml",
+                "https://www.yna.co.kr/rss/market.xml",
+                "https://www.yna.co.kr/rss/all.xml"]),
+]
 NEWS_NAVER = ("네이버금융", "https://finance.naver.com/news/news_list.naver",
               {"mode": "LSS2D", "section_id": "101", "section_id2": "258"})
 NEWS_매체당상한 = 20   # 🆕 2026-08-22 — 한국경제가 피드 2개라 물량이 배로 쌓이는 것을
@@ -582,6 +599,30 @@ def collect_news():
             print(f"  ⚠️ 뉴스({이름}) 실패: {type(e).__name__}")
         print(f"  · {이름}: {len(결과)-n0}건")
 
+    # ── 후보 주소가 여럿인 매체 — 먼저 되는 주소 하나만 채택 ──
+    #  ⚠️ 실패해도 아무 일도 일어나지 않는다. 그냥 0건으로 넘어간다.
+    for 이름, 후보들 in NEWS_RSS_후보:
+        n0 = len(결과)
+        for url in 후보들:
+            try:
+                res = requests.get(url, headers=HEADERS, timeout=12)
+                res.encoding = res.apparent_encoding or "utf-8"
+                항목 = _rss_items(res.text)
+                if not 항목:
+                    continue
+                for t, l, d in 항목:
+                    if t in 중복:
+                        continue
+                    중복.add(t)
+                    결과.append({"제목": t, "링크": _fix_entity_url(l),
+                                 "요약": d, "출처": 이름})
+                print(f"  · {이름}: {len(결과)-n0}건 (채택 주소: {url})")
+                break
+            except Exception as e:
+                print(f"  ⚠️ 뉴스({이름}) 후보 실패 {url} — {type(e).__name__}")
+        else:
+            print(f"  · {이름}: 0건 — 후보 {len(후보들)}개 모두 실패(무시하고 진행)")
+
     # 네이버 금융 — 국내 증시 뉴스라 종목명이 자주 나온다. 보조로 함께 쓴다.
     이름, url, params = NEWS_NAVER
     n0 = len(결과)
@@ -598,6 +639,13 @@ def collect_news():
                 continue
             중복.add(t)
             from urllib.parse import urljoin
+            # 🆕 2026-08-24 — 링크가 기사로 안 가고 사이트 첫 화면으로 튀던 버그.
+            #  ⚠️ 원인: HTML 파서가 주소 안의 `&sect`를 **기호 §로 해석**해버린다.
+            #     `...&section_id=101` → `...§ion_id=101` 이 되어 주소가 깨졌다.
+            #     (다른 매체는 RSS라 무사했고, 네이버금융만 HTML 파싱이라 당했다)
+            #  ⚠️ &sect 말고도 같은 함정이 있다(&para, &copy, &reg, &times…).
+            #     주소에서 실제로 나올 법한 것만 되돌린다.
+            href = _fix_entity_url(href)
             결과.append({"제목": t, "링크": urljoin(url, href),
                          "요약": (요약들[k] if k < len(요약들) else "")[:300],
                          "출처": 이름})
@@ -924,6 +972,25 @@ def _updown_from_html(t):
                 결과[이름] = m
                 break
     return 결과
+
+
+def _fix_entity_url(u):
+    """HTML 파서가 주소 안에서 잘못 바꿔버린 기호를 원래대로 되돌린다.
+
+    🆕 2026-08-24 — 실제로 겪은 버그.
+       `&section_id=101` 의 앞부분 `&sect`가 HTML 엔티티로 인식돼 `§`가 됐다.
+       세미콜론이 없어도 브라우저·파서는 관대하게 해석해버린다.
+    ⚠️ 되돌릴 대상은 **주소 파라미터에 실제로 나올 법한 것만** 넣는다.
+       무차별로 바꾸면 멀쩡한 주소를 망가뜨린다.
+    """
+    if not u or not isinstance(u, str):
+        return u
+    표 = {"§": "&sect", "¶": "&para", "©": "&copy", "®": "&reg",
+         "×": "&times", "÷": "&divide", "±": "&plusmn", "¤": "&curren"}
+    for 기호, 원본 in 표.items():
+        if 기호 in u:
+            u = u.replace(기호, 원본)
+    return u
 
 
 def collect_updown_counts():
