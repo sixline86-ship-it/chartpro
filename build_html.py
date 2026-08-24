@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-c1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.24-e1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1893,19 +1893,32 @@ def _flow_line(실탄):
 CORE_ACC_FILE = "core_accum_log.json"
 
 
-def _core_accum_recent():
-    """어제(직전 발행일) 핵심편에 노출한 매집 종목 이름 집합.
+CORE_ACC_회피일 = 5   # 🆕 2026-08-24 HO 지시 — 최근 며칠치를 피할지
 
+
+def _core_accum_recent(일수=None):
+    """최근 N번의 발행에서 핵심편에 노출한 매집 종목 이름들.
+
+    🆕 2026-08-24 HO 지시 — 예전에는 **어제 하루치만** 피했다.
+       20일 매집은 같은 종목이 며칠씩 1위를 지키는 성격이라, 하루만 건너뛰면
+       'A→B→A→B'로 두 종목이 번갈아 나오며 결국 늘 같은 얼굴이 됐다.
+       그래서 최근 {CORE_ACC_회피일}번의 발행분을 모두 피한다.
+    ⚠️ 그래도 **다 겹치면 그냥 1위를 쓴다**(코너가 비는 것보다 낫다).
+       회피는 목표가 아니라 취향이다 — 강한 매집 종목을 영영 못 보게 하면 안 된다.
     ⚠️ daily.yml의 git add 목록에 core_accum_log.json이 없으면 매일 초기화되어
        중복 회피가 작동하지 않는다.
     """
+    n = CORE_ACC_회피일 if 일수 is None else 일수
     try:
         if not os.path.exists(CORE_ACC_FILE):
             return set()
         with open(CORE_ACC_FILE, encoding="utf-8") as f:
             기록 = json.load(f) or {}
-        과거 = sorted(k for k in 기록 if str(k) < str(DATE))
-        return set(기록.get(과거[-1]) or []) if 과거 else set()
+        과거 = sorted(k for k in 기록 if str(k) < str(DATE))[-n:]
+        모음 = set()
+        for k in 과거:
+            모음 |= set(기록.get(k) or [])
+        return 모음
     except Exception as e:
         print(f"   ⚠️ 매집 노출 이력 읽기 실패 — {type(e).__name__} (중복 회피 없이 진행)")
         return set()
@@ -2070,7 +2083,14 @@ def build_core_accum(매집):
     #       정작 가장 강한 매집 종목이 영영 안 보인다.
     _최근 = _core_accum_recent()
 
-    def _고르기(시장, 제외):
+    def _고르기(시장, 제외, 완화용=None):
+        """매집강도 1위부터 훑되, 최근 노출 종목은 건너뛴다.
+
+        🆕 2026-08-24 — **단계적으로 물러선다.**
+           ① 최근 5회 노출분을 전부 피해본다
+           ② 그래도 후보가 없으면 → 직전 1회분만 피해본다
+           ③ 그것도 안 되면 → 그냥 1위를 쓴다 (HO: "안 되면 그대로 보여주는 건 됨")
+        """
         후보 = sorted([s for s in 중기 if s.get("시장") == 시장
                      and s.get("매집강도") is not None],
                     key=lambda s: s["매집강도"], reverse=True)
@@ -2079,12 +2099,17 @@ def build_core_accum(매집):
         for s in 후보:
             if s.get("종목명") not in 제외:
                 return s
-        return 후보[0]        # 전부 겹치면 어쩔 수 없이 1위를 쓴다
+        if 완화용 is not None:                 # ② 한 단계 물러서기
+            for s in 후보:
+                if s.get("종목명") not in 완화용:
+                    return s
+        return 후보[0]                          # ③ 전부 겹치면 1위 그대로
 
+    _직전 = _core_accum_recent(1)      # 완화 단계에서 쓸 '어제만' 집합
     뽑기, _쓴이름 = [], set()
     for 시장 in ("코스피", "코스닥"):
-        # 어제 종목 + 오늘 이미 뽑은 종목을 함께 제외 → 두 시장 간 중복도 막는다
-        _s = _고르기(시장, _최근 | _쓴이름)
+        # 최근 노출 종목 + 오늘 이미 뽑은 종목을 함께 제외 → 두 시장 간 중복도 막는다
+        _s = _고르기(시장, _최근 | _쓴이름, 완화용=_직전 | _쓴이름)
         if _s:
             뽑기.append(_s)
             _쓴이름.add(_s.get("종목명"))
@@ -3315,12 +3340,22 @@ def build_my_stocks(data):
    var 분석='';
    if(c&&!c.short){
     var 승률=c.win/c.tot*100;
-    분석='최근 20일 '+c.win+'승 '+(c.tot-c.win)+'패('+승률.toFixed(0)+'%), 시장 대비 '+
+    /* 🆕 2026-08-24 HO 지적 — "최근 20일 2승 3패"가 모든 종목에 똑같이 찍혔다.
+       [원인] 20일을 요청해도 실제로 쌓인 거래일이 5일뿐이면 c.tot=5가 된다.
+              그런데 문구는 늘 "최근 20일"이라 **없는 20일을 있다고 말한** 셈이다.
+              게다가 5일 표본이면 승패 조합이 몇 가지 안 나와 종목마다 같아 보인다.
+       [고침] ① 실제 표본 일수를 그대로 쓴다 ② 10일 미만이면 '표본이 짧다'고 밝힌다 */
+    var 창말=(c.tot>=20?'최근 20거래일':'최근 '+c.tot+'거래일');
+    분석=창말+' '+c.win+'승 '+(c.tot-c.win)+'패('+승률.toFixed(0)+'%), 시장 대비 '+
      fmt(c.ex)+'%p입니다. ';
-    분석+= (c.ex>=0
-      ? (승률>=60?'꾸준히 시장을 이기고 있습니다.':'며칠에 몰아서 번 구간이라 변동이 큽니다.')
-      : (승률<=30?'자리 자체가 불리했습니다 — 종목 선택 문제로 보기 어렵습니다.'
-                 :'시장에 조금 뒤처지는 흐름입니다.'));
+    if(c.tot<10){
+     분석+='아직 '+c.tot+'일치라 승패는 참고만 해주세요. ';
+    } else {
+     분석+= (c.ex>=0
+       ? (승률>=60?'꾸준히 시장을 이기고 있습니다.':'며칠에 몰아서 번 구간이라 변동이 큽니다.')
+       : (승률<=30?'자리 자체가 불리했습니다 — 종목 선택 문제로 보기 어렵습니다.'
+                  :'시장에 조금 뒤처지는 흐름입니다.'));
+    }
     if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
     else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
     else {
@@ -3352,8 +3387,12 @@ def build_my_stocks(data):
      // ⓒ 레이더에 잡혔으면 그게 가장 강한 단서
      if(window.CP_HOT&&window.CP_HOT[nm]&&볼것.length<2)
       볼것.push('다만 오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 재료 없이 수급만 들어온 자리입니다');
-     if(볼것.length) 분석+=' '+볼것.join(' 또 ')+'.';
-     else 분석+=' 주가는 대체로 시장 흐름을 따라갔을 가능성이 큽니다.';
+     /* 🆕 2026-08-24 HO 지시 — "별 이슈 없으면 짧게 끝낸다".
+        [WHY] 재료가 없는 날에 말을 늘리면 그게 곧 없는 얘기를 지어내는 것이 된다.
+              단서가 있으면 하나만 붙이고, 없으면 그냥 거기서 끝낸다.
+        ⚠️ 예전엔 단서가 없어도 "시장 흐름을 따라갔을 가능성이 큽니다"를 덧붙였는데,
+           바로 위 '왜 올랐나/내렸나' 문장이 이미 같은 말을 하고 있어 중복이었다. */
+     if(볼것.length) 분석+=' '+볼것[0]+'.';
     }
     // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
     //    당일·5일·20일·60일을 다 계산해 **가장 인상적인 창**을 골라 덧붙인다.
@@ -3571,11 +3610,16 @@ function msSug(){
   if(!el||!box) return;
   var q=(el.value||'').trim();
   if(!q){ box.style.display='none'; box.innerHTML=''; return; }
+  /* 🆕 2026-08-24 HO 지시 — 영문 종목명은 대소문자를 가리지 않는다.
+     [WHY] 'kt'를 쳐도 'KT'가, 'SK'를 쳐도 'sk'가 나와야 한다.
+           한글은 대소문자 개념이 없어 이 변환의 영향을 받지 않는다.
+     ⚠️ 비교만 소문자로 하고, 화면에 보여주는 이름은 원본 그대로 쓴다. */
+  var qL=q.toLowerCase();
   var names=(window.CP_NAMES||[]), head=[], part=[];
   for(var i=0;i<names.length;i++){
-    var n=names[i];
-    if(n.indexOf(q)===0){ if(head.length<8) head.push(n); }
-    else if(n.indexOf(q)>-1){ if(part.length<8) part.push(n); }
+    var n=names[i], nL=n.toLowerCase();
+    if(nL.indexOf(qL)===0){ if(head.length<8) head.push(n); }
+    else if(nL.indexOf(qL)>-1){ if(part.length<8) part.push(n); }
   }
   var out=head.concat(part).slice(0,8);
   if(!out.length){ box.style.display='none'; box.innerHTML=''; return; }
@@ -5960,7 +6004,8 @@ def build_core(핵심편, data, 해석):
                      f'<span class="q90-dv-t"><b>{_t}</b> — 심층편 &lt;오늘 프로의 판단&gt;에서 자세히</span></div>')
 
     뒤집 = 핵심편.get("뒤집어보기") or ""
-    뒤집블록 = (f'<div class="q90-flip"><p class="qf-h">🔄 오늘의 뒤집어보기</p>'
+    # 🆕 2026-08-24 HO 지시 — 제목을 **말 거는 형태**로. 단정형보다 읽게 만든다.
+    뒤집블록 = (f'<div class="q90-flip"><p class="qf-h">🔄 오늘을 뒤집어 볼까요?</p>'
               f'<p class="qf-b">{뒤집}</p></div>') if 뒤집 else ""
 
     # ── 티저 (기계) ──
@@ -6774,6 +6819,7 @@ _FS_TL_SEQ = [0]
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
 HIDDEN_CHAPTERS = {
+    "심층편관심종목",     # 🆕 2026-08-24 HO 지시 — 핵심편에 같은 코너가 있어 중복
     "확인해야할신호",     # 🆕 2026-08-22 HO 지시 — 「오늘 확인해야 할 신호」
     "심층편성적표",       # 🆕 2026-08-22 — 핵심편 헤더가 같은 카드를 쓴다(중복)
     "심층편관전포인트",   # 🆕 2026-08-22 — 예보를 핵심편 맨 끝으로 옮겼다(중복)
@@ -8042,6 +8088,16 @@ def build_html(data, report):
     _zone_trend_block = ""
     # 포착 항로는 v-m2에서 '기간 탭 × 시장 카드' 하나로 통합됐다.
 
+    # 🆕 2026-08-24 HO 지시 — 「내 관심종목」·「내 종목 브리핑」을 **심층편에서 뺀다.**
+    #  ⚠️ 핵심편에 같은 코너가 그대로 있다. 두 편에 나오면 같은 화면을 두 번 보는 셈이고,
+    #     특히 '등록하는 입력창'이 두 군데면 어디서 등록해야 하는지 헷갈린다.
+    #  ⚠️ 삭제가 아니라 가림이다. 되살리려면 HIDDEN_CHAPTERS에서 키만 빼면 된다.
+    #     §8 규칙대로 **제목 라벨까지 함께** hide() 안에 넣는다(라벨만 남는 실수 방지).
+    _mystock_deep = hide("심층편관심종목",
+        '<p class="sec-label"><small>내 자리</small>'
+        '📋 내 관심종목 — 등록하고 추적하기</p>'
+        + build_my_stocks(data) + build_stock_brief())
+
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
 
     # ── 다음 거래일 라벨 ──
@@ -9164,9 +9220,7 @@ html{{scroll-behavior:smooth}}
   <p class="sec-label"><small>뜨는 현장</small>📡 관제 레이더 — 오늘 관제탑에 가까워진 주인공</p>
   {hide("관제레이더", build_sector_radar())}
 
-  <p class="sec-label"><small>내 자리</small>📋 내 관심종목 — 등록하고 추적하기</p>
-  {build_my_stocks(data)}
-  {build_stock_brief()}
+  {_mystock_deep}
 
 
   <p class="sec-label"><small>내 자리</small>📊 섹터 지도</p>
