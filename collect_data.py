@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-b1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.24-c1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -398,7 +398,13 @@ def compute_gauge(지수수급, 확산도_시장):
     # ③ 등락 종목 비율(확산도)
     if 확산도_시장 is not None:
         점3 = max(0, min(100, 확산도_시장))
-        요소.append(("등락 종목 비율", round(점3), 0.25, f"주요 테마 평균 상승종목 {확산도_시장:.0f}%"))
+        # 🆕 2026-08-24 — 라벨 정정. 이 값은 **테마 단위** 비율이다.
+        #    ⚠️ 계산식: 상승한 테마 수 ÷ 전체 유효 테마 수 (compute_sector_lead 참조)
+        #    예전 이름이 "등락 종목 비율"/"평균 상승종목"이라 **종목 비율로 오해**됐고,
+        #    실제로 코스피 -3.12%인 날 Claude가 "상승종목 비율 66%"라고 써 나갔다.
+        #    숫자는 맞았지만 단위가 틀렸다. 이름을 단위 그대로 바꾼다.
+        요소.append(("상승 테마 비율", round(점3), 0.25,
+                   f"전체 테마 중 오른 테마 {확산도_시장:.0f}%"))
 
     # ④ 외국인+기관 수급: ±3조(30000억) → 0~100
     코수 = 지수수급.get("코스피_수급", {}) or {}
@@ -443,12 +449,13 @@ def compute_gauge(지수수급, 확산도_시장):
         else:
             배지.append("↔️ 코스피·코스닥 혼조")
     if 확산도_시장 is not None:
+        # 🆕 2026-08-24 — "시장 전반"이라는 말을 뺀다. 테마 기준임을 문구에 박는다.
         if 확산도_시장 >= 55:
-            배지.append(f"🟢 시장 전반 상승 우위 ({확산도_시장:.0f}%)")
+            배지.append(f"🟢 오른 테마가 더 많음 (테마 {확산도_시장:.0f}%)")
         elif 확산도_시장 <= 45:
-            배지.append(f"🔵 시장 전반 하락 우위 ({확산도_시장:.0f}%)")
+            배지.append(f"🔵 내린 테마가 더 많음 (테마 {확산도_시장:.0f}%)")
         else:
-            배지.append(f"⚪ 상승·하락 팽팽 ({확산도_시장:.0f}%)")
+            배지.append(f"⚪ 오른 테마·내린 테마 팽팽 (테마 {확산도_시장:.0f}%)")
     외 = to_num((지수수급.get("코스피_수급", {}) or {}).get("외국인"))
     기 = to_num((지수수급.get("코스피_수급", {}) or {}).get("기관계"))
     if 외 is not None and 기 is not None:
@@ -865,37 +872,115 @@ def update_flow_history(지수수급, 파생):
     return 이력
 
 
+def _updown_sane(m):
+    """상승/보합/하락 묶음이 '진짜 시장 숫자'인지 검사한다.
+
+    🆕 2026-08-24 — 이 검사가 없어서 사고가 났다.
+       파싱이 엉뚱한 숫자를 잡아 {상승 1, 보합 1, 하락 1}을 그대로 저장했고,
+       휴장 판정과 리포트 문장이 그 쓰레기 값을 근거로 삼았다.
+    ⚠️ 원칙: **못 구하는 것보다 틀리게 구하는 게 훨씬 나쁘다.**
+       코스피는 약 950종목, 코스닥은 약 1,750종목이다.
+       한 시장 합계가 500 미만이거나 3,500 초과면 파싱 실패로 본다.
+    """
+    if not isinstance(m, dict) or len(m) != 3:
+        return False
+    try:
+        vals = [int(m[k]) for k in ("상승", "보합", "하락")]
+    except (KeyError, TypeError, ValueError):
+        return False
+    if any(v < 0 for v in vals):
+        return False
+    return 500 <= sum(vals) <= 3500
+
+
+def _updown_from_html(t):
+    """HTML 한 덩어리에서 코스피·코스닥의 상승/보합/하락을 뽑는다.
+
+    ⚠️ 네이버 서식이 바뀌면 여기가 제일 먼저 깨진다. 그래서
+       ① 여러 패턴을 순서대로 시도하고
+       ② 뽑은 값은 반드시 _updown_sane()을 통과해야 채택한다.
+    """
+    결과 = {}
+    조각 = re.split(r"(?i)kosdaq|코스닥", t, maxsplit=1)
+    쌍 = list(zip(["코스피", "코스닥"], 조각)) if len(조각) == 2 else [("코스피", t)]
+    for 이름, 블록 in 쌍:
+        for 패턴 in (
+            # ① "상승</span> <span>523</span>" 처럼 태그가 끼어드는 형태
+            r"{k}\s*</[^>]+>\s*(?:<[^>]+>\s*)*([\d,]{{2,5}})",
+            # ② "상승 523" 처럼 바로 붙는 형태
+            r"{k}[^0-9<]{{0,20}}([\d,]{{2,5}})",
+            # ③ 사이에 태그가 여럿 끼는 느슨한 형태(마지막 수단)
+            r"{k}(?:[^0-9]{{0,80}}?)([\d,]{{2,5}})",
+        ):
+            m = {}
+            for k in ("상승", "보합", "하락"):
+                mm = re.search(패턴.format(k=k), 블록)
+                if mm:
+                    try:
+                        m[k] = int(mm.group(1).replace(",", ""))
+                    except ValueError:
+                        pass
+            if _updown_sane(m):
+                결과[이름] = m
+                break
+    return 결과
+
+
 def collect_updown_counts():
     """코스피·코스닥의 상승/하락/보합 종목 수.
 
-    네이버 국내증시 메인에 시장별로 "상승 N 상한 n 보합 N 하락 N"이 있다.
-    이 숫자는 pykrx 등으로 **사후 복원이 불가능**해서 매일 그날 담아둬야 한다.
-    실패하면 None — market_history에 null로 남기고 추정값을 넣지 않는다.
+    이 숫자는 사후 복원이 사실상 불가능해서 **그날 담지 못하면 영영 없다.**
+    (유료 챕터 「시장 국면 내비」의 원료이기도 하다.)
+
+    🆕 2026-08-24 전면 재작성 — 기존 파서는 조용히 쓰레기 값을 만들었다.
+       바뀐 점 세 가지:
+         ① 출처를 2곳으로 늘렸다 (메인 → 시장별 페이지)
+         ② 뽑은 값은 _updown_sane() 검사를 통과해야만 채택한다
+         ③ 실패하면 None을 돌려주고, **원문 일부를 로그에 남긴다**
+            (샌드박스에서 네이버가 403이라 서식을 직접 확인할 수 없다.
+             다음에 정확히 고치려면 실제 응답 조각이 필요하다.)
+    ⚠️ 절대 추정값을 넣지 않는다. 없으면 None이다.
     """
-    try:
-        r = requests.get("https://finance.naver.com/sise/",
-                         headers=HEADERS, timeout=12)
-        r.encoding = "euc-kr"
-        t = r.text
-    except Exception:
-        return None
+    def _get(url):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12)
+            r.encoding = "euc-kr"
+            return r.text
+        except Exception as e:
+            print(f"   ⚠️ 등락종목수 요청 실패({url}): {e}")
+            return ""
+
     결과 = {}
-    # 시장 블록별로 상승/보합/하락 수를 찾는다 (KOSPI 블록이 먼저, KOSDAQ이 다음)
-    블록들 = re.split(r"(?i)kosdaq", t, maxsplit=1)
-    이름들 = ["코스피", "코스닥"]
-    for 이름, 블록 in zip(이름들, 블록들 if len(블록들) == 2 else [t, ""]):
-        m = {}
-        for k in ("상승", "보합", "하락"):
-            mm = re.search(k + r"[^0-9]{0,40}?([\d,]+)", 블록)
-            if mm:
-                m[k] = int(mm.group(1).replace(",", ""))
-        if len(m) == 3:
-            결과[이름] = m
+    # ── 1차: 국내증시 메인 (두 시장이 한 페이지에 있다) ──
+    본문 = _get("https://finance.naver.com/sise/")
+    결과.update(_updown_from_html(본문))
+
+    # ── 2차: 1차에서 못 구한 시장만 시장별 페이지로 재시도 ──
+    보조 = {"코스피": "https://finance.naver.com/sise/sise_index.naver?code=KOSPI",
+           "코스닥": "https://finance.naver.com/sise/sise_index.naver?code=KOSDAQ"}
+    for 이름, url in 보조.items():
+        if 이름 in 결과:
+            continue
+        조각 = _updown_from_html(_get(url))
+        # 시장별 페이지는 그 시장 값만 있으므로 이름을 가리지 않고 아무거나 채택
+        for v in 조각.values():
+            if _updown_sane(v):
+                결과[이름] = v
+                break
+
     if not 결과:
-        print("⚠️ 상승/하락 종목 수를 찾지 못했습니다 (null로 기록)")
+        print("   ⚠️ 상승/보합/하락 종목 수를 찾지 못했습니다 → null로 기록(추정값 금지)")
+        # 다음에 정확히 고치기 위한 단서 — '상승' 주변 원문을 조금만 남긴다
+        단서 = re.findall(r".{0,60}상승.{0,60}", 본문)[:2]
+        for c in 단서:
+            print("      단서:", re.sub(r"\s+", " ", c)[:120])
         return None
+
     for 이름, m in 결과.items():
         print(f"   {이름} 상승 {m['상승']} · 보합 {m['보합']} · 하락 {m['하락']}")
+    for 이름 in ("코스피", "코스닥"):
+        if 이름 not in 결과:
+            print(f"   ⚠️ {이름}는 못 구했습니다 (한쪽만 기록됨)")
     return 결과
 
 
@@ -3116,6 +3201,11 @@ if __name__ == "__main__":
     _대금 = [x for x in _대금 if x is not None]
     _총대금 = sum(_대금) if _대금 else None
 
+    # 🆕 2026-08-24 — 등락종목수는 **휴장 판정의 근거로 쓰지 않는다.**
+    #  ⚠️ 이 값은 네이버 서식에 의존해 자주 실패한다(실제로 8/11~8/24 전부 실패).
+    #     실패한 값(0 또는 쓰레기)으로 휴장을 판정하면 **정상 거래일에 발행이 멈춘다.**
+    #     거래대금·수급은 날짜가 검증된 값이라 그 둘만으로 충분하다.
+    #     여기서는 기록·표시용으로만 합계를 남긴다.
     _등락 = 전체.get("등락종목수") or {}
     _종목수 = 0
     for _m in _등락.values():
@@ -3134,11 +3224,11 @@ if __name__ == "__main__":
             _사유.append("거래대금 0")
         elif _총대금 < 1_000_000:  # 정상일은 코스피만 28조 수준. 5% 미만이면 의심
             _사유.append(f"거래대금이 비정상적으로 작음({_총대금:,.0f}백만)")
-    if not _사유 and _종목수 <= 0:
-        _사유.append("등락 종목 수 0")
+    # (등락종목수 조건 삭제 — 위 주석 참조. 판정은 수급·거래대금 둘로만 한다.)
 
     전체["휴장의심"] = {"판정": bool(_사유), "사유": _사유,
-                    "총거래대금_백만": _총대금, "등락종목수합": _종목수,
+                    "총거래대금_백만": _총대금,
+                    "등락종목수합": _종목수, "등락종목수_판정에사용": False,
                     "코스피수급확보": _코수 is not None, "코스닥수급확보": _닥수 is not None}
 
     경로 = asave(f"data_{DATE}.json")
