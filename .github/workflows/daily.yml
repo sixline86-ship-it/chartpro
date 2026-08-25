@@ -62,10 +62,18 @@ on:
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   schedule:
-    - cron: '10 9 * * 1-5'    # KST 18:10  ← 1차 (본 발행, HO 지시 2026-08-25)
-    - cron: '45 9 * * 1-5'    # KST 18:45  ← 2차 (1차가 안 깨면)
-    - cron: '15 10 * * 1-5'   # KST 19:15  ← 3차
-    - cron: '45 10 * * 1-5'   # KST 19:45  ← 4차 (최후 보루)
+    # 🆕 2026-08-26 HO 지시 — 전체를 1시간 20분 앞당긴다.
+    #   [WHY] GitHub 무료 예약은 대기열 혼잡으로 1~3시간 늦게 깨어난다.
+    #         당겨두면 밀리더라도 저녁 시간 안에 들어온다.
+    #   ⚠️ 15:30(장 마감) 직후는 피한다 — 수급·주도섹터가 0으로 잡힌다.
+    #      16:50이면 마감 후 1시간 20분 여유가 있어 안전하다.
+    #   ⚠️ 다만 **수급 확정치는 대략 18시**에 최종본이 된다.
+    #      그래서 18시 이전 발행은 collect_data.py가 '미완'으로 표시하고,
+    #      아래 guard가 뒤 회차에서 **자동으로 다시 발행**한다.
+    - cron: '50 7 * * 1-5'    # KST 16:50  ← 1차 (가장 이른 시도)
+    - cron: '20 8 * * 1-5'    # KST 17:20  ← 2차
+    - cron: '50 8 * * 1-5'    # KST 17:50  ← 3차
+    - cron: '20 9 * * 1-5'    # KST 18:20  ← 4차 (수급 확정 후 · 최후 보루)
 
 permissions:
   contents: write
@@ -109,8 +117,24 @@ jobs:
             #    한 번 실패하면 오늘 남은 재시도(2~4차)가 전부 "이미 발행됨"으로 착각하고
             #    스스로 건너뛰었다 — 하루 종일 깨진 리포트가 방치되는 원인.
             #    그래서 기준을 "해석글(json)까지 성공적으로 만들어졌는가"로 바꾼다.
-            echo "run=no" >> $GITHUB_OUTPUT
-            echo "⏭️ 오늘 해석글까지 정상 완료된 발행이 이미 있습니다. 이번 시도는 건너뜁니다."
+            #
+            # 🆕 2026-08-26 — 발행됐어도 **데이터가 미완이면 다시 만든다.**
+            #    16:50로 당기면서 생긴 문제: 이른 회차가 잠정 수급으로 성공하면
+            #    남은 회차가 전부 스킵되어 **잠정 숫자가 하루 종일 라이브에 남는다.**
+            #    collect_data.py가 data_*.json에 남긴 '데이터완전성'을 보고 판단한다.
+            # ⚠️ YAML 안에서는 여러 줄 파이썬을 쓰지 않는다(들여쓰기가 깨진다).
+            #    한 줄짜리로 짜서 grep으로 판정한다.
+            INCOMPLETE=no
+            if grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null; then
+              INCOMPLETE=yes
+            fi
+            if [ "$INCOMPLETE" = "yes" ]; then
+              echo "run=yes" >> $GITHUB_OUTPUT
+              echo "🔁 이미 발행됐지만 **데이터가 미완**이라 다시 만듭니다(수급 확정 반영)."
+            else
+              echo "run=no" >> $GITHUB_OUTPUT
+              echo "⏭️ 오늘 해석글까지 정상 완료된 발행이 이미 있습니다. 이번 시도는 건너뜁니다."
+            fi
           else
             echo "run=yes" >> $GITHUB_OUTPUT
             echo "▶️ 오늘 아직 정상 발행 전입니다 — 이번 시도를 진행합니다(재시도 포함)."
@@ -242,6 +266,25 @@ jobs:
           else
             echo "::notice title=index.html 보호::해석글이 없어 index.html을 그대로 두었습니다. 오늘 화면은 report_${TODAY}.html 로 확인하세요. (정식 발행하려면 'Claude 해석글 = 새로 생성')"
           fi
+      # 🆕 2026-08-26 — 잠정 데이터로 발행됐으면 운영자에게만 알린다.
+      #   ⚠️ 구독자에게는 아무 티도 내지 않는다. 리포트는 정상 발행됐고,
+      #      다음 회차가 확정본으로 덮어쓰기 때문이다.
+      - name: 잠정 데이터 알림 (운영자 전용)
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: |
+          TODAY=$(date +%Y%m%d)
+          if grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null; then
+            REASON=$(cat INCOMPLETE_FLAG 2>/dev/null || echo "사유 미상")
+            python notify_admin.py incomplete "$REASON"
+          else
+            echo "✅ 데이터 완전 — 잠정 알림 없음"
+          fi
+
       - name: 공유 썸네일 생성
         if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: python make_thumb.py
