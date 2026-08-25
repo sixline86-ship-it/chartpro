@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-c1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-f1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1229,6 +1229,7 @@ def accum_badge(종목명):
     return 배지
 
 
+NEWS_LOOKBACK = 10      # 🆕 종목 카드 뉴스를 며칠치까지 뒤질지(거래일)
 _SC_SEQ = [0]
 
 
@@ -1250,7 +1251,7 @@ def sc_click(nm, 색=None, 크기=15):
     _색 = f"color:{색};" if 색 else ""
     이름 = (f'<b style="font-size:{크기}px;{_색}" class="cp-sname" '
            f"onclick=\"scToggle('{안전}','{sid}')\">{nm}"
-           f'<span class="sc-tap">▾ 기업분석</span></b>')
+           f'<span class="sc-tap"><i>▾</i>기업분석</span></b>')
     칸 = f'<div id="{sid}" style="display:none"></div>'
     return 이름, 칸
 
@@ -2865,7 +2866,7 @@ def build_account_grid(격자, 주도섹터=None):
             'document.addEventListener("DOMContentLoaded",paint)}})();</script>'
             '<p style="margin:7px 0 0;font-size:11px;color:#e0c060">'
             '👆 섹터 이름을 누르면 그 줄의 종목이 펼쳐집니다<br>'
-            '<span style="color:#ff9a3c">🔥</span>는 오늘 그 섹터에서 불이 난 줄입니다<br>'
+            '<span style="color:#ff9a3c">🔥</span>는 오늘 그 섹터에서 불이 난 구역입니다<br>'
             '<span style="display:inline-block;width:11px;height:11px;border-radius:2px;'
             'border:1.5px solid #f0c65a;vertical-align:-2px"></span> '
             '<b>금색 테두리</b>는 <b>내가 등록한 관심종목이 있는 칸</b>입니다<br>'
@@ -3271,6 +3272,24 @@ def build_my_stocks(data):
     except Exception:
         _종목테마 = {}
     이름배열JS += "window.CP_STOCK_THEME=" + json.dumps(_종목테마, ensure_ascii=False) + ";"
+    # 🆕 2026-08-26 — 종목이 묶인 **테마 여러 개**. "뭐 하는 회사인가"의 재료다.
+    #  ⚠️ 매출 비중(사업 포트폴리오)은 DART 주요계정에 없다. 사업보고서 원문을
+    #     파싱해야 나오는데 검증 못 한 파서는 배포하지 않는다(§3-⑥).
+    #     그래서 지금은 **테마·섹터로 성격만** 알려준다. 지어내지 않는다.
+    _종목테마들 = {}
+    try:
+        for _s in (data.get("주도섹터") or []):
+            _tn = _s.get("테마명")
+            for _x in (_s.get("종목") or []):
+                _n = (_x.get("종목명") or _x.get("명")) if isinstance(_x, dict) else _x
+                if not _n or not _tn:
+                    continue
+                _lst = _종목테마들.setdefault(_n, [])
+                if _tn not in _lst and len(_lst) < 3:
+                    _lst.append(_tn)
+    except Exception:
+        _종목테마들 = {}
+    이름배열JS += "window.CP_THEMES=" + json.dumps(_종목테마들, ensure_ascii=False) + ";"
     # 종목 → 오늘 잡힌 레이더 이름 ('왜 움직였나' 판정에 쓴다)
     _핫 = {}
     try:
@@ -3395,22 +3414,44 @@ def build_my_stocks(data):
         _strd = {}
     이름배열JS += "window.CP_STR_DETAIL=" + json.dumps(_strd, ensure_ascii=False) + ";"
 
-    # 종목별 뉴스·공시 (자세히 보기에서 씀)
+    # 종목별 뉴스·공시 — 🆕 2026-08-26 **최근 10거래일**로 확대
+    #  ⚠️ HO 지적: "오늘 뉴스만 보여주면 안 된다. 최근 어느 정도 기간을 뒤져서
+    #     **왜 돈이 몰리는지**를 알려줘야 한다."
+    #  ⚠️ 실제로 매집은 며칠~몇 주에 걸쳐 일어난다. 오늘 뉴스가 없다고
+    #     "재료 없음"이라고 하면 사흘 전 계약 공시를 놓친다.
+    #  ⚠️ archive에 날짜별 뉴스원본이 그대로 쌓여 있어 **새 수집이 필요 없다.**
+    #     날짜를 붙여 보여줘 "언제 나온 얘기인지"를 숨기지 않는다.
     _snews = {}
     try:
-        _뉴 = [n for n in (data.get("뉴스원본") or []) if n.get("제목")]
-        for _n in set(list(_accd) + list(_strd) + list(_핫)):
-            _hit = [{"t": x["제목"], "u": x.get("링크", ""), "k": "뉴스"}
-                    for x in _뉴 if _n in x["제목"]][:3]
-            for _g in (data.get("공시") or []):
-                if _g.get("회사명") == _n:
-                    _hit.insert(0, {"t": _g.get("공시명", ""),
-                                    "u": _g.get("링크", ""), "k": "공시"})
-            if _hit:
-                _snews[_n] = _hit[:3]
-    except Exception:
+        _대상 = set(list(_accd) + list(_strd) + list(_핫))
+        _본제목 = {n: set() for n in _대상}
+        for _ymd, _d in archive_days(NEWS_LOOKBACK):
+            _라벨 = f"{str(_ymd)[4:6]}/{str(_ymd)[6:]}"
+            for _x in (_d.get("뉴스원본") or []):
+                _t = _x.get("제목") or ""
+                if not _t:
+                    continue
+                for _n in _대상:
+                    if _n in _t and _t not in _본제목[_n]:
+                        _본제목[_n].add(_t)
+                        _snews.setdefault(_n, []).append(
+                            {"t": _t, "u": _x.get("링크", ""), "k": _라벨})
+            for _g in (_d.get("공시") or []):
+                _c = _g.get("회사명")
+                if _c in _대상:
+                    _t = _g.get("공시명", "")
+                    if _t and _t not in _본제목[_c]:
+                        _본제목[_c].add(_t)
+                        _snews.setdefault(_c, []).insert(
+                            0, {"t": _t, "u": _g.get("링크", ""), "k": _라벨 + " 공시"})
+        # 최신순(archive_days가 최신부터 준다) 상위 5건만
+        for _n in _snews:
+            _snews[_n] = _snews[_n][:5]
+    except Exception as e:
+        print(f"   ⚠️ 종목별 뉴스 수집 실패 — {type(e).__name__}")
         _snews = {}
     이름배열JS += "window.CP_STOCK_NEWS=" + json.dumps(_snews, ensure_ascii=False) + ";"
+    이름배열JS += f"window.CP_NEWS_DAYS={NEWS_LOOKBACK};"
     # 종목 → 오늘 시장 전체 맥락 (브리핑이 "볼 것"을 만들 때 쓴다)
     _맥락 = {}
     try:
@@ -3790,7 +3831,7 @@ def build_my_stocks(data):
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
     '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+
     '<span class="cp-sname" id="'+_bid+'-n">'+nm+
-    '<span class="sc-tap">▾ 기업분석</span></span></div>'+
+    '<span class="sc-tap"><i>▾</i>기업분석</span></span></div>'+
     '<div style="margin-top:4px">'+zones+'</div>'+items+
     '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
     'border-left:2.5px solid #e0c060">'+
@@ -3941,13 +3982,41 @@ def build_my_stocks(data):
   return out;
  }
  function _fin(nm, 상세){
+  /* 재무 카드.
+     🆕 2026-08-26 — 상세 모드에서 **매출·영업이익·부채비율을 다시 안 그린다.**
+        요약 카드에 이미 있어서 자세히 보기를 누르면 같은 그림이 두 번 나왔다.
+        상세는 순이익·수익성처럼 **요약에 없던 것만** 보여준다. */
   var P=(window.CP_PROFILE||{})[nm];
-  if(!P||!P.연도별) return '<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
+  if(!P||!P.연도별) return 상세?'':'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
   var ys=Object.keys(P.연도별).sort();
-  if(!ys.length) return '<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
+  if(!ys.length) return 상세?'':'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
+  var 끝=P.연도별[ys[ys.length-1]], 첫=P.연도별[ys[0]];
+
+  if(상세){
+   /* 상세 — 순이익을 맨 위로, 그다음 수익성·기대치 */
+   var 순=ys.map(function(y){return P.연도별[y].순이익;});
+   var out='<div class="sc-fin"><p class="sc-h">📊 조금 더 들어가면</p>'+
+    '<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
+    '<b class="sc-v" style="color:'+((끝.순이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
+    (_fmtEok(끝.순이익)||'—')+'</b></div>';
+   if(끝.매출&&끝.영업이익!==null){
+    var m=끝.영업이익/끝.매출*100;
+    out+='<p class="sc-note">영업이익률 <b>'+m.toFixed(1)+'%</b> — 100원 팔아 '+
+     m.toFixed(0)+'원 남긴다는 뜻이에요.</p>';
+   }
+   if(P.시총&&끝.영업이익>0){
+    var 배=(P.시총*100000000)/끝.영업이익;
+    out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
+     '시장이 앞으로 더 벌 거라고 보고 있다는 뜻이에요.</p>';
+   }
+   out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선). 최근 확정 연도 기준이라 '+
+    '올해 실적은 아직 안 들어가 있어요.</p>';
+   return out+'</div>';
+  }
+
+  /* 요약 — 매출·영업이익·부채비율 */
   var 매=ys.map(function(y){return P.연도별[y].매출;});
   var 영=ys.map(function(y){return P.연도별[y].영업이익;});
-  var 끝=P.연도별[ys[ys.length-1]], 첫=P.연도별[ys[0]];
   var 증='';
   if(ys.length>=2 && 첫.매출 && 끝.매출){
    var g=(끝.매출-첫.매출)/Math.abs(첫.매출)*100;
@@ -3965,32 +4034,13 @@ def build_my_stocks(data):
    적자경고='<p class="sc-warn">⚠️ 가장 최근 확정 연도가 <b>영업적자</b>예요</p>';
   else if(영.length>=2&&영[영.length-2]!==null&&영[영.length-2]<0&&끝.영업이익>0)
    적자경고='<p class="sc-warn">⚠️ 적자였다가 <b>흑자로 돌아선</b> 상태예요 — 이어지는지가 관건이에요</p>';
-  var out='<div class="sc-fin"><p class="sc-h">💰 돈은 벌고 있나 <span class="sc-sub">'+
+  return '<div class="sc-fin"><p class="sc-h">💰 돈은 벌고 있나 <span class="sc-sub">'+
    ys[ys.length-1]+'년 '+(끝.구분||'')+' 기준</span></p>'+
    '<div class="sc-row"><span class="sc-k">매출</span>'+_bars(매)+
    '<b class="sc-v">'+(_fmtEok(끝.매출)||'—')+'</b>'+증+'</div>'+
    '<div class="sc-row"><span class="sc-k">영업이익</span>'+_bars(영)+
    '<b class="sc-v" style="color:'+((끝.영업이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
-   (_fmtEok(끝.영업이익)||'—')+'</b></div>'+부채+적자경고;
-  if(상세){
-   /* 자세히 — 이익의 질·집중도 같은 '판단에 필요한' 것만 더 편다. */
-   var 순=ys.map(function(y){return P.연도별[y].순이익;});
-   out+='<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
-    '<b class="sc-v">'+(_fmtEok(끝.순이익)||'—')+'</b></div>';
-   if(끝.매출&&끝.영업이익!==null){
-    var m=끝.영업이익/끝.매출*100;
-    out+='<p class="sc-note">영업이익률 <b>'+m.toFixed(1)+'%</b> — 100원 팔아 '+
-     m.toFixed(0)+'원 남긴다는 뜻이에요.</p>';
-   }
-   if(P.시총&&끝.영업이익>0){
-    var 배=(P.시총*100000000)/끝.영업이익;
-    out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
-     '시장이 앞으로 더 벌 거라고 보고 있다는 뜻이에요.</p>';
-   }
-   out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선). 최근 확정 연도 기준이라 '+
-    '올해 실적은 아직 안 들어가 있어요.</p>';
-  }
-  return out+'</div>';
+   (_fmtEok(끝.영업이익)||'—')+'</b></div>'+부채+적자경고+'</div>';
  }
  function scToggle(nm, id){
   var box=document.getElementById(id);
@@ -4010,9 +4060,26 @@ def build_my_stocks(data):
      (B.순위?' · 시총 '+B.순위+'위':'')+(B.층?' ('+B.층+'주)':'')+
      (B.시장?' · '+B.시장:'')+'</p>';
    }
+   /* 🆕 2026-08-26 HO 지시 — "뭐 하는 회사인지" 를 맨 위에.
+      ⚠️ 매출 비중(사업 포트폴리오)은 DART 주요계정에 없어서 못 만든다.
+         지어내지 않고, 있는 재료(섹터 + 묶인 테마)로 **성격만** 알려준다. */
+   var 테마=(window.CP_THEMES||{})[nm]||[];
+   var 회사='';
+   if(한줄||테마.length){
+    회사='<div class="sc-blk"><p class="sc-h">🏢 어떤 회사냐면요</p>'+
+     (한줄?'<p class="sc-biz"><b>'+한줄+'</b> 쪽 회사예요.</p>':'')+
+     (테마.length?'<p class="sc-note">시장에서는 '+
+       테마.map(function(t){return '<b>'+t+'</b>';}).join(' · ')+
+       ' 테마로 묶여 있어요.</p>':'')+
+     '<p class="sc-src">매출이 어느 사업에서 나오는지(사업 포트폴리오)는 '+
+     '사업보고서 원문이 필요해 아직 준비 중이에요.</p></div>';
+   }
    box.innerHTML='<div class="sc-card">'+
-    (한줄?'<p class="sc-def">'+한줄+'</p>':'')+기본+
-    '<div class="sc-why"><p class="sc-h">🎯 왜 여기 떴냐면요</p>'+_why(nm)+'</div>'+
+    (한줄?'<p class="sc-def">'+한줄+'</p>':'')+기본+회사+
+    /* 🆕 2026-08-26 HO 지시 — 「왜 여기 떴냐면요」를 기업분석 카드에서 뺐다.
+       [WHY] 그건 회사 설명이 아니라 **레이더 조건 설명**이다. 종목마다
+             반복하지 말고 레이더 코너 밑에 한 번만 쓰는 게 맞다.
+             기업분석 카드는 "이 회사가 뭐 하는 곳인가"에만 집중한다. */
     _fin(nm,false)+
     '<p class="sc-more" id="'+id+'-m">자세히 보기 ↓</p>'+
     '<div id="'+id+'-d" style="display:none"></div></div>';
@@ -4030,23 +4097,34 @@ def build_my_stocks(data):
   if(!d) return;
   if(d.dataset.open==='1'){ d.style.display='none'; d.dataset.open='0'; return; }
   if(!d.dataset.built){
-   var P=(window.CP_PROFILE||{})[nm]||{}, 개=(P.개요||{});
+   /* 🆕 2026-08-26 HO 지시 — 자세히 보기를 정리했다.
+      · 매출/영업이익/부채비율은 **요약 카드에 이미 있다** → 여기서 다시 안 쓴다
+      · 순이익은 위로 올린다
+      · 「회사 정보」·「제가 틀렸다면」 삭제
+      · 대신 **왜 돈이 몰렸는지 뉴스**를 맨 위로 */
+   var P=(window.CP_PROFILE||{})[nm]||{};
    var 뉴=(window.CP_STOCK_NEWS||{})[nm]||[];
    var 뉴HTML='';
-   뉴.slice(0,3).forEach(function(n){
-    뉴HTML+='<p class="sc-news">· <a href="'+n.u+'" target="_blank">'+n.t+'</a>'+
-     (n.k?' <span class="sc-kind">'+n.k+'</span>':'')+'</p>';});
-   d.innerHTML=_fin(nm,true)+
-    (뉴HTML?'<div class="sc-blk"><p class="sc-h">📰 요즘 무슨 일</p>'+뉴HTML+
-      '<p class="sc-note">재료가 매출로 잡히기까지는 보통 <b>2~4분기</b>가 걸려요. '+
-      '지금 주가에 반영된 건 대개 <b>기대</b>예요.</p></div>':'')+
-    (개.업종||개.대표?'<div class="sc-blk"><p class="sc-h">🏢 회사 정보</p>'+
-      '<p class="sc-note">'+(개.대표?'대표 '+개.대표+' · ':'')+
-      (개.설립?'설립 '+String(개.설립).slice(0,4)+'년':'')+'</p></div>':'')+
-    '<div class="sc-blk"><p class="sc-h">🔭 제가 틀렸다면</p>'+
-     '<p class="sc-if">확인되면 → 매수 주체가 <b>3일 더</b> 이어진다 → 매집 논리 강화</p>'+
-     '<p class="sc-if">발생하면 → <b>유상증자·전환사채</b> 공시 → 희석. 논리 철회</p>'+
-     '<p class="sc-if">발생하면 → 다음 분기 <b>다시 적자</b> → 흑자가 일회성이었다는 뜻</p></div>'+
+   /* 🆕 2026-08-26 — 뉴스에 **날짜**를 붙인다. 최근 10거래일을 뒤지므로
+      "언제 나온 얘기인지"를 안 밝히면 오늘 일로 오해한다. */
+   뉴.slice(0,5).forEach(function(n){
+    뉴HTML+='<p class="sc-news">'+
+     (n.k?'<span class="sc-kind">'+n.k+'</span> ':'')+
+     '<a href="'+n.u+'" target="_blank">'+n.t+'</a></p>';});
+   /* 🆕 2026-08-26 HO 지시 — 레이더 조건(돈이 몰림/매집 금액) 설명을 뺐다.
+      [WHY] 그건 위쪽 레이더 코너에서 이미 다 말했다. 여기서 또 쓰면
+            같은 얘기를 두 번 하는 셈이다(원칙 4).
+            이 칸은 **왜 돈이 몰렸는지 = 뉴스**만 다룬다. */
+   d.innerHTML=
+    '<div class="sc-blk"><p class="sc-h">📰 최근 무슨 일이 있었냐면요</p>'+
+      (뉴HTML
+        ? 뉴HTML+'<p class="sc-note">최근 '+(window.CP_NEWS_DAYS||10)+'거래일 안에 나온 '+
+          '기사·공시예요. 재료가 매출로 잡히기까지는 보통 <b>2~4분기</b>가 걸려서, '+
+          '지금 주가에 반영된 건 대개 <b>기대</b>예요.</p>'
+        : '<p class="sc-note">최근 '+(window.CP_NEWS_DAYS||10)+'거래일 안에 이 종목 이름이 '+
+          '들어간 기사·공시가 없었어요. <b>재료 없이 수급만</b> 들어온 자리예요.</p>')+
+    '</div>'+
+    _fin(nm,true)+
     '<p class="sc-disc">투자 판단을 대신하지 않아요. 조건과 숫자를 그대로 보여드릴 뿐이에요.</p>';
    d.dataset.built='1';
   }
@@ -4765,18 +4843,24 @@ def _odd_market():
     return None, None
 
 
-def build_odd_today():
-    """🔍 오늘 이상했던 것 — 코드가 감지하고, 숫자로만 말한다."""
+def _odd_items(data=None):
+    """이상 신호 목록만 돌려준다(렌더 없이).
+
+    🆕 2026-08-26 — 「오늘 이것만 확실히 기억합시다」가 같은 판정을 써야 해서
+       감지부와 렌더부를 나눴다. 같은 로직을 두 벌 두면 언젠가 어긋난다.
+    """
     코, 닥 = _odd_market()
     통계 = _zone_today_stat()
     if not 통계:
-        return ""
+        return []
     항목 = []
 
     # ── ① 시장과 반대로 간 자리 ──
     #   코스피가 크게 빠진 날 '고르게 오른' 섹터. 시황이 절대 안 다루는 자리다.
     if isinstance(코, (int, float)) and abs(코) >= 1.0:
         for nm, v in 통계.items():
+            if nm == "기타":          # 잡동사니 묶음은 제외(위 주석 참조)
+                continue
             확 = v.get("확산도")
             중 = v.get("중앙값")
             n = v.get("종목수")
@@ -4807,6 +4891,11 @@ def build_odd_today():
     #   중앙값은 낮은데 확산도가 높으면 "조용히 다 같이" 오른 것이고,
     #   중앙값은 높은데 확산도가 낮으면 "몇 종목이 끌어올린" 것이다.
     for nm, v in 통계.items():
+        # 🆕 2026-08-26 — 「기타」는 어느 섹터에도 안 걸린 **잡동사니 묶음**이다.
+        #    1,000종목이 한 칸에 들어 있어 확산도가 늘 시장 평균처럼 나온다.
+        #    "기타가 고르게 올랐다"는 통찰이 아니라 소음이라 뺀다.
+        if nm == "기타":
+            continue
         확, 중, n = v.get("확산도"), v.get("중앙값"), v.get("종목수")
         평 = v.get("평균")
         if not all(isinstance(x, (int, float)) for x in (확, 중, 평)):
@@ -4841,21 +4930,128 @@ def build_odd_today():
                 "뜻": "두 지수가 이만큼 갈리는 날은 <b>대형주와 중소형주에 서로 다른 돈</b>이 "
                       "움직인 날이에요. 내 종목이 어느 쪽인지가 오늘 성적을 갈랐을 거예요."})
 
-    if not 항목:
-        return ""
     항목.sort(key=lambda x: -x["강도"])
-    본문 = ""
-    for it in 항목[:ODD_최대]:
-        본문 += (f'<div class="odd-item"><p class="odd-t">{it["제목"]}</p>'
-                 f'<p class="odd-b">{it["본문"]}</p>'
-                 f'<p class="odd-m">↳ {it["뜻"]}</p></div>')
-    return (f'<div class="odd-box">'
-            f'<p class="odd-h">🔍 오늘, 이상했던 것</p>'
-            f'<p class="odd-s">시황은 움직인 걸 말해요. 여기는 '
-            f'<b>안 움직인 것·겉과 속이 다른 것</b>을 봅니다.</p>'
+    return 항목[:ODD_최대]
+
+
+def build_odd_today():
+    """🙈 2026-08-26 — 「오늘 이것만 확실히 기억합시다」가 이 내용을 흡수했다.
+
+    ⚠️ HO 지시로 별도 코너를 없앴다. 같은 이야기를 두 자리에서 하면
+       둘 다 힘을 잃는다(원칙 4 — 중복해서 말하지 않는다).
+    ⚠️ 감지 로직(_odd_items)은 그대로 살아 있고 요약 코너가 쓴다.
+       다시 독립 코너로 되살리려면 이 함수만 예전처럼 렌더하면 된다.
+    """
+    return ""
+
+
+# ══════════════════════════════════════════════════════════════
+# 🧩 여기까지 정리하면 — 중간 요약 (2026-08-26 신설, HO 기획)
+# ══════════════════════════════════════════════════════════════
+#  HO 기획 — "대부분 여기까지 읽고 머리에 정리가 안 되거든? 어느 정도 정리가
+#             된 후에 섹터와 종목으로 넘어가면 좋을 것 같아서."
+#
+#  ⚠️ 이 코너의 성격 — **새 정보를 주지 않는다.** 위에서 이미 말한 것들을
+#     한 문장씩으로 줄여 다시 세워주는 자리다. 새 걸 넣으면 요약이 아니라
+#     또 하나의 코너가 되고, 독자는 다시 복잡해진다.
+#  ⚠️ 숫자는 기계가 만든 것만 쓴다(Claude 미개입). 요약이 원문과 어긋나면
+#     그게 가장 나쁜 사고다.
+#  ⚠️ 아주 쉬운 말로. 여기가 막히면 아래 섹터·종목을 못 읽는다.
+def build_midsummary(data, 해석):
+    """🧠 오늘 이것만 확실히 기억합시다 — 핵심만 남기는 중간 정리.
+
+    🆕 2026-08-26 HO 지시 — 이름·성격을 바꿨다.
+       "꼭 알아야 하는 정보를 기억하는 것이 중요하다. 위의 모든 정보를
+        주지 않아도 된다. 핵심적인 부분만 다뤄도 된다."
+    ⚠️ 그래서 **나열을 버리고 3가지로 줄인다.**
+       ① 오늘 무슨 날이었나 (한 문장)
+       ② 돈이 어디로 갔나 (섹터 + 왜 그게 의미 있는지)
+       ③ 이상했던 것 하나 (남들이 안 보는 각도 — 「오늘 이상했던 것」 흡수)
+    ⚠️ 각 줄마다 **"그래서 뭘 기억하면 되는지"**를 반드시 붙인다.
+       숫자만 다시 말하면 요약이 아니라 반복이다.
+    ⚠️ 숫자는 기계가 만든 것만. 없는 건 그 줄을 통째로 빼고 지어내지 않는다.
+    """
+    핵심 = (해석 or {}).get("핵심편") or {}
+    줄 = []
+
+    def _f(x):
+        try:
+            return float(str(x).replace(",", "").replace("%", ""))
+        except Exception:
+            return None
+
+    지 = (data.get("지수수급") or {}).get("지수") or {}
+    코 = _f((지.get("코스피") or {}).get("등락률"))
+    닥 = _f((지.get("코스닥") or {}).get("등락률"))
+
+    # ── ① 오늘은 어떤 날이었나 ──
+    정의 = (핵심.get("오늘의정의") or "").strip()
+    if 정의 or 코 is not None:
+        본문 = f"<b>{정의}</b>" if 정의 else ""
+        if 코 is not None and 닥 is not None:
+            _지수말 = f"코스피 {코:+.2f}% · 코스닥 {닥:+.2f}%"
+            본문 = (본문 + f'<br><span class="ms-num">{_지수말}</span>') if 본문 else _지수말
+        if 코 is not None and 닥 is not None and (코 >= 0) != (닥 >= 0):
+            기억 = ("큰 회사와 작은 회사에 <b>서로 다른 돈</b>이 움직인 날이에요. "
+                   "내 종목이 어느 쪽인지가 오늘 성적을 갈랐어요.")
+        elif 코 is not None:
+            기억 = ("시장 전체가 같은 방향이었어요. "
+                   "오늘 내 종목이 반대로 갔다면 <b>종목 자체의 이유</b>가 있다는 뜻이에요.")
+        else:
+            기억 = ""
+        줄.append(("1", "오늘은 이런 날", 본문, 기억))
+
+    # ── ② 돈이 간 자리 ──
+    try:
+        통 = _zone_today_stat()
+        후보 = [(nm, v) for nm, v in 통.items()
+               if isinstance(v.get("중앙값"), (int, float)) and nm != "기타"]
+        if 후보:
+            후보.sort(key=lambda x: -x[1]["중앙값"])
+            nm, v = 후보[0]
+            확 = v.get("확산도")
+            본문 = (f'<b>{nm}</b>로 갔어요'
+                   f'<br><span class="ms-num">가운데 종목 {v["중앙값"]:+.2f}%'
+                   + (f' · {v.get("종목수","")}종목 중 {확:.0f}% 상승' if isinstance(확, (int, float)) else '')
+                   + '</span>')
+            if isinstance(확, (int, float)) and 확 >= 65:
+                기억 = ("몇 종목이 아니라 <b>자리 전체</b>가 올랐어요. "
+                       "이런 상승이 보통 더 오래 갑니다.")
+            elif isinstance(확, (int, float)) and 확 < 50:
+                기억 = ("<b>몇 종목만</b> 끌어올린 자리예요. "
+                       "섹터를 통째로 사면 평균과 다른 결과가 나올 수 있어요.")
+            else:
+                기억 = "이 자리가 며칠 이어지는지가 주도주인지 아닌지를 가릅니다."
+            줄.append(("2", "돈은 여기로", 본문, 기억))
+    except Exception:
+        pass
+
+    # ── ③ 이상했던 것 (기존 「오늘 이상했던 것」을 흡수) ──
+    try:
+        특 = (_odd_items(data) or [])
+        if 특:
+            it = 특[0]
+            줄.append(("3", "그런데 이상한 게",
+                       f'<b>{it["제목"]}</b><br><span class="ms-num">'
+                       f'{re.sub(r"<[^>]+>", "", it["본문"])}</span>',
+                       it["뜻"]))
+    except Exception:
+        pass
+
+    if len(줄) < 2:
+        return ""
+    본문 = "".join(
+        f'<div class="ms-row"><span class="ms-no">{i}</span>'
+        f'<div class="ms-txt"><p class="ms-k">{k}</p>'
+        f'<p class="ms-v">{v}</p>'
+        + (f'<p class="ms-t">👉 {t}</p>' if t else '')
+        + '</div></div>'
+        for i, k, v, t in 줄)
+    return (f'<div class="ms-box"><p class="ms-h">🧠 오늘 이것만 확실히 기억합시다</p>'
+            f'<p class="ms-s">위에 숫자가 많았죠? 정말 기억할 건 이 {len(줄)}가지예요.</p>'
             f'{본문}'
-            f'<p class="odd-note">📌 예측이 아니라 <b>오늘 숫자에서 눈에 띈 점</b>이에요. '
-            f'걸리는 게 없는 날은 이 코너가 아예 안 나옵니다.</p></div>')
+            f'<p class="ms-note">여기까지가 <b>시장 이야기</b>예요. '
+            f'이제 <b>내 종목</b>은 어땠는지 보러 갈게요 👇</p></div>')
 
 
 def build_sector_ladder():
@@ -5552,16 +5748,23 @@ def build_crowd_compass(_구=None):
     if len(_hist) >= 3:
         _hi, _lo = max(_hist), min(_hist)
         _rng = max(1.0, _hi - _lo)
-        _W, _H = 300, 42
-        _pts = " ".join(f"{i*_W/(len(_hist)-1):.0f},{_H-4-(v-_lo)/_rng*(_H-10):.0f}"
+        # 🆕 2026-08-26 HO 지적 — 선그래프 위에 아래 설명 글자가 겹쳤다.
+        #  [원인] preserveAspectRatio="none"으로 세로를 42px에 강제로 눌러놓고,
+        #     설명문 margin은 2px뿐이라 선이 아래로 내려오면 글자와 부딪혔다.
+        #  [고침] 캔버스를 56으로 키우고 선이 그려지는 영역을 위쪽으로 제한한 뒤,
+        #     설명문에 여유(margin 6px)를 준다. 오른쪽 끝점도 안쪽으로 당겨
+        #     동그라미가 잘리지 않게 한다.
+        _W, _H = 300, 56
+        _pad = 8                      # 선이 아래로 내려올 수 있는 하한
+        _pts = " ".join(f"{i*(_W-6)/(len(_hist)-1):.0f},{_H-_pad-(v-_lo)/_rng*(_H-_pad-6):.0f}"
                         for i, v in enumerate(_hist))
         _c = "#ff6b4a" if _hist[-1] >= _hist[0] else "#5b9bff"
         추이HTML = (f'<svg viewBox="0 0 {_W} {_H}" preserveAspectRatio="none" '
-                  f'style="width:100%;height:42px;display:block;margin-top:7px">'
+                  f'style="width:100%;height:52px;display:block;margin-top:7px">'
                   f'<polyline points="{_pts}" fill="none" stroke="{_c}" stroke-width="2"/>'
-                  f'<circle cx="{_W}" cy="{_H-4-(_hist[-1]-_lo)/_rng*(_H-10):.0f}" r="3" '
+                  f'<circle cx="{_W-6}" cy="{_H-_pad-(_hist[-1]-_lo)/_rng*(_H-_pad-6):.0f}" r="3" '
                   f'fill="{_c}"/></svg>'
-                  f'<p style="margin:2px 0 0;font-size:9.5px;color:#6f7784">'
+                  f'<p style="margin:6px 0 0;font-size:9.5px;color:#6f7784;line-height:1.5">'
                   f'최근 {len(_hist)}거래일 신용융자 잔고 추이 '
                   f'({_lo/10000:.1f}조 ~ {_hi/10000:.1f}조)</p>')
     if isinstance(잔고, (int, float)):
@@ -7464,7 +7667,10 @@ def build_core(핵심편, data, 해석):
             + hide("삼줄요약", f'<div class="q90-3">{삼줄}</div>')
             # 🆕 2026-08-22 — 📰팩트 + 🧭해석을 한 카드(움직인것들)로 합쳤다.
             + 움직인것들
-            + 내종목
+            # 🆕 2026-08-26 HO 지시 — 감정 코너(😐 …올라타지 못했다면)를
+            #    「오늘을 뒤집어 볼까요?」 **뒤로** 보낸다.
+            #    [WHY] 사실 → 뒤집어 보기(관점) → 그제서야 감정. 위로가 먼저 오면
+            #          아직 이해가 안 된 상태라 공감이 붕 뜬다.
             # ⚠️ 계기판을 헤더 막대 바로 밑으로 올렸으므로(2026-08-20)
             #    여기 제목·부제는 뺐다. 막대 → 계기판 흐름이 이미 설명이다.
             + '<div class="mny">'
@@ -7484,7 +7690,7 @@ def build_core(핵심편, data, 해석):
             #  · 내일대응(「○요일장, 이것만 기억하세요」) 삭제
             #    → 아래 관전포인트(예보)와 역할이 겹친다. 예보가 더 구체적이라 그쪽만 남긴다.
             #  · 관전포인트를 핵심편 **맨 끝**으로. "오늘"을 다 읽고 "내일"로 닫는 순서.
-            + 뒤집블록 + 딱N블록
+            + 뒤집블록 + 내종목 + 딱N블록
             # 🆕 2026-08-22 HO 지시 — 「다음 거래일 예보」를 뒤집어보기 **바로 뒤로**.
             #    "오늘을 뒤집어 보면 → 그래서 내일은" 으로 이어지는 게 자연스럽고,
             #    맨 끝에 두면 레이더 카드들에 묻혀 잘 안 읽힌다.
@@ -7503,6 +7709,10 @@ def build_core(핵심편, data, 해석):
             + hide("핵심편예보", build_watchpoints(해석.get("관전포인트"), _NEXT_LABEL))
             # 🆕 2026-08-25 — 예보가 있던 자리를 「오늘 이상했던 것」이 대신한다.
             + build_odd_today()
+            # 🆕 2026-08-26 HO 기획 — 「오늘 이상했던 것」 바로 뒤에 중간 요약.
+            #    여기까지가 '시장 이야기'다. 머리를 한 번 정리하고
+            #    아래 섹터·내 종목으로 넘어가게 한다.
+            + build_midsummary(data, 해석)
             # 🆕 2026-08-22 HO 지시 — 「오늘 주도 섹터」(사다리)를 뒤집어보기 뒤로.
             #    ⚠️ 섹터 코너는 핵심편에 이것 하나뿐이다(칩은 2026-08-22에 제거).
             #       상위는 사다리 그림, 하위는 그 카드 안 한 줄로 흡수했다.
@@ -8498,11 +8708,13 @@ def _fs_timeline_svg(이력, p, W=380):
             g.append(f'<circle cx="{X(k):.1f}" cy="{YC(r):.1f}" r="{3.2 if k==q-1 else 2.2}" fill="{c}"/>')
         if rs[-1] is not None:
             # ⚠️ %만 있으면 "그래서 얼마?"가 안 보인다. 금액을 같이 적는다(2026-08-18).
-            ty = min(max(YC(rs[-1]) - 9, CT + 24), CB - 12)
+            ty = min(max(YC(rs[-1]) - 9, CT + 24), CB - 15)   # 아래 줄(+12) 자리 확보
             _bc = FS_BUY if (비[-1] or 0) >= 0 else FS_SELL
             g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty:.1f}" font-size="9" fill="{_bc}" '
                      f'font-weight="900" text-anchor="end">{rs[-1]:.0f}%</text>')
-            g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty+9:.1f}" font-size="7.5" fill="{_bc}" '
+            # 🆕 2026-08-26 — 위 %는 font-size 9인데 간격이 9px뿐이라 두 줄이 붙었다.
+            #    («103%» 와 «−2.73조»가 겹쳐 보이던 원인) 12px로 벌린다.
+            g.append(f'<text x="{X(q-1)-5:.1f}" y="{ty+12:.1f}" font-size="7.5" fill="{_bc}" '
                      f'font-weight="800" text-anchor="end" opacity=".9">{_flow_amt(비[-1])}</text>')
     else:
         g.append(f'<text x="{W/2:.1f}" y="{(CT+CB)/2+4:.1f}" font-size="8" fill="#4a5462" '
@@ -8544,7 +8756,13 @@ def _fs_timeline_svg(이력, p, W=380):
         _c = FS_BUY if _증 >= 0 else FS_SELL
         g.append(f'<text x="{W-PR+4}" y="{_Y(_last)+3:.1f}" font-size="8.5" '
                  f'fill="{FS_IND}" font-weight="800">신용</text>')
-        g.append(f'<text x="{W-PR-4}" y="{DT+10:.1f}" font-size="8" fill="{_c}" '
+        # 🆕 2026-08-26 HO 지적(2차) — 금액과 코너 제목이 겹쳤다.
+        #  [원인] 둘 다 y=DT+10 **같은 높이**였다. 제목은 왼쪽, 금액은 오른쪽
+        #     정렬이라 평소엔 안 부딪히다가, 금액이 «+100.75조 (-46,087억)»처럼
+        #     길어지는 날 왼쪽으로 밀려와 제목 위에 올라탔다.
+        #  [고침] 금액을 **한 줄 아래로** 내린다(DT+21). 제목과 높이를 다르게 두면
+        #     금액이 아무리 길어져도 겹칠 수가 없다.
+        g.append(f'<text x="{W-PR-4}" y="{DT+21:.1f}" font-size="8" fill="{_c}" '
                  f'font-weight="800" text-anchor="end">{_flow_amt(_실값[-1])} '
                  f'({_증:+,.0f}억)</text>')
     else:
@@ -10246,10 +10464,18 @@ html{{scroll-behavior:smooth}}
           고정 다크 팔레트라 똑같았는데, **바깥 배지만** 갈라놓은 게 문제였다.
    [고침] 배지를 핵심편 스타일(하늘색 채움 알약) **한 가지로 고정**한다.
           배경이 밝은 곳에서도 대비가 되도록 살짝 그림자를 준다. */
+/* 🆕 2026-08-26 HO 지시 — "확실히 누를 수 있도록" 더 크게.
+   [WHY] 눌러야 열리는 버튼인데 장식처럼 작으면 아무도 안 눌러본다.
+         모바일에서 손가락으로 짚으려면 최소한의 높이가 필요하다. */
+/* 🆕 2026-08-26 HO 지시 — 알약은 작게, **화살표만** 크게.
+   [WHY] 알약이 커지니 종목명과 시선을 다퉜다. 정작 눌러야 할 신호는
+         화살표 하나면 충분하다. 글자는 줄이고 화살표만 키운다. */
 .sc-tap{{font-size:9.5px;color:#0b0e13;background:#8fd0e8;font-weight:800;
   margin-left:6px;padding:1px 7px;border-radius:999px;
   white-space:nowrap;cursor:pointer;vertical-align:middle;
-  box-shadow:0 1px 3px rgba(0,0,0,.35)}}
+  box-shadow:0 1px 2px rgba(0,0,0,.3)}}
+.sc-tap i{{font-style:normal;font-size:14px;line-height:1;vertical-align:-1px;
+  margin-right:2px;font-weight:900}}
 /* 🆕 2026-08-25 — 클래스명을 .sc-name → .cp-sname 으로 분리.
    [사고] .sc-name은 **섹터 테마명**이 이미 쓰고 있었고 color:var(--ink)였다.
           --ink는 #1a1a1a(거의 검정)이라 어두운 카드 배경에서 글자가 사라졌다.
@@ -10258,6 +10484,7 @@ html{{scroll-behavior:smooth}}
 .sc-card{{background:#0f131a;border:1px solid #2a3446;border-radius:10px;
   padding:10px 11px;margin:6px 0 2px}}
 .sc-def{{margin:0 0 3px;font-size:11.5px;color:#8fd0e8;font-weight:700}}
+.sc-biz{{margin:0 0 4px;font-size:11.5px;color:#c9ced6;line-height:1.6}}
 .sc-basic{{margin:0 0 8px;font-size:11.5px;color:#c9ced6;font-weight:600}}
 .sc-hot{{font-size:9.5px;color:#0b0e13;background:#74f0d4;font-weight:800;
   padding:1px 6px;border-radius:999px;vertical-align:middle}}
@@ -10286,6 +10513,22 @@ html{{scroll-behavior:smooth}}
 .sc-kind{{font-size:9px;color:#6f7784}}
 .sc-if{{margin:3px 0 0;font-size:10.5px;color:#c9ced6;line-height:1.6}}
 .sc-disc{{margin:7px 0 0;font-size:9.5px;color:#6f7784;line-height:1.55}}
+/* 🆕 2026-08-26 여기까지 정리하면 */
+.ms-box{{background:linear-gradient(160deg,#1a2230,#141a24);
+  border:1.5px solid #2f3d52;border-radius:14px;padding:13px 13px 11px;margin:12px 0 14px}}
+.ms-h{{margin:0;font-size:15.5px;font-weight:800;color:#e0c060}}
+.ms-s{{margin:3px 0 9px;font-size:11px;color:#8b93a0;line-height:1.6}}
+.ms-row{{display:flex;gap:9px;align-items:flex-start;margin-top:9px;
+  background:#0f131a;border-radius:9px;padding:9px 10px}}
+.ms-no{{flex:none;width:20px;height:20px;border-radius:50%;background:#e0c060;
+  color:#141a24;font-size:11.5px;font-weight:900;display:flex;
+  align-items:center;justify-content:center;line-height:1}}
+.ms-num{{font-size:11px;color:#8b93a0;font-weight:600}}
+.ms-txt{{flex:1;min-width:0}}
+.ms-k{{margin:0;font-size:10px;color:#8b93a0;font-weight:700}}
+.ms-v{{margin:3px 0 0;font-size:13px;color:#e8eaee;line-height:1.65}}
+.ms-t{{margin:6px 0 0;font-size:11.5px;color:#8fd0e8;line-height:1.65}}
+.ms-note{{margin:10px 0 0;font-size:11px;color:#c9ced6;line-height:1.6;text-align:center}}
 /* 🆕 2026-08-25 오늘 이상했던 것 */
 .odd-box{{background:#141922;border:1px solid #2a3446;border-radius:12px;
   padding:12px 12px 10px;margin:10px 0 14px}}
@@ -10728,7 +10971,16 @@ html{{scroll-behavior:smooth}}
   <!-- 🆕 2026-08-25 — 심층편에서는 카드 기능을 한 번만 따로 설명한다.
        핵심편은 종목명 옆 «▾ 기업분석» 배지로만 알리고, 여기서는 뭐가 나오는지까지. -->
   <div class="sc-guide">
-    <p class="sc-guide-h">👆 종목 이름을 누르면 기업분석이 펼쳐져요</p>
+    <!-- 🆕 2026-08-26 HO 지시 — 「왜 여기 떴나」를 종목마다 반복하지 말고
+         레이더 코너 위에서 **한 번만** 설명한다. -->
+    <p class="sc-guide-h">🎯 이 종목들이 왜 여기 떴냐면요</p>
+    <p class="sc-guide-b">
+      <b>🔥 불난 자리</b>는 «어제보다 거래량이 몇 배로 늘고 큰돈이 들어온 종목»,
+      <b>🐢 조용히 모으는 손</b>은 «금액이 아니라 <b>시가총액 대비 비율</b>이 크고
+      며칠에 걸쳐 연속으로 사들인 종목»이에요.
+      추천이 아니라 <b>이 조건에 걸렸다</b>는 기록이에요.
+    </p>
+    <p class="sc-guide-h" style="margin-top:10px">👆 종목 이름을 누르면 기업분석이 펼쳐져요</p>
     <p class="sc-guide-b">
       <b>왜 여기 떴는지</b>(어떤 조건에 걸렸는지 숫자 그대로) ·
       <b>돈은 벌고 있는지</b>(매출·영업이익 5년 추이, 부채비율) ·
