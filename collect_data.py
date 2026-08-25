@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-f1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.26-g1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3970,6 +3970,38 @@ if __name__ == "__main__":
                     "총거래대금_백만": _총대금,
                     "등락종목수합": _종목수, "등락종목수_판정에사용": False,
                     "코스피수급확보": _코수 is not None, "코스닥수급확보": _닥수 is not None}
+
+    # ══════════════════════════════════════════════════════════
+    # 🆕 2026-08-26 — 데이터 완전성 판정 (HO 지시)
+    #   발행 시각을 16:50으로 당기면서 생긴 문제:
+    #   **수급 확정치는 저녁(대략 18시)에야 최종본이 된다.**
+    #   그 전에 발행하면 숫자가 잠정치이거나 일부가 비어 있을 수 있다.
+    #
+    #   ⚠️ 진짜 위험은 '누락' 자체가 아니라 **방치**다.
+    #      1차(16:50)가 불완전한 채로 성공하면 워크플로의 중복 방지 장치가
+    #      2~4차를 전부 건너뛰어, 잠정 숫자 리포트가 하루 종일 라이브에 남는다.
+    #   → 그래서 '미완'을 **데이터에 기록**해 둔다. 워크플로가 이걸 보고
+    #      뒤 회차에서 다시 발행하게 만든다(daily.yml의 guard 참조).
+    #   ⚠️ 발행 자체는 막지 않는다. HO 지시 — "발행은 하되 알려달라".
+    _미완 = []
+    if _now.hour * 100 + _now.minute < 1800:
+        _미완.append(f"18시 이전 실행({_now.hour:02d}:{_now.minute:02d}) — "
+                    f"수급 확정 전일 수 있음")
+    if _코수 is None or _닥수 is None:
+        _미완.append("수급 일부 미수집")
+    if not _등락:
+        _미완.append("등락종목수 미수집")
+    전체["데이터완전성"] = {"완전": not _미완, "사유": _미완,
+                        "실행시각": _now.strftime("%H:%M")}
+    if _미완:
+        print("⏳ 데이터가 아직 완전하지 않습니다 — " + " · ".join(_미완))
+        print("   발행은 진행하고, 이후 회차에서 다시 발행합니다.")
+        with open("INCOMPLETE_FLAG", "w", encoding="utf-8") as f:
+            f.write(" · ".join(_미완))
+    else:
+        print("✅ 데이터 완전성 확인 — 재발행 불필요")
+        if os.path.exists("INCOMPLETE_FLAG"):
+            os.remove("INCOMPLETE_FLAG")
 
     경로 = asave(f"data_{DATE}.json")
     with open(경로, "w", encoding="utf-8") as f:
