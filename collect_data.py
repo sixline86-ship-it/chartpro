@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-e1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.24-h1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -1476,7 +1476,13 @@ def collect_crowd_compass():
 #      그래서 포착 항로에 '수급편'을 만들 재료가 아예 없었다.
 #      강세와 똑같은 구조로 오늘부터 쌓는다. (시간이 만드는 데이터 — 오늘 안 심으면 영영 없다)
 #  ⚠️ 과거분은 복원 불가. 의미 있는 곡선은 약 1개월 뒤부터.
-ACC_TRACK_DAYS = 20
+# 🆕 2026-08-24 HO 지시 — 「포착 그 후」를 5·20·60·120일로 만들려면
+#    추적을 그만큼 오래 들고 있어야 한다. 20일에서 버리면 60·120일 성적은
+#    **영원히 못 만든다**(사후 복원 불가 — 지난 포착가를 다시 알 방법이 없다).
+#    강세 레이더는 이미 TRACK_DAYS=120인데 매집만 20이었다. 맞춘다.
+#  ⚠️ 파일이 커진다: 하루 20~40건씩 쌓여 120일이면 대략 2,000~4,000건.
+#     한 건이 100바이트 남짓이라 수백 KB 수준 — 감당 가능하다.
+ACC_TRACK_DAYS = 120
 
 
 def _load_prev_acc_tracking():
@@ -1497,8 +1503,19 @@ def _load_prev_acc_tracking():
     return []
 
 
-def track_accumulation(매집결과, 가격맵):
-    """매집 레이더가 잡은 종목의 이후 경로를 추적한다(강세 추적과 동일 규칙)."""
+def track_accumulation(매집결과, 가격맵, 지수종가=None):
+    """매집 레이더가 잡은 종목의 이후 경로를 추적한다(강세 추적과 동일 규칙).
+
+    🆕 2026-08-24 HO 지시 — 두 가지를 강세 레이더와 똑같이 맞춘다.
+      ① **구간성적 스냅샷** — 경과가 정확히 5·20·60·120일이 되는 그날의
+         등락률을 고정 기록한다.
+         ⚠️ 왜 필요한가: '이후등락'은 매일 덮어써지는 **오늘 기준** 값이다.
+            나중에 "D+20 성적"을 알려면 그때 값을 남겨두는 수밖에 없다.
+            사후 계산은 불가능하다(지난 가격을 다시 알 방법이 없다).
+      ② **벤치마크(코스피)** — 같은 기간 지수가 얼마나 움직였는지 함께 남긴다.
+         ⚠️ 왜 필요한가: 시장이 -5% 빠진 구간에서 -3%면 **이긴 것**이다.
+            벤치마크 없이 -3%만 보여주면 독자가 정반대로 읽는다.
+    """
     추적 = _load_prev_acc_tracking()
     맵 = {t.get("종목명"): t for t in 추적}
 
@@ -1508,6 +1525,19 @@ def track_accumulation(매집결과, 가격맵):
         if 현재 and t.get("포착가"):
             t["현재가"] = 현재["현재가"]
             t["이후등락"] = round((현재["현재가"] - t["포착가"]) / t["포착가"] * 100, 2)
+        # 같은 기간 코스피 등락 — 포착일 지수를 저장해뒀다가 매일 갱신
+        if 지수종가 and t.get("포착지수"):
+            try:
+                t["지수등락"] = round((지수종가 - t["포착지수"]) / t["포착지수"] * 100, 2)
+            except Exception:
+                pass
+        # 구간성적 고정 기록 (가격을 못 받은 날은 건너뛴다 — 0으로 채우면 오염)
+        if isinstance(t.get("이후등락"), (int, float)):
+            for _n in TRACK_SNAPSHOTS:
+                if t["경과"] == _n:
+                    t.setdefault("구간성적", {})[f"D{_n}"] = t["이후등락"]
+                    if isinstance(t.get("지수등락"), (int, float)):
+                        t.setdefault("구간지수", {})[f"D{_n}"] = t["지수등락"]
 
     오늘목록 = []
     for 키 in ("종목", "중기종목"):
@@ -1524,7 +1554,9 @@ def track_accumulation(매집결과, 가격맵):
             continue
         새 = {"종목명": nm, "시장": s.get("시장") or "코스피", "코드": s.get("코드"),
              "포착일": DATE, "포착가": 가, "현재가": 가,
-             "이후등락": 0.0, "경과": 0, "유형": s.get("유형")}
+             "이후등락": 0.0, "경과": 0, "유형": s.get("유형"),
+             "포착지수": 지수종가, "지수등락": 0.0,
+             "구간성적": {}, "구간지수": {}}
         추적.append(새); 맵[nm] = 새; 새로 += 1
 
     남김 = [t for t in 추적 if t.get("경과", 0) <= ACC_TRACK_DAYS]
@@ -1881,7 +1913,69 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
             "5일등락률": round(등락5, 2) if 등락5 is not None else None,
             "장기등락률": round(등락20, 2) if 등락20 is not None else None,
             "최장기등락률": round(등락60, 2) if 등락60 is not None else None,
+            # 🆕 2026-08-24 — 오늘치 한 줄을 stock_flow_history.json에 적재하기 위해
+            #    최신일(0번째) 값을 그대로 넘긴다. **추가 요청 0회**(이미 받은 값).
+            "오늘외국인": round(외[0], 1), "오늘기관": round(기[0], 1),
             "일수": len(외)}
+
+
+SFH_FILE = "stock_flow_history.json"
+SFH_보관 = 90        # 며칠치를 들고 있을지(거래일). 60일 판정에 여유 30일.
+
+
+def update_stock_flow_history(유니버스결과):
+    """종목별 일별 외국인·기관 순매수를 영구 누적한다.
+
+    🆕 2026-08-24 HO 지시 — 「60일 안에 이만한 매집이 처음인가」를 판정하려면
+       **종목별·일별 수급 원본**이 있어야 한다. 지금은 그날 조건을 통과한 종목의
+       합산만 저장해서, 임의 구간의 최댓값을 되짚을 수가 없었다.
+
+    ⚠️ 왜 지금 당장 심어야 하나 — 이건 **코드가 아니라 시간이 만드는 데이터**다.
+       오늘 안 심으면 60거래일이 그대로 뒤로 밀린다. 사후 복원도 불가능하다.
+    ⚠️ 수집 요청은 **0회 늘어난다.** 매집 스캔이 이미 받아온 값을 저장만 한다.
+    ⚠️ 크기: 180종목 × 2숫자 × 90일 ≈ 수백 KB. 감당 가능하다.
+    ⚠️ daily.yml의 git add 목록에 이 파일이 있어야 매일 유지된다.
+       빠지면 매일 초기화되어 영영 안 쌓인다.
+
+    구조: {"종목": {종목명: {"YYYYMMDD": [외국인억, 기관억]}}, "날짜들": [...]}
+    """
+    본체 = {"meta": {"설명": "종목별 일별 외국인·기관 순매수(억원). 매집 차수 판정용.",
+                    "스키마버전": 1}, "종목": {}, "날짜들": []}
+    try:
+        with io.open(SFH_FILE, encoding="utf-8") as f:
+            옛 = json.load(f)
+        if isinstance(옛, dict) and isinstance(옛.get("종목"), dict):
+            본체["종목"] = 옛["종목"]
+            본체["날짜들"] = [d for d in (옛.get("날짜들") or []) if isinstance(d, str)]
+    except FileNotFoundError:
+        print("   🌱 stock_flow_history.json 신규 생성 — 오늘부터 적재 시작")
+    except Exception as e:
+        print(f"   ⚠️ stock_flow_history 읽기 실패({type(e).__name__}) — 새로 시작")
+
+    적재 = 0
+    for nm, 외, 기 in 유니버스결과:
+        if not nm:
+            continue
+        본체["종목"].setdefault(nm, {})[DATE] = [외, 기]
+        적재 += 1
+
+    if DATE not in 본체["날짜들"]:
+        본체["날짜들"].append(DATE)
+    본체["날짜들"] = sorted(set(본체["날짜들"]))[-SFH_보관:]
+    살릴 = set(본체["날짜들"])
+    # 보관 기간 밖 날짜는 잘라낸다(파일이 무한히 커지지 않게)
+    for nm in list(본체["종목"]):
+        본체["종목"][nm] = {d: v for d, v in 본체["종목"][nm].items() if d in 살릴}
+        if not 본체["종목"][nm]:
+            del 본체["종목"][nm]
+
+    try:
+        with io.open(SFH_FILE, "w", encoding="utf-8") as f:
+            json.dump(본체, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   💾 종목별 수급 이력 {적재}종목 적재 "
+              f"(누적 {len(본체['날짜들'])}거래일 · {len(본체['종목'])}종목)")
+    except Exception as e:
+        print(f"   ⚠️ stock_flow_history 저장 실패 — {type(e).__name__}: {e}")
 
 
 def collect_accumulation_radar():
@@ -1952,12 +2046,17 @@ def collect_accumulation_radar():
     중기목록 = []
     장기목록 = []
     실패 = 0
+    _수급적재 = []   # 🆕 2026-08-24 — 조건 통과 여부와 무관하게 **전 종목** 저장
+    #  ⚠️ 조건을 통과한 종목만 저장하면 "60일 안에 이만한 매집이 있었나"를
+    #     판정할 수 없다. 비교 대상이 되려면 안 잡힌 날도 있어야 한다.
     for 이름, 코드, 시장, 시총 in 유니버스:
         time.sleep(ACC_SLEEP)      # ⚠️ 차단 방지 — 빼지 말 것
         flow = _fetch_investor_flow(코드)
         if not flow:
             실패 += 1
             continue
+        if isinstance(flow.get("오늘외국인"), (int, float)):
+            _수급적재.append((이름, flow["오늘외국인"], flow.get("오늘기관") or 0))
         외전체, 기전체 = flow["외국인"], flow["기관"]
         외, 기 = 외전체[:ACC_DAYS], 기전체[:ACC_DAYS]        # 단기 = 최근 5일
         외일수 = sum(1 for v in 외 if v > 0)
@@ -2083,6 +2182,12 @@ def collect_accumulation_radar():
         상위 = 중기목록[0]
         print(f"🏗️ 중기(20일) 매집 {len(중기목록)}종목 — 1위 {상위['종목명']} "
               f"{상위['합산']:,.0f}억 (시총대비 {상위['시총대비']}%)")
+    # 🆕 종목별 일별 수급 적재 — 실패해도 매집 레이더는 그대로 나간다.
+    try:
+        update_stock_flow_history(_수급적재)
+    except Exception as e:
+        print(f"   ⚠️ 종목별 수급 이력 적재 실패({type(e).__name__}) — 무시하고 진행")
+
     return {"종목": 종목, "중기종목": 중기목록, "중기기간": ACC_LONG,
             "장기종목": 장기목록, "장기기간": ACC_LONGEST,
             "장기쌍끌이": ACC_X_BOTH, "장기단독": ACC_X_SOLO,
@@ -2159,7 +2264,7 @@ def _str_excluded(이름):
     return False
 
 
-def collect_strength_radar():
+def collect_strength_radar(지수종가=None):
     """실제 강세 레이더 — 2단 구조.
 
     ── 1단: 오늘 새로 포착 ──
@@ -2337,7 +2442,7 @@ def collect_strength_radar():
             print(f"   1위 {t['종목명']} 점수 {t['강세점수']} "
                   f"(회전율 {t['회전율']}%, {t['등락률']:+.2f}%, 거래량 {t['배수']}배)")
 
-    추적 = _update_tracking(신규, 가격맵)
+    추적 = _update_tracking(신규, 가격맵, 지수종가)
     # 가격맵을 함께 돌려준다 — 매집 추적이 같은 시세를 재사용해야 추가 요청이 0이다.
     return {"신규": 신규, "추적": 추적, "_가격맵": 가격맵}
 
@@ -2357,7 +2462,7 @@ def _load_prev_tracking():
         return []
 
 
-def _update_tracking(신규, 가격맵):
+def _update_tracking(신규, 가격맵, 지수종가=None):
     """포착 이후 추적표를 갱신한다.
 
     · 기존 추적 종목: 경과일 +1, 현재가 갱신 → 포착 이후 등락률 계산
@@ -2379,10 +2484,18 @@ def _update_tracking(신규, 가격맵):
         #   ⚠️ 나중에 "D+20 성적"을 알려면 그때의 값을 남겨둬야 한다.
         #      지금 값(이후등락)은 계속 변하므로 사후 계산이 불가능하다.
         #   ⚠️ 가격을 못 받은 날은 건너뛴다 — 0으로 채우면 통계가 오염된다.
+        # 🆕 2026-08-24 — 벤치마크(같은 기간 코스피)도 함께 남긴다.
+        if 지수종가 and t.get("포착지수"):
+            try:
+                t["지수등락"] = round((지수종가 - t["포착지수"]) / t["포착지수"] * 100, 2)
+            except Exception:
+                pass
         if t.get("이후등락") is not None:
             for _n in TRACK_SNAPSHOTS:
                 if t["경과"] == _n:
                     t.setdefault("구간성적", {})[f"D{_n}"] = t["이후등락"]
+                    if isinstance(t.get("지수등락"), (int, float)):
+                        t.setdefault("구간지수", {})[f"D{_n}"] = t["지수등락"]
 
     # 2) 오늘 포착 종목 반영
     for 시장, 목록 in 신규.items():
@@ -2396,6 +2509,7 @@ def _update_tracking(신규, 가격맵):
                 기존.update({"차수": 차수, "경과": 0,
                             "포착일": DATE, "포착가": s["현재가"],
                             "현재가": s["현재가"], "이후등락": 0.0,
+                            "포착지수": 지수종가, "지수등락": 0.0, "구간지수": {},
                             "구간성적": {},                       # 기준이 바뀌었으니 초기화
                             "유형들": s.get("유형들") or []})
                 s["재점화"] = 차수
@@ -2404,6 +2518,7 @@ def _update_tracking(신규, 가격맵):
                 새 = {"종목명": s["종목명"], "시장": 시장, "코드": s.get("코드"),
                      "포착일": DATE, "포착가": s["현재가"], "현재가": s["현재가"],
                      "이후등락": 0.0, "경과": 0, "차수": 1,
+                     "포착지수": 지수종가, "지수등락": 0.0, "구간지수": {},
                      # 🆕 어느 기법으로 잡혔는지 남긴다 — 나중에 기법별 성적 비교의 근거
                      "유형들": s.get("유형들") or [],
                      "구간성적": {}}
@@ -3177,12 +3292,19 @@ if __name__ == "__main__":
     update_flow_history(지수수급, 파생)
     등락수 = collect_updown_counts()
     update_market_history(지수수급, 파생, 게이지, 등락수)
-    강세레이더 = collect_strength_radar()
+    # 🆕 2026-08-24 — 포착 성적의 **벤치마크**로 쓸 오늘 코스피 종가.
+    #    문자열("6,696.96")로 들어오므로 숫자로 바꾼다. 실패하면 None(벤치마크 생략).
+    try:
+        _코스피종가 = float(str(((지수수급.get("지수") or {}).get("코스피") or {})
+                              .get("종가") or "").replace(",", ""))
+    except Exception:
+        _코스피종가 = None
+    강세레이더 = collect_strength_radar(_코스피종가)
     _가격맵 = 강세레이더.pop("_가격맵", {}) or {}
     매집레이더 = collect_accumulation_radar()
     # 매집 종목도 강세와 똑같이 그 뒤 경로를 추적한다(포착 항로 수급편의 재료).
     try:
-        매집레이더["추적"] = track_accumulation(매집레이더, _가격맵)
+        매집레이더["추적"] = track_accumulation(매집레이더, _가격맵, _코스피종가)
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
