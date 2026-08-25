@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-b1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-c1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1045,11 +1045,22 @@ def build_radar(강세레이더, 설정=None):
                         and "V자 반등 종목" in _유들) else "")
             # 🆕 2026-08-25 — 심층편 강세 레이더에도 기업분석을 붙인다.
             _이름, _칸 = sc_click(s['종목명'], None, 13)
+            # 🆕 2026-08-25 HO 지시 — 「돈이 몰림」·「V자 반등」이 둘 다 뜨면
+            #    **한 줄에 같이** 나와야 한다.
+            #    ⚠️ 원인: 이름+배지를 한 <p>에 다 넣고 flex-wrap만 걸었더니,
+            #       폭이 되는 대로 끊겨서 배지 하나는 이름 줄에 붙고
+            #       나머지는 다음 줄로 따로 밀렸다(줄바꿈이 배지 '그룹'을 안 지켰다).
+            #    [고침] 이름 줄과 배지 줄을 **아예 분리한 두 개의 <p>**로 만든다.
+            #       그러면 배지들은 항상 자기들끼리 한 줄(모자라면 자기들끼리만 줄바꿈)이라
+            #       이름과 섞여 끊기는 일이 없다.
+            _배지줄 = f'<p class="rd-badges">{유형HTML}{재HTML}{폭발}</p>' \
+                if (유형HTML or 재HTML or 폭발) else ""
             return f"""
       <div class="rd-row">
         <span class="rd-rank">{rank}</span>
         <div class="rd-info">
-          <p class="rd-name">{_이름}{유형HTML}{재HTML}{폭발}</p>
+          <p class="rd-name">{_이름}</p>
+          {_배지줄}
           <p class="rd-meta">회전율 {s.get('회전율','—')}% · 거래량 전일 <b>{s.get('배수','—')}배</b>
             · 거래대금 {_fmt_eok(s.get('거래대금'))} · 시총 {_fmt_eok(s.get('시총'))}{_궤적}</p>
           {_칸}
@@ -9724,7 +9735,9 @@ html{{scroll-behavior:smooth}}
 .rd-row:last-child{{border-bottom:none}}
 .rd-rank{{font-size:13px;font-weight:800;color:#c9c1b0;font-style:italic;width:20px;flex-shrink:0;text-align:center}}
 .rd-info{{flex:1;min-width:0}}
-.rd-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
+.rd-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0}}
+/* 🆕 2026-08-25 — 유형 배지 전용 줄. 이름과 분리해 배지끼리만 줄바꿈한다. */
+.rd-badges{{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:4px 0 0}}
 .rd-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
 .rd-new{{background:#FAECE7;color:#993C1D}} .rd-stay{{background:#FAEEDA;color:#854F0B}}
 .rd-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
