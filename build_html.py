@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.24-e1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.24-h1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1122,6 +1122,90 @@ def _acc_star_names(매집):
 _AC_SEQ = [0]
 
 
+# ══════════════════════════════════════════════════════════════
+# 🔁 매집 이력 — 차수 · 연속 등판 (2026-08-24 신설, HO 지시)
+# ══════════════════════════════════════════════════════════════
+#  HO 질문: "각 종목마다 최근 60일 안에 이런 매집이 있었는지 체크해서
+#            1차 매집 / 2차 매집 라벨을 붙이면 분별이 되지 않을까?"
+#  → 가능하다. 새 수집이 필요 없다. archive/data_*.json에 날짜별 매집 목록이
+#    그대로 있어서, 종목별로 '언제 잡혔는지'를 되짚기만 하면 된다.
+#
+#  ⚠️ 왜 유용한가 — 같은 "매집 포착"도 성격이 전혀 다르다.
+#     · 1차 = 처음 잡힌 자리. 신선하지만 검증 안 됨.
+#     · 2차 이상 = 쉬었다가 다시 모으는 자리. 앞선 매집이 소화된 뒤라
+#       "한 번 더 확신을 가진 손"이라는 뜻이 된다.
+#     이걸 안 나누면 둘이 같은 줄에 섞여서 판단 재료가 안 된다.
+#
+#  ⚠️ 구간을 어떻게 끊나 — 하루 이틀 빠졌다고 새 매집이 아니다.
+#     ACC_차수_공백 거래일 이상 안 잡히면 그때 '다음 차수'로 센다.
+ACC_이력_창 = 60        # 며칠을 되돌아볼지(거래일)
+ACC_차수_공백 = 5       # 이만큼 연속으로 안 잡히면 별개 매집으로 본다
+_ACC_HIST_CACHE = {}
+
+
+def _accum_history():
+    """{종목명: [등장한 날짜(오래된순)]} — 최근 ACC_이력_창 거래일 기준."""
+    if _ACC_HIST_CACHE:
+        return _ACC_HIST_CACHE
+    이력 = {}
+    try:
+        for 날, d in archive_days(ACC_이력_창):
+            a = d.get("매집레이더")
+            if not isinstance(a, dict):
+                continue
+            본 = set()
+            for k in ("종목", "중기종목", "장기종목"):
+                for x in (a.get(k) or []):
+                    if isinstance(x, dict) and x.get("종목명"):
+                        본.add(x["종목명"])
+            for nm in 본:
+                이력.setdefault(nm, []).append(str(날))
+    except Exception as e:
+        print(f"   ⚠️ 매집 이력 계산 실패 — {type(e).__name__} (배지 없이 진행)")
+        return {}
+    for nm in 이력:
+        이력[nm] = sorted(set(이력[nm]))
+    _ACC_HIST_CACHE.update(이력)
+    return 이력
+
+
+def accum_badge(종목명):
+    """차수 + 연속 등판 배지 HTML. 재료가 없으면 빈 문자열."""
+    이력 = _accum_history()
+    날들 = 이력.get(종목명) or []
+    if not 날들:
+        return ""
+    try:
+        축 = [str(날) for 날, _ in archive_days(ACC_이력_창)]
+    except Exception:
+        return ""
+    축 = sorted(set(축))
+    위치 = {d: i for i, d in enumerate(축)}
+    idx = sorted(위치[d] for d in 날들 if d in 위치)
+    if not idx:
+        return ""
+    # ── 구간 나누기 ──
+    구간 = [[idx[0]]]
+    for a, b in zip(idx, idx[1:]):
+        (구간.append([b]) if b - a > ACC_차수_공백 else 구간[-1].append(b))
+    차수 = len(구간)
+    연속 = 1
+    끝 = 구간[-1]
+    for a, b in zip(끝, 끝[1:]):
+        연속 = 연속 + 1 if b - a == 1 else 1
+    배지 = ""
+    if 차수 >= 2:
+        배지 += (f'<span class="ab ab2">{차수}차 매집</span>')
+    else:
+        배지 += (f'<span class="ab ab1">1차 매집</span>')
+    if 연속 >= 2:
+        배지 += f'<span class="ab abc">🔁 {연속}일 연속</span>'
+    elif len(idx) == 1:
+        배지 += '<span class="ab abn">🆕 오늘 처음</span>'
+    배지 += f'<span class="ab abd">{len(축)}일 기준</span>'
+    return 배지
+
+
 def build_accumulation(매집, 설정=None):
     if not 매집:
         return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
@@ -1165,6 +1249,7 @@ def build_accumulation(매집, 설정=None):
             <p class="ac-name">{s['종목명']}{유형뱃지(s.get('유형',''))}</p>
             <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일
               · 시총 {_fmt_eok(s.get('시총'))}{부가}</p>
+            <p class="ac-badge">{accum_badge(s.get('종목명'))}</p>
           </div>
           {값HTML}
         </div>"""
@@ -3188,7 +3273,13 @@ def build_my_stocks(data):
  function calc(nm,n){
   var r=P.ret[nm]; if(!r) return null;
   var idx=[]; for(var i=0;i<P.days.length;i++){if(r[i]!=null&&P.mkt[i]!=null)idx.push(i);}
-  idx=idx.slice(-n); if(idx.length<2) return {short:true,have:idx.length};
+  idx=idx.slice(-n);
+  /* 🆕 2026-08-24 HO 지적 — 당일 탭에 등락률이 안 나오던 버그.
+     [원인] "2일 미만이면 통계가 안 된다"는 방어가 **당일 탭까지 같이 막고** 있었다.
+            당일은 1일이 정답인데 1개라서 '축적 중'으로 빠졌다.
+     [고침] 필요한 최소 일수를 창 크기에 맞춘다 — 당일은 1일, 나머지는 2일. */
+  var 최소 = (n<=1) ? 1 : 2;
+  if(idx.length<최소) return {short:true,have:idx.length};
   var tc=1,mc=1,w=0;
   idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100); if(r[i]>P.mkt[i])w++;});
   return {ex:(tc-mc)*100, ret:(tc-1)*100, win:w, tot:idx.length};
@@ -3211,7 +3302,10 @@ def build_my_stocks(data):
     right='<div style="text-align:right;flex:none;width:60px">'+
      '<div style="font-size:12.5px;font-weight:800;color:'+col+'">'+fmt(c.ex)+'%p</div>'+
      '<div style="font-size:9.5px;color:#7d848f">'+fmt(c.ret)+'%</div>'+
-     '<div style="font-size:9px;color:#6f7784">'+c.win+'/'+c.tot+'승</div></div>';
+     '<div style="font-size:9px;color:#6f7784">'+
+     /* 🆕 당일(1일)에 "1/1승"은 말이 안 된다. 시장과의 비교로 바꾼다. */
+     (c.tot<=1 ? (c.win? '시장 상회':'시장 하회') : (c.win+'/'+c.tot+'승'))+
+     '</div></div>';
    }else{right='<div style="text-align:right;flex:none;width:60px;font-size:10px;'+
      'color:#6f7784">축적 중</div>';}
    var tags='';
@@ -3346,6 +3440,10 @@ def build_my_stocks(data):
               게다가 5일 표본이면 승패 조합이 몇 가지 안 나와 종목마다 같아 보인다.
        [고침] ① 실제 표본 일수를 그대로 쓴다 ② 10일 미만이면 '표본이 짧다'고 밝힌다 */
     var 창말=(c.tot>=20?'최근 20거래일':'최근 '+c.tot+'거래일');
+    if(c.tot<=1){
+     /* 🆕 당일은 승패를 셀 대상이 아니다. 오늘 얼마 움직였고 시장을 이겼는지만. */
+     분석='오늘 '+fmt(c.ret)+'%, 시장 대비 '+fmt(c.ex)+'%p입니다. ';
+    } else {
     분석=창말+' '+c.win+'승 '+(c.tot-c.win)+'패('+승률.toFixed(0)+'%), 시장 대비 '+
      fmt(c.ex)+'%p입니다. ';
     if(c.tot<10){
@@ -3355,6 +3453,7 @@ def build_my_stocks(data):
        ? (승률>=60?'꾸준히 시장을 이기고 있습니다.':'며칠에 몰아서 번 구간이라 변동이 큽니다.')
        : (승률<=30?'자리 자체가 불리했습니다 — 종목 선택 문제로 보기 어렵습니다.'
                   :'시장에 조금 뒤처지는 흐름입니다.'));
+    }
     }
     if(n2) 분석+=' 오늘 공시가 있으니 내용을 확인해 보세요.';
     else if(n1) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
@@ -5325,6 +5424,162 @@ def _cap_card(일수, 시장):
             f'<svg viewBox="0 0 {W} {H}" preserveAspectRatio="xMidYMid meet" '
             f'style="width:100%;height:auto;display:block">{g}</svg>'
             f'<div style="display:flex;gap:6px;margin-top:5px">{요약}</div>')
+
+
+# ══════════════════════════════════════════════════════════════
+# 🛬 포착 그 후 — 레이더 성능 공시 (2026-08-24 신설, HO 지시)
+# ══════════════════════════════════════════════════════════════
+#  왜 만드나 — 종목을 골라주는 서비스는 널렸지만 **자기 성적을 매일 공개하는
+#  서비스는 없다.** 사람이 하는 채널은 구조적으로 못 한다(틀린 걸 지워야 장사가
+#  되니까). 우리는 지운 적이 없다는 게 상품이다.
+#
+#  ⚠️ 이 숫자가 정확히 무슨 뜻인가 (HO 질문에 대한 답을 코드에 박아둔다)
+#     "D+5 평균 +3.1%" = **5거래일 전에 레이더가 잡은 종목들이,
+#      포착 당일 종가 대비 오늘까지 평균 3.1% 올랐다**는 뜻이다.
+#     · 기준가 = 포착일 종가(추적 데이터의 '포착가')
+#     · 5거래일은 달력이 아니라 **장이 열린 날**로 센다
+#     · 아직 5일이 안 지난 종목은 그 탭 계산에서 빠진다
+#     ⚠️ 구독자는 포착 당일 종가에 살 수 없다. 그래서 이건
+#        "이만큼 벌 수 있었다"가 아니라 **지표 자체의 성능**이다.
+#
+#  ⚠️ 표본이 없으면 지어내지 않는다. 그 탭은 "축적 중 (N일 경과)"만 보여준다.
+# 🆕 2026-08-24 HO 확정 — 탭을 **점(정확히 N일)이 아니라 구간(N~M일)**으로 잡는다.
+#  ⚠️ 왜 구간인가 — 정확히 5일차인 종목만 세면 표본이 하루치(한두 종목)로 쪼그라든다.
+#     그날 시장이 급락했으면 성적 전체가 그 하루에 휘둘린다.
+#     5~10일로 넓히면 표본이 몇 배가 되고, 서로 다른 날에 포착된 종목이 섞여
+#     **특정 하루의 운**이 희석된다.
+#  ⚠️ 대가도 있다 — 5일 보유와 10일 보유가 한 평균에 섞인다. 그래서
+#     **벤치마크(같은 기간 코스피)를 반드시 함께** 보여준다. 보유 기간이
+#     섞여도 "시장보다 나았나"는 그대로 성립하기 때문이다.
+CATCH_WINS = [(5, 10, "5일"), (20, 30, "20일"),
+              (60, 80, "60일"), (120, 160, "120일")]
+CATCH_MIN_표본 = 3
+_MKT_CLOSE_CACHE = {}
+
+
+def _catch_rows(data, key):
+    """추적 목록을 꺼낸다. key = '매집레이더' | '강세레이더'."""
+    tr = ((data.get(key) or {}).get("추적")) or []
+    return [t for t in tr if isinstance(t, dict)
+            and isinstance(t.get("이후등락"), (int, float))
+            and isinstance(t.get("경과"), int)]
+
+
+def _market_close_map():
+    """{YYYYMMDD: 코스피 종가} — market_history.json에서.
+
+    ⚠️ 벤치마크를 여기서 만드는 이유: 추적 데이터에 '포착지수'를 넣기 시작한 건
+       오늘부터라, 그것만 쓰면 당분간 벤치마크가 전부 빈칸이 된다.
+       market_history에는 코스피 종가가 예전부터 쌓여 있어 **소급 계산이 된다.**
+    """
+    if _MKT_CLOSE_CACHE:
+        return _MKT_CLOSE_CACHE
+    try:
+        with open("market_history.json", encoding="utf-8") as f:
+            일별 = (json.load(f) or {}).get("일별") or []
+        for r in 일별:
+            d = str(r.get("날짜") or "").replace("-", "")
+            v = r.get("코스피")
+            if len(d) == 8 and isinstance(v, (int, float)):
+                _MKT_CLOSE_CACHE[d] = float(v)
+    except Exception as e:
+        print(f"   ⚠️ 벤치마크용 지수 이력 읽기 실패 — {type(e).__name__}")
+    return _MKT_CLOSE_CACHE
+
+
+def _bench_for(포착일):
+    """포착일 대비 오늘까지의 코스피 등락(%)."""
+    m = _market_close_map()
+    if not m:
+        return None
+    시작 = m.get(str(포착일))
+    끝 = m.get(max(m))
+    if not 시작 or not 끝:
+        return None
+    return (끝 - 시작) / 시작 * 100
+
+
+def _catch_stat(rows, lo, hi):
+    """경과 lo~hi 거래일 구간 종목들의 성적 + 같은 기간 코스피."""
+    대상 = [t for t in rows if lo <= t.get("경과", -1) <= hi]
+    if len(대상) < CATCH_MIN_표본:
+        남은 = [lo - t["경과"] for t in rows if t.get("경과", 0) < lo]
+        return {"부족": True, "수": len(대상), "대기": len(rows),
+                "곧": min(남은) if 남은 else None}
+    수익 = [t["이후등락"] for t in 대상]
+    벤치들 = [b for b in (_bench_for(t.get("포착일")) for t in 대상)
+             if isinstance(b, (int, float))]
+    승 = sum(1 for x in 수익 if x > 0)
+    평균 = sum(수익) / len(수익)
+    벤치 = (sum(벤치들) / len(벤치들)) if 벤치들 else None
+    best = max(대상, key=lambda t: t["이후등락"])
+    worst = min(대상, key=lambda t: t["이후등락"])
+    return {"부족": False, "수": len(대상), "평균": 평균, "승": 승,
+            "승률": 승 / len(대상) * 100, "벤치": 벤치,
+            "초과": (평균 - 벤치) if 벤치 is not None else None,
+            "최고": (best.get("종목명"), best["이후등락"]),
+            "최저": (worst.get("종목명"), worst["이후등락"])}
+
+
+def _catch_card(rows, lo, hi, 이름):
+    st = _catch_stat(rows, lo, hi)
+    if st["부족"]:
+        곧 = (f' · 가장 빠른 종목이 {st["곧"]}거래일 뒤 들어옵니다'
+             if st.get("곧") is not None else "")
+        return (f'<div class="cg-card"><p class="cg-h">{이름}</p>'
+                f'<p class="cg-empty">축적 중 — {lo}~{hi}거래일 구간에 든 종목 '
+                f'{st["수"]}개(추적 중 {st.get("대기", 0)}종목){곧}</p></div>')
+    c = "#ff6b4a" if st["평균"] >= 0 else "#5b9bff"
+    hn, hv = st["최고"]; ln, lv = st["최저"]
+    if st["초과"] is not None:
+        ec = "#ff6b4a" if st["초과"] >= 0 else "#5b9bff"
+        벤치HTML = (f'<p class="cg-bench">같은 기간 코스피 '
+                   f'<b>{st["벤치"]:+.1f}%</b> · 초과수익 '
+                   f'<b style="color:{ec}">{st["초과"]:+.1f}%p</b></p>')
+    else:
+        벤치HTML = '<p class="cg-bench">벤치마크에 필요한 지수 이력이 부족합니다</p>'
+    return (f'<div class="cg-card"><p class="cg-h">{이름}'
+            f'<span class="cg-n">{st["수"]}종목 · {lo}~{hi}일</span></p>'
+            f'<div class="cg-main"><span class="cg-avg" style="color:{c}">'
+            f'{st["평균"]:+.1f}%</span>'
+            f'<span class="cg-win">승률 {st["승률"]:.0f}% '
+            f'({st["승"]}/{st["수"]})</span></div>'
+            f'{벤치HTML}'
+            f'<p class="cg-ext">🏆 {hn} {hv:+.1f}% · 💀 {ln} {lv:+.1f}%</p></div>')
+
+
+def build_catch_after(data):
+    """강세·매집 두 레이더의 포착 후 성적을 기간 탭으로 보여준다."""
+    매집 = _catch_rows(data, "매집레이더")
+    강세 = _catch_rows(data, "강세레이더")
+    if not 매집 and not 강세:
+        return ""
+    탭, 패널 = "", ""
+    for i, (lo, hi, lab) in enumerate(CATCH_WINS):
+        n = lo
+        켬 = " on" if i == 0 else ""
+        탭 += (f'<span class="cg-tab{켬}" data-n="{n}" '
+               f'onclick="cgWin({n})">{lab}</span>')
+        본문 = (_catch_card(강세, lo, hi, "🔥 불난 자리(강세)")
+              + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)"))
+        패널 += (f'<div class="cg-panel" data-n="{n}" '
+                 f'style="display:{"block" if i == 0 else "none"}">{본문}</div>')
+    return (f'<div class="cg-box"><div class="cg-tabs">{탭}</div>{패널}'
+            f'<p class="cg-note">📌 <b>이 숫자가 뜻하는 것</b> — '
+            f'«5일 +3.1%»는 <b>포착한 지 5~10거래일 된 종목들이 '
+            f'포착가 대비 지금 평균 3.1% 올라 있다</b>는 뜻이에요. '
+            f'딱 5일차만 세면 종목이 한두 개뿐이라 그날 시장에 휘둘려서, '
+            f'구간으로 넓혀 표본을 늘렸어요(20일 탭은 20~30일, 60일 탭은 60~80일). '
+            f'그래서 <b>같은 기간 코스피</b>를 꼭 같이 봐주세요 — '
+            f'시장이 -5%인데 -3%면 진 게 아니라 이긴 거예요. '
+            f'포착은 추천이 아니라 레이더가 걸러낸 자리이고, 이 표는 '
+            f'그 레이더가 잘 작동하는지에 대한 성적표예요. '
+            f'좋게 나오든 나쁘게 나오든 지우지 않습니다.</p></div>'
+            f'<script>function cgWin(n){{'
+            f'document.querySelectorAll(".cg-tab").forEach(function(t){{'
+            f't.classList.toggle("on",t.dataset.n==n);}});'
+            f'document.querySelectorAll(".cg-panel").forEach(function(p){{'
+            f'p.style.display=(p.dataset.n==n)?"block":"none";}});}}</script>')
 
 
 def build_capture_paths():
@@ -8087,6 +8342,7 @@ def build_html(data, report):
     # 구역 추이는 v-l8에서 '섹터 성적표'(핵심편)로 흡수됐다 — 심층편에서는 뺀다.
     _zone_trend_block = ""
     # 포착 항로는 v-m2에서 '기간 탭 × 시장 카드' 하나로 통합됐다.
+    _catch_after_block = build_catch_after(data)   # 🆕 2026-08-24 포착 그 후
 
     # 🆕 2026-08-24 HO 지시 — 「내 관심종목」·「내 종목 브리핑」을 **심층편에서 뺀다.**
     #  ⚠️ 핵심편에 같은 코너가 그대로 있다. 두 편에 나오면 같은 화면을 두 번 보는 셈이고,
@@ -8869,6 +9125,36 @@ html{{scroll-behavior:smooth}}
 /* ── 기간 탭 공통 (오늘·5일·20일·60일) ──
    ⚠️ 코너마다 탭 모양이 제각각이면 같은 기능인 줄 모른다(2026-08-20 지시).
       섹터 성적표·크기별·관심종목·수급 타임라인·매집 레이더가 전부 같은 모양을 쓴다. */
+/* 🆕 2026-08-24 매집 차수·연속 배지 */
+.ac-badge{{margin:2px 0 0;line-height:1.4}}
+.ac-badge:empty{{display:none}}
+.ab{{display:inline-block;font-size:9.5px;font-weight:700;padding:1px 6px;
+  border-radius:999px;margin:2px 3px 0 0;line-height:1.6}}
+.ab1{{background:#16303a;color:#74f0d4}}
+.ab2{{background:#3a2f16;color:#f0c65a}}
+.abc{{background:#2a1f3d;color:#c4a8f7}}
+.abn{{background:#1c2f1c;color:#86efac}}
+.abd{{background:#171c25;color:#6f7784}}
+/* 🆕 2026-08-24 포착 그 후 */
+.cg-box{{background:#0f131a;border:1px solid #1e2531;border-radius:12px;
+  padding:11px 10px;margin:8px 0 14px}}
+.cg-tabs{{display:flex;gap:5px;margin-bottom:9px;flex-wrap:wrap}}
+.cg-tab{{flex:1;min-width:52px;text-align:center;padding:6px 4px;font-size:11.5px;
+  font-weight:700;color:#7d848f;background:#141922;border:1px solid #1e2531;
+  border-radius:7px;cursor:pointer}}
+.cg-tab.on{{color:#0b0e13;background:#f0c65a;border-color:#f0c65a}}
+.cg-card{{background:#141922;border-radius:9px;padding:9px 10px;margin-bottom:7px}}
+.cg-h{{margin:0 0 5px;font-size:12px;font-weight:800;color:#c9ced6;
+  display:flex;justify-content:space-between;align-items:center}}
+.cg-n{{font-size:10px;font-weight:600;color:#6f7784}}
+.cg-main{{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}}
+.cg-avg{{font-size:20px;font-weight:900;letter-spacing:-.5px}}
+.cg-win{{font-size:11px;color:#8d949f;font-weight:600}}
+.cg-bench{{margin:4px 0 0;font-size:10.5px;color:#8d949f;line-height:1.5}}
+.cg-ext{{margin:5px 0 0;font-size:10px;color:#7d848f;line-height:1.5}}
+.cg-empty{{margin:0;font-size:10.5px;color:#6f7784;line-height:1.5}}
+.cg-note{{margin:8px 0 0;padding:7px 9px;background:#141922;border-radius:7px;
+  font-size:10px;color:#8d949f;line-height:1.65}}
 .sb-tab,.zt-tab,.ms-tab,.fs-ptab,.ac-tab{{
   flex:1;text-align:center;font-size:11.5px;font-weight:800;padding:.42rem .2rem;
   border-radius:8px;background:#0d1118;border:1px solid #1e2531;color:#7d848f;
@@ -9268,8 +9554,9 @@ html{{scroll-behavior:smooth}}
   <p class="sec-label" id="acc"><small>매집 레이더</small><span class="cp-turtle">🐢</span> 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
-  {hide("포착성적", f'''<p class="sec-label"><small>포착 종목 성적</small>🛬 레이더는 잘 잡았나</p>
-  {build_capture_paths()}''')}
+  <p class="sec-label"><small>포착 그 후</small>🛬 레이더는 잘 잡았나</p>
+  {_catch_after_block}
+  {hide("포착성적", f'''{build_capture_paths()}''')}
 
   {hide("그들은뭐라했나", f'''<p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
   {build_briefings(해석.get('마감브리핑'))}''')}
