@@ -13,7 +13,7 @@ import time      # ⚠️ 배포 확인 대기(wait_until_live) — 2026-08-24
 import requests
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.25-g1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.26-b1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
 DATE = datetime.now().strftime("%Y%m%d")
 REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
                if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
