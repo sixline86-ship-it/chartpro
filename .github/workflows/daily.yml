@@ -59,10 +59,23 @@ on:
         options:
           - '보냄 (정식 발행)'
           - '보내지 않음 (테스트)'
+      ignore_holiday:
+        description: '휴장·장중에도 발행 (모바일 화면 확인용)'
+        type: choice
+        # 🆕 2026-08-24 HO 지시 — 주말·공휴일·장중에도 화면을 보고 싶다.
+        # ⚠️ 기본은 'no'다. 이 옵션은 **수동 실행에서만** 고를 수 있고,
+        #    자동(cron) 실행에는 아예 전달되지 않아 가드가 그대로 작동한다.
+        # ⚠️ 'yes'로 켤 때는 「해석글: 재사용」을 함께 고르세요.
+        #    장중 데이터로 과금 생성을 하면 그날 archive가 엉터리 글로 덮여
+        #    되돌리려면 마감 후 다시 과금해야 합니다.
+        default: 'no'
+        options:
+          - 'no'
+          - 'yes'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   schedule:
-    - cron: '20 9 * * 1-5'    # KST 18:20  ← 1차 (본 발행)
+    - cron: '10 9 * * 1-5'    # KST 18:10  ← 1차 (본 발행, HO 지시 2026-08-25)
     - cron: '45 9 * * 1-5'    # KST 18:45  ← 2차 (1차가 안 깨면)
     - cron: '15 10 * * 1-5'   # KST 19:15  ← 3차
     - cron: '45 10 * * 1-5'   # KST 19:45  ← 4차 (최후 보루)
@@ -164,11 +177,23 @@ jobs:
       #   collect_data.py가 거래대금·등락종목수로 사후 판정해 HOLIDAY_FLAG를 남긴다.
       #   ⚠️ 반드시 **해석글 생성(과금) 앞에** 둔다.
       # ══════════════════════════════════════════════════════════
+      # 🆕 2026-08-24 HO 지시 — 휴장·장중에도 **수동 실행이면** 발행하게 한다.
+      #   [WHY] 모바일에서 화면을 확인하려면 주말·장중에도 페이지가 있어야 한다.
+      #   ⚠️ 자동 실행(cron)에서는 가드가 그대로 작동한다. 무시 옵션은
+      #      **사람이 직접 누른 경우에만** 켤 수 있다. 실수로 엉터리 데이터가
+      #      구독자에게 나가는 사고는 그대로 막힌다.
+      #   ⚠️ 이때는 「해석글 재사용」을 쓰는 게 안전하다. 장중 데이터로 과금
+      #      생성을 하면 그날 archive가 엉터리 글로 덮인다(복구하려면 재과금).
       - name: 휴장 여부 확인
         id: holiday
         if: steps.guard.outputs.run == 'yes'
         run: |
-          if [ -f "HOLIDAY_FLAG" ]; then
+          if [ -f "HOLIDAY_FLAG" ] && [ "${{ github.event.inputs.ignore_holiday }}" = "yes" ]; then
+            echo "closed=no" >> "$GITHUB_OUTPUT"
+            echo "⚠️ 휴장으로 판단됐지만 '휴장 무시'가 켜져 있어 그대로 진행합니다"
+            echo "   사유: $(cat HOLIDAY_FLAG)"
+            echo "   ⚠️ 화면 확인용입니다. 이 데이터는 정식 발행분이 아닙니다."
+          elif [ -f "HOLIDAY_FLAG" ]; then
             echo "closed=yes" >> "$GITHUB_OUTPUT"
             echo "reason=$(cat HOLIDAY_FLAG)" >> "$GITHUB_OUTPUT"
             echo "🚨 휴장으로 판단 — 이후 단계를 모두 건너뜁니다: $(cat HOLIDAY_FLAG)"
