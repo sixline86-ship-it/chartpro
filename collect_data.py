@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.25-g1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.26-b1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3186,6 +3186,240 @@ def collect_market_halts():
     return 찾음
 
 
+# ══════════════════════════════════════════════════════════════
+# 🏢 기업 프로필 — 개요 + 재무 (2026-08-25 신설)
+# ══════════════════════════════════════════════════════════════
+#  왜 만드나 (HO 기획)
+#    레이더가 "이 종목이 잡혔습니다"까지만 말하면 독자는 네이버로 나간다.
+#    종목명을 누르면 **뭐 하는 회사인지 · 돈은 버는지**가 그 자리에서 끝나야 한다.
+#
+#  ⚠️ 왜 '검색'이 아니라 '캐시'인가
+#     리포트는 서버 없는 정적 HTML이다. 사용자가 종목을 치는 순간
+#     DART에 물어볼 방법이 없다. 그래서 **발행할 때 미리 만들어 심어둔다.**
+#     API 키를 HTML에 넣는 방법은 소스 보기로 다 새므로 절대 안 쓴다.
+#
+#  ⚠️ 3,600종목을 매일 만들 수는 없다. 그런데 만들 필요도 없다 —
+#     회사 개요는 거의 안 바뀌고 재무는 분기에 한 번 바뀐다.
+#     그래서 **하루 조금씩 쌓아 캐시를 불린다.** 오늘 심으면 몇 달 뒤 대부분이 찬다.
+#       ① 오늘 레이더에 잡힌 종목 (독자가 지금 궁금해할 종목)
+#       ② 남는 할당량은 시총 상위부터 순번대로 (관심종목 등록 대비)
+#
+#  ⚠️ 샌드박스에서 DART가 403이라 **실측 검증을 못 했다.**
+#     실패해도 아무 일도 안 일어나는 형태로만 만든다. 첫 실행 후 로그 확인.
+_유니버스_캐시 = {}          # collect_account_grid가 채운다(프로필이 참조)
+PROFILE_FILE = "stock_profile.json"
+CORPMAP_FILE = "corp_map.json"
+PROFILE_하루할당 = 25        # 하루에 새로 채울 종목 수(요청 폭증 방지)
+PROFILE_재무갱신일 = 80      # 이 일수가 지나면 재무를 다시 받는다(분기 주기)
+PROFILE_SLEEP = 0.12
+
+
+def _load_json(path, 기본):
+    try:
+        with io.open(path, encoding="utf-8") as f:
+            v = json.load(f)
+        return v if isinstance(v, type(기본)) else 기본
+    except Exception:
+        return 기본
+
+
+def build_corp_map():
+    """종목명 → DART 고유번호(corp_code) 지도. **한 번 만들면 계속 쓴다.**
+
+    ⚠️ DART는 종목코드가 아니라 자기네 고유번호로만 조회를 받는다.
+       corpCode.xml은 ZIP으로 내려오고 전 종목이 들어 있어 한 번만 받으면 된다.
+    ⚠️ 상장사만 남긴다(stock_code가 있는 것). 비상장까지 넣으면 동명이인이 생긴다.
+    """
+    지도 = _load_json(CORPMAP_FILE, {})
+    if 지도.get("_종목수", 0) > 2000:
+        return 지도
+    if not DART_KEY:
+        return 지도
+    try:
+        r = requests.get("https://opendart.fss.or.kr/api/corpCode.xml",
+                         params={"crtfc_key": DART_KEY}, timeout=30)
+        if r.status_code != 200 or len(r.content) < 1000:
+            print(f"   ⚠️ corpCode 실패 — HTTP {r.status_code}")
+            return 지도
+        import zipfile
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        xml = zf.read(zf.namelist()[0]).decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"   ⚠️ corpCode 예외 — {type(e).__name__}")
+        return 지도
+    새 = {}
+    for m in re.finditer(r"<list>(.*?)</list>", xml, re.S):
+        블록 = m.group(1)
+        def _g(tag):
+            mm = re.search(rf"<{tag}>(.*?)</{tag}>", 블록, re.S)
+            return (mm.group(1) or "").strip() if mm else ""
+        코드 = _g("stock_code")
+        이름 = _g("corp_name")
+        고유 = _g("corp_code")
+        if 코드 and 이름 and 고유:
+            새[clean_name(이름)] = 고유
+    if len(새) < 1000:
+        print(f"   ⚠️ corpCode 파싱 결과가 이상합니다({len(새)}건) — 저장하지 않음")
+        return 지도
+    새["_종목수"] = len(새)
+    try:
+        with io.open(CORPMAP_FILE, "w", encoding="utf-8") as f:
+            json.dump(새, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   🗂️ 기업 고유번호 지도 생성 — {len(새) - 1}개 상장사")
+    except Exception as e:
+        print(f"   ⚠️ corp_map 저장 실패 — {type(e).__name__}")
+    return 새
+
+
+def _dart_company(고유):
+    """기업개황 — 업종·설립일·홈페이지."""
+    try:
+        r = requests.get("https://opendart.fss.or.kr/api/company.json",
+                         params={"crtfc_key": DART_KEY, "corp_code": 고유}, timeout=12)
+        d = r.json()
+        if d.get("status") != "000":
+            return None
+        return {"업종": d.get("induty_code"), "설립": d.get("est_dt"),
+                "대표": d.get("ceo_nm"), "홈": d.get("hm_url")}
+    except Exception:
+        return None
+
+
+def _dart_finance(고유, 연도, 보고서="11011"):
+    """단일회사 주요계정 — 매출·영업이익·순이익·자산·부채.
+
+    ⚠️ 보고서 코드: 11011 사업(연간) / 11012 반기 / 11013 1분기 / 11014 3분기
+    ⚠️ 연결(CFS)을 우선하고 없으면 개별(OFS). 지주사는 연결이라야 실체가 보인다.
+    """
+    try:
+        r = requests.get("https://opendart.fss.or.kr/api/fnlttSinglAcnt.json",
+                         params={"crtfc_key": DART_KEY, "corp_code": 고유,
+                                 "bsns_year": str(연도), "reprt_code": 보고서},
+                         timeout=12)
+        d = r.json()
+        if d.get("status") != "000":
+            return None
+    except Exception:
+        return None
+
+    def _pick(계정, 구분):
+        for it in d.get("list", []):
+            if it.get("fs_div") != 구분:
+                continue
+            nm = (it.get("account_nm") or "").replace(" ", "")
+            if 계정 in nm:
+                v = (it.get("thstrm_amount") or "").replace(",", "")
+                try:
+                    return int(v)
+                except Exception:
+                    return None
+        return None
+
+    for 구분 in ("CFS", "OFS"):          # 연결 우선
+        매출 = _pick("매출액", 구분)
+        if 매출 is None:
+            continue
+        return {"구분": "연결" if 구분 == "CFS" else "개별",
+                "매출": 매출,
+                "영업이익": _pick("영업이익", 구분),
+                "순이익": _pick("당기순이익", 구분),
+                "자산": _pick("자산총계", 구분),
+                "부채": _pick("부채총계", 구분),
+                "자본": _pick("자본총계", 구분)}
+    return None
+
+
+def _profile_targets(레이더종목들, 유니버스):
+    """오늘 채울 종목 순번을 정한다.
+
+    ⚠️ 우선순위 — ① 오늘 레이더에 잡힌 종목(독자가 지금 궁금해함)
+                   ② 캐시가 없는 시총 상위 종목(관심종목 등록 대비)
+                   ③ 재무가 오래된 종목(분기 갱신)
+    """
+    캐시 = _load_json(PROFILE_FILE, {})
+    오늘 = []
+    본 = set()
+    for nm in 레이더종목들:
+        if nm and nm not in 본:
+            본.add(nm)
+            오늘.append(nm)
+    # 시총 순으로 아직 없는 것 채우기
+    순 = sorted(유니버스.items(), key=lambda kv: kv[1].get("순위") or 99999)
+    for nm, _ in 순:
+        if len(오늘) >= PROFILE_하루할당 * 3:
+            break
+        if nm in 본 or nm in 캐시:
+            continue
+        본.add(nm)
+        오늘.append(nm)
+    # 오래된 재무 갱신
+    for nm, v in 캐시.items():
+        if len(오늘) >= PROFILE_하루할당 * 4:
+            break
+        if nm in 본:
+            continue
+        try:
+            d0 = datetime.strptime(str(v.get("갱신일") or "20000101"), "%Y%m%d")
+            if (datetime.strptime(DATE, "%Y%m%d") - d0).days >= PROFILE_재무갱신일:
+                본.add(nm)
+                오늘.append(nm)
+        except Exception:
+            pass
+    return 오늘, 캐시
+
+
+def collect_stock_profiles(레이더종목들, 유니버스):
+    """기업 프로필 캐시를 조금씩 불린다. 실패해도 리포트는 그대로 나간다."""
+    if not DART_KEY:
+        print("   ⚠️ DART_API_KEY 없음 — 기업 프로필 건너뜀")
+        return {}
+    지도 = build_corp_map()
+    if len(지도) < 100:
+        print("   ⚠️ 기업 고유번호 지도가 비어 프로필을 건너뜁니다")
+        return _load_json(PROFILE_FILE, {})
+
+    대상, 캐시 = _profile_targets(레이더종목들, 유니버스)
+    올해 = int(DATE[:4])
+    채움 = 0
+    for nm in 대상:
+        if 채움 >= PROFILE_하루할당:
+            break
+        고유 = 지도.get(nm)
+        if not 고유:
+            continue
+        기존 = 캐시.get(nm) or {}
+        # 개요는 한 번만 받는다(거의 안 바뀐다)
+        개요 = 기존.get("개요")
+        if not 개요:
+            time.sleep(PROFILE_SLEEP)
+            개요 = _dart_company(고유)
+        # 재무 — 최근 5개 연도. 이미 받은 연도는 다시 안 받는다.
+        연도별 = dict(기존.get("연도별") or {})
+        for y in range(올해 - 1, 올해 - 6, -1):
+            if str(y) in 연도별:
+                continue
+            time.sleep(PROFILE_SLEEP)
+            fin = _dart_finance(고유, y)
+            if fin:
+                연도별[str(y)] = fin
+            if len(연도별) >= 5:
+                break
+        if not 개요 and not 연도별:
+            continue
+        캐시[nm] = {"개요": 개요, "연도별": 연도별,
+                    "시총": (유니버스.get(nm) or {}).get("시총"),
+                    "갱신일": DATE}
+        채움 += 1
+
+    try:
+        with io.open(PROFILE_FILE, "w", encoding="utf-8") as f:
+            json.dump(캐시, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   🏢 기업 프로필 {채움}종목 갱신 (누적 {len(캐시)}종목)")
+    except Exception as e:
+        print(f"   ⚠️ stock_profile 저장 실패 — {type(e).__name__}")
+    return 캐시
+
+
 def collect_marketcap_universe(pages=GRID_시총페이지):
     """코스피·코스닥 전 종목의 (종목명 → 시총·등락률)을 모아 시총 순위를 매긴다.
 
@@ -3280,6 +3514,9 @@ def collect_account_grid(테마후보):
     테마후보: collect_themes_and_gauge()가 모은 [(테마명, 번호, 등락률), ...] 전체 목록
     """
     유니버스 = collect_marketcap_universe()
+    # 🆕 2026-08-25 — 기업 프로필이 시총 순위를 써야 해서 전역에 남긴다.
+    global _유니버스_캐시
+    _유니버스_캐시 = 유니버스
     if not 유니버스:
         print("⚠️ 시총 유니버스 수집 실패 — 격자 생략")
         return {}
@@ -3576,6 +3813,26 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+
+    # 🆕 2026-08-25 — 기업 프로필 캐시(종목명 클릭 시 펼쳐질 재료).
+    #  ⚠️ 오늘 레이더에 잡힌 종목을 최우선으로 채우고, 남는 할당량은
+    #     시총 상위부터 순번대로 미리 채워 둔다(관심종목 등록 대비).
+    #  ⚠️ 실패해도 리포트는 그대로 나간다.
+    try:
+        _레이더명 = []
+        for _k in ("신규",):
+            for _mk, _lst in ((강세레이더.get(_k) or {}) or {}).items():
+                for _x in (_lst or []):
+                    if isinstance(_x, dict) and _x.get("종목명"):
+                        _레이더명.append(_x["종목명"])
+        for _k in ("종목", "중기종목", "장기종목"):
+            for _x in (매집레이더.get(_k) or []):
+                if isinstance(_x, dict) and _x.get("종목명"):
+                    _레이더명.append(_x["종목명"])
+        _프로필 = collect_stock_profiles(_레이더명, _유니버스_캐시 or {})
+    except Exception as e:
+        print(f"   ⚠️ 기업 프로필 실패({type(e).__name__}) — 무시하고 진행")
+        _프로필 = {}
     # 🧭 군중 나침반 — 실패해도 None만 돌아오고 파이프라인은 계속된다.
     try:
         군중나침반 = collect_crowd_compass()
@@ -3590,6 +3847,8 @@ if __name__ == "__main__":
         "공시": 공시,
         # 🆕 2026-08-25 — 1단계는 저장만. 화면은 DART_날짜_ON=True일 때.
         "공시날짜": 공시날짜,
+        # 🆕 2026-08-25 — 종목 클릭 시 펼쳐질 기업 프로필(개요+재무).
+        "기업프로필": _프로필,
         "지수수급": 지수수급,
         "주도섹터": 테마결과.get("주도섹터", []),
         "관제지수": 게이지,
