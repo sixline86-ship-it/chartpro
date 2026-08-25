@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-b1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.26-c1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -95,6 +95,19 @@ def read_html_safe(html_text):
 # ① DART 공시
 # ============================================================
 def collect_dart():
+    """오늘의 공시 목록.
+
+    🆕 2026-08-25(실전 사고) — 이 함수 하나가 **리포트 전체를 끌고 내려갔다.**
+       원인 둘:
+         ① timeout이 없어 DART가 느리면 무한정 기다렸다
+            (실측: 2분 18초 만에 겨우 ConnectTimeout으로 실패)
+         ② 이 함수가 __main__ 맨 **첫 줄**에서 호출되는데 try/except가 없어서,
+            공시(리포트 20개 코너 중 하나일 뿐) 하나가 막히면 지수·섹터·강세·
+            매집·기업분석까지 **나머지 전부가 통째로 실패**했다.
+       ⚠️ 원칙: 없어도 되는 코너 때문에 있어야 하는 코너까지 죽으면 안 된다.
+       [고침] timeout 추가 + 실패하면 빈 목록으로 **조용히 넘어간다.**
+              (다른 DART 함수들이 이미 쓰는 것과 같은 패턴)
+    """
     if not DART_KEY:
         print("⚠️ DART_API_KEY 없음 → 공시 수집 건너뜀")
         return []
@@ -102,7 +115,11 @@ def collect_dart():
     url = "https://opendart.fss.or.kr/api/list.json"
     params = {"crtfc_key": DART_KEY, "bgn_de": DATE, "end_de": DATE,
               "page_no": "1", "page_count": "100"}
-    data = requests.get(url, params=params).json()
+    try:
+        data = requests.get(url, params=params, timeout=15).json()
+    except Exception as e:
+        print(f"   ⚠️ 공시 수집 실패({type(e).__name__}) — 공시 없이 리포트를 계속 만듭니다")
+        return []
 
     별점룰북 = [
         (5, ["무상증자", "자기주식소각"]),
@@ -298,7 +315,8 @@ def _dart_unzip_text(content):
 def collect_index_and_flow():
     def 지수():
         url = "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ"
-        res = requests.get(url, headers=HEADERS).json()
+        # 🆕 2026-08-25 — timeout 추가(빠른 실패). DART 사고와 같은 이유.
+        res = requests.get(url, headers=HEADERS, timeout=12).json()
         out = {}
         for i, item in enumerate(res["datas"]):
             # 거래대금 관련 필드를 폭넓게 탐색 (API 필드명이 버전마다 다름)
@@ -331,7 +349,8 @@ def collect_index_and_flow():
 
     def 수급(sosok):
         url = "https://finance.naver.com/sise/investorDealTrendDay.naver"
-        res = requests.get(url, headers=HEADERS, params={"bizdate": DATE, "sosok": sosok, "page": "1"})
+        res = requests.get(url, headers=HEADERS,
+                            params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
         res.encoding = "euc-kr"
         tables = read_html_safe(res.text)
         표 = tables[0]
@@ -400,7 +419,7 @@ def collect_themes_and_gauge():
     중복 = set()
 
     for page in range(1, 8):
-        res = requests.get(url_list, headers=HEADERS, params={"page": page})
+        res = requests.get(url_list, headers=HEADERS, params={"page": page}, timeout=12)
         res.encoding = "euc-kr"
         soup = BeautifulSoup(res.text, "html.parser")
         links = soup.select("table.type_1 a[href*='sise_group_detail']")
@@ -447,7 +466,10 @@ def collect_themes_and_gauge():
     분석 = []
     for 테마명, 번호, 테마등락 in 후보20:
         detail_url = "https://finance.naver.com/sise/sise_group_detail.naver"
-        dres = requests.get(detail_url, headers=HEADERS, params={"type": "theme", "no": 번호})
+        # 🆕 2026-08-25 — 이 호출은 테마 수만큼(최대 수십 번) 반복된다.
+        #    timeout이 없으면 한 번의 지연이 전체 수집 시간을 몇 분씩 늘릴 수 있다.
+        dres = requests.get(detail_url, headers=HEADERS,
+                             params={"type": "theme", "no": 번호}, timeout=10)
         dres.encoding = "euc-kr"
         try:
             tables = read_html_safe(dres.text)
