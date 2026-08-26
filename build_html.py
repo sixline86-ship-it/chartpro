@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-k1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-k3"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -2204,16 +2204,21 @@ def build_core_strong(강세레이더):
         #    ⚠️ 배지는 짧게 쓴다 — 카드 자체가 종목 목록이라 "종목"은 중복이고,
         #       320px에서 이름이 길면 줄바꿈으로 카드가 지저분해진다.
         _배지명 = {"돈이 몰린 종목": "💰 돈이 몰림", "V자 반등 종목": "📈 V자 반등"}
-        _유형색 = {"돈이 몰린 종목": "#f0c65a", "V자 반등 종목": "#74f0d4"}
+        # 🆕 2026-08-26 (2차) HO 지적 — 심층편 레이더는 **밝은 배경**이라
+        #    금색(#f0c65a)·민트(#74f0d4)가 흰 바탕에 묻혀 글자가 안 읽혔다.
+        #    ⚠️ 핵심편(어두운 배경)과 같은 색을 쓰면 한쪽이 반드시 죽는다 —
+        #       이 파일에서 세 번 반복된 실수다. 심층편 전용으로 **더 짙은 색**을 쓴다.
+        _유형색 = {"돈이 몰린 종목": "#a97400", "V자 반등 종목": "#0f8a76"}
         # ⚠️ 한 종목이 두 유형에 동시에 걸릴 수 있다(독립 판정). 배지를 모두 단다.
         _유들 = s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
         if _유들:
             # 🆕 2026-08-26 HO 지시 — 배경 제거, 같은 색 테두리 2px.
             뱃지 = "".join(
-                f'<span style="font-size:9px;font-weight:700;'
+                # 글자를 9 → 10.5px로 키우고 테두리 투명도도 조금 올린다(66→99).
+                f'<span style="font-size:10.5px;font-weight:800;'
                 f'color:{_유형색.get(t,"#8b93a0")};background:none;'
-                f'border:1px solid {_유형색.get(t,"#8b93a0")}66;border-radius:5px;'
-                f'padding:1px 5px;margin-right:4px;white-space:nowrap">'
+                f'border:1px solid {_유형색.get(t,"#8b93a0")}99;border-radius:5px;'
+                f'padding:2px 7px;margin-right:4px;white-space:nowrap">'
                 f'{_배지명.get(t, t)}</span>' for t in _유들) + 뱃지
         # ⚠️ 등락률은 V자 반등에서 **음수일 수 있다.** 색을 나눈다.
         _등색 = "#ff6b4a" if (등 or 0) >= 0 else "#5b9bff"
@@ -2240,9 +2245,13 @@ def build_core_strong(강세레이더):
             f'<div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">'
             f'<span style="font-size:10.5px;color:#8b93a0">{s.get("시장","")}</span>'
             f'{_이름}'
-            f'<b style="font-size:13px;color:{_등색}">{등문}</b>{뱃지}</div>'
-            f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
-            f'{_본문}</p>{_칸}</div>')
+            f'<b style="font-size:13px;color:{_등색}">{등문}</b></div>'
+            # 🆕 2026-08-26 HO 지시 — 배지를 종목명과 같은 줄에 두면 폭이 되는
+            #    대로 끊겨 흩어진다. **다음 줄에 나란히** 놓는다.
+            + (f'<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">'
+               f'{뱃지}</div>' if 뱃지 else '')
+            + (f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
+            f'{_본문}</p>{_칸}</div>'))
 
     return (f'<div style="background:linear-gradient(160deg,#2b1a16,#241713);'
             f'border:1.5px solid #5a3229;border-radius:14px;'
@@ -2251,7 +2260,7 @@ def build_core_strong(강세레이더):
             f'<p style="margin:0 0 3px;font-size:11.5px;color:#ff6b4a;font-weight:700">'
             f'강세 레이더</p>'
             f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
-            f'<span class="cp-flame">🔥</span> 오늘 갑자기 불이 붙은 종목</p>'
+            f'<span class="cp-flame">🔥</span> 오늘 강한 종목</p>'
             # 🆕 2026-08-22 HO 지시 — "2종목만 보여드려요" 배지 제거.
             #    유료판에서는 심층편이 바로 아래 있어 굳이 안내할 이유가 없다.
             f'{"".join(행들)}'
@@ -3535,7 +3544,78 @@ def build_my_stocks(data):
                                "금액": _flow_amt(_기["v"])}
     except Exception:
         _맥락 = {}
-    이름배열JS += "window.CP_MARKET=" + json.dumps(_맥락, ensure_ascii=False) + ";" 
+    이름배열JS += "window.CP_MARKET=" + json.dumps(_맥락, ensure_ascii=False) + ";"
+
+    # 🆕 2026-08-26 HO 지시 — 「반도체를 샀는데 못 가는 크기의 종목을 들고 있었다」.
+    #  [WHY] 섹터가 올라도 그 안에서 대형만 갔으면 중소형을 든 사람은 소외된다.
+    #        섹터만 말하면 "자리는 좋았는데 왜 나만"이 설명되지 않는다.
+    #        strata_history.json에 층별 등락이 이미 매일 쌓이고 있어 새 수집이 없다.
+    #  ⚠️ 층 이름은 P.stocks[nm][2]가 주는 값(대형·중형·소형)과 같아야 매칭된다.
+    _층오늘 = {}
+    try:
+        _sh = load_json("strata_history.json") or []
+        if isinstance(_sh, list) and _sh:
+            _last = _sh[-1]
+            if str(_last.get("날짜") or "") == str(data.get("날짜") or DATE):
+                for _k in ("대형", "중형", "소형"):
+                    if isinstance(_last.get(_k), (int, float)):
+                        _층오늘[_k] = round(float(_last[_k]), 2)
+    except Exception as e:
+        print(f"   ⚠️ 층별 성적 읽기 실패 — {type(e).__name__}")
+        _층오늘 = {}
+    이름배열JS += "window.CP_STRATA=" + json.dumps(_층오늘, ensure_ascii=False) + ";"
+
+    # 🆕 종목별 외국인·기관 일별 순매수 — 「기사가 없어도 남는 단서」
+    #  ⚠️ 기사가 거의 안 나오는 중소형주일수록 이게 유일한 재료다.
+    #  ⚠️ 쌓이는 만큼 그대로 쓴다(오늘은 1일치, 60일 뒤엔 60일치).
+    #     모자란 날을 0으로 채우지 않는다 — 없는 날은 없는 것이다.
+    _종목수급 = {}
+    try:
+        _sfh = load_json("stock_flow_history.json") or {}
+        _날들 = [d for d in (_sfh.get("날짜들") or []) if str(d) <= str(DATE)][-10:]
+        for _nm, _rec in (_sfh.get("종목") or {}).items():
+            _seq = []
+            for _d in _날들:
+                _v = _rec.get(_d)
+                if isinstance(_v, list) and len(_v) >= 2:
+                    _seq.append([f"{str(_d)[4:6]}/{str(_d)[6:]}",
+                                 round(float(_v[0] or 0), 1), round(float(_v[1] or 0), 1)])
+            if _seq:
+                _종목수급[_nm] = _seq
+    except Exception as e:
+        print(f"   ⚠️ 종목별 수급 읽기 실패 — {type(e).__name__}")
+        _종목수급 = {}
+    이름배열JS += "window.CP_SFLOW=" + json.dumps(_종목수급, ensure_ascii=False) + ";"
+    print(f"   💰 종목별 수급 {len(_종목수급)}종목 (쌓인 거래일 {len(_날들) if '_날들' in dir() else 0}일)")
+
+    # 🆕 레이더에 잡힌 이력 — 「이번이 3번째」는 우리만 아는 정보다
+    #  ⚠️ 오늘은 빼고 «과거에 몇 번»만 센다. 오늘 잡힌 사실은 이미 위에서 말한다.
+    _레이더이력 = {}
+    try:
+        for _ymd, _dd in archive_days(60):
+            if str(_ymd) >= str(DATE):
+                continue
+            _lab = f"{str(_ymd)[4:6]}/{str(_ymd)[6:]}"
+            # ⚠️ 두 레이더의 저장 구조가 다르다.
+            #    매집레이더 = {"종목":[...]} · 강세레이더 = {"신규":{"코스피":[...],"코스닥":[...]}}
+            _acc = (_dd.get("매집레이더") or {})
+            for _s in (_acc.get("종목") or []):
+                _n = (_s or {}).get("종목명")
+                if _n:
+                    _레이더이력.setdefault(_n, []).append([_lab, "매집"])
+            _신규 = ((_dd.get("강세레이더") or {}).get("신규") or {})
+            for _mk in ("코스피", "코스닥"):
+                for _s in (_신규.get(_mk) or []):
+                    _n = (_s or {}).get("종목명")
+                    if _n:
+                        _레이더이력.setdefault(_n, []).append([_lab, "강세"])
+        for _n in _레이더이력:
+            _레이더이력[_n] = _레이더이력[_n][-6:]      # 최근 6회만
+    except Exception as e:
+        print(f"   ⚠️ 레이더 이력 읽기 실패 — {type(e).__name__}")
+        _레이더이력 = {}
+    이름배열JS += "window.CP_RHIST=" + json.dumps(_레이더이력, ensure_ascii=False) + ";"
+    print(f"   📡 레이더 이력 {len(_레이더이력)}종목")
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
@@ -3632,12 +3712,44 @@ def build_my_stocks(data):
   idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100); if(r[i]>P.mkt[i])w++;});
   return {ex:(tc-mc)*100, ret:(tc-1)*100, win:w, tot:idx.length};
  }
+
+ /* 🆕 2026-08-26 HO 지시 — 등록 목록에 **체크박스**를 넣고, 체크한 종목끼리만
+    그래프·평균에 넣는다(섹터 성적표와 같은 방식).
+    [WHY] 10종목을 다 등록하면 선이 10개라 아무것도 안 보인다. 오늘 궁금한
+          2~3개만 켜고 시장과 비교할 수 있어야 이 코너가 쓸모 있어진다.
+    ⚠️ 선택 상태는 이 기기에만 저장한다(서버로 안 보낸다). 등록 목록과 같은 원칙.
+    ⚠️ 등록은 했는데 체크가 하나도 없으면 **전부 켠 것으로 본다** — 새로 등록한
+       사람이 빈 그래프를 보고 고장으로 오해하는 걸 막는다. */
+ var SK='chartpro_mysel';
+ function getSel(){
+  try{var v=JSON.parse(localStorage.getItem(SK)||'[]');return Array.isArray(v)?v:[];}
+  catch(e){return [];}
+ }
+ function setSel(v){try{localStorage.setItem(SK,JSON.stringify(v));}catch(e){}}
+ /* 실제로 그래프에 넣을 종목 — 체크된 것만. 하나도 없으면 전부. */
+ function selected(){
+  var my=get(), sel=getSel().filter(function(n){return my.indexOf(n)>=0;});
+  return sel.length?sel:my.slice();
+ }
+ /* 🔴 저장된 선택이 비어 있으면 «전부 켬»을 뜻한다. 그 상태에서 하나를 끄려면
+    빈 배열에서 빼는 게 아니라 **지금 켜져 있는 목록(selected())에서 빼야** 한다.
+    빈 배열을 그대로 조작해 «끄기»가 «켜기»로 뒤집히는 버그가 있었다. */
+ window.msToggleSel=function(nm){
+  var cur=selected(), i=cur.indexOf(nm);
+  if(i>=0) cur.splice(i,1); else cur.push(nm);
+  /* 전부 끄면 «전부 켬»과 구분이 안 된다 — 마지막 하나는 못 끄게 한다. */
+  if(!cur.length) return;
+  setSel(cur); render();
+ };
+ window.msSelAll=function(){ setSel([]); render(); };
  function render(){
   var my=get(), box=document.getElementById('ms-list');
   if(!my.length){box.innerHTML='<p style="margin:14px 0;font-size:12px;color:#7d848f;'+
    'text-align:center">위에 종목을 입력하면 구역과 시장 대비 성적을 보여드립니다</p>';
-   document.getElementById('ms-sum').innerHTML=''; return;}
-  var html='', exs=[];
+   document.getElementById('ms-sum').innerHTML='';
+   var _hd0=document.getElementById('ms-selbar'); if(_hd0)_hd0.innerHTML='';
+   return;}
+  var html='', exs=[], _sel=selected();
   my.forEach(function(nm){
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,curW);
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
@@ -3645,7 +3757,9 @@ def build_my_stocks(data):
      'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')||
      '<span style="font-size:10px;color:#6f7784">지도 미분류</span>';
    var right='';
-   if(c&&!c.short){exs.push(c.ex);
+   if(c&&!c.short){
+    /* 평균도 체크된 것만 — 그래프와 숫자가 다른 집합이면 서로를 못 믿는다. */
+    if(_sel.indexOf(nm)>=0) exs.push(c.ex);
     var col=c.ex>=0?'#ff6b4a':'#5b9bff';
     /* 🆕 2026-08-24 HO 지적 — "당일 수익률이 다 이상하다".
        [원인] 숫자는 맞았다. **순서**가 문제였다. 큰 글씨가 초과수익(%p)이라
@@ -3676,8 +3790,18 @@ def build_my_stocks(data):
     'style="display:block;font-size:10.5px;color:#e0c060;margin-top:3px;text-decoration:none">'+
     '📄 '+g.t+(g.s?' ('+'★'.repeat(g.s)+')':'')+'</a>';});
    /* 🆕 2026-08-25 — 종목명을 누르면 기업분석이 아래로 펼쳐진다. */
-   html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c">'+
-    '<div style="display:flex;align-items:flex-start;gap:8px">'+
+   var _on=selected().indexOf(nm)>=0;
+   /* 체크박스는 <input>이 아니라 span이다 — 리포트 전체가 정적 HTML이라
+      폼 상태를 다시 그릴 때마다 초기화되는 문제를 피한다. */
+   var _cb='<span onclick="msToggleSel(\\''+nm+'\\')" style="flex:none;width:19px;'+
+    'height:19px;margin-top:1px;border-radius:5px;cursor:pointer;display:flex;'+
+    'align-items:center;justify-content:center;font-size:12px;font-weight:900;'+
+    (_on?'background:#8fd0e8;color:#0b0e13;border:1px solid #8fd0e8"'
+        :'background:transparent;color:transparent;border:1px solid #3d4550"')+
+    ' title="그래프에 넣기">✓</span>';
+   html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c;'+
+    (_on?'':'opacity:.55')+'">'+
+    '<div style="display:flex;align-items:flex-start;gap:8px">'+_cb+
     '<div style="flex:1;min-width:0">'+
     '<div style="font-size:13px;font-weight:800;color:#e8eaee">'+
     /* 🆕 2026-08-25 — 등록 목록에서는 뺐다(브리핑에만 둔다). 두 곳에 있으면
@@ -3693,7 +3817,21 @@ def build_my_stocks(data):
              등록 목록은 '지우기·성적' 자리라 링크가 있으면 칸만 길어진다. */
     '</div>'+right+'</div></div>';
   });
-  box.innerHTML=html; drawChart(my); drawBrief(my); if(window.cpFire)cpFire();
+  /* 🆕 그래프·브리핑·평균은 **체크된 종목만** 대상으로 한다. */
+  var pick=selected();
+  box.innerHTML=html; drawChart(pick); drawBrief(pick); if(window.cpFire)cpFire();
+  /* 몇 개를 보고 있는지 항상 알려준다. 안 그러면 "왜 선이 줄었지?"가 된다. */
+  var _hd=document.getElementById('ms-selbar');
+  if(_hd){
+   _hd.innerHTML = my.length<2 ? '' :
+    ('<span style="font-size:10.5px;color:#7d848f">그래프에 '+
+     '<b style="color:#8fd0e8">'+_sel.length+'개</b> / 등록 '+my.length+'개</span>'+
+     /* 버튼은 하나면 충분하다. 전부 켜진 상태에서는 아예 감춘다. */
+     (_sel.length===my.length?'':
+      '<span onclick="msSelAll()" style="font-size:10px;color:#8fd0e8;'+
+      'border:1px solid #2b4655;border-radius:99px;padding:3px 10px;cursor:pointer">'+
+      '전체 보기</span>'));
+  }
   var s=document.getElementById('ms-sum');
   if(exs.length){var avg=exs.reduce(function(a,b){return a+b;},0)/exs.length;
    var col=avg>=0?'#ff6b4a':'#5b9bff';
@@ -3917,6 +4055,106 @@ def build_my_stocks(data):
         ⚠️ 예전엔 단서가 없어도 "시장 흐름을 따라갔을 가능성이 큽니다"를 덧붙였는데,
            바로 위 '왜 올랐나/내렸나' 문장이 이미 같은 말을 하고 있어 중복이었다. */
      if(볼것.length) 분석+=' '+볼것[0]+'.';
+
+    }
+    /* ══════════════════════════════════════════════════
+       🆕 2026-08-26 HO 지시 — 「뉴스가 거의 안 나온다」의 구조적 해결.
+       [진단] RSS 3사는 대형주·시장 기사만 쓴다. 중소형주는 기사가 아예 없어
+              기간을 늘려도 0은 0이다. **뉴스를 더 긁는 방향으로는 안 풀린다.**
+       [해법] 매일 100% 채워지는 재료를 앞에 세운다 —
+              ① 자리(섹터) 대비 ② 크기(시총 층) 대비 ③ 종목 수급 ④ 레이더 이력
+       ⚠️ 없는 건 만들지 않는다. 각 블록은 재료가 있을 때만 나온다.
+       ══════════════════════════════════════════════════ */
+    var _add=[], _자리말함=false;
+
+    /* ① 자리 대비 — "내 종목이 못 간 게 종목 탓인가 자리 탓인가" */
+    var _z=null;
+    if(window.CP_SECT_TODAY) (m[0]||[]).forEach(function(z){
+     var v=window.CP_SECT_TODAY[z];
+     if(v===undefined||v===null) return;
+     if(_z===null||Math.abs(v)>Math.abs(_z.v)) _z={z:z,v:v};
+    });
+    /* ⚠️ calc()는 {ex,ret,win,tot}만 준다 — today 필드는 없다.
+       오늘 등락률은 창을 1로 준 calc(nm,1).ret가 정답이다. */
+    var _c1=calc(nm,1);
+    var _ret=(_c1&&!_c1.short&&_c1.ret!==undefined&&_c1.ret!==null)?_c1.ret:null;
+    if(_z&&_ret!==null){
+     var _gap=_ret-_z.v;
+     if(Math.abs(_gap)>=1.5){
+      _add.push('🗺️ <b>'+_z.z+'</b>'+_josa(_z.z,'은는')+' '+fmt(_z.v)+'%였는데 이 종목은 '+
+       fmt(_ret)+'%예요 — '+(_gap<0
+         ? '<b style="color:#ff9a3c">자리는 좋았는데 이 종목만 못 따라갔어요</b>'
+         : '<b style="color:#74f0d4">자리보다 더 갔어요 — 종목 자체의 힘이에요</b>'));
+      _자리말함=true;
+     }else{
+      _add.push('🗺️ <b>'+_z.z+'</b> '+fmt(_z.v)+'% · 이 종목 '+fmt(_ret)+
+       '% — <b>자리와 거의 같이 움직였어요</b>');
+      _자리말함=true;
+     }
+    }
+
+    /* ② 크기 대비 — HO 지시: "반도체를 샀는데 못 가는 크기의 종목을 들고 있었다"
+       [WHY] 같은 섹터를 사도 그 안에서 대형만 갔으면 중소형을 든 사람은 소외된다.
+             섹터만 말하면 "자리는 좋았는데 왜 나만"이 끝까지 설명되지 않는다. */
+    var _st=window.CP_STRATA||{}, _my층=(m[2]||'');
+    if(_my층&&_st[_my층]!==undefined){
+     var _best=null;
+     ['대형','중형','소형'].forEach(function(k){
+      if(_st[k]===undefined) return;
+      if(_best===null||_st[k]>_st[_best]) _best=k;
+     });
+     if(_best&&_best!==_my층&&(_st[_best]-_st[_my층])>=0.8){
+      _add.push('📏 오늘은 <b>'+_best+'주</b>가 '+fmt(_st[_best])+'%로 갔고 <b>'+_my층+
+       '주</b>는 '+fmt(_st[_my층])+'%였어요 — <b style="color:#ff9a3c">같은 자리를 샀어도 '+
+       '크기 때문에 소외될 수 있는 날</b>이었어요');
+     }else if(_best===_my층){
+      _add.push('📏 오늘은 <b>'+_my층+'주</b>가 '+fmt(_st[_my층])+
+       '%로 가장 잘 갔어요 — <b>크기는 유리한 쪽</b>이었어요');
+     }
+    }
+
+    /* ③ 종목 수급 — 기사가 없는 중소형주일수록 유일하게 남는 단서.
+       ⚠️ 쌓인 만큼만 말한다. 모자란 날을 0으로 채우지 않는다. */
+    var _sf=(window.CP_SFLOW||{})[nm];
+    if(_sf&&_sf.length){
+     var _f=0,_g=0,_last=_sf[_sf.length-1];
+     _sf.forEach(function(r){_f+=r[1];_g+=r[2];});
+     var _단=function(v){var a=Math.abs(v);
+      return (a>=10000?(v/10000).toFixed(2)+'조':Math.round(v).toLocaleString()+'억');};
+     var _합=_f+_g;
+     var _일수=_sf.length;
+     var _문='💰 최근 '+_일수+'거래일 외국인 <b>'+(_f>=0?'+':'')+_단(_f)+
+       '</b> · 기관 <b>'+(_g>=0?'+':'')+_단(_g)+'</b>';
+     /* 연속 매수/매도는 이틀 이상 쌓여야 말이 된다. */
+     if(_일수>=2){
+      var _n=0,_dir=null;
+      for(var i=_sf.length-1;i>=0;i--){
+       var v=_sf[i][1]+_sf[i][2], d=v>0?1:(v<0?-1:0);
+       if(d===0) break;
+       if(_dir===null) _dir=d; else if(d!==_dir) break;
+       _n++;
+      }
+      if(_n>=2) _문+=' · <b>'+_n+'일 연속 '+(_dir>0?'순매수':'순매도')+'</b>';
+     }else{
+      _문+=' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
+     }
+     if(Math.abs(_합)>=50||_일수>=2) _add.push(_문);
+    }
+
+    /* ④ 레이더 이력 — 「이번이 3번째」는 우리 기록만 아는 정보다. */
+    var _rh=(window.CP_RHIST||{})[nm];
+    if(_rh&&_rh.length){
+     var _days=[],_kinds={};
+     _rh.forEach(function(r){ if(_days.indexOf(r[0])<0)_days.push(r[0]); _kinds[r[1]]=1;});
+     var _kn=Object.keys(_kinds).join('·');
+     _add.push('📡 예전에도 <b>'+_kn+' 레이더</b>에 <b>'+_days.length+'번</b> 잡혔어요 ('+
+      _days.slice(-3).join(', ')+(_days.length>3?' 외':'')+')');
+    }
+
+    if(_add.length){
+     분석+='<span style="display:block;margin-top:6px;padding:8px 10px;'+
+      'background:#141922;border-radius:8px;font-size:11px;color:#a8b0ba;'+
+      'line-height:1.75">'+_add.join('<br>')+'</span>';
     }
     // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
     //    당일·5일·20일·60일을 다 계산해 **가장 인상적인 창**을 골라 덧붙인다.
@@ -3947,7 +4185,10 @@ def build_my_stocks(data):
      });
      /* 🔴 2026-08-26 수정 — 위 «볼 것»이 이미 같은 구역·같은 숫자를 말한 날에
         여기서 또 말해 한 카드 안에서 같은 문장이 두 번 나왔다(원칙 4). */
-     if(best&&Math.abs(best.v)>=2&&!_구역말함)
+     /* 🔴 2026-08-26 — 위 🗺️ 블록이 이미 «섹터 N% vs 이 종목 N%»를 말한다.
+        여기서 또 «소속 구역 …이 오늘 N%로 움직인 점도» 를 쓰면 한 카드 안에서
+        같은 숫자를 세 번 읽게 된다(원칙 4). 🗺️가 떴으면 침묵한다. */
+     if(best&&Math.abs(best.v)>=2&&!_구역말함&&!_자리말함)
       분석+=' 소속 구역 <b>'+best.z+'</b>'+_josa(best.z,'이가')+' 오늘 <b>'+fmt(best.v)+'%</b>로 움직인 점도 함께 보세요.';
     }
    }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
@@ -4499,6 +4740,9 @@ def build_my_stocks(data):
             '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '내 종목은 시장을 이기고 있나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
+            # 🆕 2026-08-26 — 체크 개수 표시 + 전체/기본 버튼 자리
+            '<div id="ms-selbar" style="display:flex;justify-content:space-between;'
+            'align-items:center;margin:8px 0 2px;min-height:0"></div>'
             '<div id="ms-list"></div>'
             # ⚠️ 관심종목은 이 기기에만 저장된다. 기기를 바꾸거나 앱 캐시를 지우면
             #    사라진다(브라우저 사양이라 코드로 못 막는다).
@@ -4517,11 +4761,10 @@ def build_my_stocks(data):
             '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
             '<b style="color:#9aa0aa">%p</b>는 코스피보다 얼마나 더 벌었나입니다. '
             '아래 작은 숫자는 실제 수익률, 그 아래는 그 기간 코스피를 이긴 날의 수입니다.<br>'
-            '<b style="color:#8fd0e8">파란 태그</b>가 그 종목이 속한 구역입니다. '
-            '한 종목이 두 구역에 걸치면 <b style="color:#9aa0aa">오늘 더 세게 움직인 구역</b>이 앞에 옵니다.<br>'
+            '<b style="color:#8fd0e8">파란 태그</b>가 그 종목이 속한 섹터입니다. '
+            '한 종목이 두 섹터에 걸치면 <b style="color:#9aa0aa">오늘 더 세게 움직인 섹터</b>가 앞에 옵니다.<br>'
             '<b style="color:#9aa0aa">내 종목 평균</b>은 모든 종목을 같은 금액씩 샀다고 가정한 값입니다. '
             '실제 보유 비중은 받지 않으므로 참고용입니다.<br>'
-            f'📰 뉴스와 📄 공시는 <b style="color:#9aa0aa">오늘</b> 그 종목이 언급된 것만 붙습니다.'
             '</p></details></div>' + JS
             + '<script>' + 이름배열JS + """
 /* 자체 자동완성 (datalist 대체)
@@ -5218,7 +5461,11 @@ def build_sector_ladder():
     # 🆕 2026-08-22 — 우여백 300은 과했다. 선이 좌우로 짜부라져 흐름이 안 보였다.
     #    viewBox를 넓혀(680→980) **그래프 폭은 넉넉히 두고** 오른쪽 이름 자리만 얹는다.
     # 🆕 2026-08-22 — 이름 자리를 줄이고(300→252) 좌우 여백도 좁혀 선을 더 벌린다.
-    W, 좌여백, 우여백 = 1020, 40, 296
+    # 🆕 2026-08-26 HO 지시 — 섹터명 글자를 31→40으로 키웠더니
+    #    «전력·신재생·원전» 같은 긴 이름이 오른쪽으로 잘렸다.
+    #    ⚠️ 우여백만 늘리면 그래프 폭이 줄어 선이 짜부라진다.
+    #       **viewBox(W)를 같이 넓혀** 그래프 폭은 유지하고 이름 자리만 더 준다.
+    W, 좌여백, 우여백 = 1180, 40, 452
     가용폭 = W - 좌여백 - 우여백
     x간격 = (가용폭 / (len(사용일) - 1)) if len(사용일) > 1 else 0
     # 🆕 2026-08-22 — 날짜·그래프가 위 문장에 붙어 보인다는 지적으로 더 내린다.
@@ -5245,7 +5492,9 @@ def build_sector_ladder():
     #    순위가 1·2·3위로 붙으면 끝점 y도 15.5px 간격이라 선 3개가 겹쳐 보인다.
     #    → **라벨 위치를 먼저 확정하고, 선의 끝점도 그 위치로 끌어올린다.**
     #      선과 라벨이 같은 높이에서 만나므로 어느 선이 어느 섹터인지도 명확해진다.
-    라벨높이 = 46
+    # 🆕 2026-08-26 HO 지시 — 오늘(마지막) 쪽 선·라벨이 붙어 읽기 어렵다.
+    #    라벨 글자를 키우면 필요한 세로 간격도 같이 커져야 겹치지 않는다.
+    라벨높이 = 62
     코스.sort(key=lambda t: t[3])
     for i in range(1, len(코스)):
         if 코스[i][3] - 코스[i - 1][3] < 라벨높이:
@@ -5280,7 +5529,10 @@ def build_sector_ladder():
             #    선의 오르내림이 이미 같은 정보를 보여주고 있어 숫자가 중복이었다.
             #    섹터명만 남기니 라벨이 훨씬 깔끔하고 크게 보인다.
             f'<text x="{lx+16:.0f}" y="{끝y:.0f}" dominant-baseline="central" '
-            f'font-size="31" font-weight="800" fill="{col}">{nm}</text>')
+            # 🆕 2026-08-26 HO 지시 — 섹터명이 너무 작다. 31 → 40.
+            #    ⚠️ SVG가 화면 폭에 맞춰 축소되므로 viewBox 기준 숫자를 키워야
+            #       실제 화면에서 커진다.
+            f'font-size="40" font-weight="800" fill="{col}">{nm}</text>')
 
     날짜라벨 = "".join(
         f'<text x="{좌여백 + i * x간격:.0f}" y="46" text-anchor="middle" font-size="22" '
