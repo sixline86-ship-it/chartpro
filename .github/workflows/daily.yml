@@ -128,9 +128,16 @@ jobs:
             if grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null; then
               INCOMPLETE=yes
             fi
+            # 🆕 2026-08-26 — 승계본(전날 해석글)으로 발행된 날은 **아직 끝난 게 아니다.**
+            #   뒤 회차가 진짜 해석글을 만들어 덮어써야 하므로 다시 돌린다.
+            #   inherit_report.py가 남긴 "승계원본" 필드로 판정한다.
+            if grep -q '"승계원본"' "archive/report_${TODAY}.json" 2>/dev/null; then
+              INCOMPLETE=yes
+              echo "🔁 오늘 해석글이 **전날 승계본**입니다 — 진짜 해석글로 다시 시도합니다."
+            fi
             if [ "$INCOMPLETE" = "yes" ]; then
               echo "run=yes" >> $GITHUB_OUTPUT
-              echo "🔁 이미 발행됐지만 **데이터가 미완**이라 다시 만듭니다(수급 확정 반영)."
+              echo "🔁 이미 발행됐지만 **미완(데이터 또는 승계본)**이라 다시 만듭니다."
             else
               echo "run=no" >> $GITHUB_OUTPUT
               echo "⏭️ 오늘 해석글까지 정상 완료된 발행이 이미 있습니다. 이번 시도는 건너뜁니다."
@@ -240,6 +247,29 @@ jobs:
             echo "⏰ 자동 실행 — 정식 발행 (Claude 생성 + 텔레그램 발송)"
           fi
 
+      # ── ②-b 해석글 승계 (2026-08-26 신설) ──
+      #   오늘 해석글이 없으면 **직전 거래일 글을 그대로 승계**한다.
+      #   [WHY] 예전엔 해석글이 없으면 텔레그램·index.html이 통째로 막혀
+      #         하루가 비었다. 숫자·표는 전부 정상인데도 그랬다.
+      #         발행은 하되, 화면에 "○/○ 글"이라고 반드시 밝힌다.
+      #   ⚠️ 오늘 해석글이 이미 있으면 스크립트가 스스로 아무것도 하지 않는다.
+      #   ⚠️ 승계본에는 "승계원본" 필드가 박혀, 위 가드가 뒤 회차에서
+      #      진짜 해석글로 덮어쓰도록 다시 돌린다.
+      - name: 해석글 승계 (없으면 전날 글)
+        id: inherit
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        continue-on-error: true
+        run: python inherit_report.py | tee /tmp/inherit.log
+      - name: 승계 여부 판정
+        id: inherit_check
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        run: |
+          if grep -q "inherited=yes" /tmp/inherit.log 2>/dev/null; then
+            echo "done=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "done=no" >> "$GITHUB_OUTPUT"
+          fi
+
       # ⚠️ '재사용'인데 오늘 해석글이 아예 없으면 핵심편이 빈 채로 나간다.
       #    그 상태로 발행되면 구독자가 "핵심편이 사라졌다"고 느낀다 → 미리 크게 경고한다.
       - name: 해석글 없음 경고
@@ -337,6 +367,21 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: python notify_admin.py no_interp
+
+      # 🆕 2026-08-26 — 전날 글로 승계 발행했으면 운영자에게만 알린다.
+      #   ⚠️ 구독자에게는 화면 배너로 이미 밝혔다. 여기서는 운영자가
+      #      "오늘 Claude 생성이 왜 실패했는지"를 확인하도록 알린다.
+      - name: 해석글 승계 알림 (운영자 전용)
+        if: >-
+          steps.guard.outputs.run == 'yes' &&
+          steps.holiday.outputs.closed != 'yes' &&
+          steps.inherit_check.outputs.done == 'yes'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py inherited "오늘 해석글 생성 실패 — 직전 거래일 글로 발행"
 
       # ── Pages 배포 전파 대기 ──
       #   git push 직후 바로 텔레그램을 보내면, GitHub Pages가 아직 새 페이지를
