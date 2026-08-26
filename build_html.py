@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-j2"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-k1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1079,8 +1079,8 @@ def build_radar(강세레이더, 설정=None):
             #          선으로 바꾸면 윤곽은 남고 무게만 준다.
             유형HTML = "".join(
                 f'<span class="rd-tag" style="background:none;'
-                f'border:2px solid {_색.get(t,"#8b93a0")};'
-                f'color:{_색.get(t,"#8b93a0")};font-weight:800">{_배지명.get(t, t)}</span>'
+                f'border:1px solid {_색.get(t,"#8b93a0")}66;'
+                f'color:{_색.get(t,"#8b93a0")};font-weight:700">{_배지명.get(t, t)}</span>'
                 for t in _유들)
             # ⚠️ V자 반등은 **전일 종가 대비로는 하락일 수 있다.**
             #    예전처럼 '+' 를 강제로 붙이면 "+-2.00%"가 되어 깨진다.
@@ -1272,6 +1272,24 @@ def accum_badge(종목명):
 
 
 NEWS_LOOKBACK = 10      # 🆕 종목 카드 뉴스를 며칠치까지 뒤질지(거래일)
+BRIEF_NEWS_DAYS = 5     # 🆕 「내 종목 브리핑」이 뒤지는 기간(거래일)
+#  ⚠️ 카드(10일)와 브리핑(5일)이 다른 이유 —
+#     카드는 "왜 매집이 들어왔나"를 찾는 자리라 길게 본다.
+#     브리핑은 "지금 내 종목 상황"이라 **최근 것**이어야 한다.
+#     오늘 하루만 보면 "재료 없음"이 대부분이라 5일이 균형점이다.
+
+
+def _news_key(제목):
+    """같은 사건을 다룬 기사를 하나로 묶기 위한 지문.
+
+    ⚠️ 여러 매체가 같은 사안을 쓰면 제목이 «[특징주] 한전기술, 원전 기대에 20%↑»
+       «한전기술 원전 기대감에 20% 급등» 처럼 미세하게 다르다. 글자만 비교하면
+       중복이 그대로 남는다. 대괄호 머리말·기호·공백을 걷어내고 앞부분만 본다.
+    """
+    import re as _re
+    s = _re.sub(r"\[[^\]]*\]", "", str(제목 or ""))       # [특징주] 같은 머리말
+    s = _re.sub(r"[^0-9A-Za-z가-힣]", "", s)              # 기호·공백 제거
+    return s[:24]                                        # 앞 24글자로 동일 사건 판정
 _SC_SEQ = [0]
 
 
@@ -2192,10 +2210,10 @@ def build_core_strong(강세레이더):
         if _유들:
             # 🆕 2026-08-26 HO 지시 — 배경 제거, 같은 색 테두리 2px.
             뱃지 = "".join(
-                f'<span style="font-size:9.5px;font-weight:800;'
+                f'<span style="font-size:9px;font-weight:700;'
                 f'color:{_유형색.get(t,"#8b93a0")};background:none;'
-                f'border:2px solid {_유형색.get(t,"#8b93a0")};border-radius:5px;'
-                f'padding:1px 6px;margin-right:4px;white-space:nowrap">'
+                f'border:1px solid {_유형색.get(t,"#8b93a0")}66;border-radius:5px;'
+                f'padding:1px 5px;margin-right:4px;white-space:nowrap">'
                 f'{_배지명.get(t, t)}</span>' for t in _유들) + 뱃지
         # ⚠️ 등락률은 V자 반등에서 **음수일 수 있다.** 색을 나눈다.
         _등색 = "#ff6b4a" if (등 or 0) >= 0 else "#5b9bff"
@@ -3490,14 +3508,17 @@ def build_my_stocks(data):
                         _본제목[_c].add(_t)
                         _snews.setdefault(_c, []).insert(
                             0, {"t": _t, "u": _g.get("링크", ""), "k": _라벨 + " 공시"})
-        # 최신순(archive_days가 최신부터 준다) 상위 5건만
+        # 🔴 2026-08-26 수정 — archive_days()는 **오래된 순**으로 준다.
+        #    예전 주석은 "최신부터"라고 잘못 적혀 있었고, 그대로 [:5]를 해서
+        #    가장 **오래된** 5건이 카드에 올라가고 있었다. 뒤집어서 자른다.
         for _n in _snews:
-            _snews[_n] = _snews[_n][:5]
+            _snews[_n] = list(reversed(_snews[_n]))[:5]
     except Exception as e:
         print(f"   ⚠️ 종목별 뉴스 수집 실패 — {type(e).__name__}")
         _snews = {}
     이름배열JS += "window.CP_STOCK_NEWS=" + json.dumps(_snews, ensure_ascii=False) + ";"
     이름배열JS += f"window.CP_NEWS_DAYS={NEWS_LOOKBACK};"
+    이름배열JS += f"window.CP_BRIEF_DAYS={BRIEF_NEWS_DAYS};"
     # 종목 → 오늘 시장 전체 맥락 (브리핑이 "볼 것"을 만들 때 쓴다)
     _맥락 = {}
     try:
@@ -3521,10 +3542,37 @@ def build_my_stocks(data):
     # ⚠️ 요약문(본문 앞부분)까지 넘긴다(2026-08-20).
     #    제목에만 종목명이 있는 기사는 극소수다. 본문에서 언급되는 경우가 훨씬 많아
     #    제목만 보면 "오늘 뉴스가 없습니다"가 계속 나온다.
-    뉴스 = [{"t": n.get("제목", ""), "u": n.get("링크", ""),
-            # 🆕 2026-08-25 — 브리핑에서 기사 요약을 3~4줄로 보여주므로 넉넉히.
-            "d": (n.get("요약") or "")[:400], "s": n.get("출처", "")}
-           for n in (data.get("뉴스원본") or []) if n.get("제목")]
+    # 🆕 2026-08-26 HO 지시 — 브리핑 뉴스를 **최근 5거래일**로 넓힌다.
+    #  ⚠️ 오늘치만 보면 대부분의 종목이 매일 "재료 없음"으로 끝난다. 실제로는
+    #     사흘 전 계약 공시가 오늘 주가를 움직이는 일이 흔하다.
+    #  ⚠️ 제목·본문 어디에 종목명이 있든 잡는다(매칭은 브라우저가 한다).
+    #  ⚠️ 여러 매체가 같은 사건을 쓰면 **한 건만** 남긴다(_news_key).
+    #     남기는 쪽은 **더 최근 것** — 그래서 최신부터 훑는다.
+    #  ⚠️ 날짜(k)를 반드시 함께 넘긴다. 안 붙이면 사흘 전 기사를 오늘 일로 읽는다.
+    뉴스, _본지문 = [], set()
+    try:
+        for _ymd, _d in reversed(archive_days(BRIEF_NEWS_DAYS)):
+            _lab = f"{int(str(_ymd)[4:6])}/{int(str(_ymd)[6:])}"
+            _오늘인가 = 1 if str(_ymd) == str(DATE) else 0
+            for n in (_d.get("뉴스원본") or []):
+                _t = n.get("제목", "")
+                if not _t:
+                    continue
+                _k = _news_key(_t)
+                if not _k or _k in _본지문:
+                    continue
+                _본지문.add(_k)
+                뉴스.append({"t": _t, "u": n.get("링크", ""),
+                            "d": (n.get("요약") or "")[:400],
+                            "s": n.get("출처", ""),
+                            "k": _lab, "o": _오늘인가})
+    except Exception as e:
+        print(f"   ⚠️ 브리핑 뉴스 수집 실패 — {type(e).__name__}: {e}")
+        뉴스 = [{"t": n.get("제목", ""), "u": n.get("링크", ""),
+                "d": (n.get("요약") or "")[:400], "s": n.get("출처", ""),
+                "k": "", "o": 1}
+               for n in (data.get("뉴스원본") or []) if n.get("제목")]
+    print(f"   📰 브리핑 뉴스 {len(뉴스)}건 (최근 {BRIEF_NEWS_DAYS}거래일, 중복 제거 후)")
     공시원 = data.get("공시")
     공시목록 = 공시원.get("목록") if isinstance(공시원, dict) else (공시원 or [])
     공시 = [{"c": g.get("회사명", ""), "t": (g.get("공시명") or "").strip(),
@@ -3539,6 +3587,18 @@ def build_my_stocks(data):
     JS = ("""<script>
 (function(){
  window.CP_PAINT=window.CP_PAINT||[];
+ /* 🆕 2026-08-26 — 조사(助詞) 자동 선택. 파이썬의 _josa()와 같은 규칙이다.
+    [WHY] «반도체이 오늘 +3.9%», «소속 구역 반도체이» 처럼 받침 없는 이름 뒤에
+          '이'가 그대로 붙어 나갔다. 섹터명·종목명은 매일 바뀌므로 코드로 막는다. */
+ function _josa(w,pair){
+  var t=String(w||'').replace(/<[^>]*>/g,'').trim();
+  if(!t) return pair[1];
+  var ch=t.charCodeAt(t.length-1);
+  if(ch>=0xAC00&&ch<=0xD7A3) return ((ch-0xAC00)%28)?pair[0]:pair[1];
+  var c=t[t.length-1];
+  if(c>='0'&&c<='9') return ('0136780'.indexOf(c)>=0)?pair[0]:pair[1];
+  return pair[1];
+ }
  var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
  var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
  // ⚠️ 기본은 **당일**. 다른 코너와 같은 창 구성·같은 이름으로 맞춘다(2026-08-21).
@@ -3690,14 +3750,19 @@ def build_my_stocks(data):
    n1=hits.length;
    hits.slice(0,4).forEach(function(h){
     var n=h.n;
+    /* 🆕 2026-08-26 — 날짜를 반드시 붙인다. 5거래일치를 섞어 보여주므로
+       안 붙이면 사흘 전 기사를 오늘 일로 오해한다. */
+    var 날=n.k?'<span style="font-size:9.5px;color:#e0c060;font-weight:700">'+
+      (n.o?'오늘':n.k)+'</span> ':'';
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
-     '<div><a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
+     '<div>'+날+'<a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
      'line-height:1.5;text-decoration:none">'+n.t+'</a>'+
      (h.w===1?'<span style="font-size:9.5px;color:#6f7784"> · 본문 언급</span>':'')+
+     (n.s?'<span style="font-size:9.5px;color:#6f7784"> · '+n.s+'</span>':'')+
      '</div></div>';
    });
    if(n1>4) items+='<p style="margin:4px 0 0;font-size:10px;color:#6f7784">'+
-     '외 '+(n1-4)+'건 더 있습니다</p>';
+     '외 '+(n1-4)+'건 더 있습니다 · 최근 '+(window.CP_BRIEF_DAYS||5)+'거래일</p>';
    DISC.forEach(function(g){if(g.c===nm){n2++;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
      '<a href="'+g.u+'" target="_blank" style="font-size:11px;color:#e0c060;'+
@@ -3713,7 +3778,7 @@ def build_my_stocks(data):
             없으면 없다고 짧게 끝내는 게 이 리포트의 원칙에 맞다. */
    if(!items){
     items='<p style=\\"margin:4px 0 0;font-size:11px;color:#6f7784\\">'+
-      '오늘 뉴스, 공시 없음</p>';
+      '뉴스, 공시, 일정 없음</p>';
    }
    // ⚠️ 가장 먼저 "왜 움직였나"를 **하나로 단정**한다(2026-08-20 지시).
    //    재료를 나열만 하면 "그래서 뭐 때문인데?"가 남는다.
@@ -3724,28 +3789,34 @@ def build_my_stocks(data):
     var 방향=(d0===null)?'움직였나?':(d0>=0?'올랐나?':'내렸나?');
     var 화살=(d0===null)?'':(d0>=0?'📈':'📉');
     var 왜='';
+    /* 🆕 2026-08-26 — 기사에서 그 종목이 나오는 **한 문장**을 그대로 뽑는다.
+       [WHY] 제목만 보면 "왜 유력한지"가 안 보인다. 근거를 눈앞에 둔다.
+       ⚠️ 지어내지 않는다 — 원문에 있는 문장을 자를 뿐이다. */
     if(n2>0) 왜='오늘 나온 <b>공시</b>가 직접적인 이유로 보입니다';
-    else if(hits.length&&hits[0].w===2) 왜='<b>'+hits[0].n.t.slice(0,26)+'</b> 뉴스가 가장 유력합니다';
-    else if(window.CP_HOT&&window.CP_HOT[nm]) 왜='오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 큰손이 붙은 자리입니다';
-    else if(hits.length) 왜='관련 <b>뉴스 본문</b>에 언급됐습니다';
-    else{
-     var zz=(m[0]||[]), bb=null;
-     if(window.CP_SECT_TODAY) zz.forEach(function(z){
-      var v=window.CP_SECT_TODAY[z];
-      if(v===undefined||v===null) return;
-      if(bb===null||Math.abs(v)>Math.abs(bb.v)) bb={z:z,v:v};
-     });
-     /* 🆕 2026-08-25 HO 지시 — 재료 없는 날은 **짧게**.
-        길게 쓰면 없는 얘기를 지어내는 모양이 된다. 사실만 한 줄. */
-     if(bb&&Math.abs(bb.v)>=1.5) 왜='특별한 재료없이 <b>'+bb.z+'</b> 구역 흐름('+fmt(bb.v)+'%)을 따라감';
-     else 왜='특별한 재료없이 <b>시장 흐름</b>을 따라감';
+    else if(hits.length&&hits[0].w===2){
+     var h0=hits[0].n;
+     왜=(h0.k?'['+(h0.o?'오늘':h0.k)+'] ':'')+
+        '<b>'+h0.t.slice(0,26)+'</b> 뉴스가 가장 유력합니다';
     }
+    else if(window.CP_HOT&&window.CP_HOT[nm]) 왜='오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 큰손이 붙은 자리입니다';
+    else if(hits.length){
+     var h1=hits[0].n;
+     왜=(h1.k?'['+(h1.o?'오늘':h1.k)+'] ':'')+'관련 <b>뉴스 본문</b>에 언급됐습니다';
+    }
+    /* 🆕 2026-08-26 HO 지시 — «특별한 재료없이 시장 흐름을 따라감» 삭제.
+       [WHY] 매일 같은 문장이 반복돼 정보가 아니라 소음이 됐다. 재료가 없으면
+             위 «뉴스, 공시, 일정 없음»이 이미 그 사실을 말한다.
+             원칙 14 — 없으면 없다고 짧게 끝낸다. 여기선 아예 말하지 않는다. */
     // 원인은 별도 문단이 아니라 '오늘 분석' 안 첫 문장으로 들어간다(2026-08-21).
     // 분석과 원인이 따로 있으면 같은 얘기를 두 번 읽게 된다.
     /* 🆕 2026-08-25 HO 지시 — "왜 움직였나?" 라벨 삭제.
        [WHY] 코너 제목이 이미 '오늘 분석'이다. 그 아래 다시 질문을 던지면
              글이 한 겹 늘어날 뿐 정보가 늘지 않는다. 답만 남긴다. */
-    원인='<b>'+화살+'</b> '+왜+'. ';
+    /* 왜가 비면(재료 없는 날) 원인 문장 자체를 만들지 않는다. */
+    /* 왜가 비면(재료 없는 날) 원인 문장 자체를 만들지 않는다.
+       ⚠️ 핵심구절은 아래 «📰 _본»(_gist)이 이미 보여준다. 여기서 또 쓰면
+          같은 문장을 두 번 읽게 된다(원칙 4). 여기는 날짜 + 제목까지만. */
+    원인=왜?('<b>'+화살+'</b> '+왜+'. '):'';
    })();
    var 분석='';
    /* 🆕 2026-08-25 HO 지시 — 승패·구간 문구를 **표본이 충분할 때만** 낸다.
@@ -3796,7 +3867,14 @@ def build_my_stocks(data):
       분석+='<span style="display:block;margin-top:5px;padding:7px 9px;'+
        'background:#141922;border-radius:7px;font-size:11px;color:#a8b0ba;'+
        'line-height:1.65">📰 '+_본+'</span>';
-     } else if(!n2) 분석+=' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.';
+     } else if(!n2){
+      /* 🔴 2026-08-26 수정 — 뉴스를 5거래일치로 넓히면서 이 문장이
+         **사흘 전 기사에도 "오늘 뉴스"라고 말하는** 거짓말이 됐다.
+         실제 날짜를 보고 문장을 바꾼다. */
+      var _오늘것=hits.length&&hits[0].n&&hits[0].n.o;
+      분석+=_오늘것?' 오늘 뉴스가 있어 단기 변동이 커질 수 있습니다.'
+                  :' 최근 나온 뉴스라 아직 영향이 남아 있을 수 있습니다.';
+     }
     }
     else {
      // ⚠️ 재료가 없다고 "없었습니다"로 끝내면 이 코너의 값이 사라진다(2026-08-21).
@@ -3804,7 +3882,7 @@ def build_my_stocks(data):
      //    **다음에 볼 것**을 대신 짚어줘야 한다.
      /* 🆕 2026-08-25 HO 지시 — 바로 위 '왜 움직였나'가 이미 재료 없음을
         말했다. 같은 얘기를 두 번 하지 않는다(원칙 4). */
-     var 볼것=[];
+     var 볼것=[], _구역말함=false;
      // ⓐ 소속 구역이 크게 움직였으면 그게 오늘의 이유다
      if(window.CP_SECT_TODAY){
       var zz2=(m[0]||[]), bb2=null;
@@ -3814,7 +3892,8 @@ def build_my_stocks(data):
        if(bb2===null||Math.abs(v)>Math.abs(bb2.v)) bb2={z:z,v:v};
       });
       if(bb2&&Math.abs(bb2.v)>=1.0)
-       볼것.push('소속 구역 <b>'+bb2.z+'</b>이 '+fmt(bb2.v)+'% 움직였으니, 이 종목도 그 흐름을 따라갔을 가능성이 큽니다');
+       {볼것.push('소속 구역 <b>'+bb2.z+'</b>'+_josa(bb2.z,'이가')+' '+fmt(bb2.v)+'% 움직였으니, 이 종목도 그 흐름을 따라갔을 가능성이 큽니다');
+        _구역말함=true;}
      }
      // ⓑ 시장 수급이 한 방향으로 굳어지는 중이면 그게 다음 변수다
      if(window.CP_MARKET){
@@ -3822,7 +3901,7 @@ def build_my_stocks(data):
       ['외국인','기관'].forEach(function(who){
        var o=mk[who];
        if(o&&o.연속>=3&&볼것.length<2)
-        볼것.push('시장 전체로는 <b>'+who+'이 '+o.연속+'일 연속 '+o.방향+'</b> 중입니다 — 개별 재료가 없을 때는 이 흐름이 주가를 좌우합니다');
+        볼것.push('시장 전체로는 <b>'+who+'이 '+o.연속+'일 연속 '+o.방향+'</b> 중입니다');
       });
      }
      // ⓒ 레이더에 잡혔으면 그게 가장 강한 단서
@@ -3866,8 +3945,10 @@ def build_my_stocks(data):
       if(v===undefined||v===null) return;
       if(best===null||Math.abs(v)>Math.abs(best.v)) best={z:z,v:v};
      });
-     if(best&&Math.abs(best.v)>=2)
-      분석+=' 소속 구역 <b>'+best.z+'</b>이 오늘 <b>'+fmt(best.v)+'%</b>로 움직인 점도 함께 보세요.';
+     /* 🔴 2026-08-26 수정 — 위 «볼 것»이 이미 같은 구역·같은 숫자를 말한 날에
+        여기서 또 말해 한 카드 안에서 같은 문장이 두 번 나왔다(원칙 4). */
+     if(best&&Math.abs(best.v)>=2&&!_구역말함)
+      분석+=' 소속 구역 <b>'+best.z+'</b>'+_josa(best.z,'이가')+' 오늘 <b>'+fmt(best.v)+'%</b>로 움직인 점도 함께 보세요.';
     }
    }else{분석='성적을 말하기엔 아직 이력이 부족합니다.';}
    /* 🆕 2026-08-25 HO 지시 — 등록 목록이 아니라 **브리핑**에 기업분석을 붙인다.
@@ -4502,7 +4583,7 @@ def build_stock_brief():
             '오늘 내 종목에 무슨 일이 있었나</p>'
             '<div id="ms-brief"></div>'
             '<p style="margin:9px 0 0;font-size:11px;color:#7d848f;line-height:1.6">'
-            '📰 뉴스 · 📄 공시 중 <b>오늘 그 종목이 언급된 것만</b> 붙습니다. '
+            '📰 뉴스 · 📄 공시 중 <b>최근 5거래일 안에 그 종목이 언급된 것만</b> 붙습니다. '
             '별일 없는 날은 짧게 끝납니다.</p></div>')
 
 
@@ -5251,9 +5332,9 @@ def build_sector_ladder():
         #     섹터 전체에 돈이 퍼지는 중 = **다음 주도 후보**.
         #  ⚠️ 오늘 전 섹터 중 확산도 1위일 때만 붙인다. 매일 붙으면 의미가 없다.
         if _확 is not None and _확 == _확산도최고():
-            _요약 += ('<span style="display:inline-block;margin-left:6px;font-size:9.5px;'
+            _요약 += ('<span style="display:inline-block;margin-left:5px;font-size:9px;'
                     'font-weight:800;color:#74f0d4;border:1px solid #74f0d4;'
-                    'border-radius:999px;padding:1px 7px">가장 고르게 올랐어요</span>')
+                    'border-radius:999px;padding:1px 6px">가장 고르게 올랐어요</span>')
         _줄.append(
             f'<div style="padding:8px 9px;margin-top:6px;background:#0f131a;'
             f'border-radius:8px;border-left:3px solid {col}">'
@@ -5337,7 +5418,7 @@ def build_sector_brief():
         return "".join(
             f'<span style="display:inline-flex;align-items:center;gap:3px;'
             f'background:#1b2230;border:1px solid #262e3c;border-radius:999px;'
-            f'padding:3px 9px;margin:3px 4px 0 0;font-size:11.5px;color:#c9ced6">'
+            f'padding:2px 8px;margin:3px 3px 0 0;font-size:11px;color:#c9ced6">'
             f'<b style="color:{sector_color(nm)}">●</b>{nm}'
             f'<b style="color:{색}">{v:+.1f}%p</b></span>'
             for nm, v in items)
@@ -9738,6 +9819,29 @@ def build_html(data, report):
     except Exception:
         _NEXT = "내일"
     해석 = (report or {}).get("해석글", {})
+
+    # 🆕 2026-08-26 — inherit_report.py가 전날 해석글을 승계했으면 그 사실을 밝힌다.
+    #  [WHY] 해석글이 없다고 발행을 멈추면 하루가 통째로 빈다. 숫자·표는 전부
+    #        정상인데도 그렇다. 그래서 **발행은 하되 어제 글임을 숨기지 않는다.**
+    #  ⚠️ 이건 «오늘 글인 척»과 «발행 중단» 사이의 타협이다. 배너를 빼면
+    #     어제 시황을 오늘 것으로 읽게 되므로 **절대 조용히 넘어가지 않는다.**
+    _승계 = (report or {}).get("승계원본")
+    승계배너 = ""
+    if _승계:
+        _md = f"{_승계[4:6]}/{_승계[6:]}"
+        print(f"🔁 해석글 승계본으로 빌드합니다 — 원본 {_승계} (화면에 명시됨)")
+        승계배너 = (
+            '<div style="background:#2a1a12;border:1px solid #6b3f1f;'
+            'border-radius:12px;padding:12px 14px;margin:0 0 14px">'
+            '<p style="margin:0;font-size:12.5px;color:#f0c65a;font-weight:800">'
+            f'⚠️ 오늘 해설은 <b>{_md} 글</b>을 그대로 싣습니다</p>'
+            '<p style="margin:5px 0 0;font-size:11px;color:#c9ced6;line-height:1.7">'
+            '오늘 해석글이 아직 만들어지지 않아 직전 거래일 글로 대신합니다. '
+            '<b style="color:#e8eaee">지수·수급·섹터·레이더의 숫자와 표는 모두 '
+            '오늘 것</b>이니 그대로 보셔도 됩니다.<br>'
+            '<span style="color:#8b93a0">글로 된 해설(시황·이슈 해부·프로의 시선)만 '
+            f'{_md} 것이라는 뜻이에요. 오늘 글이 준비되면 이 자리에서 바로 바뀝니다.</span>'
+            '</p></div>')
     오늘의시장 = 해석.get("오늘의_시장", "— (Claude API 해석글 미생성: 충전 후 generate_report.py 재실행 필요)")
     오늘한줄평 = 해석.get("한줄평", "— (충전 후 자동 생성: 오늘 시장을 한 문장으로 압축)")
     오늘의문장 = 해석.get("오늘의_한문장", "오늘 시장이 준 교훈이 이 자리에 담깁니다. (Claude 해석 연동 후 자동 생성)")
@@ -9874,17 +9978,30 @@ body{{background:#f0efec;padding:24px 12px;display:flex;justify-content:center;f
    ⚠️ .deep-wrap 안에서만 sticky다 — 핵심편에서는 안 나온다(의도).
    ⚠️ HO 지적 — 밝은 바에 흰 칩은 배경에 묻혀 안 보였다.
       심층편 배경(#e6e9ef)이 밝으므로 바를 **어둡게 반전**시켜 대비를 만든다. */
-.cp-nav{{position:sticky;top:0;z-index:45;display:flex;gap:7px;overflow-x:auto;
-  margin:-1.4rem -1.75rem 1.1rem;padding:10px 1.75rem;
-  background:#1b2027;border-bottom:2px solid #e0c060;
-  box-shadow:0 3px 10px rgba(0,0,0,.22);
+.cp-nav{{position:sticky;top:0;z-index:45;display:flex;gap:8px;overflow-x:auto;
+  margin:-1.4rem -1.75rem 1.1rem;padding:11px 1.75rem;
+  background:#0d1117;border-bottom:3px solid #e0c060;
+  box-shadow:0 4px 14px rgba(0,0,0,.38);
   -webkit-overflow-scrolling:touch;scrollbar-width:none}}
 .cp-nav::-webkit-scrollbar{{display:none}}
-.cp-chip{{flex:none;font-size:11.5px;font-weight:700;color:#cdd3dc;
-  background:#2b323c;border:1px solid #3d4550;border-radius:999px;
-  padding:7px 13px;cursor:pointer;white-space:nowrap;font-family:inherit;
-  line-height:1;-webkit-tap-highlight-color:transparent;transition:background .15s}}
-.cp-chip.on{{background:#e0c060;color:#1b2027;border-color:#e0c060}}
+/* 🆕 2026-08-26 (2차) HO 지적 — "여전히 존재감이 없다".
+   [고침] ① 바 배경을 거의 검정(#0d1117)으로 내려 대비를 키우고
+          ② 칩 글자를 밝게(#e8eaee) + 11.5 → 12.5px
+          ③ 활성 칩은 금색 채움 + 바깥 링으로 한 겹 더 띄운다. */
+.cp-chip{{flex:none;font-size:12.5px;font-weight:700;color:#e8eaee;
+  background:#252c36;border:1px solid #4a5462;border-radius:999px;
+  padding:8px 15px;cursor:pointer;white-space:nowrap;font-family:inherit;
+  line-height:1;-webkit-tap-highlight-color:transparent;
+  transition:background .15s,color .15s}}
+.cp-chip:hover{{background:#333c48;border-color:#6b7787}}
+.cp-chip.on{{background:#e0c060;color:#14181f;border-color:#e0c060;font-weight:800;
+  box-shadow:0 0 0 3px rgba(224,192,96,.22)}}
+/* 넓은 화면 — 칩 6개가 다 들어가 스크롤이 없다. 왼쪽에 몰리면 허전해서
+   가운데로 모아 탭바처럼 보이게 한다. */
+@media (min-width:769px){{
+  .cp-nav{{justify-content:center;gap:10px}}
+  .cp-chip{{font-size:13px;padding:9px 17px}}
+}}
 /* 앵커는 보이지 않는 표식. scroll-margin-top이 칩바 높이만큼 자리를 비워
    제목이 칩바에 가려지는 것을 막는다. */
 .nv-a{{display:block;height:0;overflow:hidden;scroll-margin-top:60px}}
@@ -10102,7 +10219,7 @@ html{{scroll-behavior:smooth}}
 .rd-name{{font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0}}
 /* 🆕 2026-08-25 — 유형 배지 전용 줄. 이름과 분리해 배지끼리만 줄바꿈한다. */
 .rd-badges{{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:4px 0 0}}
-.rd-tag{{font-size:9px;font-weight:700;padding:1px 6px;border-radius:4px;white-space:nowrap}}
+.rd-tag{{font-size:8.5px;font-weight:700;padding:1px 5px;border-radius:4px;white-space:nowrap}}
 .rd-new{{background:#FAECE7;color:#993C1D}} .rd-stay{{background:#FAEEDA;color:#854F0B}}
 .rd-meta{{font-size:10.5px;color:var(--sub);margin-top:2px}}
 .rd-nums{{text-align:right;flex-shrink:0}}
@@ -10595,8 +10712,8 @@ html{{scroll-behavior:smooth}}
 /* 🆕 2026-08-25 HO 지시 — 배경만 빼고 **테두리는 색으로 남긴다**.
    [의도] 배경이 있으면 덩어리로 보여 종목명과 시선을 다툰다.
           테두리만 있으면 윤곽은 유지되면서 무게가 확 준다. */
-.ab{{display:inline-block;font-size:9px;font-weight:600;padding:1px 6px;
-  margin:2px 4px 0 0;line-height:1.5;border-radius:999px;
+.ab{{display:inline-block;font-size:8.5px;font-weight:600;padding:0 5px;
+  margin:2px 3px 0 0;line-height:1.55;border-radius:999px;
   background:none;border:1px solid currentColor}}
 .ab1{{color:#5f9a8c}}
 .ab2{{color:#d1a83f;font-weight:800}}
@@ -10629,8 +10746,8 @@ html{{scroll-behavior:smooth}}
 /* 🆕 2026-08-26 HO 지시 — 알약은 작게, **화살표만** 크게.
    [WHY] 알약이 커지니 종목명과 시선을 다퉜다. 정작 눌러야 할 신호는
          화살표 하나면 충분하다. 글자는 줄이고 화살표만 키운다. */
-.sc-tap{{font-size:9.5px;color:#0b0e13;background:#8fd0e8;font-weight:800;
-  margin-left:6px;padding:1px 7px;border-radius:999px;
+.sc-tap{{font-size:9px;color:#0b0e13;background:#8fd0e8;font-weight:800;
+  margin-left:5px;padding:1px 6px;border-radius:999px;
   white-space:nowrap;cursor:pointer;vertical-align:middle;
   box-shadow:0 1px 2px rgba(0,0,0,.3)}}
 .sc-tap i{{font-style:normal;font-size:14px;line-height:1;vertical-align:-1px;
@@ -10657,13 +10774,13 @@ html{{scroll-behavior:smooth}}
   border-left:1px solid #2a3446;border-top:1px solid #2a3446;
   transform:rotate(45deg)}}
 .sc-card::after{{content:"기업분석";position:absolute;top:-9px;right:12px;
-  font-size:9px;font-weight:800;color:#8fd0e8;background:#0b0e13;
-  padding:1px 7px;border-radius:999px;border:1px solid #2a3446}}
+  font-size:8.5px;font-weight:800;color:#8fd0e8;background:#0b0e13;
+  padding:1px 6px;border-radius:999px;border:1px solid #2a3446}}
 .sc-def{{margin:0 0 3px;font-size:11.5px;color:#8fd0e8;font-weight:700}}
 .sc-biz{{margin:0 0 4px;font-size:11.5px;color:#c9ced6;line-height:1.6}}
 .sc-basic{{margin:0 0 8px;font-size:11.5px;color:#c9ced6;font-weight:600}}
-.sc-hot{{font-size:9.5px;color:#0b0e13;background:#74f0d4;font-weight:800;
-  padding:1px 6px;border-radius:999px;vertical-align:middle}}
+.sc-hot{{font-size:9px;color:#0b0e13;background:#74f0d4;font-weight:800;
+  padding:1px 5px;border-radius:999px;vertical-align:middle}}
 .sc-why-s{{margin:3px 0 0;font-size:10.5px;color:#a8b0ba;line-height:1.6}}
 .sc-why-badge{{margin:5px 0 0;line-height:1.5}}
 .sc-h{{margin:0 0 5px;font-size:11.5px;font-weight:800;color:#e0c060}}
@@ -11056,6 +11173,7 @@ html{{scroll-behavior:smooth}}
   </div>
 
   {휴장배너}
+  {승계배너}
   {build_core(해석.get('핵심편'), data, 해석)}
 
   <div class="deep-wrap">
