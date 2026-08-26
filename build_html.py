@@ -10,10 +10,33 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-i1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-j1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
+
+
+# ── 조사(助詞) 자동 선택 (2026-08-26 신설) ──────────────
+#  왜 필요한가: 금액 표기가 "조"(받침 없음)와 "억"(받침 있음)을 오가는데
+#  뒤 조사를 고정해 두면 «+848억를 담았어요», «기관 +156억가 들어왔습니다»
+#  같은 문장이 그대로 발행된다. 실제 8/25 리포트에서 발견된 오류다.
+#  유료 리포트에서 문장 오류는 숫자 오류만큼 신뢰를 깎으므로 코드로 막는다.
+#
+#  ⚠️ HTML 태그가 붙은 채로 넘어오므로 태그를 걷어내고 마지막 글자를 본다.
+def _josa(word, pair):
+    """pair = '이가' / '을를' / '은는' / '와과'"""
+    import re as _re
+    t = _re.sub(r"<[^>]*>", "", str(word)).strip()
+    if not t:
+        return pair[1]
+    ch, code = t[-1], ord(t[-1])
+    if 0xAC00 <= code <= 0xD7A3:               # 한글 음절
+        받침 = (code - 0xAC00) % 28
+    elif ch.isdigit():                          # 숫자는 읽는 소리로 판정
+        받침 = 1 if ch in "0136780" else 0      # 영·일·삼·육·칠·팔
+    else:
+        return pair[1]                          # 알 수 없으면 받침 없는 쪽
+    return pair[0] if 받침 else pair[1]
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -418,17 +441,21 @@ def _sc_read(수급):
 
     if 외 > 0 and 기 > 0:
         return "🔥 두 큰손이 함께 샀다", FS_BUY, (
-            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>가 같이 들어왔습니다.")
+            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>"
+            f"{_josa(_flow_amt(기), '이가')} 같이 들어왔습니다.")
     if 외 < 0 and 기 < 0:
         return "🧊 두 큰손이 함께 팔았다", FS_SELL, (
-            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>가 같이 빠졌습니다."
+            f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>"
+            f"{_josa(_flow_amt(기), '이가')} 같이 빠졌습니다."
             + (f" 개인만 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
     if 실 >= 0:
         약 = "기관" if 큰쪽 == "외국인" else "외국인"
         return f"🔥 {큰쪽}이 끌었다", FS_BUY, (
-            f"{큰쪽} <b>{_flow_amt(큰값)}</b>가 {약} 매도를 덮었습니다.")
+            f"{큰쪽} <b>{_flow_amt(큰값)}</b>"
+            f"{_josa(_flow_amt(큰값), '이가')} {약} 매도를 덮었습니다.")
     return f"🧊 {큰쪽}이 밀었다", FS_SELL, (
-        f"{큰쪽} <b>{_flow_amt(큰값)}</b>가 빠져 나갔습니다."
+        f"{큰쪽} <b>{_flow_amt(큰값)}</b>"
+        f"{_josa(_flow_amt(큰값), '이가')} 빠져 나갔습니다."
         + (f" 개인이 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
 
 
@@ -2184,7 +2211,8 @@ def build_core_strong(강세레이더):
             #     그런데 화면엔 '평소'라고만 써서 독자가 20일 평균쯤으로 오해한다.
             #     원칙 10(화면 설명문 = 실제 코드 조건)에 걸린다. 말을 바꾼다.
             _본문 = (f'거래량이 <b style="color:#e8eaee">어제보다 {배수문}</b>로 늘면서 '
-                   f'거래대금 <b style="color:#e8eaee">{_flow_amt(s.get("거래대금"))}</b>가 '
+                   f'거래대금 <b style="color:#e8eaee">{_flow_amt(s.get("거래대금"))}</b>'
+                   f'{_josa(_flow_amt(s.get("거래대금")), "이가")} '
                    f'몰렸어요')
         _이름, _칸 = sc_click(nm, c, 15)
         행들.append(
@@ -2297,7 +2325,8 @@ def build_core_accum(매집):
             f'<span style="font-size:10.5px;color:#8b93a0">{유형}</span></div>'
             f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             f'외국인·기관이 {기간}일간 <b style="color:#e8eaee">'
-            f'{_flow_amt(s.get("합산"))}</b>를 담았어요 '
+            f'{_flow_amt(s.get("합산"))}</b>'
+            f'{_josa(_flow_amt(s.get("합산")), "을를")} 담았어요 '
             f'(시총의 {s.get("시총대비", 0):.2f}%) · 그동안 주가는 '
             f'<b style="color:{등색}">{등문}</b></p>{_칸}</div>')
 
@@ -6412,7 +6441,10 @@ def build_return_sector():
                 f'font-size:10.5px;color:#8d949f;line-height:1.6">'
                 f'📌 지금은 비교할 수 있는 거래일이 <b style="color:#c9ced6">{len(날짜)}일</b>뿐이라, '
                 f'아직 어느 섹터도 \'평균 주기\'를 말할 단계가 아닙니다. '
-                f'지금 상위권에 있는 곳만 사실대로 알려드리고, 주기는 기록이 쌓이는 대로 붙이겠습니다.</p>')
+                f'지금 상위권에 있는 곳만 사실대로 알려드리고, 주기는 기록이 쌓이는 대로 붙이겠습니다.<br>'
+                f'<span style="color:#6f7784">아래 줄의 <b style="color:#8d949f">등판 N회</b>는 '
+                f'그 섹터가 최근 {len(날짜)}일 안에 상위 {CYC_TOP}위에 든 횟수입니다 — '
+                f'주기를 말하려면 최소 {CYC_MIN_간격 + 1}회가 필요합니다.</span></p>')
     for key, 라벨, 색, 설명 in GRP:
         멤버 = [n for n in 순위 if 그룹(n) == key]
         if not 멤버:
@@ -6444,10 +6476,13 @@ def build_return_sector():
                 #    ⚠️ 단, 한 번도 등판 못 한 섹터에 "표본이 적다"고 하면 오해다.
                 #       그건 표본 문제가 아니라 **아직 상위권에 못 온 것**이다. 문장을 나눈다.
                 if not _s["회수"]:
-                    주기문 = f'최근 {len(날짜)}일간 상위 {CYC_TOP}위에 든 적이 없습니다'
+                    주기문 = f"최근 {len(날짜)}일간 상위 {CYC_TOP}위 진입 없음"
                 else:
-                    주기문 = (f'등판 {_s["회수"]}회 — '
-                           f'표본이 적어 아직 주기를 못 믿습니다')
+                    # 🆕 2026-08-26 — 「표본이 적어 아직 주기를 못 믿습니다」가
+                    #    섹터 줄마다 최대 16번 반복돼 소음이 됐다. 사유는 코너
+                    #    맨 위 안내가 이미 한 번 말한다. 여기는 **사실(등판 횟수)만**
+                    #    남긴다. 표본이 차면 위 안내가 사라지고 평균 주기가 들어온다.
+                    주기문 = f"등판 {_s['회수']}회"
             # 🆕 2026-08-22 — 섹터명을 누르면 대표 종목이 펼쳐진다(섹터 지도와 같은 방식).
             #    "돌아올 섹터라는데, 그래서 뭘 사라는 거지?"에 답이 없던 문제를 메운다.
             _pid = f"rsm_{_GRID_SEQ[0]}_{abs(hash(nm)) % 99999}"
@@ -7825,7 +7860,15 @@ def build_core(핵심편, data, 해석):
             + ('<div class="deep-cut" id="deep">'
                '<span class="deep-arrow">⌄</span>'
                '<div class="deep-txt"><p class="deep-t1">여기까지가 핵심편입니다</p>'
-               '<p class="deep-t2">지금부터는 근거와 상세를 담은 <b>심층편</b></p></div>'
+               '<p class="deep-t2">지금부터는 근거와 상세를 담은 <b>심층편</b></p>'
+               # 🆕 2026-08-26 — 이 경계가 나중에 무료·유료의 경계가 된다.
+               #    ⚠️ HO 지시 — 지금은 «유료·멤버 전용» 같은 말을 쓰지 않는다.
+               #       아직 아무것도 못 지키는 시점에 조건부터 말하면 신뢰를 먼저 쓴다.
+               #       «곧 정식 공개» 예고만 남기고, 자물쇠로 변화만 암시한다.
+               #    ⚠️ 날짜·가격은 쓰지 않는다. 못 지킬 약속을 화면에 박지 않는다.
+               '<p class="deep-pre">🔒 심층편은 아직 준비 중이에요 · '
+               '<b>곧 정식으로 공개됩니다</b></p>'
+               '</div>'
                '<span class="deep-arrow">⌄</span></div>'))
 
 
@@ -9826,6 +9869,26 @@ def build_html(data, report):
 body{{background:#f0efec;padding:24px 12px;display:flex;justify-content:center;font-family:var(--font-sans)}}
 .rp{{padding:1.5rem 1.75rem 2rem;background:var(--bg);max-width:780px;width:100%;border-radius:16px;box-shadow:0 2px 24px rgba(0,0,0,.06)}}
 .deep-wrap{{background:#e4e7ec;background:linear-gradient(180deg,#e6e9ef,#dfe3ea);margin:.2rem -1.75rem 0;padding:1.4rem 1.75rem 1.5rem;border-top:3px solid #c0c6d0}}
+/* 🆕 2026-08-26 심층편 칩 네비 — 코너를 줄이지 않고 '길다'는 체감만 줄인다.
+   심층편은 16개 코너가 한 줄로 이어져 있어 "채점표만 보고 싶다"는 독자가
+   전부를 손가락으로 지나쳐야 했다. 내용은 그대로, 이동 수단만 붙인다.
+   ⚠️ .deep-wrap 안에서만 sticky다 — 핵심편에서는 안 나온다(의도).
+   ⚠️ HO 지적 — 밝은 바에 흰 칩은 배경에 묻혀 안 보였다.
+      심층편 배경(#e6e9ef)이 밝으므로 바를 **어둡게 반전**시켜 대비를 만든다. */
+.cp-nav{{position:sticky;top:0;z-index:45;display:flex;gap:7px;overflow-x:auto;
+  margin:-1.4rem -1.75rem 1.1rem;padding:10px 1.75rem;
+  background:#1b2027;border-bottom:2px solid #e0c060;
+  box-shadow:0 3px 10px rgba(0,0,0,.22);
+  -webkit-overflow-scrolling:touch;scrollbar-width:none}}
+.cp-nav::-webkit-scrollbar{{display:none}}
+.cp-chip{{flex:none;font-size:11.5px;font-weight:700;color:#cdd3dc;
+  background:#2b323c;border:1px solid #3d4550;border-radius:999px;
+  padding:7px 13px;cursor:pointer;white-space:nowrap;font-family:inherit;
+  line-height:1;-webkit-tap-highlight-color:transparent;transition:background .15s}}
+.cp-chip.on{{background:#e0c060;color:#1b2027;border-color:#e0c060}}
+/* 앵커는 보이지 않는 표식. scroll-margin-top이 칩바 높이만큼 자리를 비워
+   제목이 칩바에 가려지는 것을 막는다. */
+.nv-a{{display:block;height:0;overflow:hidden;scroll-margin-top:60px}}
 .deep-wrap .sec-label{{color:#2b3038}}
 .deep-wrap .sec-label small{{color:#7a828d}}
 a{{color:inherit;text-decoration:none}}
@@ -10391,7 +10454,13 @@ html{{scroll-behavior:smooth}}
 .deep-txt{{text-align:center}}
 .deep-t1{{font-size:12px;color:#9aa0a8;font-weight:700}}
 .deep-t2{{font-size:14px;color:#e8e6e2;font-weight:800;margin-top:2px}}
+.deep-t2{{word-break:keep-all}}
 .deep-t2 b{{color:#e0c060}}
+.deep-pre{{display:inline-block;margin-top:8px;padding:6px 12px;font-size:11px;
+  font-weight:700;color:#cdd2da;background:rgba(224,192,96,.10);
+  border:.5px solid rgba(224,192,96,.32);border-radius:14px;line-height:1.6;
+  word-break:keep-all;max-width:19em}}
+.deep-pre b{{color:#e0c060}}
 .tmr{{margin-top:1rem;padding:.9rem 1rem;background:linear-gradient(180deg,#2b2f37,#242830);border-radius:12px;border-left:4px solid #e0c060}}
 .tmr-h{{font-size:17px;font-weight:800;color:#e0c060;margin-bottom:6px}}
 .tmr-b{{font-size:13px;color:#e8e6e2;line-height:1.7}}
@@ -10418,6 +10487,7 @@ html{{scroll-behavior:smooth}}
   body{{padding:8px 0}}
   .rp{{padding:1.1rem 1rem 1.5rem;border-radius:0;max-width:100%}}
   .deep-wrap{{margin-left:-1rem;margin-right:-1rem;padding-left:1rem;padding-right:1rem}}
+  .cp-nav{{margin-left:-1rem;margin-right:-1rem;padding-left:1rem;padding-right:1rem}}
   .top-bar{{flex-direction:column;gap:6px}}
   .q90{{padding:1.05rem .95rem}}
   .q90-def{{font-size:18.5px}}
@@ -10990,6 +11060,16 @@ html{{scroll-behavior:smooth}}
   {build_core(해석.get('핵심편'), data, 해석)}
 
   <div class="deep-wrap">
+  <nav class="cp-nav" id="cpnav" aria-label="심층편 바로가기">
+    <button type="button" class="cp-chip" data-go="nv-gauge">관제지수</button>
+    <button type="button" class="cp-chip" data-go="nv-flow">수급</button>
+    <button type="button" class="cp-chip" data-go="nv-star">오늘 주인공</button>
+    <button type="button" class="cp-chip" data-go="nv-sector">섹터</button>
+    <button type="button" class="cp-chip" data-go="nv-radar">종목 레이더</button>
+    <button type="button" class="cp-chip" data-go="nv-catch">포착 그 후</button>
+    <button type="button" class="cp-chip" data-go="nv-score">채점표</button>
+  </nav>
+  <span class="nv-a" id="nv-gauge"></span>
   {build_gauge(data.get('관제지수'), 오늘한줄평, 지수)}
 
   <!-- 🆕 2026-08-22 — 핵심편 헤더가 같은 성적표 카드를 쓰게 되면서 여기는 중복이 됐다.
@@ -11017,10 +11097,12 @@ html{{scroll-behavior:smooth}}
 
   <!-- ⚠️ 수급을 주인공보다 먼저 본다(2026-08-21 지시).
        "돈이 어디로 갔나"를 알고 나서 "어디가 떴나"를 봐야 인과가 맞다. -->
+  <span class="nv-a" id="nv-flow"></span>
   <p class="sec-label" id="flow"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>
   <!-- 🆕 2026-08-22 — "확인 ↓"(#flow)도 같은 이유로 죽어 있었다. -->
   {build_flow_signal(data.get('파생'), data.get('지수수급'), 해석)}
 
+  <span class="nv-a" id="nv-star"></span>
   <p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공
     <span style="font-size:11px;font-weight:600;color:#8b93a0">· 상승률 + 거래대금 + 확산도 기준</span></p>
   {dev_note(f"전체 테마 중 등락률 상위 {(data.get('설정') or {}).get('주도섹터',{}).get('1차후보','?')}개를 1차 후보로 추림 → "
@@ -11041,6 +11123,7 @@ html{{scroll-behavior:smooth}}
   {_mystock_deep}
 
 
+  <span class="nv-a" id="nv-sector"></span>
   <p class="sec-label"><small>내 자리</small>📊 섹터 지도</p>
   {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
 
@@ -11091,12 +11174,14 @@ html{{scroll-behavior:smooth}}
           어두운 박스(#141922) 안으로 들어갔고, 제목(sec-label)이 어두운 글자라
           「오늘 불난 자리」부터 마지막 교신까지 **8개 제목이 통째로 안 보였다.**
           ⚠️ 블록을 지울 때는 **여는 태그와 닫는 태그를 같이** 지운다. -->
+  <span class="nv-a" id="nv-radar"></span>
   <p class="sec-label" id="radar"><small>실제 강세 레이더</small><span class="cp-flame">🔥</span> 오늘 불난 자리</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
   <p class="sec-label" id="acc"><small>매집 레이더</small><span class="cp-turtle">🐢</span> 조용히 모으는 손</p>
   {build_accumulation(data.get('매집레이더'), data.get('설정'))}
 
+  <span class="nv-a" id="nv-catch"></span>
   <p class="sec-label"><small>포착 그 후</small>🛬 레이더는 잘 잡았나</p>
   {_catch_after_block}
   {hide("포착성적", f'''{build_capture_paths()}''')}
@@ -11113,6 +11198,7 @@ html{{scroll-behavior:smooth}}
   <p class="sec-label"><small>챙겨볼 뉴스</small>🔥 {news_title(해석.get('핵심뉴스'))}</p>
   {build_news(해석.get('핵심뉴스'))}
 
+  <span class="nv-a" id="nv-score"></span>
   {f'<p class="sec-label"><small>어제의 채점표</small>✅ 어제 예고, 오늘 결과는</p>{build_scorecard(해석.get("채점표"))}' if 해석.get('채점표') else ''}
 
   {build_story_bridge()}
@@ -11136,6 +11222,42 @@ html{{scroll-behavior:smooth}}
   <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[{SCRIPT_VERSION}]</span></p>
 </div>
 <script>
+/* 🆕 심층편 칩 네비 — 인라인 onclick을 쓰지 않는다.
+   파이썬 f-string을 거치며 따옴표 이스케이프가 풀려 JS 전체가 죽은 사고가 있었다. */
+(function(){{
+  var nav=document.getElementById('cpnav');
+  if(!nav) return;
+  var chips=[].slice.call(nav.querySelectorAll('.cp-chip'));
+  chips.forEach(function(b){{
+    b.addEventListener('click',function(){{
+      var t=document.getElementById(b.getAttribute('data-go'));
+      if(t) t.scrollIntoView({{behavior:'smooth',block:'start'}});
+    }});
+  }});
+  /* 지금 어느 코너인지 칩에 표시한다 — 위치 감각이 없으면 네비가 있어도
+     "내가 어디쯤인지"를 모른다. 활성 칩이 바 밖이면 가운데로 끌어온다. */
+  var marks=chips.map(function(b){{return document.getElementById(b.getAttribute('data-go'));}});
+  var tick=false;
+  function sync(){{
+    tick=false;
+    var cur=-1;
+    for(var i=0;i<marks.length;i++){{
+      if(marks[i] && marks[i].getBoundingClientRect().top<=72) cur=i;
+    }}
+    chips.forEach(function(b,i){{
+      var was=b.classList.contains('on');
+      b.classList.toggle('on',i===cur);
+      if(i===cur && !was && nav.scrollWidth>nav.clientWidth){{
+        nav.scrollTo({{left:Math.max(0,b.offsetLeft-(nav.clientWidth-b.offsetWidth)/2),
+                      behavior:'smooth'}});
+      }}
+    }});
+  }}
+  window.addEventListener('scroll',function(){{
+    if(!tick){{tick=true;window.requestAnimationFrame(sync);}}
+  }},{{passive:true}});
+  sync();
+}})();
 function toggleMore(id,btn,label){{
   var el=document.getElementById(id);
   var open=el.classList.toggle('open');
