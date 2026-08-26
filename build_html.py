@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-j1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-j2"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -7866,8 +7866,7 @@ def build_core(핵심편, data, 해석):
                #       아직 아무것도 못 지키는 시점에 조건부터 말하면 신뢰를 먼저 쓴다.
                #       «곧 정식 공개» 예고만 남기고, 자물쇠로 변화만 암시한다.
                #    ⚠️ 날짜·가격은 쓰지 않는다. 못 지킬 약속을 화면에 박지 않는다.
-               '<p class="deep-pre">🔒 심층편은 아직 준비 중이에요 · '
-               '<b>곧 정식으로 공개됩니다</b></p>'
+               '<p class="deep-pre">🔒 <b>심층편은 곧 공개됩니다</b></p>'
                '</div>'
                '<span class="deep-arrow">⌄</span></div>'))
 
@@ -11061,15 +11060,13 @@ html{{scroll-behavior:smooth}}
 
   <div class="deep-wrap">
   <nav class="cp-nav" id="cpnav" aria-label="심층편 바로가기">
-    <button type="button" class="cp-chip" data-go="nv-gauge">관제지수</button>
     <button type="button" class="cp-chip" data-go="nv-flow">수급</button>
-    <button type="button" class="cp-chip" data-go="nv-star">오늘 주인공</button>
+    <button type="button" class="cp-chip" data-go="nv-star">주인공</button>
     <button type="button" class="cp-chip" data-go="nv-sector">섹터</button>
     <button type="button" class="cp-chip" data-go="nv-radar">종목 레이더</button>
     <button type="button" class="cp-chip" data-go="nv-catch">포착 그 후</button>
     <button type="button" class="cp-chip" data-go="nv-score">채점표</button>
   </nav>
-  <span class="nv-a" id="nv-gauge"></span>
   {build_gauge(data.get('관제지수'), 오늘한줄평, 지수)}
 
   <!-- 🆕 2026-08-22 — 핵심편 헤더가 같은 성적표 카드를 쓰게 되면서 여기는 중복이 됐다.
