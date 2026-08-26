@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-g1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-i1"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1014,6 +1014,22 @@ def build_radar(강세레이더, 설정=None):
         f"(각각 0~100 정규화) + 거래량 {설정.get('가점배수','?')}배↑ 시 +{설정.get('가점','?')}점 │ "
         f"추적 {설정.get('추적일','?')}거래일"
     ) if 설정 else ""
+    # 🆕 2026-08-26 HO 지시 — 조건 설명 **바로 밑**에 두 기법이 뭔지 쉽게 쓴다.
+    #  ⚠️ 구체적 수치(몇 배·몇 %)는 쓰지 않는다. 위 dev_note가 이미 다 말했고,
+    #     여기는 "그래서 이게 무슨 종목인가"만 답하는 자리다.
+    안내 = (
+        '<div class="rd-guide">'
+        '<p class="rd-guide-h">🎯 이 종목들이 왜 여기 떴냐면요</p>'
+        '<p class="rd-guide-b">'
+        '<b style="color:#f0c65a">💰 돈이 몰림</b> — 평소보다 훨씬 많은 돈과 거래가 '
+        '한꺼번에 몰리면서 <b>높은 가격대에서 끝난</b> 종목이에요. '
+        '살 사람이 끝까지 붙어 있었다는 뜻이에요.<br>'
+        '<b style="color:#74f0d4">📈 V자 반등</b> — 장중에 크게 밀렸다가 '
+        '<b>되돌려 올라온</b> 종목이에요. 떨어질 때 받아준 손이 있었다는 뜻이에요.'
+        '</p>'
+        '<p class="rd-guide-n">두 기법은 재는 기준이 서로 달라서 '
+        '<b>한 종목이 둘 다</b> 걸리기도 해요. 추천이 아니라 '
+        '<b>이 조건에 걸렸다</b>는 기록이에요.</p></div>')
     신규 = 강세레이더.get("신규") or {}
     추적 = 강세레이더.get("추적") or []
 
@@ -1031,9 +1047,13 @@ def build_radar(강세레이더, 설정=None):
             _배지명 = {"돈이 몰린 종목": "💰 돈이 몰림", "V자 반등 종목": "📈 V자 반등"}
             _색 = {"돈이 몰린 종목": "#f0c65a", "V자 반등 종목": "#74f0d4"}
             _유들 = s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
+            # 🆕 2026-08-26 HO 지시 — 배경을 빼고 **같은 색 테두리만 두껍게**.
+            #    [WHY] 채운 배지가 종목명보다 먼저 눈에 들어와 시선을 뺏었다.
+            #          선으로 바꾸면 윤곽은 남고 무게만 준다.
             유형HTML = "".join(
-                f'<span class="rd-tag" style="background:{_색.get(t,"#8b93a0")};'
-                f'color:#1a0f08;font-weight:800">{_배지명.get(t, t)}</span>'
+                f'<span class="rd-tag" style="background:none;'
+                f'border:2px solid {_색.get(t,"#8b93a0")};'
+                f'color:{_색.get(t,"#8b93a0")};font-weight:800">{_배지명.get(t, t)}</span>'
                 for t in _유들)
             # ⚠️ V자 반등은 **전일 종가 대비로는 하락일 수 있다.**
             #    예전처럼 '+' 를 강제로 붙이면 "+-2.00%"가 되어 깨진다.
@@ -1094,14 +1114,9 @@ def build_radar(강세레이더, 설정=None):
 
     return f"""
   <div class="rd-box">
-    <p class="rd-lead">🔥 <b>서로 다른 두 기법</b>으로 잡습니다. 조건도 재는 기준도 완전히 다릅니다.<br>
-      <b style="color:#a07d1f">💰 돈이 몰림</b> — 거래대금 <b>1,000억↑</b> ·
-      전일 대비 거래량 <b>2배↑</b> · <b>전일 종가 대비 7%↑</b> 상승 ·
-      종가가 당일 <b>고가권(60% 이상)</b>에서 마감.<br>
-      <b style="color:#0f7a68">📈 V자 반등</b> — 시총 <b>3,000억↑</b> · 거래대금 <b>500억↑</b> ·
-      거래량 <b>1.5배↑</b> · <b>당일 시가 대비 −3%까지 밀렸다가 +4%↑로 마감</b>.
-      이쪽은 전일 종가 대비로는 <b>하락일 수도</b> 있습니다 — 장중 흐름을 보는 기법이라서입니다.</p>
+    <p class="rd-lead">🔥 <b>서로 다른 두 기법</b>으로 잡습니다. 조건도 재는 기준도 완전히 다릅니다.</p>
     {조건}
+    {안내}
     {신규HTML}
     <p class="rd-foot">🔄 N차 포착 = 추적 중이던 종목의 재점화 ·
       한 종목이 <b>두 기법에 동시에</b> 걸리면 배지가 둘 다 붙습니다.<br>
@@ -2148,10 +2163,12 @@ def build_core_strong(강세레이더):
         # ⚠️ 한 종목이 두 유형에 동시에 걸릴 수 있다(독립 판정). 배지를 모두 단다.
         _유들 = s.get("유형들") or ([s["유형"]] if s.get("유형") else [])
         if _유들:
+            # 🆕 2026-08-26 HO 지시 — 배경 제거, 같은 색 테두리 2px.
             뱃지 = "".join(
-                f'<span style="font-size:9.5px;font-weight:800;color:#1a0f08;'
-                f'background:{_유형색.get(t,"#8b93a0")};border-radius:4px;'
-                f'padding:2px 6px;margin-right:3px;white-space:nowrap">'
+                f'<span style="font-size:9.5px;font-weight:800;'
+                f'color:{_유형색.get(t,"#8b93a0")};background:none;'
+                f'border:2px solid {_유형색.get(t,"#8b93a0")};border-radius:5px;'
+                f'padding:1px 6px;margin-right:4px;white-space:nowrap">'
                 f'{_배지명.get(t, t)}</span>' for t in _유들) + 뱃지
         # ⚠️ 등락률은 V자 반등에서 **음수일 수 있다.** 색을 나눈다.
         _등색 = "#ff6b4a" if (등 or 0) >= 0 else "#5b9bff"
@@ -3631,7 +3648,7 @@ def build_my_stocks(data):
    if(_cd) zones+='<a href="https://finance.naver.com/item/board.naver?code='+_cd+'" '+
      'target="_blank" rel="noopener" style="display:inline-block;font-size:10px;'+
      'padding:2px 8px;margin:0 4px 4px 0;border-radius:99px;background:#2a2233;'+
-     'color:#c4a8f7;text-decoration:none;font-weight:700">💬 토론방 가기</a>';
+     'color:#c4a8f7;text-decoration:none;font-weight:700">💬 실시간 토론방</a>';
    var items='', n1=0, n2=0;
    // ⚠️ 제목 + **본문(요약)** 둘 다에서 종목명을 찾는다(2026-08-20).
    //    제목 매칭은 우선순위를 높여 위로 올리고, 많으면 상위 4건만 보여준다.
@@ -5338,7 +5355,10 @@ def build_sector_scoreboard():
     보유일 = len(set().union(*[set(v) for v in 구역.values()]) & set(시장))
 
     탭, 패널 = "", ""
-    기본idx = 0   # 기본 탭은 **당일** — "오늘 어디가 셌나"부터 본다 (2026-08-18)
+    # 🆕 2026-08-26 HO 지시 — 기본 탭을 **5일**로 (순위 타일과 통일).
+    #  [WHY] 당일 하나만 보면 "오늘 셌다"로 끝나고 흐름이 안 보인다.
+    #        5일이면 한 주 흐름이 보여 '주도 섹터'라는 이 코너의 목적이 산다.
+    기본idx = next((i for i, (n, _, _) in enumerate(ZONE_WINDOWS) if n == 5), 0)
 
     for idx, (n, 이름, 부제) in enumerate(ZONE_WINDOWS):
         통계 = []
@@ -6157,8 +6177,12 @@ def build_sector_map():
         return ""
     이름 = sorted(순위)
     탭, 패널 = "", ""
+    # 🆕 2026-08-26 HO 지시 — 기본 탭을 **5일**로.
+    #  [WHY] 당일 한 칸만 보면 '순위가 어떻게 돌았나'라는 이 코너의 목적이 안 산다.
+    #        5일이면 한 주 흐름이 보여서 첫 화면부터 의미가 생긴다.
+    _기본 = next((i for i, (n, _) in enumerate(CYC_WINS) if n == 5), 0)
     for idx, (n, lab) in enumerate(CYC_WINS):
-        켬 = idx == 0
+        켬 = idx == _기본
         if len(날짜) < 5:
             continue
         # ⚠️ 이력이 창 길이에 못 미치면 60일 탭과 120일 탭이 똑같은 그림이 된다.
@@ -6775,11 +6799,69 @@ def _catch_card(rows, lo, hi, 이름):
             f'<p class="cg-ext">🏆 {hn} {hv:+.1f}% · 💀 {ln} {lv:+.1f}%</p></div>')
 
 
+def _catch_compare(돈몰림, V반등, 매집, lo, hi):
+    """세 기법의 **시장 대비 성적**을 한 그래프에 나란히.
+
+    🆕 2026-08-26 HO 지시 — "두 개의 데이터를 쌓아주고 시장 대비 그래프로 그려줘".
+    ⚠️ 절대수익이 아니라 **초과수익(%p)**으로 그린다.
+       같은 기간 시장이 -4%였는지 +2%였는지에 따라 -3%의 의미가 정반대다.
+       세 기법이 각자 다른 날 잡혔으니 벤치마크도 각자 다르다 — 그래서
+       "얼마 벌었나"가 아니라 "시장보다 얼마나 나았나"로만 비교가 성립한다.
+    ⚠️ 표본이 없는 기법은 막대를 그리지 않는다. 0으로 그리면 "성적 0"으로 읽힌다.
+    """
+    항목 = []
+    for rows, 이름, 색 in ((돈몰림, "돈이 몰림", "#f0c65a"),
+                          (V반등, "V자 반등", "#74f0d4"),
+                          (매집, "조용히 모으는 손", "#8fd0e8")):
+        st = _catch_stat(rows, lo, hi)
+        if st["부족"] or st.get("초과") is None:
+            continue
+        항목.append((이름, 색, st["초과"], st["수"]))
+    if len(항목) < 2:
+        return ""
+    mx = max(abs(v) for _, _, v, _ in 항목) or 1
+    W, H = 320, 24 + len(항목) * 26
+    L, R = 96, 46
+    z = L + (W - L - R) / 2
+    half = (W - L - R) / 2
+    g = (f'<line x1="{z:.0f}" y1="16" x2="{z:.0f}" y2="{H - 6}" stroke="#f0c65a" '
+         f'stroke-width="1.4" stroke-dasharray="3 2"/>'
+         f'<text x="{z:.0f}" y="10" text-anchor="middle" font-size="8.5" '
+         f'font-weight="800" fill="#f0c65a">시장과 같음</text>')
+    for i, (이름, 색, v, n) in enumerate(항목):
+        y = 22 + i * 26
+        w = abs(v) / mx * half * 0.9
+        g += (f'<rect x="{(z if v >= 0 else z - w):.1f}" y="{y}" '
+              f'width="{max(2, w):.1f}" height="13" rx="2.5" fill="{색}"/>'
+              f'<text x="{L - 6}" y="{y + 10}" text-anchor="end" font-size="9" '
+              f'fill="#c9ced6">{이름}</text>'
+              f'<text x="{W - R + 4}" y="{y + 10}" font-size="9.5" font-weight="800" '
+              f'fill="{색}">{v:+.1f}%p</text>'
+              f'<text x="{L - 6}" y="{y + 21}" text-anchor="end" font-size="7.5" '
+              f'fill="#6f7784">{n}종목</text>')
+    최고 = max(항목, key=lambda x: x[2])
+    return (f'<div class="cg-cmp"><p class="cg-cmp-h">📊 세 기법, 시장 대비로 비교하면</p>'
+            f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto">{g}</svg>'
+            f'<p class="cg-cmp-n">막대가 오른쪽이면 <b>같은 기간 시장보다 나았다</b>는 뜻이에요. '
+            f'지금은 <b style="color:{최고[1]}">{최고[0]}</b>이 가장 앞서 있어요 — '
+            f'다만 표본이 적을 때는 순서가 자주 바뀝니다.</p></div>')
+
+
 def build_catch_after(data):
     """강세·매집 두 레이더의 포착 후 성적을 기간 탭으로 보여준다."""
+    # 🆕 2026-08-26 HO 지시 — 강세를 **기법별로 쪼갠다.**
+    #  [WHY] 「돈이 몰림」과 「V자 반등」은 재는 기준부터 다른 별개 기법이다.
+    #        한 평균에 섞으면 어느 쪽이 유효한지 영영 알 수 없다.
+    #  ⚠️ 추적 데이터의 '유형들'로 나눈다(한 종목이 둘 다일 수 있어 중복 허용).
+    #  ⚠️ 2026-08-25 이전 추적분에는 '유형들'이 없다 → 어느 쪽에도 안 들어간다.
+    #     지어내지 않는다. 표본은 앞으로 쌓이는 것부터 정확해진다.
     매집 = _catch_rows(data, "매집레이더")
-    강세 = _catch_rows(data, "강세레이더")
-    if not 매집 and not 강세:
+    _강세전체 = _catch_rows(data, "강세레이더")
+    def _유형필터(rows, 키):
+        return [t for t in rows if 키 in (t.get("유형들") or [])]
+    돈몰림 = _유형필터(_강세전체, "돈이 몰린 종목")
+    V반등 = _유형필터(_강세전체, "V자 반등 종목")
+    if not 매집 and not _강세전체:
         return ""
     탭, 패널 = "", ""
     for i, (lo, hi, lab) in enumerate(CATCH_WINS):
@@ -6788,8 +6870,10 @@ def build_catch_after(data):
         탭 += (f'<span class="cg-tab{켬}" data-n="{n}" '
                f'onclick="cgWin({n})">{lab}'
                f'<span class="cg-tab-r">{lo}~{hi}일</span></span>')
-        본문 = (_catch_card(강세, lo, hi, "🔥 불난 자리(강세)")
-              + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)"))
+        본문 = (_catch_card(돈몰림, lo, hi, "💰 돈이 몰림(강세)")
+              + _catch_card(V반등, lo, hi, "📈 V자 반등(전환)")
+              + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)")
+              + _catch_compare(돈몰림, V반등, 매집, lo, hi))
         패널 += (f'<div class="cg-panel" data-n="{n}" '
                  f'style="display:{"block" if i == 0 else "none"}">{본문}</div>')
     # 🆕 2026-08-25 HO 지시 — 탭 라벨은 «5일»인데 실제로는 5~10일 구간이다.
@@ -10450,6 +10534,12 @@ html{{scroll-behavior:smooth}}
 .abc{{color:#9b8ac0}}
 .abn{{color:#77a377}}
 .abd{{color:#5a616b}}
+/* 🆕 2026-08-26 강세 레이더 안내 (조건 설명 바로 밑) */
+.rd-guide{{background:rgba(255,255,255,.55);border:1px solid #e6e2da;
+  border-radius:10px;padding:10px 11px;margin:8px 0 10px}}
+.rd-guide-h{{margin:0 0 6px;font-size:12.5px;font-weight:800;color:var(--ink)}}
+.rd-guide-b{{margin:0;font-size:11.5px;color:#3d4450;line-height:1.75}}
+.rd-guide-n{{margin:6px 0 0;font-size:10.5px;color:#6b7280;line-height:1.6}}
 /* 🆕 2026-08-25 종목 카드 */
 .sc-guide{{background:#141922;border:1px solid #2a3446;border-radius:11px;
   padding:11px 12px;margin:14px 0 8px}}
@@ -10481,8 +10571,25 @@ html{{scroll-behavior:smooth}}
           --ink는 #1a1a1a(거의 검정)이라 어두운 카드 배경에서 글자가 사라졌다.
           이름이 겹치면 이렇게 조용히 죽는다. */
 .cp-sname{{cursor:pointer;color:inherit;font-weight:800}}
-.sc-card{{background:#0f131a;border:1px solid #2a3446;border-radius:10px;
-  padding:10px 11px;margin:6px 0 2px}}
+/* 🆕 2026-08-26 HO 지시 — 기업분석 카드가 다른 코너와 비슷해 헷갈린다.
+   [해법] '펼쳐진 서랍'처럼 보이게 만든다 — 본문과 다른 층으로 인식되게.
+     ① 왼쪽 굵은 하늘색 세로 띠 (이 카드만의 색)
+     ② 안쪽 들여쓰기 — 종목명에 딸린 것임을 표시
+     ③ 위쪽 화살표 꼬리 — 어느 종목에서 펼쳐졌는지 시선을 잇는다
+     ④ 더 어두운 배경 + 안쪽 그림자로 '눌린 면' 느낌
+     ⑤ 오른쪽 위 «기업분석» 꼬리표 */
+.sc-card{{position:relative;background:#080b10;
+  border:1px solid #2a3446;border-left:4px solid #8fd0e8;
+  border-radius:4px 10px 10px 4px;
+  padding:12px 12px 11px;margin:12px 0 4px 10px;
+  box-shadow:inset 0 2px 8px rgba(0,0,0,.55)}}
+.sc-card::before{{content:"";position:absolute;top:-7px;left:14px;
+  width:12px;height:12px;background:#080b10;
+  border-left:1px solid #2a3446;border-top:1px solid #2a3446;
+  transform:rotate(45deg)}}
+.sc-card::after{{content:"기업분석";position:absolute;top:-9px;right:12px;
+  font-size:9px;font-weight:800;color:#8fd0e8;background:#0b0e13;
+  padding:1px 7px;border-radius:999px;border:1px solid #2a3446}}
 .sc-def{{margin:0 0 3px;font-size:11.5px;color:#8fd0e8;font-weight:700}}
 .sc-biz{{margin:0 0 4px;font-size:11.5px;color:#c9ced6;line-height:1.6}}
 .sc-basic{{margin:0 0 8px;font-size:11.5px;color:#c9ced6;font-weight:600}}
@@ -10560,6 +10667,11 @@ html{{scroll-behavior:smooth}}
    읽히는데 실제는 구간이라 오해가 생긴다(원칙 10). */
 .cg-tab-r{{display:block;font-size:8.5px;font-weight:600;opacity:.75;margin-top:1px}}
 .cg-tab.on{{color:#0b0e13;background:#f0c65a;border-color:#f0c65a}}
+/* 🆕 2026-08-26 기법 비교 그래프 */
+.cg-cmp{{background:#0b0e13;border:1px solid #232a36;border-radius:9px;
+  padding:9px 10px;margin-top:7px}}
+.cg-cmp-h{{margin:0 0 4px;font-size:11.5px;font-weight:800;color:#c9ced6}}
+.cg-cmp-n{{margin:5px 0 0;font-size:10px;color:#8b93a0;line-height:1.6}}
 .cg-range{{margin:0 0 8px;padding:5px 8px;background:#0b0e13;
   border:1px solid #232a36;border-radius:7px;
   font-size:9.5px;color:#8b93a0;text-align:center;line-height:1.5}}
@@ -10970,26 +11082,15 @@ html{{scroll-behavior:smooth}}
 
   <!-- 🆕 2026-08-25 — 심층편에서는 카드 기능을 한 번만 따로 설명한다.
        핵심편은 종목명 옆 «▾ 기업분석» 배지로만 알리고, 여기서는 뭐가 나오는지까지. -->
-  <div class="sc-guide">
-    <!-- 🆕 2026-08-26 HO 지시 — 「왜 여기 떴나」를 종목마다 반복하지 말고
-         레이더 코너 위에서 **한 번만** 설명한다. -->
-    <p class="sc-guide-h">🎯 이 종목들이 왜 여기 떴냐면요</p>
-    <p class="sc-guide-b">
-      <b>🔥 불난 자리</b>는 «어제보다 거래량이 몇 배로 늘고 큰돈이 들어온 종목»,
-      <b>🐢 조용히 모으는 손</b>은 «금액이 아니라 <b>시가총액 대비 비율</b>이 크고
-      며칠에 걸쳐 연속으로 사들인 종목»이에요.
-      추천이 아니라 <b>이 조건에 걸렸다</b>는 기록이에요.
-    </p>
-    <p class="sc-guide-h" style="margin-top:10px">👆 종목 이름을 누르면 기업분석이 펼쳐져요</p>
-    <p class="sc-guide-b">
-      <b>왜 여기 떴는지</b>(어떤 조건에 걸렸는지 숫자 그대로) ·
-      <b>돈은 벌고 있는지</b>(매출·영업이익 5년 추이, 부채비율) ·
-      <b>알고 봐야 할 점</b>(적자 이력·재무 부담)을 그 자리에서 보여드려요.
-      더 필요하시면 카드 안의 <b>«자세히 보기»</b>를 한 번 더 누르시면 됩니다.
-    </p>
-    <p class="sc-guide-n">재무는 DART 사업보고서(연결 우선) 기준이라 최근 확정 연도까지예요.
-      아직 준비 안 된 종목은 다음 발행부터 차례로 채워집니다.</p>
-  </div>
+  <!-- 🆕 2026-08-26 HO 지시 — 여기 있던 「이 종목들이 왜 여기 떴냐면요」와
+       「종목 이름을 누르면…」 안내를 삭제했다.
+       [WHY] 왜 떴는지는 **불난 자리 코너 안**(조건 설명 바로 밑)이 제자리다.
+             레이더를 보기도 전에 설명부터 나오면 순서가 거꾸로다.
+       🔴 2026-08-26 사고 — 처음 지울 때 <div class="sc-guide"> **여는 태그만
+          남기고** 안쪽 내용만 지웠다. 닫는 태그가 없으니 그 뒤 심층편 전체가
+          어두운 박스(#141922) 안으로 들어갔고, 제목(sec-label)이 어두운 글자라
+          「오늘 불난 자리」부터 마지막 교신까지 **8개 제목이 통째로 안 보였다.**
+          ⚠️ 블록을 지울 때는 **여는 태그와 닫는 태그를 같이** 지운다. -->
   <p class="sec-label" id="radar"><small>실제 강세 레이더</small><span class="cp-flame">🔥</span> 오늘 불난 자리</p>
   {build_radar(data.get('강세레이더'), data.get('설정'))}
 
