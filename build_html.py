@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-k3"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.26-k4"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -3737,11 +3737,20 @@ def build_my_stocks(data):
  window.msToggleSel=function(nm){
   var cur=selected(), i=cur.indexOf(nm);
   if(i>=0) cur.splice(i,1); else cur.push(nm);
-  /* 전부 끄면 «전부 켬»과 구분이 안 된다 — 마지막 하나는 못 끄게 한다. */
-  if(!cur.length) return;
+  /* 전부 끄면 «전부 켬»과 구분이 안 된다 — 마지막 하나는 못 끄게 한다.
+     ⚠️ 체크박스는 이미 시각적으로 꺼진 상태라, 그냥 return하면 화면과
+        실제 상태가 어긋난다. 반드시 다시 그려 체크를 되돌린다. */
+  if(!cur.length){ render(); return; }
   setSel(cur); render();
  };
- window.msSelAll=function(){ setSel([]); render(); };
+ /* 🆕 전체 «해제»도 지원한다. 다만 하나도 안 켜진 상태는 «전부 켬»과
+    구분이 안 되므로, 해제하면 **맨 위 한 종목만** 남긴다.
+    빈 그래프를 보여주면 고장으로 오해한다. */
+ window.msSelAll=function(on){
+  var my=get();
+  setSel(on===false ? my.slice(0,1) : []);
+  render();
+ };
  function render(){
   var my=get(), box=document.getElementById('ms-list');
   if(!my.length){box.innerHTML='<p style="margin:14px 0;font-size:12px;color:#7d848f;'+
@@ -3791,14 +3800,14 @@ def build_my_stocks(data):
     '📄 '+g.t+(g.s?' ('+'★'.repeat(g.s)+')':'')+'</a>';});
    /* 🆕 2026-08-25 — 종목명을 누르면 기업분석이 아래로 펼쳐진다. */
    var _on=selected().indexOf(nm)>=0;
-   /* 체크박스는 <input>이 아니라 span이다 — 리포트 전체가 정적 HTML이라
-      폼 상태를 다시 그릴 때마다 초기화되는 문제를 피한다. */
-   var _cb='<span onclick="msToggleSel(\\''+nm+'\\')" style="flex:none;width:19px;'+
-    'height:19px;margin-top:1px;border-radius:5px;cursor:pointer;display:flex;'+
-    'align-items:center;justify-content:center;font-size:12px;font-weight:900;'+
-    (_on?'background:#8fd0e8;color:#0b0e13;border:1px solid #8fd0e8"'
-        :'background:transparent;color:transparent;border:1px solid #3d4550"')+
-    ' title="그래프에 넣기">✓</span>';
+   /* 🆕 2026-08-26 HO 지시 — 섹터 성적표(.sb-ck)와 **크기·디자인을 통일**한다.
+      같은 리포트 안에서 같은 역할을 하는 조작이 서로 다르게 생기면
+      독자는 두 번 배워야 한다. 14×14px · accent-color 방식을 그대로 쓴다.
+      ⚠️ render()가 매번 다시 그리므로 checked를 HTML에 직접 박는다. */
+   var _cb='<input type="checkbox" class="ms-ck"'+(_on?' checked':'')+
+    ' onchange="msToggleSel(\\''+nm+'\\')"'+
+    ' style="flex:none;width:14px;height:14px;margin-top:3px;'+
+    'accent-color:#8fd0e8;cursor:pointer">';
    html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c;'+
     (_on?'':'opacity:.55')+'">'+
     '<div style="display:flex;align-items:flex-start;gap:8px">'+_cb+
@@ -3823,14 +3832,17 @@ def build_my_stocks(data):
   /* 몇 개를 보고 있는지 항상 알려준다. 안 그러면 "왜 선이 줄었지?"가 된다. */
   var _hd=document.getElementById('ms-selbar');
   if(_hd){
+   var _allOn=(_sel.length===my.length);
    _hd.innerHTML = my.length<2 ? '' :
-    ('<span style="font-size:10.5px;color:#7d848f">그래프에 '+
+    ('<label style="display:flex;align-items:center;gap:6px;font-size:11px;'+
+     'color:#8b93a0;cursor:pointer">'+
+     '<input type="checkbox" id="ms-all"'+(_allOn?' checked':'')+
+     ' onchange="msSelAll(this.checked)"'+
+     ' style="width:14px;height:14px;accent-color:#f0c65a;cursor:pointer">'+
+     '전체 선택 / 해제</label>'+
+     '<span style="font-size:10.5px;color:#7d848f">그래프에 '+
      '<b style="color:#8fd0e8">'+_sel.length+'개</b> / 등록 '+my.length+'개</span>'+
-     /* 버튼은 하나면 충분하다. 전부 켜진 상태에서는 아예 감춘다. */
-     (_sel.length===my.length?'':
-      '<span onclick="msSelAll()" style="font-size:10px;color:#8fd0e8;'+
-      'border:1px solid #2b4655;border-radius:99px;padding:3px 10px;cursor:pointer">'+
-      '전체 보기</span>'));
+     '');
   }
   var s=document.getElementById('ms-sum');
   if(exs.length){var avg=exs.reduce(function(a,b){return a+b;},0)/exs.length;
