@@ -147,7 +147,7 @@ REPORT_PATH = asave(f"report_{DATE}.json")
 # 아래 4개 중 쓰고 싶은 것의 # 를 지우고, 나머지는 # 를 붙이면 된다.
 # (가격은 입력/출력 100만 토큰당. 2026년 7월 기준)
 FLOW_창 = 20          # ⚠️ build_html.py의 FLOW_창과 항상 같아야 한다.
-SCRIPT_VERSION = "v2026.08.26-j2"
+SCRIPT_VERSION = "v2026.08.26-k1"
 
 # 출력 토큰 한도 — 잘리면 자동으로 2배씩 올려 재시도하되, 모델 상한을 넘지 않게 캡을 둔다
 MAX_TOKENS_START = 24000   # 🆕 2026-08-22 — effort=high로 올리면서 함께 상향.
