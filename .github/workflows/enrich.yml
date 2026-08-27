@@ -1,0 +1,61 @@
+name: 몰아 모으기 (기업 프로필·사업보고서·종목뉴스)
+
+# ⚠️ 이 workflow는 발행(daily.yml)과 완전히 분리돼 있다.
+#    수동(workflow_dispatch)으로만 돈다 — 예약 실행 없음.
+#    발행이 도는 중(16:50~18:20 사이)에는 되도록 실행하지 않는다.
+#    같은 json 파일을 동시에 건드리면 git push가 충돌할 수 있다.
+on:
+  workflow_dispatch:
+    inputs:
+      profile_quota:
+        description: "기업 프로필 — 이번에 새로 채울 종목 수"
+        default: "300"
+      biz_quota:
+        description: "사업보고서 — 이번에 받을 건수"
+        default: "40"
+      news_quota:
+        description: "종목뉴스 — 이번에 긁을 종목 수"
+        default: "150"
+
+permissions:
+  contents: write
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300   # 넉넉히 5시간 — 발행과 달리 서두를 이유가 없다
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 패키지 설치
+        # ⚠️ collect_data.py는 requests만 쓰는 게 아니라 pandas·yfinance 등도
+        #    최상단에서 import한다. requirements.txt를 그대로 설치해야
+        #    "ModuleNotFoundError"로 죽지 않는다.
+        run: pip install -r requirements.txt --quiet
+
+      - name: 몰아 모으기 실행
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          CP_PROFILE_QUOTA: ${{ github.event.inputs.profile_quota }}
+          CP_BIZ_QUOTA: ${{ github.event.inputs.biz_quota }}
+          CP_SNEWS_QUOTA: ${{ github.event.inputs.news_quota }}
+        run: python catchup_enrich.py
+
+      - name: 결과 저장 (git commit)
+        run: |
+          git config user.name "chartpro-bot"
+          git config user.email "bot@chartpro.local"
+          git add stock_profile.json corp_map.json corp_stockcode.json \
+                   biz_report_raw.json stock_news_raw.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "변경 없음 — 커밋 생략"
+          else
+            git commit -m "🚀 몰아 모으기 $(date +%Y-%m-%d\ %H:%M)"
+            git push
+          fi
