@@ -1,5 +1,5 @@
 # ============================================================
-# inherit_report.py  (v2026.08.27-b1)
+# inherit_report.py  (v2026.08.27-c2)
 # ------------------------------------------------------------
 #  오늘 해석글(archive/report_YYYYMMDD.json)이 없을 때
 #  **가장 최근 거래일의 해석글을 그대로 승계**한다.
@@ -25,7 +25,7 @@ import re
 import sys
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.27-b1"   # ⬅ 다른 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.27-c2"   # ⬅ 다른 파일과 항상 같아야 한다.
 
 ARCHIVE = "archive"
 DATE = os.environ.get("CP_DATE") or datetime.now().strftime("%Y%m%d")
