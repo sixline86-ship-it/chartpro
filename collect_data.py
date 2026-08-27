@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-k4"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.26-p2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3231,7 +3231,12 @@ def collect_market_halts():
 _유니버스_캐시 = {}          # collect_account_grid가 채운다(프로필이 참조)
 PROFILE_FILE = "stock_profile.json"
 CORPMAP_FILE = "corp_map.json"
-PROFILE_하루할당 = 25        # 하루에 새로 채울 종목 수(요청 폭증 방지)
+# 🆕 2026-08-26 HO 지적 — "재무는 아직 준비되지 않았어요"가 자주 뜬다.
+#  [원인] 하루 25종목씩만 채워 3,957개 상장사를 다 덮는 데 158거래일이 걸린다.
+#  [고침] 120으로 올린다. DART 호출은 종목당 2회 → 하루 240회로, 일반 키의
+#         일일 한도(2만 회)에 한참 못 미친다. 소요는 약 1~2분 늘어난다.
+#  ⚠️ 우선순위(레이더 종목 → 시총 상위 → 오래된 재무)는 그대로다.
+PROFILE_하루할당 = 120       # 하루에 새로 채울 종목 수
 PROFILE_재무갱신일 = 80      # 이 일수가 지나면 재무를 다시 받는다(분기 주기)
 PROFILE_SLEEP = 0.12
 
@@ -3388,6 +3393,202 @@ def _profile_targets(레이더종목들, 유니버스):
         except Exception:
             pass
     return 오늘, 캐시
+
+
+BIZ_하루할당 = 8            # 하루에 사업보고서를 열어볼 종목 수
+BIZ_FILE = "biz_report_raw.json"   # 1단계 저장소(구조 확인용)
+BIZ_최대문자 = 4000        # 종목당 저장할 본문 길이 상한
+
+# 「사업의 내용」 안에서 매출 비중이 실려 있을 만한 자리를 찾는 실마리.
+#  ⚠️ 이건 **파서가 아니다.** 어떤 표현이 실제로 등장하는지 세어보기만 한다.
+#     2단계에서 진짜 파서를 쓸 때 근거로 삼는다.
+BIZ_단서 = ["매출비중", "매출 비중", "매출액 비중", "품목별", "사업부문",
+           "부문별", "제품별", "매출유형", "주요 제품", "주요 사업"]
+
+
+def _dart_biz_report(고유, 회사명):
+    """그 회사의 **가장 최근 사업보고서 원문**을 받아 본문 일부를 돌려준다.
+
+    ⚠️ 화면에 아무것도 내보내지 않는다. 저장과 로그만 한다.
+    ⚠️ 실패해도 절대 예외를 밖으로 던지지 않는다 — 공시 수집 하나가
+       리포트 전체를 끌고 내려간 사고가 있었다(원칙 15).
+    """
+    try:
+        # ① 최근 3년치 정기보고서(A=사업보고서) 목록에서 가장 최근 것 하나
+        r = requests.get(
+            "https://opendart.fss.or.kr/api/list.json",
+            params={"crtfc_key": DART_KEY, "corp_code": 고유,
+                    "bgn_de": f"{int(DATE[:4]) - 3}0101", "end_de": DATE,
+                    "pblntf_ty": "A", "page_count": 20},
+            timeout=15)
+        if r.status_code != 200:
+            return None
+        목록 = (r.json() or {}).get("list") or []
+        보고서 = None
+        for it in 목록:
+            if "사업보고서" in str(it.get("report_nm") or ""):
+                보고서 = it
+                break
+        if not 보고서:
+            return None
+
+        # ② 원문(ZIP) → 텍스트
+        time.sleep(PROFILE_SLEEP)
+        d = requests.get("https://opendart.fss.or.kr/api/document.xml",
+                         params={"crtfc_key": DART_KEY,
+                                 "rcept_no": 보고서.get("rcept_no")},
+                         timeout=25)
+        if d.status_code != 200:
+            return None
+        본문 = _dart_unzip_text(d.content)
+        if not 본문 or len(본문) < 500:
+            return None
+
+        # ③ 「사업의 내용」 근처만 잘라낸다. 없으면 앞부분을 쓴다.
+        _i = 본문.find("사업의 내용")
+        조각 = 본문[_i:_i + BIZ_최대문자] if _i >= 0 else 본문[:BIZ_최대문자]
+
+        # ④ 단서 표현이 실제로 몇 번 나오는지 센다(2단계 파서 설계 근거)
+        히트 = {k: 조각.count(k) for k in BIZ_단서 if k in 조각}
+
+        return {"회사": 회사명, "접수번호": 보고서.get("rcept_no"),
+                "보고서명": 보고서.get("report_nm"),
+                "접수일": 보고서.get("rcept_dt"),
+                "전체길이": len(본문), "사업의내용_위치": _i,
+                "단서": 히트, "본문조각": 조각}
+    except Exception as e:
+        print(f"      ⚠️ {회사명} 사업보고서 실패 — {type(e).__name__}")
+        return None
+
+
+SNEWS_하루할당 = 30            # 하루에 종목뉴스를 긁어올 종목 수
+SNEWS_FILE = "stock_news_raw.json"   # 1단계 저장소(구조 확인용)
+
+
+def _naver_stock_news(코드, 회사명):
+    """네이버 금융 **종목별 뉴스** 목록을 긁는다 — 기간 제한 없음.
+
+    🔴 왜 필요한가 — 지금은 RSS 3사에서 받은 «시장 전체 뉴스» 안에서 종목명을
+       찾는 방식이라, 기사가 거의 안 나오는 중소형주는 영영 빈칸이다. 그런데
+       독자가 가장 궁금한 건 «이 종목이 최근에 왜 올랐나»다.
+       종목 페이지는 그 종목만 다룬 기사를 모아 두므로 이 질문에 바로 답한다.
+
+    ⚠️ 1단계다 — **저장과 로그만** 한다. 화면에는 아무것도 안 나간다.
+       샌드박스에서 네이버가 403이라 실제 응답을 못 봤고, 응답을 못 본 파서를
+       바로 켜면 «없는 기사 제목을 지어내는» 사고가 난다(원칙 8).
+    """
+    try:
+        r = requests.get(
+            "https://finance.naver.com/item/news_news.naver",
+            params={"code": 코드, "page": 1, "sm": "title_entity_id.basic"},
+            headers={"User-Agent": "Mozilla/5.0",
+                     "Referer": f"https://finance.naver.com/item/main.naver?code={코드}"},
+            timeout=12)
+        if r.status_code != 200:
+            return None
+        html = r.content.decode("euc-kr", errors="ignore")
+        # 제목·링크·날짜를 한 줄씩 뽑는다. 실패하면 빈 목록으로 두고 원문 길이만 남긴다.
+        기사 = []
+        for m in re.finditer(
+                r'<a[^>]+href="([^"]*read\.naver[^"]*)"[^>]*>(.*?)</a>', html, re.S):
+            _t = re.sub(r"<[^>]+>", " ", m.group(2))
+            _t = re.sub(r"\s+", " ", _t).strip()
+            if len(_t) >= 6:
+                기사.append({"t": _t, "u": "https://finance.naver.com" + m.group(1)})
+            if len(기사) >= 20:
+                break
+        날짜 = re.findall(r"(20\d{2}\.\d{2}\.\d{2})", html)[:20]
+        return {"회사": 회사명, "코드": 코드, "원문길이": len(html),
+                "기사수": len(기사), "기사": 기사[:10], "날짜샘플": 날짜[:5]}
+    except Exception as e:
+        print(f"      ⚠️ {회사명} 종목뉴스 실패 — {type(e).__name__}")
+        return None
+
+
+def collect_stock_news_raw(레이더종목들, 코드지도):
+    """1단계 — 종목별 뉴스를 긁어 **저장·로그만** 한다.
+
+    ⚠️ 화면 표시 0. HO가 Actions 로그의 `📰종목` 줄에서 실제 파싱 결과를 확인한 뒤
+       2단계에서 「요즘 왜 주목받냐면요」에 연결한다.
+    """
+    if not 코드지도:
+        print("   ⚠️ 종목코드 지도가 없어 종목뉴스 수집을 건너뜁니다")
+        return
+    저장 = _load_json(SNEWS_FILE, {})
+    대상 = [n for n in (레이더종목들 or []) if 코드지도.get(n)]
+    seen, 정리 = set(), []
+    for n in 대상:
+        if n not in seen:
+            seen.add(n)
+            정리.append(n)
+    채움 = 0
+    for nm in 정리[:SNEWS_하루할당]:
+        time.sleep(PROFILE_SLEEP)
+        res = _naver_stock_news(코드지도[nm], nm)
+        if not res:
+            continue
+        저장[nm] = res
+        채움 += 1
+        if 채움 <= 3:      # 앞 3종목만 자세히 — 로그가 길어지면 못 읽는다
+            print(f"   📰종목 {nm}({res['코드']}) — 원문 {res['원문길이']:,}자 · "
+                  f"기사 {res['기사수']}건 · 날짜 {res['날짜샘플']}")
+            for _a in res["기사"][:3]:
+                print(f"      · {_a['t'][:70]}")
+    if 채움:
+        with io.open(SNEWS_FILE, "w", encoding="utf-8") as _f:
+            json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   📰종목 {채움}종목 저장 — ⚠️ 1단계라 화면에는 안 나옵니다")
+    else:
+        print("   📰종목 — 받은 기사 없음(파서 확인 필요)")
+
+
+def collect_biz_reports(레이더종목들):
+    """1단계 — 사업보고서 원문을 받아 **저장·로그만** 한다.
+
+    ⚠️ 화면에는 아무것도 안 나간다. HO가 Actions 로그의 `📑` 줄로
+       실제 구조를 확인한 뒤에 2단계(파싱·시각화)로 넘어간다.
+    """
+    if not DART_KEY:
+        print("   ⚠️ DART_API_KEY 없음 — 사업보고서 수집 건너뜀")
+        return
+    지도 = build_corp_map()
+    if len(지도) < 100:
+        print("   ⚠️ 기업 고유번호 지도가 비어 사업보고서를 건너뜁니다")
+        return
+
+    저장 = _load_json(BIZ_FILE, {})
+    # 오늘 레이더에 잡힌 종목부터. 독자가 지금 궁금해하는 회사가 먼저다.
+    대상 = [n for n in (레이더종목들 or []) if n in 지도 and n not in 저장]
+    if len(대상) < BIZ_하루할당:
+        for n in 지도:
+            if n not in 저장 and n not in 대상:
+                대상.append(n)
+            if len(대상) >= BIZ_하루할당:
+                break
+
+    채움 = 0
+    for nm in 대상[:BIZ_하루할당]:
+        time.sleep(PROFILE_SLEEP)
+        res = _dart_biz_report(지도[nm], nm)
+        if not res:
+            continue
+        저장[nm] = res
+        채움 += 1
+        print(f"   📑 {nm} — {res['보고서명']} ({res['접수일']}) · "
+              f"본문 {res['전체길이']:,}자 · 「사업의 내용」 위치 {res['사업의내용_위치']} · "
+              f"단서 {res['단서']}")
+        # 첫 종목만 실제 본문 앞부분을 로그에 남긴다 — 구조 확인용.
+        if 채움 == 1:
+            print(f"   📑 본문 미리보기 ↓\n      {res['본문조각'][:600]}")
+
+    if 채움:
+        # ⚠️ 이 파일에 _save_json 헬퍼가 없다. 다른 저장부와 같은 방식으로 쓴다.
+        with io.open(BIZ_FILE, "w", encoding="utf-8") as _f:
+            json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   📑 사업보고서 {채움}종목 저장 (누적 {len(저장)}종목) — "
+              f"⚠️ 1단계라 화면에는 안 나옵니다")
+    else:
+        print("   📑 사업보고서 — 새로 받은 종목 없음")
 
 
 def collect_stock_profiles(레이더종목들, 유니버스):
@@ -3842,19 +4043,37 @@ if __name__ == "__main__":
     #  ⚠️ 실패해도 리포트는 그대로 나간다.
     try:
         _레이더명 = []
+        _레이더코드 = {}
         for _k in ("신규",):
             for _mk, _lst in ((강세레이더.get(_k) or {}) or {}).items():
                 for _x in (_lst or []):
                     if isinstance(_x, dict) and _x.get("종목명"):
                         _레이더명.append(_x["종목명"])
+                        if _x.get("코드"):
+                            _레이더코드[_x["종목명"]] = str(_x["코드"]).zfill(6)
         for _k in ("종목", "중기종목", "장기종목"):
             for _x in (매집레이더.get(_k) or []):
                 if isinstance(_x, dict) and _x.get("종목명"):
                     _레이더명.append(_x["종목명"])
+                    if _x.get("코드"):
+                        _레이더코드[_x["종목명"]] = str(_x["코드"]).zfill(6)
         _프로필 = collect_stock_profiles(_레이더명, _유니버스_캐시 or {})
     except Exception as e:
         print(f"   ⚠️ 기업 프로필 실패({type(e).__name__}) — 무시하고 진행")
         _프로필 = {}
+    # 📑 사업보고서 1단계 — 저장·로그만. 화면에는 아무것도 안 나간다.
+    #  ⚠️ 실패해도 리포트는 그대로 나간다(원칙 15 — 없어도 되는 코너 때문에
+    #     있어야 하는 코너까지 죽으면 안 된다).
+    try:
+        collect_biz_reports(_레이더명)
+    except Exception as e:
+        print(f"   ⚠️ 사업보고서 수집 실패({type(e).__name__}) — 무시하고 진행")
+    # 📰 종목별 뉴스 1단계 — 저장·로그만. 화면에는 아무것도 안 나간다.
+    #  ⚠️ 「요즘 왜 주목받냐면요」의 진짜 재료다. 로그로 파싱 결과를 확인한 뒤 켠다.
+    try:
+        collect_stock_news_raw(_레이더명, _레이더코드)
+    except Exception as e:
+        print(f"   ⚠️ 종목뉴스 수집 실패({type(e).__name__}) — 무시하고 진행")
     # 🧭 군중 나침반 — 실패해도 None만 돌아오고 파이프라인은 계속된다.
     try:
         군중나침반 = collect_crowd_compass()
