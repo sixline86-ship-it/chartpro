@@ -351,7 +351,7 @@ jobs:
           #    watch_tally.json        = 관전포인트 예보 누적 승패(2026-08-22 추가)
           git add -A archive index.html report_*.html flow_history.json market_history.json \
                   return_sector_log.json watch_tally.json core_accum_log.json strata_history.json \
-                  stock_flow_history.json stock_profile.json corp_map.json thumb/*.png || true
+                  stock_flow_history.json stock_profile.json biz_report_raw.json stock_news_raw.json corp_map.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
           git pull --rebase --autostash || true
           git push
