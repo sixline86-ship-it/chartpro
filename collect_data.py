@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.26-p2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.27-b1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -293,12 +293,23 @@ def _dart_unzip_text(content):
                 raw = zf.read(nm)
             except Exception:
                 continue
-            for enc in ("euc-kr", "utf-8", "cp949"):
+            # 🔴 2026-08-27 사고 수정 — 인코딩 선택이 **항상 euc-kr로 고정**됐다.
+            #    errors="ignore"를 주면 어떤 인코딩도 예외를 안 내므로 첫 번째
+            #    후보(euc-kr)에서 무조건 break 했다. DART 사업보고서는 UTF-8이라
+            #    본문이 통째로 깨졌다(실측: 「사업의 내용」 위치 -1, 단서 {} 8종목 전부).
+            #    → 예외가 아니라 **한글이 얼마나 나왔는지**로 고른다.
+            _best, _score = "", -1
+            for enc in ("utf-8", "euc-kr", "cp949"):
                 try:
-                    조각.append(raw.decode(enc, errors="ignore"))
-                    break
+                    _t = raw.decode(enc, errors="ignore")
                 except Exception:
                     continue
+                # 한글 음절 비율이 가장 높은 해독을 채택한다.
+                _h = sum(1 for _c in _t[:20000] if "가" <= _c <= "힣")
+                if _h > _score:
+                    _best, _score = _t, _h
+            if _best:
+                조각.append(_best)
         본문 = " ".join(조각)
     except Exception:
         try:
@@ -3236,7 +3247,11 @@ CORPMAP_FILE = "corp_map.json"
 #  [고침] 120으로 올린다. DART 호출은 종목당 2회 → 하루 240회로, 일반 키의
 #         일일 한도(2만 회)에 한참 못 미친다. 소요는 약 1~2분 늘어난다.
 #  ⚠️ 우선순위(레이더 종목 → 시총 상위 → 오래된 재무)는 그대로다.
-PROFILE_하루할당 = 120       # 하루에 새로 채울 종목 수
+# 🔴 2026-08-27 실측 — 「데이터 수집」 단계가 **19분 47초**까지 늘었다.
+#    120종목이면 DART 호출이 240회다. 발행이 늦어지면 16:50 목표가 무너진다.
+#    → 40으로 내린다. 시총 상위·레이더 종목은 며칠이면 다 덮이고,
+#      나머지는 천천히 채워도 «재무는 준비 중» 문구가 잠깐 보일 뿐이다.
+PROFILE_하루할당 = 40        # 하루에 새로 채울 종목 수
 PROFILE_재무갱신일 = 80      # 이 일수가 지나면 재무를 다시 받는다(분기 주기)
 PROFILE_SLEEP = 0.12
 
@@ -3395,7 +3410,10 @@ def _profile_targets(레이더종목들, 유니버스):
     return 오늘, 캐시
 
 
-BIZ_하루할당 = 8            # 하루에 사업보고서를 열어볼 종목 수
+# 🔴 2026-08-27 실측 — 사업보고서 한 건이 본문 40만 자다(가온전선 396,838자).
+#    8건이면 300만 자를 내려받아 푸는 셈이라 가장 무거운 작업이었다.
+#    → 3으로 내린다. 구조 확인이 목적이라 하루 3건이면 충분하다.
+BIZ_하루할당 = 3            # 하루에 사업보고서를 열어볼 종목 수
 BIZ_FILE = "biz_report_raw.json"   # 1단계 저장소(구조 확인용)
 BIZ_최대문자 = 4000        # 종목당 저장할 본문 길이 상한
 
@@ -3445,7 +3463,14 @@ def _dart_biz_report(고유, 회사명):
             return None
 
         # ③ 「사업의 내용」 근처만 잘라낸다. 없으면 앞부분을 쓴다.
-        _i = 본문.find("사업의 내용")
+        # 🆕 2026-08-27 — 목차 표기가 제각각이라 «사업의 내용» 하나만 찾으면 놓친다.
+        #    실제 서식에서 쓰이는 다른 표현도 순서대로 시도한다.
+        _i = -1
+        for _key in ("사업의 내용", "II. 사업의 내용", "2. 사업의 내용",
+                     "주요 제품", "매출에 관한 사항", "사업부문"):
+            _i = 본문.find(_key)
+            if _i >= 0:
+                break
         조각 = 본문[_i:_i + BIZ_최대문자] if _i >= 0 else 본문[:BIZ_최대문자]
 
         # ④ 단서 표현이 실제로 몇 번 나오는지 센다(2단계 파서 설계 근거)
@@ -3461,21 +3486,49 @@ def _dart_biz_report(고유, 회사명):
         return None
 
 
-SNEWS_하루할당 = 30            # 하루에 종목뉴스를 긁어올 종목 수
+# 🔴 2026-08-27 — 검증 전까지는 적게. 로그로 파서가 맞는지만 확인하면 된다.
+SNEWS_하루할당 = 10            # 하루에 종목뉴스를 긁어올 종목 수
 SNEWS_FILE = "stock_news_raw.json"   # 1단계 저장소(구조 확인용)
+
+
+def _unescape(t):
+    """HTML 엔티티를 사람이 읽는 글자로 되돌린다.
+
+    🔴 2026-08-27 실측 — 제목이 «내년엔 LFP와 단가 같아져&quot;&hellip;니트륨»
+       처럼 나왔다. 화면에 그대로 나가면 읽을 수 없다.
+    ⚠️ html.unescape가 표준이지만, 네이버는 `&hellip;`처럼 세미콜론이 빠진
+       변형도 섞어 쓰므로 자주 나오는 것을 먼저 손으로 바꾸고 넘긴다.
+    """
+    import html as _html
+    for a, b in (("&hellip;", "…"), ("&hellip", "…"),
+                 ("&quot;", '"'), ("&quot", '"'),
+                 ("&lsquo;", "'"), ("&rsquo;", "'"),
+                 ("&ldquo;", '"'), ("&rdquo;", '"'),
+                 ("&middot;", "·"), ("&amp;", "&"), ("&nbsp;", " ")):
+        t = t.replace(a, b)
+    try:
+        t = _html.unescape(t)
+    except Exception:
+        pass
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def _naver_stock_news(코드, 회사명):
     """네이버 금융 **종목별 뉴스** 목록을 긁는다 — 기간 제한 없음.
 
-    🔴 왜 필요한가 — 지금은 RSS 3사에서 받은 «시장 전체 뉴스» 안에서 종목명을
-       찾는 방식이라, 기사가 거의 안 나오는 중소형주는 영영 빈칸이다. 그런데
+    🔴 왜 필요한가 — RSS 3사에서 받은 «시장 전체 뉴스» 안에서 종목명을 찾는
+       방식이라, 기사가 거의 안 나오는 중소형주는 영영 빈칸이다. 그런데
        독자가 가장 궁금한 건 «이 종목이 최근에 왜 올랐나»다.
        종목 페이지는 그 종목만 다룬 기사를 모아 두므로 이 질문에 바로 답한다.
 
-    ⚠️ 1단계다 — **저장과 로그만** 한다. 화면에는 아무것도 안 나간다.
-       샌드박스에서 네이버가 403이라 실제 응답을 못 봤고, 응답을 못 본 파서를
-       바로 켜면 «없는 기사 제목을 지어내는» 사고가 난다(원칙 8).
+    ✅ 2026-08-27 실측 성공 — 30종목 전부에서 기사를 받았다.
+       (가온전선 12건 · 산일전기 14건 · 삼성SDI 20건)
+
+    🔴 그때 드러난 문제 3개를 이 버전에서 고쳤다.
+       ① `&hellip;` 같은 엔티티가 안 풀렸다 → _unescape()
+       ② 날짜를 페이지 전체에서 긁어 **기사와 짝이 안 맞았다**
+          → 표의 **행(<tr>) 단위**로 잘라 같은 행 안에서 제목·날짜·언론사를 묶는다
+       ③ 연관기사(같은 사건 묶음)가 중복으로 들어왔다 → 제목 지문으로 제거
     """
     try:
         r = requests.get(
@@ -3486,20 +3539,44 @@ def _naver_stock_news(코드, 회사명):
             timeout=12)
         if r.status_code != 200:
             return None
-        html = r.content.decode("euc-kr", errors="ignore")
-        # 제목·링크·날짜를 한 줄씩 뽑는다. 실패하면 빈 목록으로 두고 원문 길이만 남긴다.
-        기사 = []
-        for m in re.finditer(
-                r'<a[^>]+href="([^"]*read\.naver[^"]*)"[^>]*>(.*?)</a>', html, re.S):
-            _t = re.sub(r"<[^>]+>", " ", m.group(2))
-            _t = re.sub(r"\s+", " ", _t).strip()
-            if len(_t) >= 6:
-                기사.append({"t": _t, "u": "https://finance.naver.com" + m.group(1)})
-            if len(기사) >= 20:
+        # ⚠️ 네이버 금융은 EUC-KR이다. 다만 바뀔 수 있으니 한글이 많은 쪽을 고른다.
+        _best, _score = "", -1
+        for enc in ("euc-kr", "utf-8", "cp949"):
+            try:
+                _t = r.content.decode(enc, errors="ignore")
+            except Exception:
+                continue
+            _h = sum(1 for _c in _t[:20000] if "가" <= _c <= "힣")
+            if _h > _score:
+                _best, _score = _t, _h
+        html = _best
+
+        기사, 지문 = [], set()
+        # 행 단위로 잘라야 제목과 날짜가 어긋나지 않는다.
+        for _tr in re.split(r"<tr[^>]*>", html):
+            _a = re.search(r'<a[^>]+href="([^"]*read[^"]*)"[^>]*>(.*?)</a>', _tr, re.S)
+            if not _a:
+                continue
+            _t = _unescape(re.sub(r"<[^>]+>", " ", _a.group(2)))
+            if len(_t) < 6:
+                continue
+            # 같은 사건을 다룬 기사가 여러 매체로 들어온다. 지문으로 하나만 남긴다.
+            _k = re.sub(r"[^0-9A-Za-z가-힣]", "", _t)[:20]
+            if not _k or _k in 지문:
+                continue
+            지문.add(_k)
+            _d = re.search(r"(20\d{2}\.\d{2}\.\d{2})", _tr)
+            _s = re.search(r'class="info[^"]*"[^>]*>([^<]{1,20})<', _tr)
+            _u = _a.group(1)
+            if _u.startswith("/"):
+                _u = "https://finance.naver.com" + _u
+            기사.append({"t": _t, "u": _u,
+                        "d": _d.group(1) if _d else "",
+                        "s": _unescape(_s.group(1)) if _s else ""})
+            if len(기사) >= 15:
                 break
-        날짜 = re.findall(r"(20\d{2}\.\d{2}\.\d{2})", html)[:20]
         return {"회사": 회사명, "코드": 코드, "원문길이": len(html),
-                "기사수": len(기사), "기사": 기사[:10], "날짜샘플": 날짜[:5]}
+                "기사수": len(기사), "기사": 기사[:10]}
     except Exception as e:
         print(f"      ⚠️ {회사명} 종목뉴스 실패 — {type(e).__name__}")
         return None
@@ -3530,10 +3607,11 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
         저장[nm] = res
         채움 += 1
         if 채움 <= 3:      # 앞 3종목만 자세히 — 로그가 길어지면 못 읽는다
-            print(f"   📰종목 {nm}({res['코드']}) — 원문 {res['원문길이']:,}자 · "
-                  f"기사 {res['기사수']}건 · 날짜 {res['날짜샘플']}")
+            print(f"   📰종목 {nm}({res['코드']}) — 기사 {res['기사수']}건 "
+                  f"(중복 제거 후)")
             for _a in res["기사"][:3]:
-                print(f"      · {_a['t'][:70]}")
+                print(f"      · [{_a.get('d','?')}] {_a.get('s','')} "
+                      f"{_a['t'][:60]}")
     if 채움:
         with io.open(SNEWS_FILE, "w", encoding="utf-8") as _f:
             json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
@@ -3578,8 +3656,14 @@ def collect_biz_reports(레이더종목들):
               f"본문 {res['전체길이']:,}자 · 「사업의 내용」 위치 {res['사업의내용_위치']} · "
               f"단서 {res['단서']}")
         # 첫 종목만 실제 본문 앞부분을 로그에 남긴다 — 구조 확인용.
+        # 🆕 2026-08-27 — 미리보기를 300자로 줄이고 **한글 비율**을 같이 찍는다.
+        #    인코딩이 깨지면 이 숫자가 0에 가깝게 나와 1초에 판별된다.
         if 채움 == 1:
-            print(f"   📑 본문 미리보기 ↓\n      {res['본문조각'][:600]}")
+            _han = sum(1 for _c in res["본문조각"] if "가" <= _c <= "힣")
+            _pct = _han * 100 // max(1, len(res["본문조각"]))
+            print(f"   📑 한글 비율 {_pct}% — 30% 이상이면 정상")
+            print(f"   📑 본문 미리보기 ↓")
+            print("      " + res["본문조각"][:300])
 
     if 채움:
         # ⚠️ 이 파일에 _save_json 헬퍼가 없다. 다른 저장부와 같은 방식으로 쓴다.
