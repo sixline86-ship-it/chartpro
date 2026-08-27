@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.27-b1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.27-c2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3251,7 +3251,12 @@ CORPMAP_FILE = "corp_map.json"
 #    120종목이면 DART 호출이 240회다. 발행이 늦어지면 16:50 목표가 무너진다.
 #    → 40으로 내린다. 시총 상위·레이더 종목은 며칠이면 다 덮이고,
 #      나머지는 천천히 채워도 «재무는 준비 중» 문구가 잠깐 보일 뿐이다.
-PROFILE_하루할당 = 40        # 하루에 새로 채울 종목 수
+# 🔴 2026-08-27 (2차) 실측 — 40으로 내렸는데도 17분 14초. 더 내린다.
+#    ⚠️ 25(원래 값)로 완전히 되돌리지 않는다 — 그러면 다시 158거래일이 걸린다.
+# 🆕 2026-08-27 — 환경변수로 덮어쓸 수 있게 한다. 평소 발행(daily.yml)에서는
+#    변수를 안 주므로 기본값(20) 그대로다. 「몰아 모으기」 전용 workflow에서만
+#    CP_PROFILE_QUOTA를 크게 줘서 하루치 발행 속도에 영향을 안 준다.
+PROFILE_하루할당 = int(os.environ.get("CP_PROFILE_QUOTA", "20"))
 PROFILE_재무갱신일 = 80      # 이 일수가 지나면 재무를 다시 받는다(분기 주기)
 PROFILE_SLEEP = 0.12
 
@@ -3310,6 +3315,56 @@ def build_corp_map():
         print(f"   🗂️ 기업 고유번호 지도 생성 — {len(새) - 1}개 상장사")
     except Exception as e:
         print(f"   ⚠️ corp_map 저장 실패 — {type(e).__name__}")
+    return 새
+
+
+STOCKCODE_FILE = "corp_stockcode.json"   # 종목명 → 6자리 종목코드(뉴스 크롤러용)
+
+
+def build_stock_code_map():
+    """종목명 → **6자리 종목코드**. corp_map.json(DART 고유번호)과는 다른 값이다.
+
+    🆕 2026-08-27 — 「몰아 모으기」에서 레이더에 안 잡힌 종목까지 종목뉴스를
+       받으려면 종목코드가 있어야 하는데, corp_map은 DART 고유번호만 저장한다.
+       (예: DART 고유번호 "00260985" ≠ 종목코드 "052690")
+    ⚠️ corpCode.xml을 다시 받는다 — build_corp_map과 같은 소스지만 결과를
+       재사용하지 않는다(이미 저장된 corp_map은 고유번호만 남기고 종목코드를
+       버렸기 때문). 캐시가 있으면 그걸 쓰고, 없을 때만 한 번 더 받는다.
+    """
+    지도 = _load_json(STOCKCODE_FILE, {})
+    if 지도.get("_종목수", 0) > 2000:
+        return 지도
+    if not DART_KEY:
+        return 지도
+    try:
+        r = requests.get("https://opendart.fss.or.kr/api/corpCode.xml",
+                         params={"crtfc_key": DART_KEY}, timeout=30)
+        if r.status_code != 200 or len(r.content) < 1000:
+            return 지도
+        import zipfile
+        zf = zipfile.ZipFile(io.BytesIO(r.content))
+        xml = zf.read(zf.namelist()[0]).decode("utf-8", errors="ignore")
+    except Exception as e:
+        print(f"   ⚠️ 종목코드 지도 실패 — {type(e).__name__}")
+        return 지도
+    새 = {}
+    for m in re.finditer(r"<list>(.*?)</list>", xml, re.S):
+        블록 = m.group(1)
+        def _g(tag):
+            mm = re.search(rf"<{tag}>(.*?)</{tag}>", 블록, re.S)
+            return (mm.group(1) or "").strip() if mm else ""
+        코드, 이름 = _g("stock_code"), _g("corp_name")
+        if 코드 and 이름:
+            새[clean_name(이름)] = 코드
+    if len(새) < 1000:
+        return 지도
+    새["_종목수"] = len(새)
+    try:
+        with io.open(STOCKCODE_FILE, "w", encoding="utf-8") as f:
+            json.dump(새, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   🗂️ 종목코드 지도 생성 — {len(새) - 1}개 상장사")
+    except Exception as e:
+        print(f"   ⚠️ 종목코드 지도 저장 실패 — {type(e).__name__}")
     return 새
 
 
@@ -3407,15 +3462,52 @@ def _profile_targets(레이더종목들, 유니버스):
                 오늘.append(nm)
         except Exception:
             pass
+    # 🆕 2026-08-27 — 「몰아 모으기」 대비 4순위.
+    #    [WHY] 유니버스가 비어 있으면(발행 파이프라인 밖에서 호출된 경우)
+    #          ②·③단계가 새 종목을 하나도 못 채운다 — 캐시에 *있는* 종목만
+    #          손보기 때문이다. corp_map 순서로라도 새 종목을 채워 넣는다.
+    if len(오늘) < PROFILE_하루할당:
+        try:
+            _지도 = _load_json(CORPMAP_FILE, {})
+            for nm in _지도:
+                if nm.startswith("_") or nm in 본 or nm in 캐시:
+                    continue
+                본.add(nm)
+                오늘.append(nm)
+                if len(오늘) >= PROFILE_하루할당 * 2:
+                    break
+        except Exception:
+            pass
     return 오늘, 캐시
 
 
 # 🔴 2026-08-27 실측 — 사업보고서 한 건이 본문 40만 자다(가온전선 396,838자).
 #    8건이면 300만 자를 내려받아 푸는 셈이라 가장 무거운 작업이었다.
 #    → 3으로 내린다. 구조 확인이 목적이라 하루 3건이면 충분하다.
-BIZ_하루할당 = 3            # 하루에 사업보고서를 열어볼 종목 수
+# 🔴 2026-08-27 (2차) 실측 — 3건인데 에이피알 433,235자 등 여전히 무겁다.
+#    → 2로. 구조는 이미 확인됐으니(§단서) 지금은 검증용 소량이면 된다.
+BIZ_하루할당 = int(os.environ.get("CP_BIZ_QUOTA", "2"))            # 하루에 사업보고서를 열어볼 종목 수
 BIZ_FILE = "biz_report_raw.json"   # 1단계 저장소(구조 확인용)
-BIZ_최대문자 = 4000        # 종목당 저장할 본문 길이 상한
+# 🆕 2026-08-27 (2차) HO 지시 — "나중에 또 이 작업을 반복하지 않게,
+#    최대한 유용한 정보를 다 가져와라". 실측 로그로 구조가 확인됐으니
+#    이번엔 한 자리만 잘라내지 않고 **여러 자리를 넉넉히** 담는다.
+#  ⚠️ 다만 무한정 늘리면 안 된다 — biz_report_raw.json은 회사별로 쌓이는
+#     **하나의 파일**이라, 3,957개 전부 채우면 파일이 통째로 커진다.
+#     GitHub는 파일 하나가 100MB를 넘으면 아예 커밋을 막는다.
+#     그래서 "이 회사가 뭘 파는지(매출 비중)"에 실제로 쓸모 있는 부분만
+#     골라 담는 쪽으로 늘렸다 — 원문 전체를 통째로 저장하지 않는다.
+BIZ_최대문자 = 8000        # 「사업의 내용」 챕터 시작부에서 담을 길이(기존 4000→8000)
+# 매출 비중 표는 챕터 시작부가 아니라 문서 중간에 따로 있는 경우가 많다.
+# 그 표가 나올 만한 자리를 따로 찾아 **추가로** 담는다(중복 구간은 건너뜀).
+BIZ_보조단서 = ["매출 비중", "부문별 매출", "제품별 매출액", "사업부문별",
+              "매출현황", "주요 제품 및 서비스", "품목별 매출"]
+BIZ_보조창 = 1800          # 보조 단서 하나당 앞뒤로 담을 길이
+BIZ_보조개수 = 4           # 보조 자리는 최대 몇 곳까지만
+# ⚠️ GitHub는 파일 하나가 100MB를 넘으면 커밋을 거부한다. 회사당 최대
+#    16,000자(≈47KB)를 3,957개 전부 채우면 181MB로 그 한도를 넘는다.
+#    40MB에서 멈추면(회사당 47KB 기준 약 850개) 안전하다 — 어차피 실제로
+#    관심종목·레이더에 자주 잡히는 종목은 그보다 훨씬 적다.
+BIZ_파일상한바이트 = 40_000_000
 
 # 「사업의 내용」 안에서 매출 비중이 실려 있을 만한 자리를 찾는 실마리.
 #  ⚠️ 이건 **파서가 아니다.** 어떤 표현이 실제로 등장하는지 세어보기만 한다.
@@ -3474,20 +3566,37 @@ def _dart_biz_report(고유, 회사명):
         조각 = 본문[_i:_i + BIZ_최대문자] if _i >= 0 else 본문[:BIZ_최대문자]
 
         # ④ 단서 표현이 실제로 몇 번 나오는지 센다(2단계 파서 설계 근거)
-        히트 = {k: 조각.count(k) for k in BIZ_단서 if k in 조각}
+        #  🔴 2026-08-27 (2차) 수정 — 예전엔 잘린 조각(4000자) 안에서만 셌다.
+        #     표가 그 범위 밖에 있으면 "단서 없음"으로 잘못 보였다.
+        #     → 원문 **전체**에서 세되, 저장은 여전히 필요한 부분만 한다.
+        히트 = {k: 본문.count(k) for k in BIZ_단서 if k in 본문}
+
+        # ⑤ 보조 자리 — 매출 비중 표가 챕터 시작부 밖에 있을 경우를 대비한 안전망.
+        #    주 조각(_i~_i+BIZ_최대문자)과 겹치는 자리는 중복이라 건너뛴다.
+        보조 = []
+        for _kw in BIZ_보조단서:
+            if len(보조) >= BIZ_보조개수:
+                break
+            _p = 본문.find(_kw)
+            if _p < 0:
+                continue
+            if _i >= 0 and _i <= _p < _i + BIZ_최대문자:
+                continue   # 이미 주 조각 안에 있다
+            보조.append({"단서": _kw, "위치": _p,
+                        "글": 본문[max(0, _p - 200):_p + BIZ_보조창]})
 
         return {"회사": 회사명, "접수번호": 보고서.get("rcept_no"),
                 "보고서명": 보고서.get("report_nm"),
                 "접수일": 보고서.get("rcept_dt"),
                 "전체길이": len(본문), "사업의내용_위치": _i,
-                "단서": 히트, "본문조각": 조각}
+                "단서": 히트, "본문조각": 조각, "보조조각": 보조}
     except Exception as e:
         print(f"      ⚠️ {회사명} 사업보고서 실패 — {type(e).__name__}")
         return None
 
 
 # 🔴 2026-08-27 — 검증 전까지는 적게. 로그로 파서가 맞는지만 확인하면 된다.
-SNEWS_하루할당 = 10            # 하루에 종목뉴스를 긁어올 종목 수
+SNEWS_하루할당 = int(os.environ.get("CP_SNEWS_QUOTA", "10"))            # 하루에 종목뉴스를 긁어올 종목 수
 SNEWS_FILE = "stock_news_raw.json"   # 1단계 저장소(구조 확인용)
 
 
@@ -3634,6 +3743,18 @@ def collect_biz_reports(레이더종목들):
         print("   ⚠️ 기업 고유번호 지도가 비어 사업보고서를 건너뜁니다")
         return
 
+    # 🆕 2026-08-27 (2차) — 파일이 상한에 가까우면 아예 시작하지 않는다.
+    #    100MB를 넘기고 나서 발견하면 git push 자체가 막혀 그날 수집분을
+    #    통째로 잃는다. 미리 멈추는 게 훨씬 싸다.
+    try:
+        _현재바이트 = os.path.getsize(BIZ_FILE) if os.path.exists(BIZ_FILE) else 0
+    except Exception:
+        _현재바이트 = 0
+    if _현재바이트 >= BIZ_파일상한바이트:
+        print(f"   📑 사업보고서 파일이 이미 {_현재바이트/1e6:.1f}MB — "
+              f"상한({BIZ_파일상한바이트/1e6:.0f}MB) 근처라 이번엔 건너뜁니다")
+        return
+
     저장 = _load_json(BIZ_FILE, {})
     # 오늘 레이더에 잡힌 종목부터. 독자가 지금 궁금해하는 회사가 먼저다.
     대상 = [n for n in (레이더종목들 or []) if n in 지도 and n not in 저장]
@@ -3654,7 +3775,7 @@ def collect_biz_reports(레이더종목들):
         채움 += 1
         print(f"   📑 {nm} — {res['보고서명']} ({res['접수일']}) · "
               f"본문 {res['전체길이']:,}자 · 「사업의 내용」 위치 {res['사업의내용_위치']} · "
-              f"단서 {res['단서']}")
+              f"단서 {res['단서']} · 보조자리 {len(res.get('보조조각') or [])}곳")
         # 첫 종목만 실제 본문 앞부분을 로그에 남긴다 — 구조 확인용.
         # 🆕 2026-08-27 — 미리보기를 300자로 줄이고 **한글 비율**을 같이 찍는다.
         #    인코딩이 깨지면 이 숫자가 0에 가깝게 나와 1초에 판별된다.
