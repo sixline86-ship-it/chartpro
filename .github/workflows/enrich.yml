@@ -47,6 +47,17 @@ jobs:
           CP_SNEWS_QUOTA: ${{ github.event.inputs.news_quota }}
         run: python catchup_enrich.py
 
+      # 🔴 2026-08-28 사고 수정 — 몰아 모으기가 2시간 넘게 도는 사이,
+      #    형이 그날 저녁 발행(daily.yml)을 수동으로 먼저 완료시켜 같은
+      #    저장소에 커밋했다. 몰아 모으기가 뒤늦게 push하려 하자 "네가
+      #    시작한 뒤로 다른 커밋이 먼저 들어왔다"며 거부당해(rejected),
+      #    2시간 16분 동안 모은 결과가 통째로 저장 안 되고 날아갈 뻔했다.
+      #    [WHY] git push는 "내가 받아온 시점 이후로 아무도 안 건드렸을 때만"
+      #          성공한다. 오래 도는 작업일수록 그 사이에 발행이 끼어들
+      #          가능성이 높다 — 특히 이 작업은 5시간까지 걸릴 수 있다.
+      #    → 실패하면 **최신 커밋을 받아와 합친 뒤(rebase) 다시 시도**한다.
+      #      최대 5번, 매번 몇 초씩 쉬면서 — 여러 workflow가 동시에 끝나도
+      #      순서대로 안전하게 쌓이게 한다.
       - name: 결과 저장 (git commit)
         run: |
           git config user.name "chartpro-bot"
@@ -55,7 +66,18 @@ jobs:
                    biz_report_raw.json stock_news_raw.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "변경 없음 — 커밋 생략"
-          else
-            git commit -m "🚀 몰아 모으기 $(date +%Y-%m-%d\ %H:%M)"
-            git push
+            exit 0
           fi
+          git commit -m "🚀 몰아 모으기 $(date +%Y-%m-%d\ %H:%M)"
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "✅ 저장 성공 (시도 $i회)"
+              exit 0
+            fi
+            echo "⚠️ push 거부됨 — 그 사이 다른 커밋이 들어온 것 같습니다. 받아와서 다시 시도합니다 ($i/5)"
+            git pull --rebase --autostash
+            sleep 5
+          done
+          echo "❌ 5번 시도해도 저장 실패 — 모아둔 결과는 이번 실행 로그에 없고 사라집니다"
+          echo "   (다음 «몰아 모으기»를 다시 돌리면 그 종목들부터 이어서 채워집니다)"
+          exit 1
