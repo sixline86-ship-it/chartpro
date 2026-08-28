@@ -178,6 +178,35 @@ jobs:
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
         run: python collect_data.py
 
+      # 🆕 2026-08-27 (2차) — GitHub 무료 예약이 밀려 16:50 예약이 다음 날
+      #    새벽에 실행된 사고가 있었다. 그럴 경우 코드가 "오늘"을 다음 날로
+      #    착각해, 아직 열리지도 않은 시장을 대상으로 잠정 데이터를 만들어
+      #    **텔레그램까지 그대로 나갈 뻔했다**(완전성 검사가 텔레그램 발송
+      #    조건에 없었다). 이 단계가 data_*.json의 "정상시각" 값을 읽어
+      #    뒤 텔레그램 단계의 조건에 연결한다. 발행 자체는 막지 않는다
+      #    (기존 원칙 유지) — 텔레그램만 건너뛴다.
+      - name: 실행 시각 정상 여부 확인
+        id: 시각검사
+        if: steps.guard.outputs.run == 'yes'
+        run: |
+          TODAY=$(date +%Y%m%d)
+          if grep -q '"정상시각": false' "archive/data_${TODAY}.json" 2>/dev/null; then
+            echo "정상=no" >> "$GITHUB_OUTPUT"
+            echo "🔴 실행 시각이 비정상입니다 — 뒤 텔레그램 단계를 건너뜁니다."
+          else
+            echo "정상=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 🆕 2026-08-27 (2차) — 비정상 시각이면 형에게만 알린다(구독자는 무관).
+      - name: 예약 지연 알림 (운영자 전용)
+        if: steps.guard.outputs.run == 'yes' && steps.시각검사.outputs.정상 == 'no'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py abnormal_time
+
       # 🆕 2026-08-22 — 수집이 죽으면 그 뒤는 전부 무의미하다. 운영자에게만 알리고 끝낸다.
       - name: 수집 실패 알림 (운영자 전용)
         if: failure() && steps.guard.outputs.run == 'yes'
@@ -402,6 +431,7 @@ jobs:
         if: >-
           steps.guard.outputs.run == 'yes' &&
           steps.holiday.outputs.closed != 'yes' &&
+          steps.시각검사.outputs.정상 != 'no' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
