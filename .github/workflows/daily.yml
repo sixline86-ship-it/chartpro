@@ -61,19 +61,23 @@ on:
           - '보내지 않음 (테스트)'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
-  schedule:
-    # 🆕 2026-08-26 HO 지시 — 전체를 1시간 20분 앞당긴다.
-    #   [WHY] GitHub 무료 예약은 대기열 혼잡으로 1~3시간 늦게 깨어난다.
-    #         당겨두면 밀리더라도 저녁 시간 안에 들어온다.
-    #   ⚠️ 15:30(장 마감) 직후는 피한다 — 수급·주도섹터가 0으로 잡힌다.
-    #      16:50이면 마감 후 1시간 20분 여유가 있어 안전하다.
-    #   ⚠️ 다만 **수급 확정치는 대략 18시**에 최종본이 된다.
-    #      그래서 18시 이전 발행은 collect_data.py가 '미완'으로 표시하고,
-    #      아래 guard가 뒤 회차에서 **자동으로 다시 발행**한다.
-    - cron: '50 7 * * 1-5'    # KST 16:50  ← 1차 (가장 이른 시도)
-    - cron: '20 8 * * 1-5'    # KST 17:20  ← 2차
-    - cron: '50 8 * * 1-5'    # KST 17:50  ← 3차
-    - cron: '20 9 * * 1-5'    # KST 18:20  ← 4차 (수급 확정 후 · 최후 보루)
+  # 🔴 2026-08-28 (3차) — GitHub 자체 schedule(cron)을 완전히 없앤다.
+  #    HO 지적: "안전망이라고 남겨둔 것도 결국 같은 GitHub 예약 기능이라
+  #    똑같이 몇 시간씩 밀릴 수 있잖아. 그럼 안전망이 아니라 그것도 위험한 거네."
+  #    — 정확히 맞다. 18:47로 아무리 늦게 잡아도, 이 트리거 자체가 **그날
+  #    안에 도는지조차 보장이 안 된다.** 밀리면 다음 날 새벽에 돌아 오늘
+  #    겪은 사고(날짜 착각 + 잠정 데이터 + 새벽 알림)를 그대로 반복한다.
+  #    "안전망"이라는 이름이 무색하게, 실제로는 소음과 위험만 더했다.
+  #
+  #    → 타이밍은 이제 **전적으로 cron-job.org(외부, 신뢰 가능)**가 맡는다.
+  #      18:07 · 18:27 두 번 찔러도 부족하면, GitHub 예약을 더 넣는 대신
+  #      **cron-job.org에 18:47 하나를 더** 만드는 쪽을 권한다 — 똑같이
+  #      "한 번 더 찔러보는" 안전망이지만, 이번엔 진짜로 믿을 수 있는 안전망이다.
+  #
+  #    ⚠️ workflow_dispatch(수동 「Run workflow」 버튼)는 그대로 남긴다.
+  #       이건 "예약"이 아니라 "형이 직접 누를 때만 도는 버튼"이라 지연 문제와
+  #       무관하고, cron-job.org 셋이 전부 실패한 정말 최악의 날에 형이
+  #       직접 개입할 수 있는 유일한 수단이다.
 
 permissions:
   contents: write
@@ -382,8 +386,19 @@ jobs:
                   return_sector_log.json watch_tally.json core_accum_log.json strata_history.json \
                   stock_flow_history.json stock_profile.json biz_report_raw.json stock_news_raw.json corp_stockcode.json corp_map.json thumb/*.png || true
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
-          git pull --rebase --autostash || true
-          git push
+          # 🔴 2026-08-28 — 몰아 모으기(enrich.yml)가 같은 저장소에 push하다가
+          #   실패하는 사고를 겪었다. 이제 cron-job.org 3개(18:07·18:27·18:47)가
+          #   짧은 간격으로 걸려 있어, 앞 회차가 늦게 끝나면 뒤 회차와 겹칠 수
+          #   있다. push가 거부되면 최신을 받아와 합친 뒤 재시도한다.
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash || true
+            if git push; then
+              echo "✅ 저장 성공 (시도 $i회)"
+              break
+            fi
+            echo "⚠️ push 거부됨 — 재시도 ($i/5)"
+            sleep 5
+          done
 
       # 🆕 2026-08-22 — 해석글이 없으면 구독자 발송을 막고 운영자에게만 알린다.
       - name: 해석글 없음 알림 (운영자 전용)
