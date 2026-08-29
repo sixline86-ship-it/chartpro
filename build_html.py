@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a4"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.29-a13"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -1278,7 +1278,10 @@ def accum_badge(종목명):
 
 
 NEWS_LOOKBACK = 10      # 🆕 종목 카드 뉴스를 며칠치까지 뒤질지(거래일)
-BRIEF_NEWS_DAYS = 5     # 🆕 「내 종목 브리핑」이 뒤지는 기간(거래일)
+BRIEF_NEWS_DAYS = 20    # 🆕 2026-08-29 HO 지시 — 5 → 20. 대신 최근 위주 정렬 +
+                        #    종목별 중복(같은 사건 반복 보도) 제거를 같이 넣는다
+                        #    (안 그러면 기간만 늘어난 만큼 옛날 기사·중복이 쌓여
+                        #    더 정신없어진다).
 # 🆕 2026-08-26 — 기업분석 카드의 「요즘 왜 주목받냐면요」는 **기간을 안 자른다.**
 #  [WHY] HO 지시 — "10거래일만 보지 말고, 이 종목이 최근에 왜 올랐는지
 #        이슈가 된 기사를 찾아라". 사흘 전 계약 공시가 오늘 주가를 만든다.
@@ -2230,7 +2233,16 @@ def build_core_strong(강세레이더):
         배수 = s.get("배수")
         배수문 = "—" if 배수 is None else f"{배수:.1f}배"
         재점화 = s.get("재점화")
-        뱃지 = (f'<span style="font-size:10px;color:#ff6b4a">🔁 {재점화}차 재점화</span>'
+        # 🆕 2026-08-29 HO 지적 — 「2차 재점화」가 옆 유형 배지보다 살짝 위로
+        #    떠 보였다. [원인] 유형 배지는 padding+border가 있어 세로로 두꺼운데
+        #    이 배지는 맨 글자라, 부모의 align-items:baseline 기준으로 글자
+        #    밑선만 맞춰져 결과적으로 위로 밀려 보였다.
+        #    [고침] 같은 inline-block + 같은 세로 padding(2px)을 주고
+        #    vertical-align:middle로 가운데를 맞춘다. 테두리는 안 준다 —
+        #    유형 배지가 주인공이고 이건 부가 정보라 덜 튀어야 한다.
+        뱃지 = (f'<span style="display:inline-block;vertical-align:middle;'
+              f'font-size:10.5px;color:#ff6b4a;padding:2px 0;'
+              f'white-space:nowrap">🔁 {재점화}차 재점화</span>'
               if 재점화 and 재점화 > 1 else "")
         # 🆕 2026-08-22 — 어떤 기법으로 잡혔는지 배지로 보여준다.
         #    두 기법은 재는 기준부터 달라서(전일종가 vs 당일시가),
@@ -2249,7 +2261,10 @@ def build_core_strong(강세레이더):
             # 🆕 2026-08-26 HO 지시 — 배경 제거, 같은 색 테두리 2px.
             뱃지 = "".join(
                 # 글자를 9 → 10.5px로 키우고 테두리 투명도도 조금 올린다(66→99).
-                f'<span style="font-size:10.5px;font-weight:800;'
+                # 🆕 2026-08-29 — 옆 「N차 재점화」와 세로 기준을 맞춘다
+                #    (inline-block + vertical-align:middle로 둘 다 통일).
+                f'<span style="display:inline-block;vertical-align:middle;'
+                f'font-size:10.5px;font-weight:800;'
                 f'color:{_유형색.get(t,"#8b93a0")};background:none;'
                 f'border:1px solid {_유형색.get(t,"#8b93a0")}99;border-radius:5px;'
                 f'padding:2px 7px;margin-right:4px;white-space:nowrap">'
@@ -2312,20 +2327,36 @@ def build_core_strong(강세레이더):
 
 
 def build_core_accum(매집):
-    """🐢 핵심편용 — 20일 매집 종목을 코스피·코스닥 1개씩만.
+    """🐢 핵심편용 — 매집 종목을 코스피·코스닥 1개씩만.
 
     🆕 2026-08-22 HO 지시. 심층편 매집 레이더는 표 전체를 보여주지만,
        핵심편에서는 **각 시장 대표 1개씩**만 뽑아 맛보기로 둔다.
+    🆕 2026-08-29 HO 지시 — **20일 위주로 보여주되, 최근에 나온 종목이면
+       5일(또는 60일)로 바꿔서 보여준다.**
+       ⚠️ "랜덤"이라는 표현을 그대로 난수로 구현하지 않았다. 난수를 쓰면
+          같은 날 새로고침할 때마다 종목이 바뀌어(리포트가 매번 달라져)
+          "어제 뭘 봤는지"를 되짚을 수 없고, 원칙 7(매일 내용물이 바뀌는
+          칸은 누적하지 않는다)과도 어긋난다. HO의 실제 의도는
+          "매일 같은 종목만 나오지 않게 해달라"이므로, **기간을 바꿔가며
+          새 얼굴을 찾는** 방식으로 구현한다. 결과적으로 날마다 다른
+          종목이 나오면서도 그 날의 리포트는 몇 번을 열어도 똑같다.
+       탐색 순서: 20일 → 5일 → 60일 (20일이 기본, 겹치면 다음 기간으로)
     ⚠️ 정렬 기준은 심층편과 동일하게 '매집강도'다.
        매집강도 = 시총대비 ÷ (1 + 기간등락률/100)
        → 같은 금액을 담았어도 **덜 올랐을수록** 위로 온다.
          "샀다"가 아니라 "조용히 모았다"를 찾는 게 이 코너의 목적이기 때문이다.
     ⚠️ 상승률 조건은 없다. (그건 강세 레이더 조건이다 — 혼동 주의)
     """
-    중기 = (매집 or {}).get("중기종목") or []
-    if not 중기:
+    매집 = 매집 or {}
+    # (목록, 기간, 등락률필드) — 20일을 맨 앞에 둬 «기본»으로 삼는다.
+    _풀 = [
+        (매집.get("중기종목") or [], 매집.get("중기기간", 20), "장기등락률"),
+        (매집.get("종목") or [], 매집.get("기간", 5), "등락률"),
+        (매집.get("장기종목") or [], 매집.get("장기기간", 60), "장기등락률"),
+    ]
+    _풀 = [(lst, per, fld) for lst, per, fld in _풀 if lst]
+    if not _풀:
         return ""
-    기간 = (매집 or {}).get("중기기간", 20)
 
     # 🆕 2026-08-22 HO 지시 — **어제 노출한 종목은 건너뛰고 다음 순위로.**
     #    20일 매집은 성격상 며칠씩 같은 종목이 1위를 지킨다. 그대로 두면
@@ -2334,46 +2365,67 @@ def build_core_accum(매집):
     #       정작 가장 강한 매집 종목이 영영 안 보인다.
     _최근 = _core_accum_recent()
 
-    def _고르기(시장, 제외, 완화용=None):
-        """매집강도 1위부터 훑되, 최근 노출 종목은 건너뛴다.
-
-        🆕 2026-08-24 — **단계적으로 물러선다.**
-           ① 최근 5회 노출분을 전부 피해본다
-           ② 그래도 후보가 없으면 → 직전 1회분만 피해본다
-           ③ 그것도 안 되면 → 그냥 1위를 쓴다 (HO: "안 되면 그대로 보여주는 건 됨")
-        """
-        후보 = sorted([s for s in 중기 if s.get("시장") == 시장
+    def _고르기(목록, 시장, 제외):
+        """한 기간 목록 안에서 매집강도 1위부터 훑되, 제외 종목은 건너뛴다.
+        찾으면 종목을, 전부 겹치면 None을 돌려준다(다음 기간에서 다시 찾게)."""
+        후보 = sorted([s for s in 목록 if s.get("시장") == 시장
                      and s.get("매집강도") is not None],
                     key=lambda s: s["매집강도"], reverse=True)
-        if not 후보:
-            return None
         for s in 후보:
             if s.get("종목명") not in 제외:
                 return s
-        if 완화용 is not None:                 # ② 한 단계 물러서기
-            for s in 후보:
-                if s.get("종목명") not in 완화용:
-                    return s
-        return 후보[0]                          # ③ 전부 겹치면 1위 그대로
+        return None
+
+    def _아무거나(시장):
+        """모든 기간에서 다 겹쳤을 때의 최후 수단 — 20일 1위를 그냥 쓴다.
+        (HO: "안 되면 그대로 보여주는 건 됨")"""
+        for 목록, 기간, 필드 in _풀:
+            후보 = sorted([s for s in 목록 if s.get("시장") == 시장
+                         and s.get("매집강도") is not None],
+                        key=lambda s: s["매집강도"], reverse=True)
+            if 후보:
+                return 후보[0], 기간, 필드
+        return None, None, None
 
     _직전 = _core_accum_recent(1)      # 완화 단계에서 쓸 '어제만' 집합
     뽑기, _쓴이름 = [], set()
     for 시장 in ("코스피", "코스닥"):
-        # 최근 노출 종목 + 오늘 이미 뽑은 종목을 함께 제외 → 두 시장 간 중복도 막는다
-        _s = _고르기(시장, _최근 | _쓴이름, 완화용=_직전 | _쓴이름)
-        if _s:
-            뽑기.append(_s)
-            _쓴이름.add(_s.get("종목명"))
+        _찾음 = None
+        # ① 최근 5회 노출분을 피해 20일 → 5일 → 60일 순으로 새 얼굴을 찾는다
+        for 목록, 기간, 필드 in _풀:
+            _s = _고르기(목록, 시장, _최근 | _쓴이름)
+            if _s:
+                _찾음 = (_s, 기간, 필드)
+                break
+        # ② 그래도 없으면 '어제만' 피해서 다시 한 바퀴
+        if not _찾음:
+            for 목록, 기간, 필드 in _풀:
+                _s = _고르기(목록, 시장, _직전 | _쓴이름)
+                if _s:
+                    _찾음 = (_s, 기간, 필드)
+                    break
+        # ③ 전부 겹치면 20일 1위 그대로
+        if not _찾음:
+            _s, 기간, 필드 = _아무거나(시장)
+            if _s:
+                _찾음 = (_s, 기간, 필드)
+        if _찾음:
+            뽑기.append(_찾음)
+            _쓴이름.add(_찾음[0].get("종목명"))
     _core_accum_save(_쓴이름)
     if not 뽑기:
         return ""
 
     색맵 = {"코스피": "#f0c65a", "코스닥": "#74f0d4"}
     행들 = []
-    for s in 뽑기:
+    for s, 기간, 등락필드 in 뽑기:
         nm = s.get("종목명", "—")
         c = 색맵.get(s.get("시장"), "#c9ced6")
-        등 = s.get("장기등락률")
+        # ⚠️ 5일 목록은 등락률 필드 이름이 다르다(«등락률») — 기간에 맞는
+        #    필드를 써야 "그동안 주가는" 숫자가 그 기간의 것이 된다.
+        등 = s.get(등락필드)
+        if 등 is None:
+            등 = s.get("장기등락률") if 등락필드 == "등락률" else s.get("등락률")
         등문 = "—" if 등 is None else f"{등:+.1f}%"
         등색 = "#8b93a0" if 등 is None else ("#ff6b4a" if 등 >= 0 else "#5b9bff")
         유형 = "🤝 쌍끌이" if s.get("유형") == "쌍끌이" else f"💼 {s.get('유형','단독')}"
@@ -3368,6 +3420,21 @@ def build_my_stocks(data):
     except Exception:
         _오늘구역 = {}
     이름배열JS += "window.CP_SECT_TODAY=" + json.dumps(_오늘구역, ensure_ascii=False) + ";"
+    # 🆕 2026-08-29 HO 지시 — "무리에서 이탈" 알림의 재료. 오늘 하루만으론
+    #    "계속" 뒤처지는지 알 수 없다 — 최근 5거래일 구역별 등락 시계열이
+    #    필요하다. _zone_series()가 이미 계산해 사다리 그래프에 쓰고 있는
+    #    걸 그대로 재사용한다(새 수집 0회).
+    _구역시계열 = {}
+    try:
+        _구역들, _ = _zone_series()
+        for _nm, _일별 in _구역들.items():
+            _최근5 = sorted(_일별.items())[-5:]
+            if _최근5:
+                _구역시계열[_nm] = _최근5
+    except Exception as e:
+        print(f"   ⚠️ 구역 시계열(이탈 알림용) 읽기 실패 — {type(e).__name__}")
+        _구역시계열 = {}
+    이름배열JS += "window.CP_SECT_SERIES=" + json.dumps(_구역시계열, ensure_ascii=False) + ";"
     # 종목 → 오늘 주도 테마명 (구역이 비었을 때 대신 보여준다)
     _종목테마 = {}
     try:
@@ -3699,6 +3766,43 @@ def build_my_stocks(data):
         _레이더이력 = {}
     이름배열JS += "window.CP_RHIST=" + json.dumps(_레이더이력, ensure_ascii=False) + ";"
     print(f"   📡 레이더 이력 {len(_레이더이력)}종목")
+
+    # 🆕 2026-08-29 HO 지시 — 「내 종목 브리핑」에 종목별 예보 성적을 내려준다.
+    #    ⚠️ 승리만 골라 보여주지 않는다 — 손실도 있는 그대로 승률에 반영한다
+    #    (원칙 3 + 「포착 그 후」의 생존 편향 금지 원칙, 유료챕터_기획.md 참고).
+    #    D5를 기준으로 잡는다 — 표본이 가장 많이 찬 구간이라(120일 추적 중
+    #    가장 먼저 도달하는 스냅샷) 승률이 가장 안정적으로 계산된다.
+    # 🆕 2026-08-29 (2차) — 두 가지를 더한다(승패 자체는 그대로 유지).
+    #    ① 표본 3회 미만은 아예 안 보여준다 — 1~2회짜리 숫자는 노이즈를
+    #       "성적"으로 오해하게 만든다(「시장 국면 내비」의 "표본 5회 미만
+    #       은 통계 문장 생략" 원칙과 같은 이유).
+    #    ② "최고 성적"을 같이 보여준다 — 이건 숨기는 게 아니라 **추가**하는
+    #       것이라 정직성 문제가 없다. 승패는 그대로 다 보이는 채로,
+    #       "이 종목으로 가장 잘 맞았을 땐 이랬다"는 참고 정보를 더한다.
+    _캡최소표본 = 3
+    _캡통계 = {}
+    try:
+        _캡로그 = load_json("stock_capture_log.json") or {}
+        for _n, _캡들 in _캡로그.items():
+            _d5들 = [c["구간성적"]["D5"] for c in _캡들
+                    if isinstance(c.get("구간성적"), dict)
+                    and isinstance(c["구간성적"].get("D5"), (int, float))]
+            if len(_d5들) < _캡최소표본:
+                continue
+            _승 = sum(1 for v in _d5들 if v > 0)
+            _캡통계[_n] = {
+                "횟수": len(_d5들),
+                "평균": round(sum(_d5들) / len(_d5들), 2),
+                "최고": round(max(_d5들), 2),
+                "승": _승,
+                "패": len(_d5들) - _승,
+            }
+    except Exception as e:
+        print(f"   ⚠️ 종목별 예보 성적 읽기 실패 — {type(e).__name__}")
+        _캡통계 = {}
+    이름배열JS += "window.CP_CAPSTAT=" + json.dumps(_캡통계, ensure_ascii=False) + ";"
+    print(f"   🎯 종목별 예보 성적 {len(_캡통계)}종목 "
+          f"(D+5 기준, 표본 {_캡최소표본}회 미만 제외, 승패 전부 포함)")
     보유일 = len(payload["days"])
 
     # 오늘의 뉴스·공시 (브라우저가 종목명으로 매칭한다)
@@ -3728,6 +3832,8 @@ def build_my_stocks(data):
                 뉴스.append({"t": _t, "u": n.get("링크", ""),
                             "d": (n.get("요약") or "")[:400],
                             "s": n.get("출처", ""),
+                            "y": int(_ymd),   # 🆕 2026-08-29 — 정렬용 실제 날짜(정수)
+                                              #    'k'는 "8/24" 같은 표시용이라 정렬에 못 쓴다.
                             "k": _lab, "o": _오늘인가})
     except Exception as e:
         print(f"   ⚠️ 브리핑 뉴스 수집 실패 — {type(e).__name__}: {e}")
@@ -3848,9 +3954,9 @@ def build_my_stocks(data):
   my.forEach(function(nm){
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,curW);
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
-     'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
+     'font-size:11px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
      'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')||
-     '<span style="font-size:10px;color:#6f7784">지도 미분류</span>';
+     '<span style="font-size:11px;color:#6f7784">지도 미분류</span>';
    var right='';
    if(c&&!c.short){
     /* 평균도 체크된 것만 — 그래프와 숫자가 다른 집합이면 서로를 못 믿는다. */
@@ -3866,16 +3972,16 @@ def build_my_stocks(data):
     var _주 = (curW<=1) ? fmt(c.ret)+'%'  : fmt(c.ex)+'%p';
     var _보 = (curW<=1) ? '시장 대비 '+fmt(c.ex)+'%p' : fmt(c.ret)+'%';
     var _주색 = (curW<=1) ? (c.ret>=0?'#ff6b4a':'#5b9bff') : col;
-    right='<div style="text-align:right;flex:none;width:74px">'+
-     '<div style="font-size:13.5px;font-weight:800;color:'+_주색+'">'+_주+'</div>'+
-     '<div style="font-size:9.5px;color:#7d848f">'+_보+'</div>'+
+    right='<div style="text-align:right;flex:none;width:82px">'+
+     '<div style="font-size:15px;font-weight:800;color:'+_주색+'">'+_주+'</div>'+
+     '<div style="font-size:11px;color:#7d848f">'+_보+'</div>'+
      /* 🆕 2026-08-25 HO 지시 — 당일 탭의 '시장 상회/하회' 글자 제거.
         [WHY] 바로 위 줄이 이미 '시장 대비 -5.6%p'라고 말한다.
               부호만 봐도 아는 걸 한 줄 더 쓰면 칸만 좁아진다. */
-     (c.tot<=1 ? '' : '<div style="font-size:9px;color:#6f7784">'+
+     (c.tot<=1 ? '' : '<div style="font-size:10px;color:#6f7784">'+
         c.win+'/'+c.tot+'승</div>')+
      '</div>';
-   }else{right='<div style="text-align:right;flex:none;width:60px;font-size:10px;'+
+   }else{right='<div style="text-align:right;flex:none;width:66px;font-size:11px;'+
      'color:#6f7784">축적 중</div>';}
    var tags='';
    NEWS.forEach(function(n){if(n.t.indexOf(nm)>=0)tags+='<a href="'+n.u+'" target="_blank" '+
@@ -3898,14 +4004,15 @@ def build_my_stocks(data):
     (_on?'':'opacity:.55')+'">'+
     '<div style="display:flex;align-items:flex-start;gap:8px">'+_cb+
     '<div style="flex:1;min-width:0">'+
-    '<div style="font-size:13px;font-weight:800;color:#e8eaee">'+
+    /* 🆕 2026-08-29 HO 지시 — 목록 글자가 전체적으로 작다. 13 → 14.5 */
+    '<div style="font-size:14.5px;font-weight:800;color:#e8eaee">'+
     /* 🆕 2026-08-25 — 등록 목록에서는 뺐다(브리핑에만 둔다). 두 곳에 있으면
        같은 카드가 화면에 두 번 열려 중복이 된다. */
     nm+
     '<span onclick="msDel(\\''+nm+'\\')" style="color:#6f7784;font-size:11px;'+
     'margin-left:6px;cursor:pointer">✕</span></div>'+
     '<div style="margin-top:4px">'+zones+'</div>'+
-    (m[1]?'<div style="font-size:9.5px;color:#6f7784;margin-top:3px">'+
+    (m[1]?'<div style="font-size:10.5px;color:#6f7784;margin-top:3px">'+
       (m[3]||'')+' · 시총 '+m[1]+'위 ('+(m[2]||'')+')</div>':'')+
     /* 🆕 2026-08-25 HO 지시 — 등록 목록에서 기사 링크 제거.
        [WHY] 바로 아래 「내 종목 브리핑」이 같은 뉴스를 요약까지 붙여 보여준다.
@@ -3960,7 +4067,7 @@ def build_my_stocks(data):
      zlist=[window.CP_STOCK_THEME[nm]];
    var zones=zlist.length
      ? zlist.map(function(z){return '<span style="display:inline-block;'+
-       'font-size:10px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
+       'font-size:11px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
        'background:#22303f;color:#8fd0e8">'+z+'</span>';}).join('')
      : '<span style="display:inline-block;font-size:10px;padding:2px 7px;'+
        'border-radius:99px;background:#1a2029;color:#6f7784">지도 미분류</span>';
@@ -3976,41 +4083,61 @@ def build_my_stocks(data):
    var _층=(m&&m[2])?String(m[2]):'';
    /* 🆕 2026-08-26 HO 지시 — 규모는 «참고 정보»라 눈에 덜 띄어도 된다.
       알약을 빼고 흰 글자로만 둔다(섹터 배지가 주인공 자리를 지키게). */
-   if(_층) zones+='<span style="display:inline-block;font-size:10px;'+
+   if(_층) zones+='<span style="display:inline-block;font-size:11px;'+
      'margin:0 4px 4px 0;color:#c9ced6">'+_층+'주</span>';
    var _cd=(m&&m[4])?String(m[4]):'';
    if(_cd) zones+='<a href="https://finance.naver.com/item/board.naver?code='+_cd+'" '+
      'target="_blank" rel="noopener" style="display:inline-block;font-size:10px;'+
      'padding:2px 8px;margin:0 4px 4px 0;border-radius:99px;background:#2a2233;'+
-     'color:#c4a8f7;text-decoration:none;font-weight:700">💬 실시간 토론방</a>';
+     'color:#c4a8f7;text-decoration:none;font-weight:700;font-size:11px">💬 실시간 토론방</a>';
    var items='', n1=0, n2=0;
    // ⚠️ 제목 + **본문(요약)** 둘 다에서 종목명을 찾는다(2026-08-20).
-   //    제목 매칭은 우선순위를 높여 위로 올리고, 많으면 상위 4건만 보여준다.
+   //    제목 매칭은 우선순위를 높여 위로 올리고, 많으면 상위 5건만 보여준다.
+   // 🆕 2026-08-29 HO 지시 — 기간을 5→20거래일로 늘리는 대신 두 가지를 더한다.
+   //    ① **최근 위주 정렬** — 예전엔 제목매칭(w=2)이 항상 위로 와서, 옛날
+   //       제목매칭 기사가 최근 본문매칭 기사보다 위에 뜰 수 있었다.
+   //       이제 **날짜(y)를 우선**으로 정렬하고, 같은 날이면 제목매칭을 우선한다.
+   //    ② **종목별 중복 제거** — 서로 다른 매체가 같은 사건을 다르게 쓰면
+   //       (_news_key의 24자 지문으로는 못 잡는 경우) 20일치를 보면 한 종목에
+   //       비슷한 기사가 여러 개 뜬다. 여기서 **더 느슨한 지문**(12자)으로
+   //       한 번 더 걸러, 같은 사건이면 **가장 최근 것 하나만** 남긴다.
    var hits=[];
    NEWS.forEach(function(n){
     var inT=(n.t||'').indexOf(nm)>=0, inD=((n.d||'').indexOf(nm)>=0);
     if(inT||inD) hits.push({n:n, w:(inT?2:1)});
    });
-   hits.sort(function(a,b){return b.w-a.w;});
+   hits.sort(function(a,b){ return (b.n.y-a.n.y) || (b.w-a.w); });
+   // 종목 안에서 «같은 사건» 판정용 느슨한 지문 — 대괄호 머리말·기호 제거 후 앞 12자.
+   var _fp=function(t){
+    return String(t||'').replace(/\[[^\]]*\]/g,'').replace(/[^0-9A-Za-z가-힣]/g,'').slice(0,12);
+   };
+   var _seen={}, _hits2=[];
+   hits.forEach(function(h){
+    var k=_fp(h.n.t);
+    if(k && _seen[k]) return;         // 이미 더 최근 것(정렬상 앞선 것)을 남겼다
+    if(k) _seen[k]=1;
+    _hits2.push(h);
+   });
+   hits=_hits2;
    n1=hits.length;
-   hits.slice(0,4).forEach(function(h){
+   hits.slice(0,5).forEach(function(h){
     var n=h.n;
-    /* 🆕 2026-08-26 — 날짜를 반드시 붙인다. 5거래일치를 섞어 보여주므로
-       안 붙이면 사흘 전 기사를 오늘 일로 오해한다. */
+    /* 🆕 2026-08-26 — 날짜를 반드시 붙인다. 20거래일치를 섞어 보여주므로
+       안 붙이면 며칠 전 기사를 오늘 일로 오해한다. */
     var 날=n.k?'<span style="font-size:9.5px;color:#e0c060;font-weight:700">'+
       (n.o?'오늘':n.k)+'</span> ':'';
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
-     '<div>'+날+'<a href="'+n.u+'" target="_blank" style="font-size:11px;color:#8fb4ee;'+
+     '<div>'+날+'<a href="'+n.u+'" target="_blank" style="font-size:12px;color:#8fb4ee;'+
      'line-height:1.5;text-decoration:none">'+n.t+'</a>'+
      (h.w===1?'<span style="font-size:9.5px;color:#6f7784"> · 본문 언급</span>':'')+
      (n.s?'<span style="font-size:9.5px;color:#6f7784"> · '+n.s+'</span>':'')+
      '</div></div>';
    });
-   if(n1>4) items+='<p style="margin:4px 0 0;font-size:10px;color:#6f7784">'+
-     '외 '+(n1-4)+'건 더 있습니다 · 최근 '+(window.CP_BRIEF_DAYS||5)+'거래일</p>';
+   if(n1>5) items+='<p style="margin:4px 0 0;font-size:10px;color:#6f7784">'+
+     '외 '+(n1-5)+'건 더 있습니다(중복 제외) · 최근 '+(window.CP_BRIEF_DAYS||20)+'거래일</p>';
    DISC.forEach(function(g){if(g.c===nm){n2++;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
-     '<a href="'+g.u+'" target="_blank" style="font-size:11px;color:#e0c060;'+
+     '<a href="'+g.u+'" target="_blank" style="font-size:12px;color:#e0c060;'+
      'line-height:1.5;text-decoration:none">'+g.t+(g.s?' '+'★'.repeat(g.s):'')+'</a></div>';}});
    // ⚠️ 조용한 날에도 할 말은 있다 (2026-08-18).
    //    뉴스도 공시도 없으면 '없었습니다'로 끝내지 말고,
@@ -4247,31 +4374,99 @@ def build_my_stocks(data):
      }
     }
 
+    /* ②-2 무리에서 이탈 — "오늘 하루"가 아니라 "요 며칠 계속" 뒤처지는지.
+       🆕 2026-08-29 HO 지시. [WHY] 위 ① 자리 대비는 오늘 하루만 본다.
+       하루 밀리는 건 흔하지만, **여러 날 연속으로** 같은 섹터보다 계속
+       처지면 "이 종목만의 문제"일 확률이 높아진다 — 손절 타이밍을 놓치는
+       사람들에게 실질적으로 도움이 되는 신호다.
+       ⚠️ 새 수집 없음 — 사다리 그래프가 이미 쓰는 _zone_series()를
+          CP_SECT_SERIES로 재노출해 재사용한다.
+       ⚠️ 대표 구역은 위 ①에서 고른 _z(오늘 가장 세게 움직인 구역)를
+          그대로 쓴다 — 카드마다 다른 구역을 기준 삼으면 숫자가 안 맞아
+          보인다(원칙 10, 화면 설명과 코드 조건 일치). */
+    if(_z&&window.CP_SECT_SERIES&&window.CP_SECT_SERIES[_z.z]){
+     var _zs=window.CP_SECT_SERIES[_z.z];   // [[날짜,구역등락], ...] 최근 5일
+     var _diffs=[];
+     _zs.forEach(function(pair){
+      var di=P.days.indexOf(pair[0]);
+      if(di<0) return;
+      var rv=(P.ret[nm]||[])[di];
+      if(rv===null||rv===undefined) return;
+      _diffs.push({d:pair[0], gap:rv-pair[1]});
+     });
+     /* 최근 날짜부터 거슬러 올라가며 "섹터보다 뒤처진(gap<-0.5%p)" 연속 일수 센다.
+        ⚠️ 0으로 걸면 오차 수준의 하루도 "이탈"로 잡혀 매일 뜬다 — 최소한의
+        문턱(0.5%p)을 둔다. */
+     var _이탈연속=0, _이탈합=0;
+     for(var _i=_diffs.length-1;_i>=0;_i--){
+      if(_diffs[_i].gap<-0.5){ _이탈연속++; _이탈합+=_diffs[_i].gap; }
+      else break;
+     }
+     if(_이탈연속>=3){
+      _add.push('⚠️ 최근 <b>'+_이탈연속+'거래일 연속</b> <b>'+_z.z+'</b> 섹터보다 '+
+       '뒤처지고 있어요 (평균 <b style="color:#5b9bff">'+
+       (_이탈합/_이탈연속).toFixed(1)+'%p</b>) — 종목 자체에 원인이 있는지 '+
+       '살펴볼 때예요');
+     }
+    }
+
     /* ③ 종목 수급 — 기사가 없는 중소형주일수록 유일하게 남는 단서.
-       ⚠️ 쌓인 만큼만 말한다. 모자란 날을 0으로 채우지 않는다. */
+       ⚠️ 쌓인 만큼만 말한다. 모자란 날을 0으로 채우지 않는다.
+       🆕 2026-08-29 HO 지시 — 글자 나열("외국인 +216억 · 기관 -261억 ·
+          외국인이 5일 연속…")이 한눈에 안 들어온다는 지적으로 **선그래프**로
+          바꾼다. 최근 **10거래일**의 외국인·기관 순매수를 두 선으로 겹쳐
+          그린다. 0선 위=매수, 아래=매도.
+       ⚠️ 색은 주체를 가리킨다(외국인 금색 #f0c65a / 기관 청록 #74f0d4).
+          매수·매도의 빨강/파랑을 선에 쓰면 한 선이 중간에 색이 바뀌어
+          흐름을 못 읽는다. 대신 0선을 기준으로 위아래로 읽게 한다. */
     var _sf=(window.CP_SFLOW||{})[nm];
     if(_sf&&_sf.length){
-     var _f=0,_g=0,_last=_sf[_sf.length-1];
-     _sf.forEach(function(r){_f+=r[1];_g+=r[2];});
+     /* 최근 10거래일만 */
+     var _sf10=_sf.slice(-10);
+     var _f=0,_g=0;
+     _sf10.forEach(function(r){_f+=r[1];_g+=r[2];});
      var _단=function(v){var a=Math.abs(v);
       return (a>=10000?(v/10000).toFixed(2)+'조':Math.round(v).toLocaleString()+'억');};
      var _합=_f+_g;
-     var _일수=_sf.length;
-     var _문='💰 최근 '+_일수+'거래일 외국인 <b>'+(_f>=0?'+':'')+_단(_f)+
-       '</b> · 기관 <b>'+(_g>=0?'+':'')+_단(_g)+'</b>';
-     /* 연속 매수/매도는 이틀 이상 쌓여야 말이 된다. */
+     var _일수=_sf10.length;
+
+     /* 🔴 2026-08-29 (2차) HO 지시 — 그래프 삭제. 시도해본 막대·선그래프
+        둘 다 "위 합계 문장과 숫자가 달라 헷갈린다"는 지적을 받았다
+        (그래프 축은 하루 최대치, 문장은 기간 합계라 애초에 다른 걸 재는
+        숫자였는데, 라벨을 아무리 붙여도 한눈에 안 풀렸다). → 그래프 없이
+        **누적 합계 문장만** 남긴다. 수급 데이터가 있는 종목만 이 문장
+        자체가 뜨므로(_sf&&_sf.length 조건), "데이터 있는 종목만 언급"은
+        이미 만족된다. */
+
+     /* 연속 매수/매도는 이틀 이상 쌓여야 말이 된다.
+        🔴 2026-08-29 HO 지적 — 예전엔 외국인+기관을 «합쳐서» 연속을 셌더니
+        화면에 "2일 연속 순매수"라고만 나와 그게 누구인지 알 수 없었다.
+        주체별로 따로 세고 이름을 반드시 붙인다(원칙 11 — 단정하는 문장에는
+        근거가 있어야 한다). 둘 다 해당하면 둘 다 적는다. */
+     var _연속문='';
      if(_일수>=2){
-      var _n=0,_dir=null;
-      for(var i=_sf.length-1;i>=0;i--){
-       var v=_sf[i][1]+_sf[i][2], d=v>0?1:(v<0?-1:0);
-       if(d===0) break;
-       if(_dir===null) _dir=d; else if(d!==_dir) break;
-       _n++;
-      }
-      if(_n>=2) _문+=' · <b>'+_n+'일 연속 '+(_dir>0?'순매수':'순매도')+'</b>';
+      var _streak=function(idx){
+       var n=0,dir=null;
+       for(var i=_sf10.length-1;i>=0;i--){
+        var v=_sf10[i][idx], d=v>0?1:(v<0?-1:0);
+        if(d===0) break;
+        if(dir===null) dir=d; else if(d!==dir) break;
+        n++;
+       }
+       return {n:n, dir:dir};
+      };
+      var _연속들=[];
+      [['외국인',1],['기관',2]].forEach(function(pair){
+       var r=_streak(pair[1]);
+       if(r.n>=2) _연속들.push('<b>'+pair[0]+'이 '+r.n+'일 연속 '+
+        (r.dir>0?'순매수':'순매도')+'</b>');
+      });
+      if(_연속들.length) _연속문=' · '+_연속들.join(' · ');
      }else{
-      _문+=' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
+      _연속문=' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
      }
+     var _문='💰 최근 '+_일수+'거래일 합계 외국인 <b>'+(_f>=0?'+':'')+_단(_f)+
+       '</b> · 기관 <b>'+(_g>=0?'+':'')+_단(_g)+'</b>'+_연속문;
      if(Math.abs(_합)>=50||_일수>=2) _add.push(_문);
     }
 
@@ -4281,13 +4476,29 @@ def build_my_stocks(data):
      var _days=[],_kinds={};
      _rh.forEach(function(r){ if(_days.indexOf(r[0])<0)_days.push(r[0]); _kinds[r[1]]=1;});
      var _kn=Object.keys(_kinds).join('·');
-     _add.push('📡 예전에도 <b>'+_kn+' 레이더</b>에 <b>'+_days.length+'번</b> 잡혔어요 ('+
-      _days.slice(-3).join(', ')+(_days.length>3?' 외':'')+')');
+     var _문4='📡 예전에도 <b>'+_kn+' 레이더</b>에 <b>'+_days.length+'번</b> 잡혔어요 ('+
+      _days.slice(-3).join(', ')+(_days.length>3?' 외':'')+')';
+     /* 🆕 2026-08-29 HO 지시 — 예보 성적(D+5 기준)을 같이 붙인다.
+        ⚠️ **승패를 있는 그대로** 보여준다. 이긴 것만 골라 보여주면
+        "지운 적 없다"는 이 서비스의 핵심 신뢰를 스스로 깨는 셈이라
+        (유료챕터_기획.md, 「포착 그 후」 챕터 설계 원칙) 절대 안 한다. */
+     var _cs=(window.CP_CAPSTAT||{})[nm];
+     if(_cs&&_cs.횟수){
+      var _sc=_cs.평균>=0?'#ff6b4a':'#5b9bff';
+      /* ⚠️ '최고'도 부호를 그대로 살린다. 표본 전부가 손실이면 최고조차
+         마이너스일 수 있다 — 그걸 +로 우기면 그게 진짜 왜곡이다. */
+      var _hc=_cs.최고>=0?'#ff6b4a':'#5b9bff';
+      _문4+=' · <b>D+5 평균 <span style="color:'+_sc+'">'+
+       (_cs.평균>=0?'+':'')+_cs.평균+'%</span></b> (승 '+_cs.승+' · 패 '+_cs.패+
+       ') · 최고 <span style="color:'+_hc+'">'+
+       (_cs.최고>=0?'+':'')+_cs.최고+'%</span>';
+     }
+     _add.push(_문4);
     }
 
     if(_add.length){
      분석+='<span style="display:block;margin-top:6px;padding:8px 10px;'+
-      'background:#141922;border-radius:8px;font-size:11px;color:#a8b0ba;'+
+      'background:#141922;border-radius:8px;font-size:12px;color:#a8b0ba;'+
       'line-height:1.75">'+_add.join('<br>')+'</span>';
     }
     // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
@@ -4330,9 +4541,26 @@ def build_my_stocks(data):
       [WHY] 등록 목록은 '지우기·성적' 자리다. 브리핑이 그 종목을 실제로
             읽는 자리라, 기업분석도 여기 있어야 흐름이 안 끊긴다. */
    var _bid='scb'+(_scbSeq++);
+   /* 🆕 2026-08-29 HO 지시 — 종목명 옆에 **오늘 등락률**을 붙인다.
+      [WHY] 브리핑을 읽는 첫 질문이 "그래서 오늘 얼마나 올랐나"인데,
+            그 숫자만 위 등록 목록으로 돌아가서 봐야 했다.
+      ⚠️ calc(nm,1)이 당일 창이다(20일짜리 c와 다르다 — 혼동 주의).
+         데이터가 없으면 아무것도 안 붙인다(빈칸이 거짓말보다 낫다). */
+   var _t=calc(nm,1), _tr=(_t&&!_t.short&&_t.ret!=null)?_t.ret:null;
+   var _tb=(_tr===null)?'':
+     '<b style="margin-left:7px;font-size:13.5px;color:'+
+     (_tr>=0?'#ff6b4a':'#5b9bff')+'">'+(_tr>=0?'+':'')+_tr.toFixed(2)+'%</b>';
+   /* 🆕 2026-08-29 HO 지시 — 브리핑 글자가 전체적으로 작다. 조금씩 키운다
+      (종목명 13.5→15, 오늘 분석 11.5→12.5, 뉴스·공시 11→12). */
+   /* 🆕 2026-08-29 HO 지시 — 순서를 **종목명 · 등락률 · 기업분석**으로.
+      [WHY] 등락률이 「기업분석」 뒤에 붙어 있어 이름에서 멀었다.
+            종목명 바로 옆에 오늘 숫자가 붙어야 눈이 안 튄다.
+      ⚠️ 「기업분석」 펼침 버튼(.sc-tap)은 .cp-sname 안에 있어야
+         클릭 동작이 붙는다(sc_click 규약). 그래서 등락률을
+         **.cp-sname 안, 이름과 sc-tap 사이**에 넣는다. */
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
-    '<div style="font-size:13.5px;font-weight:800;color:#e8eaee">'+
-    '<span class="cp-sname" id="'+_bid+'-n">'+nm+
+    '<div style="font-size:15px;font-weight:800;color:#e8eaee">'+
+    '<span class="cp-sname" id="'+_bid+'-n">'+nm+_tb+
     '<span class="sc-tap"><i>▾</i>기업분석</span></span></div>'+
     '<div style="margin-top:4px">'+zones+'</div>'+items+
     /* 🆕 2026-08-26 HO 지시 — 기업분석 펼침칸을 «오늘 분석» **위**로 올린다.
@@ -4342,7 +4570,7 @@ def build_my_stocks(data):
     '<div id="'+_bid+'" style="display:none"></div>'+
     '<div style="margin-top:7px;padding:8px 10px;background:#0f131a;border-radius:8px;'+
     'border-left:2.5px solid #e0c060">'+
-    '<p style="margin:0;font-size:11.5px;color:#c9ced6;line-height:1.7">'+
+    '<p style="margin:0;font-size:12.5px;color:#c9ced6;line-height:1.7">'+
     '<b style="color:#e0c060">오늘 분석</b> — '+원인+분석+'</p></div></div>';
   });
   host.innerHTML=out;
@@ -5780,11 +6008,23 @@ def build_sector_ladder():
     #    «전력·신재생·원전» 같은 긴 이름이 오른쪽으로 잘렸다.
     #    ⚠️ 우여백만 늘리면 그래프 폭이 줄어 선이 짜부라진다.
     #       **viewBox(W)를 같이 넓혀** 그래프 폭은 유지하고 이름 자리만 더 준다.
-    W, 좌여백, 우여백 = 1180, 40, 452
+    # 🆕 2026-08-29 HO 지시 — 선그래프가 너무 작다. 좌우를 최대한 쓴다.
+    #    ⚠️ 우여백(섹터명 자리)을 줄이면 긴 이름이 잘린다. 그래서
+    #       **W를 크게 늘려** 그래프 폭(가용폭)을 벌리고, 이름 자리는 오히려
+    #       조금 더 준다(섹터명을 40→52로 키웠으므로).
+    #       1180-40-452 = 688 → 1620-40-530 = 1050 (그래프 폭 +53%)
+    #    ⚠️ 우여백 470으로 먼저 잡았더니 「전력·신재생·원전」(9자)의 끝이
+    #       1551/1560으로 9px만 남았다. 이보다 긴 이름이 나오면 잘린다
+    #       (2026-08-26에 실제로 겪은 사고와 같은 상황) → 530으로 늘려
+    #       한 글자분 이상 여유를 둔다. 가용폭은 1050 그대로다.
+    W, 좌여백, 우여백 = 1620, 40, 530
     가용폭 = W - 좌여백 - 우여백
     x간격 = (가용폭 / (len(사용일) - 1)) if len(사용일) > 1 else 0
     # 🆕 2026-08-22 — 날짜·그래프가 위 문장에 붙어 보인다는 지적으로 더 내린다.
-    Y0, 행높이 = 104, 15.5
+    # 🆕 2026-08-29 HO 지시 — 위아래도 더 넓게. 날짜 글자를 키우면서 Y0를
+    #    내리고, 행높이도 키워 선의 오르내림이 실제로 눈에 보이게 한다
+    #    (15.5는 순위가 1·2·3위로 붙으면 거의 평평해 보였다).
+    Y0, 행높이 = 128, 26
     # ⚠️ 높이는 **표시하는 3개 섹터가 실제로 지나간 순위 범위**로 잡는다.
     #    예전엔 전체 섹터수(16)를 그대로 곱해 아래가 통째로 비었다.
     _쓴순위 = [일별순위[d][nm] for nm in 표시 for d in 사용일 if nm in 일별순위[d]]
@@ -5809,7 +6049,9 @@ def build_sector_ladder():
     #      선과 라벨이 같은 높이에서 만나므로 어느 선이 어느 섹터인지도 명확해진다.
     # 🆕 2026-08-26 HO 지시 — 오늘(마지막) 쪽 선·라벨이 붙어 읽기 어렵다.
     #    라벨 글자를 키우면 필요한 세로 간격도 같이 커져야 겹치지 않는다.
-    라벨높이 = 62
+    # 🆕 2026-08-29 — 섹터명을 40→52로 키웠으니 라벨 간격도 같이 키운다.
+    #    안 그러면 이름끼리 겹친다(2026-08-26에 같은 이유로 조정한 적 있음).
+    라벨높이 = 78
     코스.sort(key=lambda t: t[3])
     for i in range(1, len(코스)):
         if 코스[i][3] - 코스[i - 1][3] < 라벨높이:
@@ -5847,12 +6089,15 @@ def build_sector_ladder():
             # 🆕 2026-08-26 HO 지시 — 섹터명이 너무 작다. 31 → 40.
             #    ⚠️ SVG가 화면 폭에 맞춰 축소되므로 viewBox 기준 숫자를 키워야
             #       실제 화면에서 커진다.
-            f'font-size="40" font-weight="800" fill="{col}">{nm}</text>')
+            # 🆕 2026-08-29 HO 지시 — 섹터명도 더 크게. 40 → 52.
+            f'font-size="52" font-weight="800" fill="{col}">{nm}</text>')
 
     날짜라벨 = "".join(
         # 🆕 2026-08-26 (2차) HO 지시 — 날짜가 여전히 작다. 22 → 32 + 굵게.
-        f'<text x="{좌여백 + i * x간격:.0f}" y="46" text-anchor="middle" font-size="32" font-weight="700" '
-        f'font-weight="700" fill="#9aa3ae">'
+        # 🆕 2026-08-29 HO 지시 — 32도 작다. 44로. (font-weight가 두 번
+        #    적혀 있던 것도 정리 — 뒤엣것이 앞엣것을 덮어써 무해했지만 혼란만 준다)
+        f'<text x="{좌여백 + i * x간격:.0f}" y="58" text-anchor="middle" font-size="44" '
+        f'font-weight="800" fill="#b6bec9">'
         f'{"오늘" if i == len(사용일) - 1 else d[4:6] + "/" + d[6:]}</text>'
         for i, d in enumerate(사용일))
 
@@ -5870,9 +6115,17 @@ def build_sector_ladder():
         목록 = (_zone_members().get(nm) or [])[:6]
         if not 목록:
             continue
+        # 🆕 2026-08-29 HO 지시 — 칩 테두리를 **그 섹터의 색**으로 준다.
+        #    이유: 한 줄에 종목명과 등락률이 잔뜩 나오다 보니 어디까지가
+        #    한 종목인지 눈으로 끊기 어려웠다. 위 선그래프에서 그 섹터가
+        #    쓰는 색(col)을 그대로 재사용하므로, "이 종목들이 저 선의
+        #    섹터구나"가 색 하나로 바로 연결된다(예: 2차전지·소재=노랑,
+        #    반도체=주황, 전력·신재생=파랑 — 팔레트 순서대로).
+        #    ⚠️ 테두리만 그 색이고 글자색은 그대로 둔다. 글자까지 물들이면
+        #       등락률의 빨강/파랑(상승·하락)과 싸워서 오히려 더 헷갈린다.
         칩 = "".join(
             f'<span style="display:inline-block;font-size:11px;color:#d5d9e0;'
-            f'background:#141922;border:1px solid #232a36;border-radius:5px;'
+            f'background:#141922;border:1px solid {col};border-radius:5px;'
             f'padding:2px 7px;margin:0 4px 4px 0;white-space:nowrap">{n} '
             f'<b style="color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
             f'{(v or 0):+.1f}%</b></span>'
