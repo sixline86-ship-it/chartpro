@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a1"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.29-a2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3491,6 +3491,13 @@ def _profile_targets(레이더종목들, 유니버스):
 #    → 2로. 구조는 이미 확인됐으니(§단서) 지금은 검증용 소량이면 된다.
 BIZ_하루할당 = int(os.environ.get("CP_BIZ_QUOTA", "2"))            # 하루에 사업보고서를 열어볼 종목 수
 BIZ_FILE = "biz_report_raw.json"   # 1단계 저장소(구조 확인용)
+# 🆕 2026-08-29 — 실패 기록. 없으면 지도 앞쪽에 몰린 오래된/휴면 법인
+#    (사업보고서를 3년간 낸 적 없는 곳)만 매번 재시도하고 진짜 새 후보로
+#    못 넘어가는 문제가 실측 확인됨(10회 실행 동안 15종목에서 그대로 정체).
+#    실패해도 원칙 3(틀린 걸 지우지 않는다)에 따라 영구 제외는 안 하고,
+#    일정 기간 뒤에는 다시 한번 확인할 여지를 남긴다(신규 상장사 등 대비).
+BIZ_FAIL_FILE = "biz_report_fail.json"   # {회사명: 마지막시도 YYYYMMDD}
+BIZ_재시도일 = 180
 # 🆕 2026-08-27 (2차) HO 지시 — "나중에 또 이 작업을 반복하지 않게,
 #    최대한 유용한 정보를 다 가져와라". 실측 로그로 구조가 확인됐으니
 #    이번엔 한 자리만 잘라내지 않고 **여러 자리를 넉넉히** 담는다.
@@ -3601,6 +3608,8 @@ def _dart_biz_report(고유, 회사명):
 # 🔴 2026-08-27 — 검증 전까지는 적게. 로그로 파서가 맞는지만 확인하면 된다.
 SNEWS_하루할당 = int(os.environ.get("CP_SNEWS_QUOTA", "10"))            # 하루에 종목뉴스를 긁어올 종목 수
 SNEWS_FILE = "stock_news_raw.json"   # 1단계 저장소(구조 확인용)
+SNEWS_FAIL_FILE = "stock_news_fail.json"   # 🆕 2026-08-29 — BIZ_FAIL_FILE과 같은 이유
+SNEWS_재시도일 = 180
 
 
 def _unescape(t):
@@ -3694,6 +3703,16 @@ def _naver_stock_news(코드, 회사명):
         return None
 
 
+def _날짜차이(a, b):
+    """YYYYMMDD 문자열 두 날짜 사이 일수 차이. 파싱 실패하면 충분히 오래된 걸로
+    간주해(9999) 재시도를 막지 않는다 — 실패기록이 재시도를 영구히 막는 사고를
+    피하기 위함(원칙 3, 틀린 걸 지우지 않는다와 같은 맥락)."""
+    try:
+        return (datetime.strptime(str(a), "%Y%m%d") - datetime.strptime(str(b), "%Y%m%d")).days
+    except Exception:
+        return 9999
+
+
 def collect_stock_news_raw(레이더종목들, 코드지도):
     """1단계 — 종목별 뉴스를 긁어 **저장·로그만** 한다.
 
@@ -3704,19 +3723,40 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
         print("   ⚠️ 종목코드 지도가 없어 종목뉴스 수집을 건너뜁니다")
         return
     저장 = _load_json(SNEWS_FILE, {})
+    실패기록 = _load_json(SNEWS_FAIL_FILE, {})
+
+    # 🔴 2026-08-29 수정 — 몰아 모으기는 레이더종목들=[]로 호출되는데,
+    #    예전엔 여기서 대상이 그대로 빈 채로 끝나 매번 0건 처리됐다
+    #    (실측 확인: 10회 실행 동안 종목뉴스 30건에서 그대로 정체).
+    #    collect_biz_reports와 같은 폴백을 추가한다 — 레이더가 비면
+    #    코드지도 전체에서 "아직 안 해본" 종목으로 채운다.
     대상 = [n for n in (레이더종목들 or []) if 코드지도.get(n)]
+    if len(대상) < SNEWS_하루할당:
+        _오늘 = DATE
+        for n in 코드지도:
+            if n in 저장 or n in 대상 or not 코드지도.get(n):
+                continue
+            _마지막시도 = 실패기록.get(n)
+            if _마지막시도 and _날짜차이(_오늘, _마지막시도) < SNEWS_재시도일:
+                continue   # 최근에 이미 실패 확인함 — 재시도일 전엔 건너뜀
+            대상.append(n)
+            if len(대상) >= SNEWS_하루할당:
+                break
     seen, 정리 = set(), []
     for n in 대상:
         if n not in seen:
             seen.add(n)
             정리.append(n)
-    채움 = 0
+    채움, 새실패 = 0, 0
     for nm in 정리[:SNEWS_하루할당]:
         time.sleep(PROFILE_SLEEP)
         res = _naver_stock_news(코드지도[nm], nm)
         if not res:
+            실패기록[nm] = DATE
+            새실패 += 1
             continue
         저장[nm] = res
+        실패기록.pop(nm, None)   # 이번엔 성공했으니 실패 기록에서 뺀다
         채움 += 1
         if 채움 <= 3:      # 앞 3종목만 자세히 — 로그가 길어지면 못 읽는다
             print(f"   📰종목 {nm}({res['코드']}) — 기사 {res['기사수']}건 "
@@ -3727,9 +3767,14 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     if 채움:
         with io.open(SNEWS_FILE, "w", encoding="utf-8") as _f:
             json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
-        print(f"   📰종목 {채움}종목 저장 — ⚠️ 1단계라 화면에는 안 나옵니다")
+        print(f"   📰종목 {채움}종목 저장 (누적 {len(저장)}종목) — ⚠️ 1단계라 화면에는 안 나옵니다")
     else:
         print("   📰종목 — 받은 기사 없음(파서 확인 필요)")
+    if 새실패:
+        with io.open(SNEWS_FAIL_FILE, "w", encoding="utf-8") as _f:
+            json.dump(실패기록, _f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   📰종목 실패기록 {새실패}건 추가 (누적 {len(실패기록)}건, "
+              f"{SNEWS_재시도일}일 뒤 재시도)")
 
 
 def collect_biz_reports(레이더종목들):
@@ -3759,22 +3804,57 @@ def collect_biz_reports(레이더종목들):
         return
 
     저장 = _load_json(BIZ_FILE, {})
+    실패기록 = _load_json(BIZ_FAIL_FILE, {})
+
+    # 🔴 2026-08-29 수정 — 실패기록이 없으면 지도(corp_map) 앞쪽에 몰린
+    #    오래된/휴면 법인(3년간 사업보고서 미제출)만 매 실행 40개씩 그대로
+    #    재시도해, 뒤쪽의 진짜 새 후보로 영영 못 넘어가는 문제가 실측
+    #    확인됐다(10회 실행 동안 15종목에서 완전히 정체 — 로그에 예외도
+    #    안 찍힌 걸 보아 "조용히 사업보고서 없음"으로 계속 빠진 것으로 추정).
+    #    원칙 3(틀린 걸 지우지 않는다)에 따라 영구 제외는 안 하고,
+    #    BIZ_재시도일 뒤에는 다시 한번 확인할 여지를 남긴다.
+    _오늘 = DATE
     # 오늘 레이더에 잡힌 종목부터. 독자가 지금 궁금해하는 회사가 먼저다.
     대상 = [n for n in (레이더종목들 or []) if n in 지도 and n not in 저장]
+
+    # 🆕 2026-08-29 — 2순위: stock_profile.json에 이미 프로필이 있는 종목.
+    #    프로필 수집이 성공했다는 건 DART가 그 법인을 "최근에도 정상 보고
+    #    중인 활동 법인"으로 인정했다는 뜻이라, 지도를 맹목적으로 순서대로
+    #    훑는 것보다 사업보고서가 실제로 있을 확률이 훨씬 높다.
     if len(대상) < BIZ_하루할당:
-        for n in 지도:
-            if n not in 저장 and n not in 대상:
-                대상.append(n)
+        _프로필있음 = _load_json(PROFILE_FILE, {})
+        for n in _프로필있음:
+            if n in 저장 or n in 대상 or n not in 지도:
+                continue
+            _마지막시도 = 실패기록.get(n)
+            if _마지막시도 and _날짜차이(_오늘, _마지막시도) < BIZ_재시도일:
+                continue
+            대상.append(n)
             if len(대상) >= BIZ_하루할당:
                 break
 
-    채움 = 0
+    # 3순위: 나머지는 지도 순서대로(최근 실패는 재시도일 전까지 건너뜀)
+    if len(대상) < BIZ_하루할당:
+        for n in 지도:
+            if n in 저장 or n in 대상:
+                continue
+            _마지막시도 = 실패기록.get(n)
+            if _마지막시도 and _날짜차이(_오늘, _마지막시도) < BIZ_재시도일:
+                continue   # 최근에 이미 실패 확인함 — 재시도일 전엔 건너뜀
+            대상.append(n)
+            if len(대상) >= BIZ_하루할당:
+                break
+
+    채움, 새실패 = 0, 0
     for nm in 대상[:BIZ_하루할당]:
         time.sleep(PROFILE_SLEEP)
         res = _dart_biz_report(지도[nm], nm)
         if not res:
+            실패기록[nm] = DATE
+            새실패 += 1
             continue
         저장[nm] = res
+        실패기록.pop(nm, None)   # 이번엔 성공했으니 실패 기록에서 뺀다
         채움 += 1
         print(f"   📑 {nm} — {res['보고서명']} ({res['접수일']}) · "
               f"본문 {res['전체길이']:,}자 · 「사업의 내용」 위치 {res['사업의내용_위치']} · "
@@ -3797,6 +3877,11 @@ def collect_biz_reports(레이더종목들):
               f"⚠️ 1단계라 화면에는 안 나옵니다")
     else:
         print("   📑 사업보고서 — 새로 받은 종목 없음")
+    if 새실패:
+        with io.open(BIZ_FAIL_FILE, "w", encoding="utf-8") as _f:
+            json.dump(실패기록, _f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   📑 사업보고서 실패기록 {새실패}건 추가 (누적 {len(실패기록)}건, "
+              f"{BIZ_재시도일}일 뒤 재시도)")
 
 
 def collect_stock_profiles(레이더종목들, 유니버스):
