@@ -62,13 +62,21 @@ jobs:
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
-          # 🔴 2026-08-29 — biz_report_fail.json·stock_news_fail.json 누락 발견.
-          #    실패기록이 커밋 안 돼 매 실행 사라지고, 실패한 종목을 다음 번에도
-          #    계속 재시도하는 문제로 이어질 뻔했다(daily.yml은 git add -A라
-          #    안전한데 여긴 파일명을 일일이 나열하는 방식이라 새 파일이 빠졌다).
-          git add stock_profile.json corp_map.json corp_stockcode.json \
+          # 🔴 2026-08-29 (2차) — 실측으로 심각한 사고 확인.
+          #    biz_report_fail.json·stock_news_fail.json은 "실패가 있을 때만"
+          #    생기는 파일이다. 한쪽만 실패가 0건이면 그 파일이 아예 안 만들어지고,
+          #    git add에 없는 파일이 하나라도 섞이면 **그 한 줄 전체가 실패해서
+          #    나머지 멀쩡한 파일까지 통째로 안 올라간다**(pathspec 에러, exit 128).
+          #    2>/dev/null || true가 이걸 조용히 삼켜 "변경 없음"으로 보였지만
+          #    실제론 그날 모은 것 전부(프로필·사업보고서·종목뉴스)가 커밋 자체가
+          #    안 되고 통째로 날아갔다(31분 실행분 소실, 2026-08-29 실측).
+          #    → 파일 하나씩 따로 add해서, 없는 파일 하나가 나머지를 물귀신처럼
+          #      끌고 들어가지 않게 한다.
+          for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
-                   biz_report_fail.json stock_news_fail.json 2>/dev/null || true
+                   biz_report_fail.json stock_news_fail.json; do
+            git add "$f" 2>/dev/null || true
+          done
           if git diff --cached --quiet; then
             echo "변경 없음 — 커밋 생략"
             exit 0
