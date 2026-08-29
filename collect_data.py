@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a2"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.29-a3"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3731,8 +3731,28 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     #    collect_biz_reports와 같은 폴백을 추가한다 — 레이더가 비면
     #    코드지도 전체에서 "아직 안 해본" 종목으로 채운다.
     대상 = [n for n in (레이더종목들 or []) if 코드지도.get(n)]
+    _오늘 = DATE
+
+    # 🆕 2026-08-29 (2차) — 실측 확인: 폴백만 넣었더니 코드지도 앞쪽에
+    #    몰린 휴면 법인(한빛네트·엔플렉스·동서정보기술 등)부터 시도해
+    #    150건 중 150건이 전부 「기사 0건」이었다. collect_biz_reports와
+    #    같은 이유(corp_map·corp_stockcode 둘 다 같은 원본이라 같은
+    #    패턴)로 보고, 같은 해법(stock_profile 우선)을 적용한다 —
+    #    프로필 수집에 성공한 종목은 DART가 활동 법인으로 인정한
+    #    곳이라 실제 뉴스가 있을 확률이 훨씬 높다.
     if len(대상) < SNEWS_하루할당:
-        _오늘 = DATE
+        _프로필있음 = _load_json(PROFILE_FILE, {})
+        for n in _프로필있음:
+            if n in 저장 or n in 대상 or not 코드지도.get(n):
+                continue
+            _마지막시도 = 실패기록.get(n)
+            if _마지막시도 and _날짜차이(_오늘, _마지막시도) < SNEWS_재시도일:
+                continue
+            대상.append(n)
+            if len(대상) >= SNEWS_하루할당:
+                break
+
+    if len(대상) < SNEWS_하루할당:
         for n in 코드지도:
             if n in 저장 or n in 대상 or not 코드지도.get(n):
                 continue
