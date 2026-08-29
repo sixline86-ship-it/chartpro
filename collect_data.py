@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a4"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.29-a15"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -2644,6 +2644,39 @@ def collect_strength_radar(지수종가=None):
     return {"신규": 신규, "추적": 추적, "_가격맵": 가격맵}
 
 
+def _stock_capture_log(종목명, 포착일, 차수, 유형들, 구간, 값):
+    """🆕 2026-08-29 — 종목별 예보 성적 영구 로그.
+
+    ⚠️ 이 로그는 **절대 승리만 남기지 않는다.** 포착일+차수로 그 종목의
+       "그 한 번의 포착"을 특정하고, D5/D20/D60/D120이 찍힐 때마다
+       있는 그대로 갱신한다. 손실도 똑같이 남는다 — 원칙 3(틀린 걸
+       지우지 않는다)과 「포착 그 후」의 생존 편향 금지 원칙을 그대로
+       따른다. build_html.py가 이 로그로 "승률 X% (Y승 Z패)"를 계산할
+       때, 여기서 손실 기록이 빠지면 그 계산 자체가 거짓말이 된다.
+    """
+    if not 종목명 or not 포착일:
+        return
+    try:
+        로그 = _load_json(STOCK_CAPTURE_LOG_FILE, {})
+    except Exception:
+        로그 = {}
+    항목들 = 로그.setdefault(종목명, [])
+    기존 = next((x for x in 항목들 if x.get("포착일") == 포착일
+                and x.get("차수") == 차수), None)
+    if 기존 is None:
+        기존 = {"포착일": 포착일, "차수": 차수, "유형들": 유형들, "구간성적": {}}
+        항목들.append(기존)
+    기존["구간성적"][구간] = 값
+    try:
+        with io.open(STOCK_CAPTURE_LOG_FILE, "w", encoding="utf-8") as _f:
+            json.dump(로그, _f, ensure_ascii=False, separators=(",", ":"))
+    except Exception as e:
+        print(f"   ⚠️ 종목별 예보 성적 로그 저장 실패 — {type(e).__name__}")
+
+
+STOCK_CAPTURE_LOG_FILE = "stock_capture_log.json"
+
+
 def _load_prev_tracking():
     """직전 발행분에서 추적 목록을 불러온다."""
     import glob
@@ -2693,6 +2726,17 @@ def _update_tracking(신규, 가격맵, 지수종가=None):
                     t.setdefault("구간성적", {})[f"D{_n}"] = t["이후등락"]
                     if isinstance(t.get("지수등락"), (int, float)):
                         t.setdefault("구간지수", {})[f"D{_n}"] = t["지수등락"]
+                    # 🆕 2026-08-29 HO 지시 — 「내 종목 브리핑」에 종목별
+                    #    예보 성적을 내려주려면, 지금처럼 120일 지나면
+                    #    그냥 사라지는(졸업) 데이터로는 안 된다. D 스냅샷이
+                    #    찍히는 이 순간마다 **영구 로그**에도 같이 남긴다.
+                    #    ⚠️ 반드시 승률·손실을 있는 그대로 남긴다 — 이긴 것만
+                    #    골라 보여주는 건 「포착 그 후」 챕터가 명시적으로
+                    #    금지하는 생존 편향이다("우리는 지운 적이 없다는 게
+                    #    상품이다", 유료챕터_기획.md).
+                    _stock_capture_log(t["종목명"], t.get("포착일"),
+                                       t.get("차수", 1), t.get("유형들") or [],
+                                       f"D{_n}", t["이후등락"])
 
     # 2) 오늘 포착 종목 반영
     for 시장, 목록 in 신규.items():
