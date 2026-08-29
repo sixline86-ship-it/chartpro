@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a13"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.29-a15"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -552,11 +552,19 @@ def build_gauge(gauge, 오늘한줄평, 지수=None):
     </div>
     <p class="gz-oneline">📝 <b>한줄평:</b> {오늘한줄평}</p>
     {배지HTML}
-    <button class="gz-toggle" onclick="toggleMore('gzDetail',this,'▾ 산정 기준 보기')">▾ 산정 기준 보기</button>
-    <div class="hidden-block" id="gzDetail">
-      <div class="gz-detail">{기준표}
-        <p class="gz-note">※ 각 요소를 0~100으로 환산해 가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>
-      </div>
+    <!-- 🔴 2026-08-29 HO 지시 — 심층편 시황 정리.
+         [WHY] «오늘 몇 점»이라는 결론은 핵심편 신호등이 이미 색으로 말한다
+         (조합태그 기반 같은 판정). 즉 위 게이지는 핵심편과 중복이다.
+         그런데 이 카드에는 신호등에 **없는** 것이 하나 있다 — 요소별
+         점수와 근거(가중합산 상세). 그게 심층편만의 정보인데, 정작
+         «▾ 산정 기준 보기» 버튼 뒤에 접혀 있어 아무도 안 봤다.
+         → 접힘을 풀어 **근거표를 주인공으로** 올린다. 결론(게이지)은
+         위에 그대로 두되, 이제 이 카드의 무게중심은 «왜 그 점수인가»다. -->
+    <div class="gz-detail" style="margin-top:8px">
+      <p style="margin:0 0 6px;font-size:11.5px;color:#e0c060;font-weight:800">
+        이 점수가 나온 근거</p>
+      {기준표}
+      <p class="gz-note">※ 각 요소를 0~100으로 환산해 가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>
     </div>
   </div>'''
 
@@ -999,8 +1007,15 @@ def build_news(핵심뉴스):
 # ── 환율·유가·금리 카드 ──
 # ── 프로의 시선 (3개 렌즈) ──
 def build_insight(프로의시선):
+    # 🔴 2026-08-29 HO 지시 — 조건부 표시로 바꾼다.
+    #    [WHY] 예전엔 내용이 없어도 "⏳ …해석 연동 후 자동 생성" 같은
+    #    안내문이 자리를 차지했다. 이 코너의 값어치는 «남들이 못 본 것»인데,
+    #    빈 껍데기가 매일 뜨면 "놓친 자리"가 아니라 그냥 «아무 말»이 된다.
+    #    → 없으면 **코너 자체를 통째로 생략**한다(원칙 14 — 없으면 없다고
+    #    짧게 끝낸다. 여기선 아예 말을 안 하는 게 가장 짧다).
+    #    ⚠️ 운영자는 로그로 안다 — 화면에 «미생성» 안내를 띄울 이유가 없다.
     if not 프로의시선:
-        return '<div class="pending">⏳ 조용한 강세 · 짖지 않은 개 · 다음 시나리오 — Claude 해석 연동 후 자동 생성</div>'
+        return ""
     # 🆕 2026-08-22 — 프롬프트는 과거→현재→미래 1막/2막/3막으로 쓰라고 하는데
     #    화면엔 그 구조가 안 보여서, 글이 흔들려도 독자도 개발자도 못 알아챘다.
     #    라벨을 화면에도 노출해 구조를 눈으로 검증할 수 있게 한다.
@@ -1016,7 +1031,7 @@ def build_insight(프로의시선):
         rows.append(f'''
     <div class="si-item"><span class="si-lens"><b class="si-act">{막}</b>{이름}</span><span>{내용}</span></div>''')
     if not rows:
-        return '<div class="pending">⏳ 프로의 시선 — 데이터 부족</div>'
+        return ""     # 🔴 2026-08-29 — 위와 같은 이유로 안내문 대신 생략
     return f'''
   <div class="silent-wrap">
     <p class="silent-head">🔍 모두가 지수를 볼 때, 저는 이 3가지를 봅니다</p>
@@ -4442,8 +4457,9 @@ def build_my_stocks(data):
         🔴 2026-08-29 HO 지적 — 예전엔 외국인+기관을 «합쳐서» 연속을 셌더니
         화면에 "2일 연속 순매수"라고만 나와 그게 누구인지 알 수 없었다.
         주체별로 따로 세고 이름을 반드시 붙인다(원칙 11 — 단정하는 문장에는
-        근거가 있어야 한다). 둘 다 해당하면 둘 다 적는다. */
-     var _연속문='';
+        근거가 있어야 한다). 둘 다 해당하면 둘 다 적는다.
+        ⚠️ _연속은 아래 문장 조립에서도 쓰므로 반드시 if 밖에서 선언한다. */
+     var _연속={};
      if(_일수>=2){
       var _streak=function(idx){
        var n=0,dir=null;
@@ -4455,18 +4471,24 @@ def build_my_stocks(data):
        }
        return {n:n, dir:dir};
       };
-      var _연속들=[];
+      /* 🆕 2026-08-29 HO 지시 — 연속을 문장 끝에 몰아 쓰지 않고
+         **각 주체 금액 바로 뒤 괄호**에 붙인다. 예전엔
+         "외국인 +1,058억 · 기관 +3,764억 · 외국인이 2일 연속… · 기관이 4일 연속…"
+         처럼 주체 이름을 두 번씩 말해 길고 헷갈렸다. */
+      _연속={};
       [['외국인',1],['기관',2]].forEach(function(pair){
        var r=_streak(pair[1]);
-       if(r.n>=2) _연속들.push('<b>'+pair[0]+'이 '+r.n+'일 연속 '+
-        (r.dir>0?'순매수':'순매도')+'</b>');
+       if(r.n>=2) _연속[pair[0]]='('+r.n+'일 연속 '+
+        (r.dir>0?'순매수':'순매도')+')';
       });
-      if(_연속들.length) _연속문=' · '+_연속들.join(' · ');
-     }else{
-      _연속문=' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
      }
-     var _문='💰 최근 '+_일수+'거래일 합계 외국인 <b>'+(_f>=0?'+':'')+_단(_f)+
-       '</b> · 기관 <b>'+(_g>=0?'+':'')+_단(_g)+'</b>'+_연속문;
+     var _f문='<b>'+(_f>=0?'+':'')+_단(_f)+'</b>'+
+      (_연속['외국인']?'<span style="color:#8b93a0">'+_연속['외국인']+'</span>':'');
+     var _g문='<b>'+(_g>=0?'+':'')+_단(_g)+'</b>'+
+      (_연속['기관']?'<span style="color:#8b93a0">'+_연속['기관']+'</span>':'');
+     var _꼬리=(_일수>=2)?'':
+      ' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
+     var _문='💰 최근 '+_일수+'거래일 합계 외국인 '+_f문+' · 기관 '+_g문+_꼬리;
      if(Math.abs(_합)>=50||_일수>=2) _add.push(_문);
     }
 
@@ -6071,7 +6093,10 @@ def build_sector_ladder():
                 mx = (px + x) / 2
                 path += f"C {mx:.0f} {py:.0f}, {mx:.0f} {y:.0f}, {x:.0f} {y:.0f} "
             prev = (x, y)
-        선들.append(f'<path d="{path}" fill="none" stroke="{col}" stroke-width="3.4" '
+        # 🆕 2026-08-29 HO 지시 — 선이 너무 얇다. 3.4 → 5.2.
+        #    ⚠️ viewBox가 1620이라 화면에서는 폭에 맞춰 축소된다. 즉 여기
+        #       숫자를 키워야 실제 화면에서 굵어진다(글자 크기와 같은 이유).
+        선들.append(f'<path d="{path}" fill="none" stroke="{col}" stroke-width="5.2" '
                     f'stroke-linecap="round" opacity="0.9"/>')
         lx = xy(pts[-1][0], 1)[0]
         점들.append(f'<circle cx="{lx:.0f}" cy="{끝y:.0f}" r="5" fill="{col}" '
@@ -6115,17 +6140,17 @@ def build_sector_ladder():
         목록 = (_zone_members().get(nm) or [])[:6]
         if not 목록:
             continue
-        # 🆕 2026-08-29 HO 지시 — 칩 테두리를 **그 섹터의 색**으로 준다.
-        #    이유: 한 줄에 종목명과 등락률이 잔뜩 나오다 보니 어디까지가
-        #    한 종목인지 눈으로 끊기 어려웠다. 위 선그래프에서 그 섹터가
-        #    쓰는 색(col)을 그대로 재사용하므로, "이 종목들이 저 선의
-        #    섹터구나"가 색 하나로 바로 연결된다(예: 2차전지·소재=노랑,
-        #    반도체=주황, 전력·신재생=파랑 — 팔레트 순서대로).
-        #    ⚠️ 테두리만 그 색이고 글자색은 그대로 둔다. 글자까지 물들이면
-        #       등락률의 빨강/파랑(상승·하락)과 싸워서 오히려 더 헷갈린다.
+        # 🆕 2026-08-29 (2차) HO 지시 — 심층편에서 섹터명을 눌렀을 때 나오는
+        #    패널(zone_member_panel)과 **완전히 같은 디자인**으로 통일한다.
+        #    [WHY] 같은 «그 섹터의 종목들»을 보여주는 자리인데 핵심편·심층편이
+        #    서로 다르게 생기면 구독자는 같은 걸 두 번 배워야 한다(체크박스를
+        #    섹터 성적표와 통일했던 것과 같은 이유).
+        #    ⚠️ 그래서 칩 테두리는 섹터색이 아니라 심층편과 같은 #232a36으로
+        #       되돌린다. 대신 어느 섹터인지는 아래 패널 자체의 «왼쪽 색 막대»와
+        #       금색 제목줄이 이미 말해주므로 정보가 사라지지 않는다.
         칩 = "".join(
-            f'<span style="display:inline-block;font-size:11px;color:#d5d9e0;'
-            f'background:#141922;border:1px solid {col};border-radius:5px;'
+            f'<span style="display:inline-block;font-size:10.5px;color:#d5d9e0;'
+            f'background:#141922;border:1px solid #232a36;border-radius:5px;'
             f'padding:2px 7px;margin:0 4px 4px 0;white-space:nowrap">{n} '
             f'<b style="color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
             f'{(v or 0):+.1f}%</b></span>'
@@ -6183,7 +6208,15 @@ def build_sector_ladder():
             f'border-radius:8px;border-left:3px solid {col}">'
             f'<p style="margin:0 0 2px;font-size:13px;font-weight:800;color:#e8eaee">'
             f'{nm}</p><p style="margin:0 0 5px">{_요약}</p>'
-            f'{_브릿지}<div>{칩}</div></div>')
+            # 🆕 2026-08-29 — 심층편 zone_member_panel과 같은 «어두운 패널»
+            #    안에 칩을 담는다(배경 #0f131a → 한 단계 더 어두운 #0a0d13 +
+            #    금색 제목줄). 이게 두 코너를 같아 보이게 하는 핵심이다.
+            f'{_브릿지}'
+            f'<div style="margin-top:4px;padding:8px 9px;background:#0a0d13;'
+            f'border-radius:6px">'
+            f'<p style="margin:0 0 5px;font-size:10.5px;color:#e0c060;'
+            f'font-weight:700">{nm} 대표 종목</p>'
+            f'<div>{칩}</div></div></div>')
     if _줄:
         사다리목록 = ('<p style="margin:11px 0 0;font-size:11px;color:#e0c060">'
                   '이 섹터들, 어떤 종목이 담겨 있냐면요</p>' + "".join(_줄))
@@ -9407,6 +9440,12 @@ HIDDEN_CHAPTERS = {
     "지수와수급나란히",     # 2026-08-18 — 통합 타임라인과 역할이 겹침
     "어제대비움직임",       # 2026-08-18 — 레이더 그림과 같은 내용을 표로 반복
     "과거엔어땠나",         # 2026-08-18 — 차별점이 없어 보류 (표본 쌓이면 되살릴 것)
+    # 🔴 2026-08-29 HO 지시 — 심층편 시황 정리.
+    #    핵심편 「오늘, 시장에 무슨 일이 있었냐면요」 + 심층편 「이슈 해부」와
+    #    **같은 질문에 세 번 답하는** 구조였다. 과거(무슨 일이 있었나)는
+    #    핵심편이 전담하고, 심층편은 현재(이슈 해부)·미래(프로의 판단)를
+    #    맡는 것으로 시제를 나눴다.
+    "오늘의시장",
 }
 
 
@@ -12046,9 +12085,16 @@ html{{scroll-behavior:smooth}}
     {build_score_card("KOSDAQ", 닥, 닥수)}
   </div>''')}
 
-  <div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>
+  <!-- 🔴 2026-08-29 HO 지시 — 「오늘의 시장」 가림.
+       [WHY] 핵심편 「오늘, 시장에 무슨 일이 있었냐면요」와 바로 아래
+       「이슈 해부」가 **같은 질문**("오늘 무슨 일이 있었나")에 답하고 있어
+       같은 얘기를 세 번 하는 구조였다. 심층편 독자는 핵심편을 먼저 읽고
+       내려오므로, 과거(무슨 일이 있었나)는 핵심편이 전담한다.
+       ⚠️ 해석글의 «오늘의_시장» 필드 자체는 그대로 둔다 — generate_report가
+       계속 만들고, 되살리려면 이 hide()만 풀면 된다(원칙: 지우지 않는다). -->
+  {hide("오늘의시장", f'<div class="today-market">💡 <b>오늘의 시장:</b> {오늘의시장}</div>')}
 
-  <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 왜, 어디로, 무엇을 볼까</p>
+  <p class="sec-label"><small>핵심 이슈</small>🔬 이슈 해부 — 이 이슈가 어디까지 닿나</p>
   {build_issues(해석.get('핵심이슈'))}
 
   <p class="sec-label"><small>환율 · 유가 · 금리 · 금</small>🌏 바깥 날씨</p>
