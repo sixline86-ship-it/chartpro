@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a3"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.29-a4"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -3740,9 +3740,13 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     #    패턴)로 보고, 같은 해법(stock_profile 우선)을 적용한다 —
     #    프로필 수집에 성공한 종목은 DART가 활동 법인으로 인정한
     #    곳이라 실제 뉴스가 있을 확률이 훨씬 높다.
+    # 🔴 2026-08-29 (3차) — biz_report와 같은 이유로 강화. 프로필 "있음"이
+    #    아니라 연도별 재무데이터가 실제로 있는 종목만 우선 후보로 쓴다.
     if len(대상) < SNEWS_하루할당:
         _프로필있음 = _load_json(PROFILE_FILE, {})
-        for n in _프로필있음:
+        for n, _p in _프로필있음.items():
+            if not (isinstance(_p, dict) and _p.get("연도별")):
+                continue
             if n in 저장 or n in 대상 or not 코드지도.get(n):
                 continue
             _마지막시도 = 실패기록.get(n)
@@ -3841,9 +3845,20 @@ def collect_biz_reports(레이더종목들):
     #    프로필 수집이 성공했다는 건 DART가 그 법인을 "최근에도 정상 보고
     #    중인 활동 법인"으로 인정했다는 뜻이라, 지도를 맹목적으로 순서대로
     #    훑는 것보다 사업보고서가 실제로 있을 확률이 훨씬 높다.
+    # 🔴 2026-08-29 (3차) — 실측으로 이 필터도 허술했던 게 드러났다.
+    #    stock_profile "있음" ≠ "활동 법인 확인됨". KB금융처럼 초대형
+    #    상장사도 개요(company.json)만 채워지고 연도별 재무제표(fnlttSinglAcnt)
+    #    는 비어 있는 경우가 있었다(80개 시도 중 0개 성공, 그 안에
+    #    KB금융·한화에어로스페이스·맥쿼리인프라·현대제철까지 포함된 걸 보고
+    #    발견). 개요는 DART에 등록만 되면 영구히 남는 정적 정보라
+    #    휴면 법인도 다 갖고 있어서 필터 역할을 못 한다. **연도별 재무
+    #    데이터가 실제로 채워진 종목**만 우선순위로 쓴다(실측: 3,956개 중
+    #    2,828개만 해당 — 이게 훨씬 정확한 "진짜 활동 법인" 신호다).
     if len(대상) < BIZ_하루할당:
         _프로필있음 = _load_json(PROFILE_FILE, {})
-        for n in _프로필있음:
+        for n, _p in _프로필있음.items():
+            if not (isinstance(_p, dict) and _p.get("연도별")):
+                continue   # 개요만 있고 재무데이터가 빈 종목은 후보에서 제외
             if n in 저장 or n in 대상 or n not in 지도:
                 continue
             _마지막시도 = 실패기록.get(n)
