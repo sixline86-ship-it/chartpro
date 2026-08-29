@@ -189,21 +189,28 @@ jobs:
       #    조건에 없었다). 이 단계가 data_*.json의 "정상시각" 값을 읽어
       #    뒤 텔레그램 단계의 조건에 연결한다. 발행 자체는 막지 않는다
       #    (기존 원칙 유지) — 텔레그램만 건너뛴다.
+      # 🔴 2026-08-29 — GitHub Actions의 id는 영문/숫자/_/- 만 허용(알파벳
+      #    또는 _로 시작). 한글 id("시각검사")가 여기 있어서 워크플로 파일
+      #    자체가 무효 처리되고 있었다(Invalid workflow file 에러, 실측
+      #    확인). daily.yml이 8/28 19:32에 마지막으로 수정된 뒤 계속 이
+      #    상태였을 것으로 보인다 — 다행히 그 뒤로 국내 시장이 열린
+      #    거래일이 없어(주말) 실제 발행 누락 피해는 없었다.
+      #    표시 이름(name)은 한글 그대로 둬도 된다 — 문제는 id뿐이다.
       - name: 실행 시각 정상 여부 확인
-        id: 시각검사
+        id: time_check
         if: steps.guard.outputs.run == 'yes'
         run: |
           TODAY=$(date +%Y%m%d)
           if grep -q '"정상시각": false' "archive/data_${TODAY}.json" 2>/dev/null; then
-            echo "정상=no" >> "$GITHUB_OUTPUT"
+            echo "normal=no" >> "$GITHUB_OUTPUT"
             echo "🔴 실행 시각이 비정상입니다 — 뒤 텔레그램 단계를 건너뜁니다."
           else
-            echo "정상=yes" >> "$GITHUB_OUTPUT"
+            echo "normal=yes" >> "$GITHUB_OUTPUT"
           fi
 
       # 🆕 2026-08-27 (2차) — 비정상 시각이면 형에게만 알린다(구독자는 무관).
       - name: 예약 지연 알림 (운영자 전용)
-        if: steps.guard.outputs.run == 'yes' && steps.시각검사.outputs.정상 == 'no'
+        if: steps.guard.outputs.run == 'yes' && steps.time_check.outputs.normal == 'no'
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -446,7 +453,7 @@ jobs:
         if: >-
           steps.guard.outputs.run == 'yes' &&
           steps.holiday.outputs.closed != 'yes' &&
-          steps.시각검사.outputs.정상 != 'no' &&
+          steps.time_check.outputs.normal != 'no' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
