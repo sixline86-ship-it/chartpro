@@ -62,8 +62,13 @@ jobs:
         run: |
           git config user.name "chartpro-bot"
           git config user.email "bot@chartpro.local"
+          # 🔴 2026-08-29 — biz_report_fail.json·stock_news_fail.json 누락 발견.
+          #    실패기록이 커밋 안 돼 매 실행 사라지고, 실패한 종목을 다음 번에도
+          #    계속 재시도하는 문제로 이어질 뻔했다(daily.yml은 git add -A라
+          #    안전한데 여긴 파일명을 일일이 나열하는 방식이라 새 파일이 빠졌다).
           git add stock_profile.json corp_map.json corp_stockcode.json \
-                   biz_report_raw.json stock_news_raw.json 2>/dev/null || true
+                   biz_report_raw.json stock_news_raw.json \
+                   biz_report_fail.json stock_news_fail.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "변경 없음 — 커밋 생략"
             exit 0
