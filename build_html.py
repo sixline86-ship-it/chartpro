@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a15"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.08.29-a19"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -677,6 +677,60 @@ def _sector_history(days=20):
     return hist
 
 
+_THEME_ALL_CACHE = None
+
+
+def _theme_all_history():
+    """🆕 2026-08-29 — **전 기간** 테마 등판 이력 [(날짜, [테마명…])].
+
+    ⚠️ 위 _sector_history()는 20거래일 창이라 "이번이 9번째 등판" 같은
+       누적 사실을 말할 수 없다. 순환매를 보는 사람에게는 «몇 번째인지»와
+       «며칠 만에 돌아왔는지»가 등락률만큼 중요해서, 전 기간을 따로 읽는다.
+    """
+    global _THEME_ALL_CACHE
+    if _THEME_ALL_CACHE is not None:
+        return _THEME_ALL_CACHE
+    _THEME_ALL_CACHE = [(_ymd, [s.get("테마명") for s in (d.get("주도섹터") or [])])
+                        for _ymd, d in archive_days()]
+    return _THEME_ALL_CACHE
+
+
+def theme_return_badge(테마명):
+    """🆕 2026-08-29 HO 지시 — 「반짝이냐 눌러앉았냐」.
+
+    [WHY] 31거래일 실측: 등장 테마 88개 중 48개(55%)가 **딱 한 번만** 등장했고,
+    반복 등판은 14개뿐이었다. 즉 "오늘 처음 뜬 테마"와 "계속 뜨는 테마"는
+    성격이 완전히 다른데, 화면에서 구분이 안 됐다.
+    매매하는 사람에게 이 구분은 등락률만큼 중요하다 — 그래서 등락률 옆에 붙인다.
+
+    ⚠️ 통계가 아니라 **사실**만 말한다. "평균 주기 12일"은 표본이 찰 때까지
+       (theme_history.json이 쌓인 뒤) 말하지 않는다. 지금은 셀 수 있는 것만:
+       몇 번째 등판인지, 직전 등판이 며칠 전인지.
+    """
+    if not 테마명:
+        return ""
+    hist = _theme_all_history()          # 오래된 순
+    나온날 = [ymd for ymd, names in hist if 테마명 in names]
+    if not 나온날:
+        return ""
+    총등판 = len(나온날)
+    if 총등판 <= 1:
+        return ('<span class="sc-str new">🆕 첫 등판 · '
+                f'기록 {len(hist)}일 중 처음</span>')
+    # 직전 등판이 몇 거래일 전이었나 — 오늘(마지막)과 그 앞 등판 사이 거래일 수
+    _날짜순 = [ymd for ymd, _ in hist]
+    try:
+        _간격 = _날짜순.index(나온날[-1]) - _날짜순.index(나온날[-2])
+    except ValueError:
+        _간격 = None
+    _꼬리 = ""
+    if _간격 == 1:
+        _꼬리 = " · <b>어제 이어 오늘도</b>"
+    elif _간격:
+        _꼬리 = f" · <b>{_간격}거래일 만에</b> 복귀"
+    return (f'<span class="sc-str">🔁 <b>{총등판}번째</b> 등판{_꼬리}</span>')
+
+
 def sector_strength_badge(테마명):
     """테마 하나의 20일 강도 배지 HTML. 이력이 얇으면 빈 문자열."""
     hist = _sector_history()
@@ -718,6 +772,9 @@ def one_sector_card(a):
     head_cls = "pos" if (isinstance(et, (int, float)) and et >= 0) else ""
     점수 = a.get("주도력점수", "—")
     강도배지 = sector_strength_badge(a.get('테마명'))
+    # 🆕 2026-08-29 — 「반짝이냐 눌러앉았냐」. 위 강도배지는 20일 창이라
+    #    "이번이 9번째"를 못 말한다. 전 기간 등판 사실을 따로 붙인다.
+    등판배지 = theme_return_badge(a.get('테마명'))
     # 이 현장이 '내 종목 구역'의 어느 줄인지 이어준다(두 지도를 잇는 다리).
     _구역 = a.get("계좌구역") or grid_slot_of(a.get("테마명"))
     구역배지 = (f'<p style="margin:2px 0 0;font-size:10px;color:#22d3ee">'
@@ -729,6 +786,7 @@ def one_sector_card(a):
           <span class="sc-chg {badge_cls}">{et_s}</span></div>
         <p class="sc-score">주도력 {점수}점</p>
         {f'<p class="sc-strline">{강도배지}</p>' if 강도배지 else ''}
+        {f'<p class="sc-strline">{등판배지}</p>' if 등판배지 else ''}
         {구역배지}
       </div>
       <div class="sc-list">
@@ -3933,9 +3991,18 @@ def build_my_stocks(data):
   catch(e){return [];}
  }
  function setSel(v){try{localStorage.setItem(SK,JSON.stringify(v));}catch(e){}}
- /* 실제로 그래프에 넣을 종목 — 체크된 것만. 하나도 없으면 전부. */
+ /* 실제로 그래프·브리핑에 넣을 종목 — 체크된 것만. 하나도 없으면 전부.
+    🔴 2026-08-29 HO 지적 — 브리핑 순서가 등록 순서(위 ▲▼로 바꾸는 그 순서)를
+    안 따르고 있었다.
+    [원인] getSel()은 «체크박스를 누른 순서»대로 쌓인다(msToggleSel이 push
+    하는 순서). 등록 순서(my)와 체크 순서가 다르면 — 특히 체크를 껐다 켰다
+    반복하면 — 두 순서가 어긋난다.
+    [고침] getSel()의 결과는 «어느 종목이 켜져 있나»(멤버십)만 쓰고,
+    실제 순서는 항상 my(등록 순서)를 기준으로 다시 줄 세운다. */
  function selected(){
-  var my=get(), sel=getSel().filter(function(n){return my.indexOf(n)>=0;});
+  var my=get(), selSet={};
+  getSel().forEach(function(n){ if(my.indexOf(n)>=0) selSet[n]=1; });
+  var sel=my.filter(function(n){ return selSet[n]; });
   return sel.length?sel:my.slice();
  }
  /* 🔴 저장된 선택이 비어 있으면 «전부 켬»을 뜻한다. 그 상태에서 하나를 끄려면
@@ -3966,7 +4033,7 @@ def build_my_stocks(data):
    var _hd0=document.getElementById('ms-selbar'); if(_hd0)_hd0.innerHTML='';
    return;}
   var html='', exs=[], _sel=selected();
-  my.forEach(function(nm){
+  my.forEach(function(nm,_mi){
    var m=P.stocks[nm]||[[],null,null,null], c=calc(nm,curW);
    var zones=(m[0]||[]).map(function(z){return '<span style="display:inline-block;'+
      'font-size:11px;padding:2px 7px;margin:0 4px 4px 0;border-radius:99px;'+
@@ -4024,8 +4091,17 @@ def build_my_stocks(data):
     /* 🆕 2026-08-25 — 등록 목록에서는 뺐다(브리핑에만 둔다). 두 곳에 있으면
        같은 카드가 화면에 두 번 열려 중복이 된다. */
     nm+
+    /* 🆕 2026-08-29 HO 지시 — 순서 바꾸기 ▲▼.
+       ⚠️ 맨 위/맨 아래에서는 눌러도 소용없으므로 흐리게(0.25) 표시해
+          "왜 안 되지"를 미리 막는다. */
+    '<span onclick="msMove(\\''+nm+'\\',-1)" title="위로" style="color:#8fd0e8;'+
+    'font-size:12px;margin-left:8px;cursor:pointer;opacity:'+(_mi===0?'.25':'1')+
+    '">▲</span>'+
+    '<span onclick="msMove(\\''+nm+'\\',1)" title="아래로" style="color:#8fd0e8;'+
+    'font-size:12px;margin-left:4px;cursor:pointer;opacity:'+
+    (_mi===my.length-1?'.25':'1')+'">▼</span>'+
     '<span onclick="msDel(\\''+nm+'\\')" style="color:#6f7784;font-size:11px;'+
-    'margin-left:6px;cursor:pointer">✕</span></div>'+
+    'margin-left:8px;cursor:pointer">✕</span></div>'+
     '<div style="margin-top:4px">'+zones+'</div>'+
     (m[1]?'<div style="font-size:10.5px;color:#6f7784;margin-top:3px">'+
       (m[3]||'')+' · 시총 '+m[1]+'위 ('+(m[2]||'')+')</div>':'')+
@@ -5094,6 +5170,23 @@ def build_my_stocks(data):
  };
  window.msDel=function(nm){var my=get(),i=my.indexOf(nm);
   if(i>=0){my.splice(i,1); set(my); render();}};
+
+ /* 🆕 2026-08-29 HO 지시 — 내 종목 **순서 바꾸기**.
+    [WHY] 지금은 등록한 순서대로 고정이라, 비중이 큰 종목이나 오늘 제일
+          궁금한 종목이 맨 아래 있으면 매번 스크롤해야 했다.
+    ⚠️ 순서는 등록 목록·브리핑·그래프가 **모두 같은 배열**(localStorage의 K)을
+       쓰므로, 여기만 바꾸면 세 곳이 한꺼번에 따라온다.
+    ⚠️ 드래그가 아니라 ▲▼ 버튼으로 한다 — 모바일에서 드래그는 스크롤과
+       충돌해 오작동이 잦고, 라이브러리 없이 만들면 코드가 크게 늘어난다. */
+ window.msMove=function(nm,d){
+  var my=get(), i=my.indexOf(nm);
+  if(i<0) return;
+  var j=i+d;
+  if(j<0||j>=my.length) return;      // 맨 위에서 ▲, 맨 아래에서 ▼는 무시
+  my.splice(j,0,my.splice(i,1)[0]);
+  set(my);
+  render();   // ⚠️ render()가 목록·그래프·브리핑(drawBrief)·cpFire를 전부 다시 그린다
+ };
 
  /* 내보내기 / 불러오기
     [WHY] localStorage는 기기·브라우저마다 따로다. PC에 넣어도 폰엔 없고,
@@ -7824,19 +7917,29 @@ def _catch_compare(돈몰림, V반등, 매집, lo, hi):
     for i, (이름, 색, v, n) in enumerate(항목):
         y = 22 + i * 26
         w = abs(v) / mx * half * 0.9
+        # 🆕 2026-08-29 HO 지시 — 막대 색을 **시장 대비 우열**로 칠한다.
+        #    [WHY] 예전엔 기법마다 고정색(금색·청록·하늘)이라, 정작 이 그래프가
+        #    말하려는 «시장을 이겼나»가 색에서 안 보였다. 방향은 막대가 왼쪽/
+        #    오른쪽인 것으로만 알 수 있어 한눈에 안 들어왔다.
+        #    → 리포트 전체 색 규칙 그대로: 시장보다 나으면 빨강(#ff6b4a),
+        #      못하면 파랑(#5b9bff). 같은 뜻에 같은 색을 쓴다.
+        _막대색 = "#ff6b4a" if v >= 0 else "#5b9bff"
         g += (f'<rect x="{(z if v >= 0 else z - w):.1f}" y="{y}" '
-              f'width="{max(2, w):.1f}" height="13" rx="2.5" fill="{색}"/>'
+              f'width="{max(2, w):.1f}" height="13" rx="2.5" fill="{_막대색}"/>'
               f'<text x="{L - 6}" y="{y + 10}" text-anchor="end" font-size="9" '
               f'fill="#c9ced6">{이름}</text>'
               f'<text x="{W - R + 4}" y="{y + 10}" font-size="9.5" font-weight="800" '
-              f'fill="{색}">{v:+.1f}%p</text>'
+              f'fill="{_막대색}">{v:+.1f}%p</text>'
               f'<text x="{L - 6}" y="{y + 21}" text-anchor="end" font-size="7.5" '
               f'fill="#6f7784">{n}종목</text>')
     최고 = max(항목, key=lambda x: x[2])
+    _최고색 = "#ff6b4a" if 최고[2] >= 0 else "#5b9bff"
     return (f'<div class="cg-cmp"><p class="cg-cmp-h">📊 세 기법, 시장 대비로 비교하면</p>'
             f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto">{g}</svg>'
-            f'<p class="cg-cmp-n">막대가 오른쪽이면 <b>같은 기간 시장보다 나았다</b>는 뜻이에요. '
-            f'지금은 <b style="color:{최고[1]}">{최고[0]}</b>이 가장 앞서 있어요 — '
+            f'<p class="cg-cmp-n">'
+            f'<b style="color:#ff6b4a">빨강(오른쪽)</b>은 같은 기간 시장보다 나았다는 뜻이고, '
+            f'<b style="color:#5b9bff">파랑(왼쪽)</b>은 시장에 못 미쳤다는 뜻이에요. '
+            f'지금은 <b style="color:{_최고색}">{최고[0]}</b>이 가장 앞서 있어요 — '
             f'다만 표본이 적을 때는 순서가 자주 바뀝니다.</p></div>')
 
 
@@ -7860,9 +7963,15 @@ def build_catch_after(data):
     for i, (lo, hi, lab) in enumerate(CATCH_WINS):
         n = lo
         켬 = " on" if i == 0 else ""
+        # 🆕 2026-08-29 HO 지시 — 탭 디자인 정리.
+        #    [문제] «5일»(큰 글씨) 밑에 «5~10일»(작은 글씨)이 붙어 있었다.
+        #    같은 말을 두 번 하면서 탭만 두 줄로 두꺼워지고 지저분했다.
+        #    (2026-08-25에 "라벨만 보면 딱 5일차로 읽힌다"는 지적을 부제로
+        #     해결했었는데, 그게 오히려 새 문제를 만든 셈이다.)
+        #    [고침] 부제를 없애고 **라벨 자체를 구간으로** 바꾼다 — «D+5~10».
+        #    한 줄이라 깔끔하고, 구간이라는 사실도 라벨에 그대로 담긴다.
         탭 += (f'<span class="cg-tab{켬}" data-n="{n}" '
-               f'onclick="cgWin({n})">{lab}'
-               f'<span class="cg-tab-r">{lo}~{hi}일</span></span>')
+               f'onclick="cgWin({n})">D+{lo}~{hi}</span>')
         본문 = (_catch_card(돈몰림, lo, hi, "💰 돈이 몰림(강세)")
               + _catch_card(V반등, lo, hi, "📈 V자 반등(전환)")
               + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)")
@@ -9446,6 +9555,14 @@ HIDDEN_CHAPTERS = {
     #    핵심편이 전담하고, 심층편은 현재(이슈 해부)·미래(프로의 판단)를
     #    맡는 것으로 시제를 나눴다.
     "오늘의시장",
+    # 🔴 2026-08-29 (2차) HO 지시 — 「섹터 지도」(build_account_grid, 📊)를
+    #    가린다. 섹터 성적표(build_sector_scoreboard, 📈)와 같은 15칸 데이터를
+    #    표/그림으로 두 번 보여주는 중복이었다 — 섹터 성적표만 남긴다.
+    #    ⚠️ 핵심편에도 같은 함수가 있는데 그건 이미 "핵심편격자"로 가려진
+    #    상태였다(2026-08-19). 이번 건 심층편 쪽 호출만 새로 가리는 것이다.
+    #    나중에 이 자리에 테마 순환 챕터를 넣을 계획 — 되살릴 땐 이 줄만
+    #    지우면 된다.
+    "섹터지도",
 }
 
 
@@ -11734,12 +11851,12 @@ html{{scroll-behavior:smooth}}
 .cg-box{{background:#0f131a;border:1px solid #1e2531;border-radius:12px;
   padding:11px 10px;margin:8px 0 14px}}
 .cg-tabs{{display:flex;gap:5px;margin-bottom:9px;flex-wrap:wrap}}
-.cg-tab{{flex:1;min-width:56px;text-align:center;padding:5px 3px;font-size:11.5px;
-  font-weight:700;color:#7d848f;background:#141922;border:1px solid #1e2531;
-  border-radius:7px;cursor:pointer;line-height:1.25}}
-/* 🆕 2026-08-25 — 탭 박스 **안**에 실제 구간을 작게. 라벨만 보면 "딱 5일차"로
-   읽히는데 실제는 구간이라 오해가 생긴다(원칙 10). */
-.cg-tab-r{{display:block;font-size:8.5px;font-weight:600;opacity:.75;margin-top:1px}}
+/* 🆕 2026-08-29 — 부제(.cg-tab-r)를 없애고 한 줄 라벨(«D+5~10»)로 바꿨다.
+   두 줄일 때 쓰던 좁은 세로 padding(5px)이 한 줄에서는 납작해 보여서
+   위아래를 넉넉히(7px) 준다. */
+.cg-tab{{flex:1;min-width:62px;text-align:center;padding:7px 4px;font-size:12px;
+  font-weight:800;color:#7d848f;background:#141922;border:1px solid #1e2531;
+  border-radius:7px;cursor:pointer;line-height:1.3;white-space:nowrap}}
 .cg-tab.on{{color:#0b0e13;background:#f0c65a;border-color:#f0c65a}}
 /* 🆕 2026-08-26 기법 비교 그래프 */
 .cg-cmp{{background:#0b0e13;border:1px solid #232a36;border-radius:9px;
@@ -12134,8 +12251,8 @@ html{{scroll-behavior:smooth}}
 
 
   <span class="nv-a" id="nv-sector"></span>
-  <p class="sec-label"><small>내 자리</small>📊 섹터 지도</p>
-  {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}
+  {hide("섹터지도", f'''<p class="sec-label"><small>내 자리</small>📊 섹터 지도</p>
+  {build_account_grid(data.get('계좌격자'), data.get('주도섹터'))}''')}
 
   <p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>
   {build_sector_scoreboard()}
