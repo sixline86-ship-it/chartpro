@@ -18,7 +18,7 @@ import os
 import sys
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.28-a4"   # ⬅ 다른 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.08.29-a1"   # ⬅ 다른 파일과 항상 같아야 한다.
 
 DATE = datetime.now().strftime("%Y%m%d")
 SITE_URL = "https://sixline86-ship-it.github.io/chartpro/"
