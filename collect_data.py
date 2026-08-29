@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.29-a19"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.08.29-a20"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -542,7 +542,19 @@ def collect_themes_and_gauge():
 
     # ── 종목 중복 제거: 이미 뽑힌 카드와 종목이 2개 이상 겹치면 건너뛴다 ──
     # (그렇지 않으면 "에너지 관련 테마 5개, 사실 종목은 같은 애들" 이 됨)
-    주도6 = []
+    # 🆕 2026-08-29 (2차) HO 지시 — 저장은 10개, 화면은 6개로 분리한다.
+    #    [WHY] 20개 후보는 이미 다 계산돼 있다(강도·거래대금·확산도·점수).
+    #    화면 카드는 원칙 13("나열하지 말고 하나만 짚는다")대로 6개를
+    #    유지하지만, theme_history.json에는 10개까지 저장한다 — "88개 중
+    #    48개가 1회성"이라는 실측 수치 자체가 6개짜리 좁은 창이 만든
+    #    경계 노이즈일 수 있다는 판단 때문이다(진짜 순환 테마가 어떤
+    #    날은 4위, 어떤 날은 8위로 밀리면 지금 구조는 8위인 날을 통째로
+    #    놓친다). 비용은 0 — 이미 계산된 걸 몇 개 더 담는 것뿐이다.
+    #    ⚠️ 종목 중복 제거 필터 때문에 10개를 못 채우는 날도 있다 —
+    #       억지로 채우지 않는다(원칙 14와 같은 논리).
+    THEME_SAVE_MAX = 10
+    THEME_SHOW_MAX = 6
+    주도N = []
     이미쓴종목 = set()
     for a in 분석:
         이번종목 = {s["종목명"] for s in a.get("종목", [])}
@@ -550,12 +562,13 @@ def collect_themes_and_gauge():
         if 겹침 >= 2:
             print(f"  ⏭️  [{a['테마명']}] 건너뜀 — 이미 선택된 섹터와 종목 {겹침}개 중복")
             continue
-        주도6.append(a)
+        주도N.append(a)
         이미쓴종목 |= 이번종목
-        if len(주도6) == 6:
+        if len(주도N) == THEME_SAVE_MAX:
             break
+    주도6 = 주도N[:THEME_SHOW_MAX]   # 화면(카드·사다리)은 그대로 6개까지만
 
-    print("🏆 주도 섹터 6개 (주도력점수 순, 중복 제거 적용):")
+    print(f"🏆 주도 섹터 화면 {len(주도6)}개 / 저장 {len(주도N)}개 (주도력점수 순, 중복 제거 적용):")
     for a in 주도6:
         et = a["테마등락"]
         et_s = f"{et:+.2f}%" if et is not None else "—"
@@ -573,8 +586,10 @@ def collect_themes_and_gauge():
     #    나오고도 **파일로 남기지 않아 그대로 휘발**되고 있었다.
     #    → stock_flow_history를 8/24에 심어둔 덕에 지금 브리핑 💰 블록이
     #      사는 것과 같은 논리다. 오늘 심어야 3개월 뒤에 말할 수 있다.
-    #    ⚠️ 새 수집 0회 — 이미 계산된 주도6을 저장만 한다.
-    _save_theme_history(주도6)
+    #    ⚠️ 새 수집 0회 — 이미 계산된 걸 저장만 한다.
+    #    🆕 2026-08-29 (2차) — 화면(주도6)이 아니라 **주도N(최대 10개)**을
+    #    저장한다. 화면 6개보다 넓게 담아 순환 통계의 경계 노이즈를 줄인다.
+    _save_theme_history(주도N)
 
     return {"주도섹터": 주도6, "확산도_시장평균": round(시장확산, 1),
             "테마후보": 유효}   # 격자(collect_account_grid)가 재활용한다
@@ -583,18 +598,26 @@ def collect_themes_and_gauge():
 THEME_HISTORY_FILE = "theme_history.json"
 
 
-def _save_theme_history(주도6):
+def _save_theme_history(주도N):
     """🆕 2026-08-29 — 날짜별 상위 테마를 영구 누적한다.
 
     구조: {"날짜들": [...], "일별": {"YYYYMMDD": [{테마명, 등락, 확산도,
-                                                  거래대금, 구역, 종목들}, ...]}}
+                                                  거래대금, 구역, 점수, 종목들}, ...]}}
 
     ⚠️ **절대 잘라내지 않는다.** market_history.json과 같은 등급의 영구
        파일이다. 이 파일의 값어치는 «시간이 만든 것»이라, 한 번 지우면
        그 몇 달을 다시 살 수 없다(원칙: 축적 데이터 삭제 금지).
     ⚠️ 같은 날 여러 번 실행돼도 그날 값을 덮어쓴다(중복 누적 방지).
+    🆕 2026-08-29 (2차) — 파라미터명을 주도6→주도N으로 바꿨다. 화면에
+       보여주는 6개보다 넓게(최대 10개) 저장해 순환 통계의 경계 노이즈를
+       줄인다(HO 지시, 근거는 collect_themes_and_gauge 주석 참고).
+       ⚠️ 종목 중복 제거로 10개를 못 채우는 날엔 그만큼만 들어간다 —
+          억지로 채우지 않는다(원칙 14).
+    🆕 「점수」(주도력점수) 필드를 추가했다. 저장 범위를 넓히면서 약한
+       테마도 섞여 들어올 수 있는데, 점수를 같이 남겨두면 나중에
+       "상위 6위 기준"과 "10위까지 기준" 통계를 나눠서 뽑을 수 있다.
     """
-    if not 주도6:
+    if not 주도N:
         return
     try:
         이력 = _load_json(THEME_HISTORY_FILE, {}) or {}
@@ -607,15 +630,16 @@ def _save_theme_history(주도6):
         "확산도": t.get("확산도"),
         "거래대금": t.get("거래대금합"),
         "구역": t.get("계좌구역"),
+        "점수": t.get("주도력점수"),
         # 상위 종목은 이름만 — 가격·등락은 archive에 이미 있어 중복 저장이다
         "종목들": [ (x.get("종목명") if isinstance(x, dict) else x)
                   for x in (t.get("종목") or []) ][:4],
-    } for t in 주도6]
+    } for t in 주도N]
     이력["날짜들"] = sorted(일별.keys())
     try:
         with io.open(THEME_HISTORY_FILE, "w", encoding="utf-8") as _f:
             json.dump(이력, _f, ensure_ascii=False, separators=(",", ":"))
-        print(f"   🗂️ 테마 이력 적재 — 누적 {len(이력['날짜들'])}거래일")
+        print(f"   🗂️ 테마 이력 적재 — 오늘 {len(주도N)}개 · 누적 {len(이력['날짜들'])}거래일")
     except Exception as e:
         print(f"   ⚠️ 테마 이력 저장 실패 — {type(e).__name__}")
 
