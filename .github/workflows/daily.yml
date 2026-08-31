@@ -59,6 +59,31 @@ on:
         options:
           - '보냄 (정식 발행)'
           - '보내지 않음 (테스트)'
+      # 🆕 2026-08-31 — 🚨 실제 3중 과금 사고 발견 후 신설.
+      #    [사고] cron-job.org가 하루 18:07·18:27·18:47 세 번 GitHub API를
+      #    부르는데, 이 호출도 사람이 Actions 탭에서 누르는 것과 똑같은
+      #    `workflow_dispatch`로 들어온다. 그런데 바로 아래 guard 단계가
+      #    "workflow_dispatch면 무조건 새로 만든다(사람이 재발행을 원한
+      #    것으로 간주)"고 짜여 있었다 — cron-job.org가 등장하기 전,
+      #    workflow_dispatch가 오직 "사람이 직접 누른 경우"만 뜻하던
+      #    시절에 만든 가정이 cron-job.org 전환(2026-08-28) 이후로도
+      #    안 바뀐 채 남아있었다. 게다가 cron-job.org 3개 트리거 모두
+      #    claude 값을 "새로 생성(과금)"으로 저장해뒀다.
+      #    → 오늘 이미 발행이 끝났어도 18:07 성공 후 18:27·18:47이
+      #      **각각 또 과금 생성**했을 가능성이 높다(하루 최대 3배).
+      #    [수정] cron-job.org만 구분해서 표시하는 입력을 추가한다.
+      #    사람이 Actions 탭에서 누를 땐 이 값을 안 건드리므로 기본값
+      #    'no'가 그대로 들어가 예전처럼 "무조건 재발행"이 유지된다.
+      #    cron-job.org 3개 트리거에는 이 값을 'yes'로 새로 등록해야
+      #    한다(아래 안내 참고) — 그래야 guard가 "오늘 이미 발행됐으면
+      #    건너뛴다"는 정상 로직을 cron-job.org 호출에도 적용한다.
+      from_cron:
+        description: '🤖 cron-job.org 자동 호출입니까? (사람이 누를 땐 손대지 마세요)'
+        type: choice
+        default: 'no'
+        options:
+          - 'no'
+          - 'yes'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   # 🔴 2026-08-28 (3차) — GitHub 자체 schedule(cron)을 완전히 없앤다.
@@ -112,9 +137,23 @@ jobs:
         id: guard
         run: |
           TODAY=$(date +%Y%m%d)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # 🆕 2026-08-31 — 🚨 3중 과금 사고 수정.
+          #    예전엔 "workflow_dispatch면 무조건 재발행"이었다. 그런데
+          #    cron-job.org도 workflow_dispatch로 들어와서, 하루 3번 다
+          #    무조건 재발행 → 무조건 과금이 됐다(실제 청구서로 확인됨,
+          #    2026-08-26 이후 3~11일 간격이던 크레딧 충전이 거의 매일로
+          #    잦아짐).
+          #    → from_cron=yes(=cron-job.org가 부른 것)면 **사람이 누른
+          #      게 아니므로** 예약 실행과 똑같이 "오늘 이미 발행됐나"를
+          #      정상적으로 확인한다. from_cron이 no(기본값, 사람이 직접
+          #      누른 경우)일 때만 예전처럼 무조건 재발행한다.
+          IS_HUMAN_MANUAL=no
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "yes" ]; then
+            IS_HUMAN_MANUAL=yes
+          fi
+          if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
             echo "run=yes" >> $GITHUB_OUTPUT
-            echo "🔘 수동 실행 — 중복 확인을 건너뛰고 새로 만듭니다."
+            echo "🔘 사람이 직접 실행 — 중복 확인을 건너뛰고 새로 만듭니다."
           elif [ -f "archive/report_${TODAY}.json" ]; then
             # ⚠️ 예전엔 report_*.html 존재 여부로 판단했다.
             #    문제: 해석글(Claude) 생성이 실패해도 build_html.py는 html을 만들어버려서,
@@ -238,22 +277,37 @@ jobs:
       #      [WHY] 지금은 구독자가 없고 텔레그램이 운영자 본인에게만 간다.
       #            매번 막혀서 "안 된다"고 뜨는 게 오히려 확인을 방해했다.
       #   → HOLIDAY_FLAG는 **여전히 만들고 로그에 남긴다**(collect_data.py는
-      #     그대로 둔다 — 나중에 다시 켤 때 코드 변경이 필요 없게).
-      #     다만 이 단계는 그걸로 **막지 않는다.** closed는 항상 'no'.
-      #   🔴 되돌릴 때: 아래 always no 로직을 지우고, elif 분기(휴장이면 closed=yes)를
-      #      되살리면 된다. 이 블록 위에 원래 로직을 주석으로 남겨뒀다.
-      #     [원래 로직]
-      #       HOLIDAY_FLAG 있으면 closed=yes(이후 단계 스킵) · 없으면 closed=no
+      # ── ①-b 휴장 여부 확인 ──
+      #   collect_data.py가 실제 수집 데이터(거래대금 등)를 보고 이미
+      #   HOLIDAY_FLAG 파일을 만들었거나 안 만들었다. 여기선 그걸 읽기만 한다.
+      #
+      #   🆕 2026-08-31 — HO 지시로 재활성화: "휴일에는 자동발송이 안되게
+      #   해줘, 수동은 가능하고." 2026-08-26에 "무조건 발행"으로 꺼뒀던 걸
+      #   되살리되, from_cron(자동 호출) 여부로 분기한다.
+      #   [WHY 이렇게 나눴나]
+      #     - 사람이 Actions 탭에서 직접 누른 경우 → 화면을 눈으로
+      #       확인하고 싶어서일 때가 많다(장중·휴장 상관없이). 그대로 허용.
+      #     - cron-job.org 자동 호출(from_cron=yes) → 아무도 안 보고 있는
+      #       상태에서 구독자에게 나가는 거라, 휴장이면 반드시 막아야 한다.
       - name: 휴장 여부 확인
         id: holiday
         if: steps.guard.outputs.run == 'yes'
         run: |
-          echo "closed=no" >> "$GITHUB_OUTPUT"
-          if [ -f "HOLIDAY_FLAG" ]; then
-            echo "📌 휴장/장중으로 보이지만 지금은 항상 발행합니다 (HO 지시, 2026-08-26)"
+          IS_HUMAN_MANUAL=no
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "yes" ]; then
+            IS_HUMAN_MANUAL=yes
+          fi
+          if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
+            echo "closed=no" >> "$GITHUB_OUTPUT"
+            echo "🔘 사람이 직접 실행 — 휴장 여부와 상관없이 진행합니다."
+          elif [ -f "HOLIDAY_FLAG" ]; then
+            echo "closed=yes" >> "$GITHUB_OUTPUT"
+            echo "reason=$(cat HOLIDAY_FLAG)" >> "$GITHUB_OUTPUT"
+            echo "🚨 휴장으로 판단됨 — 자동 발행(해석글 생성·텔레그램)을 건너뜁니다."
             echo "   사유: $(cat HOLIDAY_FLAG)"
           else
-            echo "✅ 정상 거래일"
+            echo "closed=no" >> "$GITHUB_OUTPUT"
+            echo "✅ 정상 거래일 — 자동 발행을 진행합니다."
           fi
 
       - name: 휴장 알림 (운영자 전용)
