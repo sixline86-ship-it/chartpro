@@ -29,6 +29,12 @@ FILES = [
     "stock_news_raw.json",
     "biz_report_fail.json",
     "stock_news_fail.json",
+    # 🆕 2026-08-31 — 사업 포트폴리오 2단계 파서가 만드는 두 파일.
+    #    daily.yml은 안 건드리지만(enrich.yml 전용), enrich.yml을
+    #    연달아 두 번 돌리는 경우엔 여기서도 같은 충돌이 날 수 있어
+    #    같은 방식으로 병합 대상에 넣는다.
+    "biz_portfolio.json",
+    "biz_portfolio_fail.json",
 ]
 
 
