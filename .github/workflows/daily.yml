@@ -407,12 +407,23 @@ jobs:
           # ⚠️ 누적 파일은 반드시 여기 있어야 한다. 빠지면 매일 초기화된다.
           #    return_sector_log.json = 돌아올 섹터 예보 기록(적중률 채점용, 2026-08-21 추가)
           #    watch_tally.json        = 관전포인트 예보 누적 승패(2026-08-22 추가)
+          #    theme_history.json      = 테마 순환 통계 재료(2026-08-29 코드 심음)
+          #    🔴 2026-08-30 실측 사고: "daily.yml에 추가했다"고 인수인계 문서(v12·v13)에
+          #    적어놓고 실제로는 이 목록에 없어 최소 하루 이상 매일 조용히 사라지고
+          #    있었다. collect_themes_and_gauge()가 매일 예외 없이 계산·저장하므로
+          #    -A 한 줄에 넣어도 안전하다(조건부 파일이 아니다) — 여기 정식 추가한다.
           git add -A archive index.html report_*.html flow_history.json market_history.json \
                   return_sector_log.json watch_tally.json core_accum_log.json strata_history.json \
-                  stock_flow_history.json thumb/*.png || true
+                  stock_flow_history.json theme_history.json thumb/*.png || true
+          # ⚠️ 조건부로만 생기는 파일은 반드시 개별 루프 — 하나라도 없으면
+          #    -A 한 줄 전체가 pathspec 에러로 실패하는 사고를 이미 겪었다.
+          #    stock_capture_log.json = 종목별 예보 성적(2026-08-29 코드 심음).
+          #    첫 D+5 스냅샷이 나오는 날부터 파일이 생기므로 조건부로 취급한다 —
+          #    이 파일도 위와 같은 사고(누락)를 겪었으니 여기 정식 추가한다.
           for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
-                   biz_report_fail.json stock_news_fail.json; do
+                   biz_report_fail.json stock_news_fail.json \
+                   stock_capture_log.json; do
             git add "$f" 2>/dev/null || true
           done
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
