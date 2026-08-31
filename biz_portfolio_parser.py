@@ -2,22 +2,19 @@
 # ─────────────────────────────────────────────────────────────
 # 차트프로 관제탑 — 사업 포트폴리오(매출 비중) 2단계 파서
 #
-# 🆕 2026-08-31 — catchup_enrich.py에 정식 연결됨.
-#    ⚠️ 아직 화면(build_html.py)에는 안 붙어 있다. build_html.py는
-#       이 파일이 만드는 biz_portfolio.json을 아직 읽지 않는다 —
-#       배치가 며칠 안정적으로 돈 걸 로그로 확인한 뒤에 연결한다
-#       (원칙 8 — 검증 못 한 걸 화면에 바로 배포하지 않는다).
+# 🆕 2026-08-31 — catchup_enrich.py에 정식 연결됨. 실전 첫 실행(50종목)
+#    결과: 성공 29 · 없음 21 · 실패 0. SK·메리츠금융지주 등 지주사/
+#    재무제표 혼동 케이스도 정확히 걸러냈다.
+# 🆕 2026-08-31 (2차) — HO 질문 "포트폴리오가 바뀌면 업데이트는 어떻게
+#    해?"에 답하며 갱신 감지 로직 추가. 접수번호가 바뀌면(=새 사업보고서
+#    발행) 자동으로 재파싱 대상이 된다. §아래 갱신대상 로직 참고.
+#    ⚠️ 아직 화면(build_html.py)에는 안 붙어 있다 — 배치가 며칠
+#       안정적으로 돈 걸 로그로 확인한 뒤에 연결한다(원칙 8).
 #
-# 이 파일이 하는 일: biz_report_raw.json(1단계, 이미 2,775종목 수집됨)을
-# 읽어서, 「매출 비중(사업 포트폴리오)」을 Claude에게 구조화해달라고 시키고
-# biz_portfolio.json(2단계)에 쌓는다.
-#
-# ── 어디에 들어가야 하나 (제안) ──────────────────────────────
-#   collect_data.py가 아니라 **catchup_enrich.py**에 새 단계로 추가하는
-#   걸 추천한다.
-#   [WHY] collect_data.py는 지금 Claude API를 한 번도 안 쓴다
-#         (import anthropic이 아예 없다) — 순수 수집·계산 전담이다.
-#         이 파서는 그 반대로 "이미 모아둔 것을 Claude가 해석"하는
+# ── 어디에 들어가야 하나 (설계 근거) ──────────────────────────
+#   collect_data.py가 아니라 catchup_enrich.py에 넣은 이유:
+#   [WHY] collect_data.py는 Claude API를 안 쓴다(순수 수집·계산
+#         전담). 이 파서는 "이미 모아둔 걸 Claude가 해석"하는
 #         일이라 generate_report.py의 역할에 더 가깝다. 그런데
 #         generate_report.py는 "오늘 하루치 글"을 쓰는 곳이고, 이건
 #         "쌓여 있는 과거 문서 2,775개를 며칠에 걸쳐 나눠서" 처리하는
@@ -41,7 +38,7 @@ import time
 
 import anthropic
 
-SCRIPT_VERSION = "v2026.08.31-draft1"
+SCRIPT_VERSION = "v2026.08.31-a2"
 
 MODEL = "claude-sonnet-5"          # generate_report.py와 통일
 MAX_TOKENS = 1200                  # 부문 5~6개짜리 JSON이면 충분, 여유 포함
@@ -187,11 +184,10 @@ def _load_json(path, 기본):
 def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
     """biz_report_raw.json → biz_portfolio.json.
 
-    ⚠️ 이 함수는 아직 어디서도 호출되지 않는다(검토용). 실제로 붙일 때는
-       catchup_enrich.py에 다른 collect_* 함수들과 나란히 넣고,
-       merge_json_files.py의 FILES 목록에도 이 두 파일(PORT_FILE·
-       PORT_FAIL_FILE)을 추가해야 한다 — enrich.yml이 daily.yml과
-       공유하게 될 파일이기 때문이다(§6 병합기 문서 참고).
+    catchup_enrich.py에서 collect_biz_reports() 직후 호출된다(방금 새로
+    받은 사업보고서도 같은 실행에서 바로 파싱 대상이 되도록). merge_json_files.py
+    의 FILES 목록과 enrich.yml의 git add 목록에도 PORT_FILE·PORT_FAIL_FILE이
+    등록돼 있다 — enrich.yml을 연달아 두 번 돌릴 때의 충돌 방지용(§6 병합기 문서 참고).
     """
     if client is None:
         print("   ⚠️ ANTHROPIC_API_KEY 없음 — 사업 포트폴리오 파싱 건너뜀")
@@ -207,11 +203,30 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
     오늘 = time.strftime("%Y%m%d")
 
     # 후보: 아직 처리 안 한 것 + 최근에 기술적 실패 안 한 것 + 인코딩 정상인 것
+    # 🆕 2026-08-31 — HO 질문: "사업 포트폴리오가 바뀌면 업데이트는 어떻게 해?"
+    #    답: 원래는 안 됐다. `nm in 저장`이면 무조건 건너뛰어서, 다음 해에
+    #    새 사업보고서가 나와도 작년 비중이 영원히 화면에 남을 뻔했다.
+    #    → biz_report_raw.json의 「접수번호」(공시마다 고유, 새 보고서가
+    #    나오면 반드시 바뀐다)를 포트폴리오 저장 시 같이 기록해두고,
+    #    지금 원문의 접수번호와 다르면 "새 보고서가 나왔다"로 보고
+    #    다시 후보에 넣는다. ⚠️ 원칙 3(틀린 걸 지우지 않는다) — 옛 값을
+    #    지우는 게 아니라 새로 성공하면 덮어쓰는 것뿐이고, 실패해도
+    #    옛 값이 화면에 그대로 남아 있으니 안전하다.
     후보 = []
+    갱신대상 = []
     깨짐스킵 = 0
     for nm, v in biz.items():
-        if not isinstance(v, dict) or nm in 저장:
+        if not isinstance(v, dict):
             continue
+        if nm in 저장:
+            _저장된접수 = 저장[nm].get("접수번호")
+            _현재접수 = v.get("접수번호")
+            if _저장된접수 and _현재접수 and _저장된접수 != _현재접수:
+                갱신대상.append(nm)
+                # continue로 안 건너뛴다 — 아래 공통 필터(깨짐·재시도일)를
+                # 그대로 통과시켜 후보에 들어가게 한다.
+            else:
+                continue
         if _is_broken(v):
             깨짐스킵 += 1
             continue
@@ -225,6 +240,12 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
             except Exception:
                 pass
         후보.append(nm)
+
+    if 갱신대상:
+        print(f"   📊 🔄 새 사업보고서 감지 — 접수번호가 바뀐 {len(갱신대상)}개를 "
+              f"다시 파싱합니다: {', '.join(갱신대상[:10])}"
+              + (" ..." if len(갱신대상) > 10 else ""))
+
 
     print(f"📊 사업 포트폴리오 파싱 후보 {len(후보)}개 "
           f"(인코딩 깨짐 {깨짐스킵}개 제외 · 오늘 최대 {quota}개)")
@@ -250,7 +271,10 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
         segs = j.get("부문") or []
         if not segs:
             # 정직한 «없음»은 실패가 아니다 — 저장해서 매번 다시 안 묻는다.
-            저장[nm] = {"부문": [], "사유": j.get("사유", ""), "확인일": 오늘}
+            # ⚠️ 접수번호도 같이 저장 — 새 사업보고서가 나오면(접수번호가
+            #    바뀌면) "없음"도 재확인 대상이 된다(위 갱신대상 로직).
+            저장[nm] = {"부문": [], "사유": j.get("사유", ""), "확인일": 오늘,
+                        "접수번호": biz[nm].get("접수번호")}
             실패.pop(nm, None)
             없음 += 1
             print(f"   ⭕ {nm} — 없음: {j.get('사유', '')[:50]}")
@@ -268,6 +292,7 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
                     "기준": j.get("기준", ""),
                     "확신": j.get("확신", ""),
                     "확인일": 오늘,
+                    "접수번호": biz[nm].get("접수번호"),
                 }
                 실패.pop(nm, None)
                 성공 += 1
