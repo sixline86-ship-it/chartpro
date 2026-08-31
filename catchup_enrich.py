@@ -23,7 +23,7 @@
 import os
 import sys
 
-SCRIPT_VERSION = "v2026.08.30-a1"
+SCRIPT_VERSION = "v2026.08.31-a1"
 
 # ⚠️ collect_data.py의 세 할당량은 import 시점이 아니라 **모듈 속성**으로
 #    존재하므로, import 뒤에 직접 덮어써도 된다(환경변수를 미리 안 깔아도 됨).
@@ -31,8 +31,13 @@ SCRIPT_VERSION = "v2026.08.30-a1"
 os.environ.setdefault("CP_PROFILE_QUOTA", "300")
 os.environ.setdefault("CP_BIZ_QUOTA", "40")
 os.environ.setdefault("CP_SNEWS_QUOTA", "150")
+# 🆕 2026-08-31 — 사업 포트폴리오 2단계 파서(biz_portfolio_parser.py) 연결.
+#    소량(기본 20)으로 시작한다 — 아직 실제 배치로 며칠 안정적으로
+#    돌아간 걸 확인 못 했다(원칙 8). 로그를 보고 quota를 올리자.
+os.environ.setdefault("CP_BIZPORT_QUOTA", "20")
 
 import collect_data as cd  # noqa: E402  (환경변수를 먼저 깔아야 하므로 뒤에 import)
+import biz_portfolio_parser as bp  # noqa: E402  (같은 이유)
 
 # 명시적으로 한 번 더 덮어쓴다(다른 스크립트가 이미 import해 캐시된 상황 방지).
 cd.PROFILE_하루할당 = int(os.environ["CP_PROFILE_QUOTA"])
@@ -43,7 +48,9 @@ cd.SNEWS_하루할당 = int(os.environ["CP_SNEWS_QUOTA"])
 def main():
     print(f"🚀 몰아 모으기 시작 [{SCRIPT_VERSION}] — "
           f"프로필 {cd.PROFILE_하루할당} · 사업보고서 {cd.BIZ_하루할당} · "
-          f"종목뉴스 {cd.SNEWS_하루할당}")
+          f"종목뉴스 {cd.SNEWS_하루할당} · 사업포트폴리오 {bp.BIZPORT_하루할당}")
+    if cd.BIZ_실패목록_우선재시도:
+        print("   🔁 실패목록 우선 재시도 모드 켜짐 (CP_RETRY_FAILED=yes)")
 
     if not cd.DART_KEY:
         print("❌ DART_API_KEY가 없습니다 — 아무것도 못 합니다.")
@@ -61,6 +68,15 @@ def main():
         cd.collect_biz_reports([])
     except Exception as e:
         print(f"⚠️ 사업보고서 수집 실패 — {type(e).__name__}: {e}")
+
+    # 🆕 2026-08-31 — 사업 포트폴리오(매출 비중) 2단계 파서.
+    #    바로 위에서 새로 받은 사업보고서도 이번 실행에서 곧바로
+    #    파싱 대상이 된다(biz_report_raw.json을 방금 갱신했으므로).
+    #    ⚠️ ANTHROPIC_API_KEY가 없으면 함수 안에서 스스로 건너뛴다.
+    try:
+        bp.parse_biz_portfolio()
+    except Exception as e:
+        print(f"⚠️ 사업 포트폴리오 파싱 실패 — {type(e).__name__}: {e}")
 
     try:
         코드지도 = cd.build_stock_code_map()
