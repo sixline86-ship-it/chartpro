@@ -3637,6 +3637,16 @@ BIZ_FILE = "biz_report_raw.json"   # 1단계 저장소(구조 확인용)
 #    일정 기간 뒤에는 다시 한번 확인할 여지를 남긴다(신규 상장사 등 대비).
 BIZ_FAIL_FILE = "biz_report_fail.json"   # {회사명: 마지막시도 YYYYMMDD}
 BIZ_재시도일 = 180
+# 🆕 2026-08-31 — HO 지시: "실패한 종목들 다시 재수집하면 안돼?"
+#    실측: 실패 247개 중 190개가 2026-08-29에 몰려 있었다 — 그날 안에
+#    "연도별 재무데이터 실제 존재" 필터(§3차 수정)가 배포됐으므로, 그
+#    전에 옛 필터로 시도됐다가 실패한 것들이 섞여 있을 가능성이 높다.
+#    지금 필터로 다시 시도하면 성공률이 오를 수 있다.
+#    ⚠️ 180일 재시도일을 무시하고 **오늘 강제로 우선 재시도**하되,
+#       기본값은 off다 — 평소 발행·몰아모으기에서 매번 247개를
+#       재시도하면 새 후보를 못 만난다(예전 "정체" 사고와 같은 유형).
+#       필요할 때만 켠다.
+BIZ_실패목록_우선재시도 = os.environ.get("CP_RETRY_FAILED", "no") == "yes"
 # 🆕 2026-08-27 (2차) HO 지시 — "나중에 또 이 작업을 반복하지 않게,
 #    최대한 유용한 정보를 다 가져와라". 실측 로그로 구조가 확인됐으니
 #    이번엔 한 자리만 잘라내지 않고 **여러 자리를 넉넉히** 담는다.
@@ -3691,14 +3701,27 @@ def _dart_biz_report(고유, 회사명):
                     "pblntf_ty": "A", "page_count": 20},
             timeout=15)
         if r.status_code != 200:
+            print(f"      ⚠️ {회사명} — list.json HTTP {r.status_code}")
             return None
-        목록 = (r.json() or {}).get("list") or []
+        _r목록전체 = (r.json() or {})
+        목록 = _r목록전체.get("list") or []
+        # 🆕 2026-08-31 — DART API가 정상 응답이어도 "status"가 013(자료없음)
+        #    등 오류코드일 수 있다. list가 그냥 비어 있는 것과 구분해서
+        #    로그에 남긴다 — KB금융처럼 실제로는 보고서가 분명 있는
+        #    대형사가 계속 실패할 때 원인 추적에 필요하다(원칙16).
+        if not 목록:
+            print(f"      ⚠️ {회사명} — 공시 목록 0건 "
+                  f"(DART status={_r목록전체.get('status')}, "
+                  f"message={_r목록전체.get('message')})")
+            return None
         보고서 = None
         for it in 목록:
             if "사업보고서" in str(it.get("report_nm") or ""):
                 보고서 = it
                 break
         if not 보고서:
+            print(f"      ⚠️ {회사명} — 공시 {len(목록)}건 중 «사업보고서» 없음 "
+                  f"(예: {목록[0].get('report_nm','')[:30] if 목록 else ''})")
             return None
 
         # ② 원문(ZIP) → 텍스트
@@ -3708,9 +3731,11 @@ def _dart_biz_report(고유, 회사명):
                                  "rcept_no": 보고서.get("rcept_no")},
                          timeout=25)
         if d.status_code != 200:
+            print(f"      ⚠️ {회사명} — document.xml HTTP {d.status_code}")
             return None
         본문 = _dart_unzip_text(d.content)
         if not 본문 or len(본문) < 500:
+            print(f"      ⚠️ {회사명} — 압축 해제 후 본문 {len(본문 or '')}자(500자 미만)")
             return None
 
         # ③ 「사업의 내용」 근처만 잘라낸다. 없으면 앞부분을 쓴다.
@@ -3979,6 +4004,32 @@ def collect_biz_reports(레이더종목들):
     저장 = _load_json(BIZ_FILE, {})
     실패기록 = _load_json(BIZ_FAIL_FILE, {})
 
+    # 🆕 2026-08-31 — 원칙 16(불완전한 걸 조용히 두지 않는다).
+    #    인코딩이 깨진 채로 저장된 항목은 collect_biz_reports 입장에서
+    #    "이미 있음"으로 보여 영원히 다시 안 받아온다(스킵 조건이
+    #    `n not in 저장`이라서). 실측(2026-08-31): 2,775개 중 9개가
+    #    한글 비율이 비정상적으로 낮았다(가온전선·삼성SDI 등).
+    #    → 저장 직전 검사와 같은 기준으로 훑어서, 깨진 건 **저장에서
+    #      빼버려** 이번 실행에서 곧바로 새 후보로 취급되게 한다.
+    #    ⚠️ 완전히 지우는 게 아니다 — 이번 실행에서 다시 못 받아오면
+    #       (예: 이번에도 DART가 이상하게 응답) 다음 실행에서 또
+    #       걸러져 계속 재시도 대상이 된다(무한 방치 방지).
+    _깨진것 = []
+    for _nm, _v in list(저장.items()):
+        _t = (_v.get("본문조각", "") if isinstance(_v, dict) else "")[:3000]
+        _hit = sum(1 for _w in ["있습니다", "사업", "회사", "매출", "당사", "주요"] if _w in _t)
+        if _hit <= 1:
+            _깨진것.append(_nm)
+            저장.pop(_nm, None)
+    if _깨진것:
+        print(f"   📑 ⚠️ 인코딩 깨짐 감지 {len(_깨진것)}개 — 재수집 대상으로 되돌립니다: "
+              f"{', '.join(_깨진것[:10])}" + (" ..." if len(_깨진것) > 10 else ""))
+
+    # 🆕 2026-08-31 — HO 지시로 실패목록 강제 우선 재시도(옵션, 기본 off).
+    #    §상수 정의부의 BIZ_실패목록_우선재시도 설명 참고.
+    if BIZ_실패목록_우선재시도 and 실패기록:
+        print(f"   📑 🔁 실패목록 우선 재시도 모드 — {len(실패기록)}개를 오늘 재시도 대상 최상단에 둡니다")
+
     # 🔴 2026-08-29 수정 — 실패기록이 없으면 지도(corp_map) 앞쪽에 몰린
     #    오래된/휴면 법인(3년간 사업보고서 미제출)만 매 실행 40개씩 그대로
     #    재시도해, 뒤쪽의 진짜 새 후보로 영영 못 넘어가는 문제가 실측
@@ -3987,8 +4038,22 @@ def collect_biz_reports(레이더종목들):
     #    원칙 3(틀린 걸 지우지 않는다)에 따라 영구 제외는 안 하고,
     #    BIZ_재시도일 뒤에는 다시 한번 확인할 여지를 남긴다.
     _오늘 = DATE
+
+    # 0순위(옵션): 실패목록 강제 재시도. 켜져 있을 때만, 지도에 실제로
+    # 있는 것만, 그리고 오늘 몫(BIZ_하루할당) 안에서.
+    대상 = []
+    if BIZ_실패목록_우선재시도:
+        for n in 실패기록:
+            if n in 지도 and n not in 저장 and n not in 대상:
+                대상.append(n)
+            if len(대상) >= BIZ_하루할당:
+                break
+
     # 오늘 레이더에 잡힌 종목부터. 독자가 지금 궁금해하는 회사가 먼저다.
-    대상 = [n for n in (레이더종목들 or []) if n in 지도 and n not in 저장]
+    # ⚠️ 0순위(위에서 만든 대상)를 덮어쓰지 않고 **이어붙인다**.
+    for n in (레이더종목들 or []):
+        if n in 지도 and n not in 저장 and n not in 대상:
+            대상.append(n)
 
     # 🆕 2026-08-29 — 2순위: stock_profile.json에 이미 프로필이 있는 종목.
     #    프로필 수집이 성공했다는 건 DART가 그 법인을 "최근에도 정상 보고
@@ -4053,11 +4118,12 @@ def collect_biz_reports(레이더종목들):
             print(f"   📑 본문 미리보기 ↓")
             print("      " + res["본문조각"][:300])
 
-    if 채움:
+    if 채움 or _깨진것:
         # ⚠️ 이 파일에 _save_json 헬퍼가 없다. 다른 저장부와 같은 방식으로 쓴다.
         with io.open(BIZ_FILE, "w", encoding="utf-8") as _f:
             json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
-        print(f"   📑 사업보고서 {채움}종목 저장 (누적 {len(저장)}종목) — "
+        print(f"   📑 사업보고서 {채움}종목 저장 (누적 {len(저장)}종목"
+              + (f" · 깨진 것 {len(_깨진것)}개 제거됨" if _깨진것 else "") + ") — "
               f"⚠️ 1단계라 화면에는 안 나옵니다")
     else:
         print("   📑 사업보고서 — 새로 받은 종목 없음")
