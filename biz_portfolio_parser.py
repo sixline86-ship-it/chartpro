@@ -64,6 +64,15 @@ PORT_재시도일 = 30
 # 🆕 사업보고서(BIZ_FAIL_FILE)의 재시도일(180일)보다 훨씬 짧게 잡았다.
 #    [WHY] 이건 "DART에 문서가 없다"가 아니라 "API 호출이 실패했다"는
 #          뜻이라 원인이 일시적(네트워크·요금제)일 가능성이 높다.
+# 🔴 2026-09-01 실측 사고 — Sonnet 5→Haiku 4.5 전환 과정에서 짧은 기간
+#    안에 621개가 한꺼번에 biz_portfolio_fail.json에 쌓였다. 그 뒤
+#    quota를 아무리 늘려도(300 지정) "파싱 후보 0개"만 찍혔다 — 남은
+#    630개 중 622개가 전부 이 30일 대기에 걸려 있었기 때문이다(실측
+#    확인: 미처리 630개 ∩ 실패기록 = 622개, 새 후보는 8개뿐).
+#    → biz_report처럼 강제 재시도 스위치를 추가한다. 기본은 off(30일
+#      유지)이고, 필요할 때만 켠다 — 매번 켜두면 "정말 API가 계속
+#      실패하는" 종목까지 무한 재시도해서 quota를 낭비한다.
+PORT_실패목록_우선재시도 = os.environ.get("CP_PORT_RETRY_FAILED", "no") == "yes"
 BIZPORT_하루할당 = int(os.environ.get("CP_BIZPORT_QUOTA", "20"))
 # 🆕 다른 몰아모으기 quota들(300/40/150)보다 훨씬 작게 시작한다.
 #    [WHY] 원칙 8 — 검증 못 한 걸 배포하지 않는다. 지금까지 표본
@@ -247,7 +256,7 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
             깨짐스킵 += 1
             continue
         마지막실패 = 실패.get(nm)
-        if 마지막실패:
+        if 마지막실패 and not PORT_실패목록_우선재시도:
             try:
                 a = time.strptime(오늘, "%Y%m%d")
                 b = time.strptime(마지막실패, "%Y%m%d")
@@ -264,7 +273,8 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
 
 
     print(f"📊 사업 포트폴리오 파싱 후보 {len(후보)}개 "
-          f"(인코딩 깨짐 {깨짐스킵}개 제외 · 오늘 최대 {quota}개)")
+          f"(인코딩 깨짐 {깨짐스킵}개 제외 · 오늘 최대 {quota}개)"
+          + (" · 🔁 실패목록 강제 재시도 모드" if PORT_실패목록_우선재시도 else ""))
 
     성공, 없음, 실패건 = 0, 0, 0
     합계이상 = 0
