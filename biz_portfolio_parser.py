@@ -174,9 +174,21 @@ def _is_broken(v):
     return sum(1 for w in ["있습니다", "사업", "회사", "매출", "당사", "주요"] if w in t) <= 1
 
 
-def _call(text):
+ESCALATION_MODEL = "claude-sonnet-5"
+# 🆕 2026-09-01 HO 지시 — "합계이상"으로 실패하면 회사 크기를 미리
+#    판단해서 나누는 대신, **실제로 헷갈린 것만** Sonnet 5로 승급
+#    재시도한다. [WHY] 실측(19개 표본)에서 Haiku가 실패 17개 전부
+#    "합계이상"(STX 119%, BGF에코머티리얼즈 180% 등)이었다 — 표가
+#    여러 개인 복잡한 사업보고서에서 서로 다른 표를 섞어 계산한
+#    것으로 보인다. "큰 회사"를 미리 가려내는 건 시가총액 등 추가
+#    조회가 필요하고 부정확할 수 있지만, "합계이상"이라는 신호는
+#    이미 코드가 정확히 잡아내고 있으므로 그걸 그대로 승급 조건으로
+#    쓰는 게 더 정확하고 저렴하다(진짜 헷갈린 것만 비싼 모델을 쓴다).
+
+
+def _call(text, model=None):
     kwargs = dict(
-        model=MODEL,
+        model=model or MODEL,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": text}],
@@ -276,54 +288,88 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
           f"(인코딩 깨짐 {깨짐스킵}개 제외 · 오늘 최대 {quota}개)"
           + (" · 🔁 실패목록 강제 재시도 모드" if PORT_실패목록_우선재시도 else ""))
 
+    def _attempt(text, model):
+        """한 번의 호출+파싱+검증. 상태: 'ok'/'none'/'sum'/'error'."""
+        try:
+            raw = _call(text, model=model)
+            j = _parse_json(raw)
+        except Exception as e:
+            return ("error", type(e).__name__)
+        segs = j.get("부문") or []
+        if not segs:
+            return ("none", j.get("사유", ""))
+        tot = sum(float(s.get("비중") or 0) for s in segs)
+        if not (85 <= tot <= 115):
+            return ("sum", tot)
+        return ("ok", (segs, j, tot))
+
     성공, 없음, 실패건 = 0, 0, 0
-    합계이상 = 0
+    합계이상, 승급시도, 승급성공 = 0, 0, 0
     for nm in 후보[:quota]:
         text = _pick_blocks(biz[nm])
         if not text.strip():
             실패[nm] = 오늘
             실패건 += 1
             continue
-        try:
-            raw = _call(text)
-            j = _parse_json(raw)
-        except Exception as e:
-            print(f"   ⚠️ {nm} — {type(e).__name__}, 다음에 재시도")
+
+        상태, 결과 = _attempt(text, MODEL)
+        승급됨 = False
+
+        if 상태 == "error":
+            print(f"   ⚠️ {nm} — {결과}, 다음에 재시도")
             실패[nm] = 오늘
             실패건 += 1
             time.sleep(1)
             continue
 
-        segs = j.get("부문") or []
-        if not segs:
-            # 정직한 «없음»은 실패가 아니다 — 저장해서 매번 다시 안 묻는다.
-            # ⚠️ 접수번호도 같이 저장 — 새 사업보고서가 나오면(접수번호가
-            #    바뀌면) "없음"도 재확인 대상이 된다(위 갱신대상 로직).
-            저장[nm] = {"부문": [], "사유": j.get("사유", ""), "확인일": 오늘,
-                        "접수번호": biz[nm].get("접수번호")}
-            실패.pop(nm, None)
-            없음 += 1
-            print(f"   ⭕ {nm} — 없음: {j.get('사유', '')[:50]}")
-        else:
-            tot = sum(float(s.get("비중") or 0) for s in segs)
-            if not (85 <= tot <= 115):
-                # 모델이 규칙 8을 안 지켰다 — 코드 쪽에서도 한 번 더 막는다.
-                print(f"   ⚠️ {nm} — 합계 {tot:.1f}% 이상해서 버림")
+        if 상태 == "sum":
+            # 🆕 2026-09-01 HO 지시 — Haiku가 합계이상으로 헷갈렸을 때만
+            #    Sonnet 5로 승급 재시도한다. 회사 크기를 미리 판단하지
+            #    않고, 실제로 헷갈린 것만 비싼 모델을 쓴다.
+            print(f"   ↻ {nm} — Haiku 합계 {결과:.1f}% 이상, Sonnet 5로 재시도")
+            time.sleep(0.6)
+            승급시도 += 1
+            상태2, 결과2 = _attempt(text, ESCALATION_MODEL)
+            if 상태2 in ("ok", "none"):
+                상태, 결과 = 상태2, 결과2
+                승급됨 = True
+                if 상태2 == "ok":
+                    승급성공 += 1
+            else:
+                # Sonnet 5도 실패 — 이번엔 진짜로 포기한다.
+                print(f"   ⚠️ {nm} — Sonnet 5도 실패({결과2}), 이번엔 포기")
                 실패[nm] = 오늘
                 합계이상 += 1
                 실패건 += 1
-            else:
-                저장[nm] = {
-                    "부문": sorted(segs, key=lambda s: -(s.get("비중") or 0)),
-                    "기준": j.get("기준", ""),
-                    "확신": j.get("확신", ""),
-                    "확인일": 오늘,
-                    "접수번호": biz[nm].get("접수번호"),
-                }
-                실패.pop(nm, None)
-                성공 += 1
-                head = " · ".join(f"{s['이름']} {s['비중']}%" for s in segs[:3])
-                print(f"   ✅ {nm} — {len(segs)}부문 합계{tot:.1f}% · {head}")
+                time.sleep(0.6)
+                continue
+
+        if 상태 == "none":
+            # 정직한 «없음»은 실패가 아니다 — 저장해서 매번 다시 안 묻는다.
+            # ⚠️ 접수번호도 같이 저장 — 새 사업보고서가 나오면(접수번호가
+            #    바뀌면) "없음"도 재확인 대상이 된다(위 갱신대상 로직).
+            저장[nm] = {"부문": [], "사유": 결과, "확인일": 오늘,
+                        "접수번호": biz[nm].get("접수번호")}
+            실패.pop(nm, None)
+            없음 += 1
+            print(f"   ⭕ {nm} — 없음: {결과[:50]}"
+                  + (" (Sonnet 5 승급 후 확인)" if 승급됨 else ""))
+        else:  # "ok"
+            segs, j, tot = 결과
+            저장[nm] = {
+                "부문": sorted(segs, key=lambda s: -(s.get("비중") or 0)),
+                "기준": j.get("기준", ""),
+                "확신": j.get("확신", ""),
+                "확인일": 오늘,
+                "접수번호": biz[nm].get("접수번호"),
+            }
+            if 승급됨:
+                저장[nm]["모델승급"] = "sonnet"   # ⚠️ 나중에 "왜 이 회사만 비쌌나" 추적용
+            실패.pop(nm, None)
+            성공 += 1
+            head = " · ".join(f"{s['이름']} {s['비중']}%" for s in segs[:3])
+            print(f"   ✅ {nm} — {len(segs)}부문 합계{tot:.1f}% · {head}"
+                  + (" 🔺Sonnet 5 승급" if 승급됨 else ""))
         time.sleep(0.6)
 
     if 성공 or 없음:
@@ -334,7 +380,8 @@ def parse_biz_portfolio(quota=None, biz_file="biz_report_raw.json"):
             json.dump(실패, f, ensure_ascii=False, separators=(",", ":"))
 
     print(f"📊 사업 포트폴리오 — 성공 {성공} · 없음 {없음} · 실패 {실패건}"
-          f"(합계이상 {합계이상}) · 누적 {len(저장)}종목")
+          f"(합계이상 {합계이상}) · Sonnet 5 승급 {승급시도}회 시도·{승급성공}회 성공"
+          f" · 누적 {len(저장)}종목")
 
 
 if __name__ == "__main__":
