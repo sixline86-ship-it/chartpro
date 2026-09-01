@@ -50,7 +50,9 @@ def main():
           f"프로필 {cd.PROFILE_하루할당} · 사업보고서 {cd.BIZ_하루할당} · "
           f"종목뉴스 {cd.SNEWS_하루할당} · 사업포트폴리오 {bp.BIZPORT_하루할당}")
     if cd.BIZ_실패목록_우선재시도:
-        print("   🔁 실패목록 우선 재시도 모드 켜짐 (CP_RETRY_FAILED=yes)")
+        print("   🔁 사업보고서 실패목록 우선 재시도 모드 켜짐 (CP_RETRY_FAILED=yes)")
+    if bp.PORT_실패목록_우선재시도:
+        print("   🔁 사업포트폴리오 실패목록 우선 재시도 모드 켜짐 (CP_PORT_RETRY_FAILED=yes)")
 
     if not cd.DART_KEY:
         print("❌ DART_API_KEY가 없습니다 — 아무것도 못 합니다.")
