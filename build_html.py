@@ -199,7 +199,7 @@ def trading_day_context(today):
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
-DATE = datetime.now().strftime("%Y%m%d")
+DATE = "20260831"   # 미리보기 전용
 # ── 파일 보관 위치 ──
 #   날짜별 원본(data_·report_ json)은 archive/ 폴더에 모은다.
 #   저장소 첫 화면에 매일 3개씩 쌓이면 정작 중요한 .py 파일이 묻히기 때문이다.
@@ -459,13 +459,102 @@ def _sc_read(수급):
         + (f" 개인이 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
 
 
+def _mkt_key(이름):
+    """카드 표시 이름(KOSPI/KOSDAQ) → 데이터 키(코스피/코스닥)."""
+    t = str(이름 or "").strip().upper()
+    if t in ("KOSPI", "코스피"):
+        return "코스피"
+    if t in ("KOSDAQ", "코스닥"):
+        return "코스닥"
+    return None
+
+
+def _mkt_ammo_series(시장="코스피", days=5):
+    """시장별(코스피/코스닥) 실탄(외국인+기관) 최근 N거래일 [(날짜, 값)].
+
+    ⚠️ flow_history.json에는 코스피 실탄만 있다(코스닥 없음). archive의
+       「지수수급.{시장}_수급」에서 외국인+기관계를 직접 더한다.
+    """
+    def _n(v):
+        try:
+            return float(str(v).replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+    키 = _mkt_key(시장)
+    if not 키:
+        return []
+    out = []
+    try:
+        for 날짜, d in archive_days(days + 6):
+            수급 = ((d.get("지수수급") or {}).get(f"{키}_수급") or {})
+            외, 기 = _n(수급.get("외국인")), _n(수급.get("기관계"))
+            if 외 is None or 기 is None:
+                continue
+            out.append((str(날짜), 외 + 기))
+    except Exception:
+        return []
+    return out[-days:]
+
+
+def _mkt_ammo_spark(시장="코스피", W=118, H=52):
+    """성적표 카드용 실탄 5일 세로 막대 (작게)."""
+    시리즈 = _mkt_ammo_series(시장, 5)
+    if len(시리즈) < 2:
+        return ""
+    vals = [v for _, v in 시리즈]
+    날 = [f"{d[4:6]}/{d[6:]}" for d, _ in 시리즈]
+    mx = max(abs(v) for v in vals) or 1
+    z = H * 0.40
+    n = len(vals)
+    간격 = (W - 8) / max(1, n)
+    bw = max(5, 간격 - 3.5)
+    g = [f'<line x1="3" y1="{z:.1f}" x2="{W-3}" y2="{z:.1f}" '
+         f'stroke="#fff" stroke-opacity=".16"/>']
+    for i, v in enumerate(vals):
+        x = 4 + i * 간격
+        y = z - (v / mx) * ((z - 2) if v >= 0 else (H - 11 - z))
+        c = FS_BUY if v >= 0 else FS_SELL
+        g.append(f'<rect x="{x:.1f}" y="{min(z,y):.1f}" width="{bw:.1f}" '
+                 f'height="{max(1.5,abs(y-z)):.1f}" rx="2" fill="{c}" '
+                 f'opacity="{1 if i==n-1 else .45}"/>')
+        if i == n - 1:
+            g.append(f'<text x="{x+bw/2:.0f}" y="{H-1.5:.0f}" font-size="7" '
+                     f'fill="#c9d0d9" text-anchor="middle" font-weight="800">{날[i]}</text>')
+    return (f'<div class="sc2-spark"><p class="sc2-spark-t">최근 {n}일 실탄</p>'
+            f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg></div>')
+
+
+def _mkt_mini_gauge(시장="코스피"):
+    """성적표 카드용 미니 계기판 — 심층편과 같은 계기를 더 작게."""
+    시리즈 = _mkt_ammo_series(시장, FLOW_창 + 4)
+    if len(시리즈) < 3:
+        return ""
+    st = _fs_stat([v for _, v in 시리즈])
+    if not st:
+        return ""
+    c = FS_BUY if st["v"] >= 0 else FS_SELL
+    ico, key = _fs_keyfact(st)
+    return (f'<div class="sc2-g">'
+            f'<div class="sc2-g-l">{_fs_gauge(st, 92)}</div>'
+            f'<div class="sc2-g-r">'
+            f'<p class="sc2-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
+            f'<p class="sc2-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
+            f'<p class="sc2-g-k" style="border-color:{c}55;color:{c}">{ico} {key}</p>'
+            f'</div></div>')
+
+
 def build_score_card(이름, 지수, 수급):
-    """지수 카드 한 장 (SCORE B 배치)."""
+    """지수 카드 한 장 (SCORE B 배치). [수급막대→실탄5일→미니계기판→멘트]."""
     태그, 색, 글 = _sc_read(수급 or {})
     설명 = ""
     if 태그:
         설명 = (f'<div class="sc2-tagbox"><span class="sc2-tag" style="border-color:{색}55;'
                 f'color:{색}">{태그}</span><p class="sc2-txt">{글}</p></div>')
+    _spark = _mkt_ammo_spark(이름)
+    _gauge = _mkt_mini_gauge(이름)
+    _아래 = ""
+    if _spark or _gauge:
+        _아래 = f'<div class="sc2-bot">{_gauge}{_spark}</div>'
     # ⚠️ 설명글은 **카드 전체 폭**을 쓴다(2026-08-19).
     #    왼쪽 좁은 칸에 넣으면 두세 줄로 접혀 읽기가 힘들다.
     return f'''<div class="idx-card2 sc2wrap">
@@ -477,6 +566,7 @@ def build_score_card(이름, 지수, 수급):
         </div>
         <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
       </div>
+      {_아래}
       {설명}
     </div>'''
 
@@ -3590,6 +3680,31 @@ def build_my_stocks(data):
         _한줄 = {}
     이름배열JS += "window.CP_ONELINE=" + json.dumps(_한줄, ensure_ascii=False) + ";"
 
+    # 📊 사업 포트폴리오(매출 비중) — 2026-09-01 정식 연결.
+    #  [WHY] 기업분석 카드가 그동안 "매출을 어느 사업에서 얼마나 버는지는
+    #        준비 중"으로 비워두고 있었다. biz_portfolio_parser.py가
+    #        DART 원문을 해석해 만든 biz_portfolio.json이 이제 99.7%
+    #        커버리지라(2026-09-01 실측), 화면에 연결할 근거가 충분하다.
+    #  ⚠️ build_html은 여기서 아무것도 해석하지 않는다. 조립만 한다
+    #     (원칙 1 — 숫자는 기계가, 글은 Claude가. 해석은 이미 끝나 있다).
+    #  ⚠️ "부문"이 빈 배열인 항목("없음" — 정직한 무응답)은 화면에
+    #     보낼 이유가 없다. 여기서 미리 걸러서 JS로 보낼 용량을 줄인다
+    #     (2,771개 중 실제 부문 있는 건 1,548개뿐 — 나머지는 애초에 안 보냄).
+    _bizport = {}
+    try:
+        if os.path.exists("biz_portfolio.json"):
+            with open("biz_portfolio.json", encoding="utf-8") as _f:
+                _bp원본 = json.load(_f) or {}
+            _bizport = {k: v for k, v in _bp원본.items() if v.get("부문")}
+            print(f"   📊 사업 포트폴리오 {len(_bizport)}종목 적재 "
+                  f"(전체 {len(_bp원본)}개 중 실제 부문 있는 것만)")
+        else:
+            print("   📊 biz_portfolio.json 없음 — 포트폴리오 칸은 건너뜁니다(정상)")
+    except Exception as e:
+        print(f"   ⚠️ 사업 포트폴리오 적재 실패 — {type(e).__name__}")
+        _bizport = {}
+    이름배열JS += "window.CP_BIZPORT=" + json.dumps(_bizport, ensure_ascii=False) + ";"
+
     # 매집 상세 — '왜 떴나' 칸의 핵심. 조건을 숫자 그대로 넘긴다.
     # ⚠️ 재료를 **아끼지 않는다.** 카드가 부실해 보이는 건 데이터가 없어서가
     #    아니라 있는 걸 안 쓰고 있어서였다(2026-08-25 HO 지적).
@@ -3688,7 +3803,17 @@ def build_my_stocks(data):
     #     날짜를 붙여 보여줘 "언제 나온 얘기인지"를 숨기지 않는다.
     _snews = {}
     try:
-        _대상 = set(list(_accd) + list(_strd) + list(_핫))
+        # 🔴 2026-09-01 실측 사고 발견 — 「내 종목 브리핑」의 «요즘 왜
+        #    주목받냐면요»가 LG이노텍·SK 등 유명 종목에서도 "기사·공시가
+        #    없었어요"만 떴다. 원인: _대상이 **오늘 레이더에 걸린 종목만**
+        #    (_accd·_strd·_핫)이었다. 그런데 "내 종목"은 형이 브라우저
+        #    localStorage에만 등록하는 거라 **build_html.py 실행 시점엔
+        #    서버가 누가 무슨 종목을 등록할지 알 방법이 없다** — 오늘
+        #    레이더에 안 걸린 종목이면 애초에 뉴스를 찾아본 적조차 없었다.
+        #    → 기업프로필이 있는 종목(사실상 상장사 거의 전체, 3,956개)
+        #      전부를 대상에 넣는다. 「내 종목」은 이 중 아무거나 될 수
+        #      있으니, 미리 다 찾아둬야 나중에 등록해도 나온다.
+        _대상 = set(list(_accd) + list(_strd) + list(_핫) + list(_프로필))
         _본제목 = {n: set() for n in _대상}
         # 🆕 2026-08-26 HO 지시 — "10거래일만 뒤지지 말고, 기간 상관없이
         #    이 종목이 최근에 왜 올랐는지 이슈가 된 기사를 찾아라".
@@ -4499,6 +4624,28 @@ def build_my_stocks(data):
        (_이탈합/_이탈연속).toFixed(1)+'%p</b>) — 종목 자체에 원인이 있는지 '+
        '살펴볼 때예요');
      }
+
+     /* ②-3 최근 누적 섹터 대비 성과. ①은 오늘 하루만, ②-2는 «연속으로
+        밀렸나»만 본다. «최근 며칠 통틀어 섹터를 이겼나 졌나»가 비어
+        있었다. _diffs(날짜별 종목-섹터 격차)를 그대로 재사용 — 새 수집
+        0회. 표본 3일 미만이면 침묵, 격차 ±0.3%p 미만이면 침묵,
+        연속이탈 경고가 이미 뜬 날은 생략(원칙4 — 같은 카드에서
+        "뒤처진다"를 두 번 말하지 않는다). */
+     if(_diffs.length>=3&&_이탈연속<3){
+      var _누적=0, _이긴날=0;
+      _diffs.forEach(function(x){ _누적+=x.gap; if(x.gap>0) _이긴날++; });
+      var _평균=_누적/_diffs.length;
+      if(Math.abs(_평균)>=0.3){
+       var _이김=_평균>0;
+       _add.push('📈 최근 <b>'+_diffs.length+'거래일</b> 동안 <b>'+_z.z+'</b> 섹터보다 '+
+        '하루 평균 <b style="color:'+(_이김?'#74f0d4':'#ff9a3c')+'">'+
+        (_평균>=0?'+':'')+_평균.toFixed(1)+'%p</b> '+(_이김?'앞섰어요':'뒤졌어요')+
+        ' (<b>'+_이긴날+'/'+_diffs.length+'일</b> 섹터 상회) — '+
+        (_이김
+          ? '<b style="color:#74f0d4">자리도 좋았지만 이 종목이 그 안에서도 강했어요</b>'
+          : '<b style="color:#ff9a3c">같은 자리에 있어도 이 종목은 덜 받았어요</b>'));
+      }
+     }
     }
 
     /* ③ 종목 수급 — 기사가 없는 중소형주일수록 유일하게 남는 단서.
@@ -4820,48 +4967,29 @@ def build_my_stocks(data):
  }
  function _fin(nm, 상세){
   /* 재무 카드.
-     🆕 2026-08-26 — 상세 모드에서 **매출·영업이익·부채비율을 다시 안 그린다.**
-        요약 카드에 이미 있어서 자세히 보기를 누르면 같은 그림이 두 번 나왔다.
-        상세는 순이익·수익성처럼 **요약에 없던 것만** 보여준다. */
+     🔴 2026-09-01 HO 지시 — "처음 누르면 회사소개·왜주목받나만, 매출은
+        여기서 나와요·매출·영업이익·영업이익률·부채비율은 자세히 보기로."
+        예전엔 상세=false(요약)가 매출/영업이익/부채비율을, 상세=true(상세)가
+        순이익·영업이익률(문장)을 나눠 맡았다. 이제 **전부 상세=true 하나로
+        합친다** — 요약 카드에서 재무를 아예 안 보여주기로 했기 때문이다. */
   var P=(window.CP_PROFILE||{})[nm];
-  if(!P||!P.연도별) return 상세?'':'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
+  if(!P||!P.연도별) return 상세?'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>':'';
   var ys=Object.keys(P.연도별).sort();
-  if(!ys.length) return 상세?'':'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>';
+  if(!ys.length) return 상세?'<p class="sc-empty">🏢 재무는 아직 준비되지 않았어요 — 다음 발행부터 채워드릴게요</p>':'';
   var 끝=P.연도별[ys[ys.length-1]], 첫=P.연도별[ys[0]];
+  if(!상세) return '';   // ⚠️ 이제 요약 카드에서는 안 부른다. 혹시 몰라 안전하게 빈 값.
 
-  if(상세){
-   /* 상세 — 순이익을 맨 위로, 그다음 수익성·기대치 */
-   var 순=ys.map(function(y){return P.연도별[y].순이익;});
-   var out='<div class="sc-fin"><p class="sc-h">📊 조금 더 들어가면</p>'+
-    '<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
-    '<b class="sc-v" style="color:'+((끝.순이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
-    (_fmtEok(끝.순이익)||'—')+'</b></div>';
-   if(끝.매출&&끝.영업이익!==null){
-    var m=끝.영업이익/끝.매출*100;
-    out+='<p class="sc-note">영업이익률 <b>'+m.toFixed(1)+'%</b> — 100원 팔아 '+
-     m.toFixed(0)+'원 남긴다는 뜻이에요.</p>';
-   }
-   if(P.시총&&끝.영업이익>0){
-    var 배=(P.시총*100000000)/끝.영업이익;
-    out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
-     '시장이 앞으로 더 벌 거라고 보고 있다는 뜻이에요.</p>';
-   }
-   out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선). 최근 확정 연도 기준이라 '+
-    '올해 실적은 아직 안 들어가 있어요.</p>';
-   return out+'</div>';
-  }
-
-  /* 요약 — 매출·영업이익·부채비율 */
   var 매=ys.map(function(y){return P.연도별[y].매출;});
   var 영=ys.map(function(y){return P.연도별[y].영업이익;});
+  var 순=ys.map(function(y){return P.연도별[y].순이익;});
+  var 기간표시=ys[ys.length-1]+'년 '+(끝.구분||'')+' 기준';
+
   var 증='';
-  /* 최근 1년 변화 — 직전 확정 연도 대비 */
   if(ys.length>=2){
    var _직=P.연도별[ys[ys.length-2]]||{};
    if(_직.매출&&끝.매출){
     var g1=(끝.매출-_직.매출)/Math.abs(_직.매출)*100;
     var _추세='';
-    /* 2년 연속 같은 방향이면 «추세»라고 부를 수 있다. 한 해만으로는 못 부른다. */
     if(ys.length>=3){
      var _직직=P.연도별[ys[ys.length-3]]||{};
      if(_직직.매출){
@@ -4879,6 +5007,18 @@ def build_my_stocks(data):
      _추세+'.</p>';
    }
   }
+  // 🆕 2026-09-01 — 영업이익률을 부채비율과 같은 «게이지 행» 형태로.
+  //    전엔 문장 하나(사유: 요약에 매출/영업이익 숫자가 이미 있어서
+  //    비율만 문장으로 덧붙이면 충분했다)였는데, 이제 재무 4종을
+  //    한자리에 나란히 두기로 했으니 같은 행 모양으로 맞춘다.
+  var 이익률행='';
+  if(끝.매출&&끝.영업이익!==null){
+   var m=끝.영업이익/끝.매출*100;
+   var mc=m>=15?'#4ade80':(m>=0?'#e0c060':'#ff6b4a');
+   이익률행='<div class="sc-row"><span class="sc-k">영업이익률</span>'+_gauge(Math.max(0,m),30)+
+    '<b class="sc-v" style="color:'+mc+'">'+m.toFixed(1)+'%</b></div>'+
+    '<p class="sc-note">100원 팔아 '+m.toFixed(0)+'원 남긴다는 뜻이에요.</p>';
+  }
   var 부채='';
   if(끝.부채&&끝.자본){
    var r=끝.부채/끝.자본*100;
@@ -4891,13 +5031,28 @@ def build_my_stocks(data):
    적자경고='<p class="sc-warn">⚠️ 가장 최근 확정 연도가 <b>영업적자</b>예요</p>';
   else if(영.length>=2&&영[영.length-2]!==null&&영[영.length-2]<0&&끝.영업이익>0)
    적자경고='<p class="sc-warn">⚠️ 적자였다가 <b>흑자로 돌아선</b> 상태예요 — 이어지는지가 관건이에요</p>';
-  return '<div class="sc-fin"><p class="sc-h">💰 돈은 벌고 있나 <span class="sc-sub">'+
-   ys[ys.length-1]+'년 '+(끝.구분||'')+' 기준</span></p>'+
+
+  var out='<div class="sc-fin"><p class="sc-h">💰 돈은 벌고 있나 <span class="sc-sub">'+
+   기간표시+'</span></p>'+
    '<div class="sc-row"><span class="sc-k">매출</span>'+_bars(매)+
    '<b class="sc-v">'+(_fmtEok(끝.매출)||'—')+'</b></div>'+
    '<div class="sc-row"><span class="sc-k">영업이익</span>'+_bars(영)+
    '<b class="sc-v" style="color:'+((끝.영업이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
-   (_fmtEok(끝.영업이익)||'—')+'</b></div>'+부채+증+적자경고+'</div>';
+   (_fmtEok(끝.영업이익)||'—')+'</b></div>'+
+   이익률행+부채+증+적자경고;
+
+  // ── 여기부터는 기존 "조금 더 들어가면" 부가정보 — 순이익·시총배수·출처.
+  out+='<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
+   '<b class="sc-v" style="color:'+((끝.순이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
+   (_fmtEok(끝.순이익)||'—')+'</b></div>';
+  if(P.시총&&끝.영업이익>0){
+   var 배=(P.시총*100000000)/끝.영업이익;
+   out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
+    '시장이 앞으로 더 벌 거라고 보고 있다는 뜻이에요.</p>';
+  }
+  out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선). 최근 확정 연도 기준이라 '+
+   '올해 실적은 아직 안 들어가 있어요.</p>';
+  return out+'</div>';
  }
  function scToggle(nm, id){
   var box=document.getElementById(id);
@@ -4940,15 +5095,25 @@ def build_my_stocks(data):
       [WHY] 투자 판단에 안 쓰이는 정보다. 카드에 줄이 하나 늘 뿐이고,
             정작 궁금한 «왜 올랐나»를 아래로 밀어낸다. */
    var _연혁='';
+   /* 📊 2026-09-01 (2차) HO 지시 — "매출은 여기서 나와요"를 요약(앞면)이
+      아니라 «자세히 보기»로 옮긴다. 앞면은 어떤 회사인지·왜 주목받는지
+      딱 두 가지만 보여준다. ⚠️ _bp 계산 자체는 여기서 한다(어차피
+      회사소개 문구가 "포트폴리오 있음/없음"을 알아야 하므로) — 실제
+      막대 렌더는 scMore로 옮긴다. */
+   var _bp=(window.CP_BIZPORT||{})[nm]||null;
    if(_본문||테마.length||_연혁){
     회사='<div class="sc-blk"><p class="sc-h">🏢 어떤 회사냐면요</p>'+
      (_본문?'<p class="sc-biz">'+_본문+'</p>':'')+_연혁+
      (테마.length?'<p class="sc-note">시장에서는 '+
        테마.map(function(t){return '<b>'+t+'</b>';}).join(' · ')+
        ' 테마로 묶여 있어요.</p>':'')+
-     '<p class="sc-src">매출을 어느 사업에서 얼마나 버는지(사업 포트폴리오)는 '+
+     /* 포트폴리오가 있으면 «자세히 보기에서 확인» 안내로, 없으면
+        정직하게 «비워둡니다»(원칙 14). 둘 다 한 줄로 짧게 — 앞면은
+        어디까지나 요약이라, 안내문이 본문보다 길면 안 된다. */
+     (_bp?'<p class="sc-src">매출은 어느 사업에서 나오는지 «자세히 보기»에서 볼 수 있어요.</p>'
+         :'<p class="sc-src">매출을 어느 사업에서 얼마나 버는지(사업 포트폴리오)는 '+
      'DART 사업보고서 원문을 읽어야 나와요. 지금은 준비 중이라, 확인되기 전까지 '+
-     '<b>지어내지 않고 비워둡니다.</b></p></div>';
+     '<b>지어내지 않고 비워둡니다.</b></p>')+'</div>';
    }
    /* 🆕 2026-08-26 HO 지시 — "사람들이 제일 궁금한 건 «이 종목이 최근에 왜 올랐나»다".
       그동안 이 내용이 «자세히 보기» 안에 숨어 있어 대부분 못 봤다.
@@ -4976,11 +5141,10 @@ def build_my_stocks(data):
    _왜='<div class="sc-blk"><p class="sc-h">🔥 요즘 왜 주목받냐면요</p>'+_lst+'</div>';
    box.innerHTML='<div class="sc-card">'+
     (한줄?'<p class="sc-def">'+한줄+'</p>':'')+기본+회사+_왜+
-    /* 🆕 2026-08-26 HO 지시 — 「왜 여기 떴냐면요」를 기업분석 카드에서 뺐다.
-       [WHY] 그건 회사 설명이 아니라 **레이더 조건 설명**이다. 종목마다
-             반복하지 말고 레이더 코너 밑에 한 번만 쓰는 게 맞다.
-             기업분석 카드는 "이 회사가 뭐 하는 곳인가"에만 집중한다. */
-    _fin(nm,false)+
+    /* 🔴 2026-09-01 HO 지시 — "처음 누르면 어떤 회사인지·왜 주목받는지
+       두 가지만 나와야 해." 재무 요약(_fin)을 요약 카드에서 뺐다.
+       매출·영업이익·부채비율·영업이익률은 이제 «자세히 보기»에서만
+       (매출 막대그래프와 같이) 보여준다. */
     '<p class="sc-more" id="'+id+'-m">자세히 보기 ↓</p>'+
     '<div id="'+id+'-d" style="display:none"></div></div>';
    box.dataset.built='1';
@@ -4997,20 +5161,33 @@ def build_my_stocks(data):
   if(!d) return;
   if(d.dataset.open==='1'){ d.style.display='none'; d.dataset.open='0'; return; }
   if(!d.dataset.built){
-   /* 🆕 2026-08-26 HO 지시 — 자세히 보기를 정리했다.
-      · 매출/영업이익/부채비율은 **요약 카드에 이미 있다** → 여기서 다시 안 쓴다
-      · 순이익은 위로 올린다
-      · 「회사 정보」·「제가 틀렸다면」 삭제
-      · 대신 **왜 돈이 몰렸는지 뉴스**를 맨 위로 */
-   var P=(window.CP_PROFILE||{})[nm]||{};
-   /* 🔴 2026-08-26 (2차) — 뉴스를 **요약 자리로 올렸다**(「🔥 요즘 왜 주목받냐면요」).
-      여기서 또 보여주면 같은 목록을 두 번 읽게 된다(원칙 4).
-      자세히 보기는 이제 **재무 심화**만 담당한다. */
-   /* 🆕 2026-08-26 HO 지시 — 레이더 조건(돈이 몰림/매집 금액) 설명을 뺐다.
-      [WHY] 그건 위쪽 레이더 코너에서 이미 다 말했다. 여기서 또 쓰면
-            같은 얘기를 두 번 하는 셈이다(원칙 4).
-            이 칸은 **왜 돈이 몰렸는지 = 뉴스**만 다룬다. */
+   /* 🔴 2026-09-01 HO 지시 — 자세히 보기 순서를 다시 정리했다.
+      [순서] 매출은 여기서 나와요(막대) → 매출/영업이익/영업이익률/부채비율
+      (_fin true 안에 다 들어있다) → 투자판단 문구.
+      ⚠️ 매출 막대(사업 포트폴리오)는 scToggle에서 계산해둔 window.CP_BIZPORT를
+      여기서 **다시** 읽는다 — scToggle과 scMore는 별개 함수라 변수를
+      못 나눠 쓴다(간단히 재조회하는 쪽이 상태 관리보다 안전하다). */
+   var _bp=(window.CP_BIZPORT||{})[nm]||null;
+   var _포트='';
+   if(_bp&&_bp.부문&&_bp.부문.length){
+    var _rows='';
+    var _sorted=_bp.부문.slice().sort(function(a,b){return (b.비중||0)-(a.비중||0);});
+    _sorted.forEach(function(seg){
+     var _p=Math.max(0,Math.min(100,seg.비중||0));
+     _rows+='<div class="bp-row">'+
+      '<div class="bp-top"><span class="bp-k">'+seg.이름+'</span>'+
+      '<b class="bp-v">'+(_p<10?_p.toFixed(1):Math.round(_p))+'%</b></div>'+
+      '<span class="bp-bar"><i style="width:'+_p.toFixed(1)+'%"></i></span></div>';
+    });
+    _포트='<div class="sc-blk"><p class="sc-h">📊 매출은 여기서 나와요</p>'+
+     '<div class="bp-wrap">'+_rows+'</div>'+
+     '<p class="sc-src">'+(_bp.기준||'사업보고서')+' 기준'+
+     (_bp.rcp?' · <a href="https://dart.fss.or.kr/dsaf001/main.do?rcpNo='+_bp.rcp+
+       '" target="_blank">DART 원문</a>':'')+
+     '</p></div>';
+   }
    d.innerHTML=
+    _포트+
     _fin(nm,true)+
     '<p class="sc-disc">투자 판단을 대신하지 않아요. 조건과 숫자를 그대로 보여드릴 뿐이에요.</p>';
    d.dataset.built='1';
@@ -6238,12 +6415,12 @@ def build_sector_ladder():
         #    [WHY] 같은 «그 섹터의 종목들»을 보여주는 자리인데 핵심편·심층편이
         #    서로 다르게 생기면 구독자는 같은 걸 두 번 배워야 한다(체크박스를
         #    섹터 성적표와 통일했던 것과 같은 이유).
-        #    ⚠️ 그래서 칩 테두리는 섹터색이 아니라 심층편과 같은 #232a36으로
-        #       되돌린다. 대신 어느 섹터인지는 아래 패널 자체의 «왼쪽 색 막대»와
-        #       금색 제목줄이 이미 말해주므로 정보가 사라지지 않는다.
+        #    ⚠️ 종목들 테두리를 섹터 색상으로 넣되, 투명도를 낮춰(55)
+        #       은은하게 — 색만 진하게 두면 종목명보다 색이 먼저
+        #       눈에 들어와 주인공이 바뀐다(2026-09-01 HO 지시).
         칩 = "".join(
             f'<span style="display:inline-block;font-size:10.5px;color:#d5d9e0;'
-            f'background:#141922;border:1px solid #232a36;border-radius:5px;'
+            f'background:#141922;border:1px solid {col}55;border-radius:5px;'
             f'padding:2px 7px;margin:0 4px 4px 0;white-space:nowrap">{n} '
             f'<b style="color:{"#ff6b4a" if (v or 0) >= 0 else "#5b9bff"}">'
             f'{(v or 0):+.1f}%</b></span>'
@@ -8590,10 +8767,14 @@ def build_core(핵심편, data, 해석):
                               관제=data.get("관제지수"),
                               사건명=(해석.get("사건명") or ""))
     # ⚠️ id="score"는 「오늘 확인해야 할 신호」의 '확인 ↓' 이동 목적지다.
+    # 🔴 큰 계기판(core_flow_gauge) 호출 안 함 — 성적표 카드 안에 코스피·
+    #    코스닥 각각의 미니 계기판이 이미 들어있어, 코스피만 크게 한 번
+    #    더 보여주면 원칙5(같은 그림 두 번) 위반이 된다. 함수 자체는
+    #    안 지웠다(원칙3) — 되살리려면 여기 + core_flow_gauge()만 붙이면 됨.
     지수스트립 = (f'<div class="idx-grid" id="score">'
                 f'{build_score_card("KOSPI", _코, 코수)}'
                 f'{build_score_card("KOSDAQ", _닥, _닥수)}</div>'
-                + core_flow_gauge() + _flow_comment())
+                + _flow_comment())
 
     def _f(v):
         try:
@@ -11797,6 +11978,26 @@ html{{scroll-behavior:smooth}}
 .sc-warn{{margin:6px 0 0;font-size:10.5px;color:#e0c060;line-height:1.55}}
 .sc-note{{margin:6px 0 0;font-size:10.5px;color:#a8b0ba;line-height:1.6}}
 .sc-src{{margin:6px 0 0;font-size:9.5px;color:#6f7784;line-height:1.55}}
+/* 📊 2026-09-01 정식 연결 — 사업 포트폴리오 가로 막대.
+   ⚠️ 색은 하늘색 계열(#8fd0e8)로 간다 — 이 카드의 고유색이고,
+      지수(빨강/파랑)·수급(초록/보라) 두 색 규칙 어디와도 안 겹친다.
+   ⚠️ 이름·%를 막대 위 줄에 두고 막대는 폭 전체를 쓴다 — 한 줄에
+      다 넣으면 막대가 너무 짧아 비중 차이가 눈으로 안 구분된다
+      (2026-08-31 1차 시안 실패, 실측 후 이 구조로 교정). */
+.bp-wrap{{margin:7px 0 0}}
+.bp-row{{margin:0 0 8px}}
+.bp-top{{display:flex;align-items:baseline;justify-content:space-between;
+  gap:8px;margin:0 0 3px}}
+.bp-k{{font-size:10.5px;color:#c8d0da;font-weight:700;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.bp-v{{flex:0 0 auto;font-size:11px;color:#8fd0e8;font-weight:800}}
+.bp-bar{{display:block;width:100%;height:9px;background:#141a24;
+  border-radius:3px;overflow:hidden}}
+.bp-bar i{{display:block;height:100%;border-radius:3px;
+  background:linear-gradient(90deg,#4d8ba3,#8fd0e8)}}
+@media (max-width:360px){{
+  .bp-k{{font-size:9.5px}} .bp-v{{font-size:10px}}
+}}
 .sc-empty{{margin:0;font-size:10.5px;color:#6f7784;line-height:1.6}}
 .sc-more{{margin:8px 0 0;font-size:11px;font-weight:700;color:#f0c65a;
   cursor:pointer;text-align:center;padding:6px;background:#141922;border-radius:7px}}
@@ -11956,6 +12157,26 @@ html{{scroll-behavior:smooth}}
 .sc2-tag{{display:inline-block;font-size:9.5px;font-weight:800;padding:.1rem .45rem;border-radius:20px;border:1px solid #2a3342}}
 .sc2-txt{{font-size:10.5px;color:#8b93a0;margin:.28rem 0 0;line-height:1.6}}
 .sc2-txt b{{color:#c9d0d9}}
+.sc2-bot{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.55rem;
+  align-items:center;margin:.6rem 0 0;padding:.55rem 0 0;
+  border-top:1px solid rgba(255,255,255,.07)}}
+.sc2-g{{display:flex;align-items:center;gap:.45rem;min-width:0}}
+.sc2-g-l{{flex:0 0 auto}}
+.sc2-g-r{{min-width:0}}
+.sc2-g-v{{margin:0;font-size:13px;font-weight:900;letter-spacing:-.3px}}
+.sc2-g-s{{margin:.1rem 0 0;font-size:9.5px;color:#8b93a0;white-space:nowrap}}
+.sc2-g-s b{{color:#c9d0d9}}
+.sc2-g-k{{display:inline-block;margin:.22rem 0 0;font-size:9px;font-weight:800;
+  padding:.08rem .38rem;border-radius:20px;border:1px solid #2a3342;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+.sc2-spark{{flex:0 0 auto;text-align:center}}
+.sc2-spark-t{{margin:0 0 .1rem;font-size:8.5px;color:#6f7784;font-weight:700;
+  white-space:nowrap}}
+.sc2-spark svg{{width:118px;height:52px;display:block}}
+@media (max-width:400px){{
+  .sc2-bot{{grid-template-columns:1fr;gap:.45rem}}
+  .sc2-spark{{justify-self:start}}
+}}
 @media (max-width:359px){{.sc2{{grid-template-columns:1fr}}}}
 /* ── 수급 관제신호 v5 ── */
 .fs-v5{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.7rem;align-items:center;padding:0 0 .7rem;border-bottom:.5px solid rgba(255,255,255,.1)}}
