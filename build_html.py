@@ -3705,6 +3705,72 @@ def build_my_stocks(data):
         _bizport = {}
     이름배열JS += "window.CP_BIZPORT=" + json.dumps(_bizport, ensure_ascii=False) + ";"
 
+    # 🆕 2026-09-01 (3차) HO 지시 — "이 회사 한번 제대로 알아볼까?" 느낌을
+    #    주는 두 가지. 둘 다 **새 수집 0회** — 이미 있는 데이터를 다르게
+    #    엮기만 한다.
+    #
+    # ① "이 종목, 원래 뭐로 알고 계셨어요?" — 섹터 분류 vs 실제 매출 1위
+    #    부문이 다르면 알려준다. grid_slot_of()는 네이버 테마명용으로
+    #    만들어졌지만, 회사 고유 사업부명에도 "자동차 제조" 같은 일반
+    #    산업 키워드가 있으면 매핑된다(실측: 497개 매핑, 그중 125개가
+    #    실제 섹터와 다름 — 나머지 372개는 매핑은 됐지만 섹터랑 같아서
+    #    "낙차"가 없는 정상 케이스, 조용히 넘어간다·원칙14).
+    _사전 = (data.get("계좌격자") or {}).get("종목사전") or {}
+    _섹터낙차 = {}
+    for _nm, _v in _bizport.items():
+        _entry = _사전.get(_nm)
+        if not _entry or not _entry[0]:
+            continue
+        _실제섹터들 = _entry[0]
+        _부문목록 = _v.get("부문") or []
+        if not _부문목록:
+            continue
+        _top = max(_부문목록, key=lambda s: s.get("비중", 0))
+        _매핑섹터 = grid_slot_of(_top.get("이름", ""))
+        if _매핑섹터 and _매핑섹터 not in _실제섹터들:
+            _섹터낙차[_nm] = {"부문": _top.get("이름"), "비중": _top.get("비중"),
+                           "매핑섹터": _매핑섹터, "실제섹터": _실제섹터들[0]}
+    이름배열JS += "window.CP_SECGAP=" + json.dumps(_섹터낙차, ensure_ascii=False) + ";"
+
+    # ② "같은 업종 중에 어디쯤이에요?" — 계좌구역(섹터) 내 영업이익률 순위.
+    #    stock_profile.json의 연도별 최신 매출·영업이익만 있으면 계산된다.
+    #    ⚠️ 절대 숫자(영업이익률 15%)보다 "업종 내 순위"가 훨씬 와닿는다
+    #       (HO 지시 — "너의 통찰이 필요해"에 대한 답 중 하나).
+    _업종순위 = {}
+    try:
+        _섹터별종목 = {}
+        for _nm, _entry in _사전.items():
+            _p = _프로필.get(_nm)
+            if not _p or not _p.get("연도별"):
+                continue
+            _ys = sorted(_p["연도별"].keys())
+            if not _ys:
+                continue
+            _끝 = _p["연도별"][_ys[-1]]
+            _매출, _영업 = _끝.get("매출"), _끝.get("영업이익")
+            if not _매출 or _영업 is None:
+                continue
+            _률 = _영업 / _매출 * 100
+            for _섹 in (_entry[0] or []):
+                _섹터별종목.setdefault(_섹, []).append((_nm, _률))
+        for _섹, _lst in _섹터별종목.items():
+            # 표본 너무 작은 섹터는 "순위"라는 말 자체가 무의미하다.
+            if len(_lst) < 5:
+                continue
+            _lst.sort(key=lambda x: -x[1])
+            for _i, (_nm, _률) in enumerate(_lst):
+                _업종순위.setdefault(_nm, []).append(
+                    {"섹터": _섹, "순위": _i + 1, "총": len(_lst),
+                     "영업이익률": round(_률, 1)})
+        # 종목이 섹터 여러 개에 걸치면(예: LS마린솔루션) 가장 앞선 순위만 남긴다.
+        for _nm in list(_업종순위):
+            _업종순위[_nm] = min(_업종순위[_nm], key=lambda x: x["순위"] / x["총"])
+    except Exception as e:
+        print(f"   ⚠️ 업종 내 순위 계산 실패 — {type(e).__name__}")
+        _업종순위 = {}
+    이름배열JS += "window.CP_MARGIN_RANK=" + json.dumps(_업종순위, ensure_ascii=False) + ";"
+    print(f"   🆕 섹터 낙차 {len(_섹터낙차)}종목 · 업종 내 순위 {len(_업종순위)}종목")
+
     # 매집 상세 — '왜 떴나' 칸의 핵심. 조건을 숫자 그대로 넘긴다.
     # ⚠️ 재료를 **아끼지 않는다.** 카드가 부실해 보이는 건 데이터가 없어서가
     #    아니라 있는 걸 안 쓰고 있어서였다(2026-08-25 HO 지적).
@@ -3840,6 +3906,36 @@ def build_my_stocks(data):
                         _본제목[_c].add(_t)
                         _snews.setdefault(_c, []).insert(
                             0, {"t": _t, "u": _g.get("링크", ""), "k": _라벨 + " 공시"})
+
+        # 🔴 2026-09-01 (2차) HO 지시 — "뉴스를 찾지 말고, 해당종목을 검색해서
+        #    최근에 뜨는 이슈를 보여주는거야." archive 뉴스원본(RSS, 하루 몇 개
+        #    언론사만)은 커버리지가 좁아서 엘앤에프·현대차·휴젤 등 대형주조차
+        #    "기사 없음"이 떴다. stock_news_raw.json은 **종목명으로 네이버를
+        #    직접 검색**해 이미 모아둔 결과다(3,961종목·72.8% 기사 확보,
+        #    2026-08-27부터 몰아모으기로 수집). 이게 정확히 형이 원하는 방식이다.
+        #    ⚠️ 화면에 이미 있는 잡음 필터·점수 로직을 그대로 통과시킨다 —
+        #       "코스피 마감" 같은 시황 나열 기사는 여기서도 걸러져야 한다.
+        try:
+            with open("stock_news_raw.json", encoding="utf-8") as _f:
+                _snraw = json.load(_f) or {}
+            _병합수 = 0
+            for _n in _대상:
+                _entry = _snraw.get(_n)
+                if not _entry:
+                    continue
+                for _a in (_entry.get("기사") or []):
+                    _t = _a.get("t") or ""
+                    if not _t or _t in _본제목.get(_n, set()):
+                        continue
+                    _본제목.setdefault(_n, set()).add(_t)
+                    _d날 = _a.get("d", "")
+                    _라벨 = (_d날[5:7] + "/" + _d날[8:10]) if len(_d날) >= 10 else (_a.get("s") or "")
+                    _snews.setdefault(_n, []).append(
+                        {"t": _t, "u": _a.get("u", ""), "k": _라벨})
+                    _병합수 += 1
+            print(f"   📰 stock_news_raw 병합 — {_병합수}건 (종목명 직접 검색 결과)")
+        except Exception as e:
+            print(f"   ⚠️ stock_news_raw 병합 실패 — {type(e).__name__}")
         # 🔴 2026-08-26 수정 — archive_days()는 **오래된 순**으로 준다.
         #    예전 주석은 "최신부터"라고 잘못 적혀 있었고, 그대로 [:5]를 해서
         #    가장 **오래된** 5건이 카드에 올라가고 있었다. 뒤집어서 자른다.
@@ -3869,7 +3965,11 @@ def build_my_stocks(data):
                 _p += (len(_lst) - _i) * 0.01          # 동점이면 최신 우선
                 _sc.append((_p, _i, _it))
             _sc.sort(key=lambda x: (-x[0], x[1]))
-            _snews[_n] = [x[2] for x in _sc][:5]
+            # 🔴 2026-09-01 (3차) — 5→3으로 줄임. 뉴스 검색 대상을
+            #    상장사 전체(3,956개)로 넓히면서 CP_STOCK_NEWS가 2.69MB까지
+            #    커졌다(파일 전체 4.4MB→9.0MB). 실제 화면(_lst.slice(0,4))도
+            #    최대 4개만 보여주므로 5개 저장은 애초에 과했다.
+            _snews[_n] = [x[2] for x in _sc][:3]
     except Exception as e:
         print(f"   ⚠️ 종목별 뉴스 수집 실패 — {type(e).__name__}")
         _snews = {}
@@ -5018,6 +5118,17 @@ def build_my_stocks(data):
    이익률행='<div class="sc-row"><span class="sc-k">영업이익률</span>'+_gauge(Math.max(0,m),30)+
     '<b class="sc-v" style="color:'+mc+'">'+m.toFixed(1)+'%</b></div>'+
     '<p class="sc-note">100원 팔아 '+m.toFixed(0)+'원 남긴다는 뜻이에요.</p>';
+   /* 🆕 2026-09-01 (3차) HO 지시 — "같은 업종 중에 어디쯤이에요?"
+      절대 숫자(15%)보다 «업종 내 몇 등»이 훨씬 와닿는다. 표본 5개
+      미만인 섹터는 애초에 서버에서 안 만들었다(원칙14). */
+   var _rk=(window.CP_MARGIN_RANK||{})[nm]||null;
+   if(_rk){
+    var _pct=_rk.순위/_rk.총;
+    var _rc=_pct<=0.2?'#4ade80':(_pct<=0.5?'#e0c060':'#8b93a0');
+    이익률행+='<p class="sc-note">📐 <b>'+_rk.섹터+'</b> 업종 <b>'+_rk.총+'개</b> 중 '+
+     '영업이익률 <b style="color:'+_rc+'">'+_rk.순위+'위</b>예요'+
+     (_pct<=0.2?' — <b style="color:#4ade80">상위권</b>이에요':'')+'.</p>';
+   }
   }
   var 부채='';
   if(끝.부채&&끝.자본){
@@ -5039,12 +5150,15 @@ def build_my_stocks(data):
    '<div class="sc-row"><span class="sc-k">영업이익</span>'+_bars(영)+
    '<b class="sc-v" style="color:'+((끝.영업이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
    (_fmtEok(끝.영업이익)||'—')+'</b></div>'+
-   이익률행+부채+증+적자경고;
-
-  // ── 여기부터는 기존 "조금 더 들어가면" 부가정보 — 순이익·시총배수·출처.
+   이익률행;
+  // 🔴 2026-09-01 (2차) HO 지시 — "순이익은 영업이익률 밑에 나오게 해줘."
+  //    [매출→영업이익→영업이익률→순이익→부채비율] 순서로 고정.
   out+='<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
    '<b class="sc-v" style="color:'+((끝.순이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
    (_fmtEok(끝.순이익)||'—')+'</b></div>';
+  out+=부채+증+적자경고;
+
+  // ── 여기부터는 기존 "조금 더 들어가면" 부가정보 — 시총배수·출처.
   if(P.시총&&끝.영업이익>0){
    var 배=(P.시총*100000000)/끝.영업이익;
    out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
@@ -5101,12 +5215,20 @@ def build_my_stocks(data):
       회사소개 문구가 "포트폴리오 있음/없음"을 알아야 하므로) — 실제
       막대 렌더는 scMore로 옮긴다. */
    var _bp=(window.CP_BIZPORT||{})[nm]||null;
+   /* 🆕 2026-09-01 (3차) — "이 종목, 원래 뭐로 알고 계셨어요?" 섹터 낙차.
+      ⚠️ 있을 때만 말한다 — 대부분(섹터와 실제 매출 1위가 같은 경우)은
+      조용히 아무 말 안 한다(원칙14, 섹터브릿지의 "1.5%p 미만 침묵"과
+      같은 정신). 낙차가 있는 종목에서만, 그것도 «놀라움»으로 던진다. */
+   var _gap=(window.CP_SECGAP||{})[nm]||null;
+   var _gapLine=_gap?('<p class="sc-note">⚡ 「'+_gap.실제섹터+
+     '」로 분류돼 있지만, 실제 매출 1위는 <b>'+_gap.부문+'</b>이에요 ('+
+     (_gap.비중<10?_gap.비중.toFixed(1):Math.round(_gap.비중))+'%)</p>'):'';
    if(_본문||테마.length||_연혁){
     회사='<div class="sc-blk"><p class="sc-h">🏢 어떤 회사냐면요</p>'+
      (_본문?'<p class="sc-biz">'+_본문+'</p>':'')+_연혁+
      (테마.length?'<p class="sc-note">시장에서는 '+
        테마.map(function(t){return '<b>'+t+'</b>';}).join(' · ')+
-       ' 테마로 묶여 있어요.</p>':'')+
+       ' 테마로 묶여 있어요.</p>':'')+_gapLine+
      /* 포트폴리오가 있으면 «자세히 보기에서 확인» 안내로, 없으면
         정직하게 «비워둡니다»(원칙 14). 둘 다 한 줄로 짧게 — 앞면은
         어디까지나 요약이라, 안내문이 본문보다 길면 안 된다. */
