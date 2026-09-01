@@ -84,10 +84,24 @@ on:
       #    식의 사소한 오타에도 choice는 정확히 안 맞으면 통째로
       #    거절한다. boolean은 JSON에서 true/false **리터럴**(따옴표
       #    없는 값)이라 이런 문자열 오타 자체가 날 수가 없다.
+      # 🔴 2026-09-01 (3차) — boolean → choice로 되돌린다.
+      #    [WHY] boolean 타입으로 바꾼 뒤에도 cron-job.org가 정확히
+      #    `"from_cron": true`(따옴표 없는 JSON boolean)를 보냈는데도
+      #    계속 422로 거절당했다. 원인: GitHub Actions REST API 자체가
+      #    workflow_dispatch의 boolean 타입 입력을 제대로 못 받는
+      #    **공식적으로 알려진 버그**다(GitHub 자체 이슈: "Adding an
+      #    optional boolean input... breaks the /dispatches API
+      #    clients" — 공식 워크어라운드가 정확히 "don't use boolean,
+      #    use choice with true/false strings"). daily.yml 자체는
+      #    실측으로 이미 최신 반영을 확인했으니(원인이 파일 미반영이
+      #    아니라 GitHub API 자체였다는 뜻), choice로 되돌리면 된다.
       from_cron:
         description: '🤖 cron-job.org 자동 호출입니까? (사람이 누를 땐 손대지 마세요)'
-        type: boolean
-        default: false
+        type: choice
+        default: 'no'
+        options:
+          - 'no'
+          - 'yes'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   # 🔴 2026-08-28 (3차) — GitHub 자체 schedule(cron)을 완전히 없앤다.
@@ -152,7 +166,7 @@ jobs:
           #      정상적으로 확인한다. from_cron이 no(기본값, 사람이 직접
           #      누른 경우)일 때만 예전처럼 무조건 재발행한다.
           IS_HUMAN_MANUAL=no
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "yes" ]; then
             IS_HUMAN_MANUAL=yes
           fi
           if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
@@ -298,7 +312,7 @@ jobs:
         if: steps.guard.outputs.run == 'yes'
         run: |
           IS_HUMAN_MANUAL=no
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "true" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.from_cron }}" != "yes" ]; then
             IS_HUMAN_MANUAL=yes
           fi
           if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
