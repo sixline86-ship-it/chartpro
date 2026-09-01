@@ -40,7 +40,23 @@ import anthropic
 
 SCRIPT_VERSION = "v2026.08.31-a2"
 
-MODEL = "claude-sonnet-5"          # generate_report.py와 통일
+MODEL = "claude-haiku-4-5-20251001"
+# 🔴 2026-09-01 HO 지시 — Sonnet 5(claude-sonnet-5)에서 Haiku 4.5로 전환.
+#    [WHY] 2,300여 종목을 마저 돌리면 Sonnet 5 기준 약 $34가 드는 걸 보고
+#    "너무 심하다"는 지적이 있었다. Anthropic 자체 가이드도 "Haiku는
+#    분류·추출(classification/extraction)용, Sonnet은 프로덕션 전반용"이라
+#    지금 하는 일(표에서 매출 비중 뽑기)이 정확히 Haiku의 주력 분야다.
+#    ⚠️ Haiku·Sonnet 사이에 «중간 등급»은 없다(Haiku 4.5 $1/$5 → Sonnet 5
+#       $2/$10 → Opus 5 $5/$25, 2026-08-31 실측 가격). "Haiku보다 살짝
+#       좋은 것"을 원했지만 그런 등급 자체가 없어서, 대신 **표본 15개로
+#       Haiku 정확도를 직접 검증**한 뒤 전환하기로 했다.
+# ⚠️ 텍스트 추출 방식(_pick_blocks, 2블록·1800자)은 **그대로 둔다.**
+#    표본 15개 검증은 Haiku 정확도만 보기 위한 것이었는데 아직 결과를
+#    못 받았다. 검증 안 된 축소(1블록·1200자)까지 같이 바꾸면, 나중에
+#    결과가 나빠져도 "모델 때문인지 텍스트를 줄여서인지" 구분이 안 된다
+#    (원칙 11 — 단정하려면 근거가 있어야 한다). 그래서 이번엔 모델
+#    하나만 바꾼다 — 같은 텍스트 양 기준으로 Haiku가 Sonnet 5보다
+#    입출력 다 절반 가격이라, 이것만으로도 비용이 약 반으로 준다.
 MAX_TOKENS = 1200                  # 부문 5~6개짜리 JSON이면 충분, 여유 포함
 PORT_FILE = "biz_portfolio.json"           # 2단계 결과(성공+정직한 「없음」 둘 다)
 PORT_FAIL_FILE = "biz_portfolio_fail.json"  # 기술적 실패만(API 오류·JSON 파싱 실패)
