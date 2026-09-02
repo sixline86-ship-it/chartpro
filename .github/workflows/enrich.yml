@@ -33,6 +33,16 @@ on:
         options:
           - "no"
           - "yes"
+      desc_quota:
+        description: "기업 설명(무엇을 만들어 파는 회사인지, Claude 파싱) — 이번에 처리할 종목 수"
+        default: "20"
+      desc_retry_failed:
+        description: "기업 설명 실패목록을 30일 기다리지 않고 오늘 재시도할까요?"
+        type: choice
+        default: "no"
+        options:
+          - "no"
+          - "yes"
 
 permissions:
   contents: write
@@ -68,6 +78,8 @@ jobs:
           CP_BIZPORT_QUOTA: ${{ github.event.inputs.bizport_quota }}
           CP_RETRY_FAILED: ${{ github.event.inputs.retry_failed }}
           CP_PORT_RETRY_FAILED: ${{ github.event.inputs.port_retry_failed }}
+          CP_DESC_QUOTA: ${{ github.event.inputs.desc_quota }}
+          CP_DESC_RETRY_FAILED: ${{ github.event.inputs.desc_retry_failed }}
         run: python catchup_enrich.py
 
       # 🔴 2026-08-28 사고 수정 — 몰아 모으기가 2시간 넘게 도는 사이,
@@ -103,7 +115,8 @@ jobs:
             for f in stock_profile.json corp_map.json corp_stockcode.json \
                      biz_report_raw.json stock_news_raw.json \
                      biz_report_fail.json stock_news_fail.json \
-                     biz_portfolio.json biz_portfolio_fail.json; do
+                     biz_portfolio.json biz_portfolio_fail.json \
+                     biz_description.json biz_description_fail.json; do
               git add "$f" 2>/dev/null || true
             done
             if git diff --cached --quiet; then
