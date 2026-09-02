@@ -35,6 +35,10 @@ FILES = [
     #    같은 방식으로 병합 대상에 넣는다.
     "biz_portfolio.json",
     "biz_portfolio_fail.json",
+    # 🆕 2026-09-01 — 기업 설명 2단계 파서가 만드는 두 파일. 같은 이유로
+    #    (enrich.yml 연달아 두 번 돌릴 때 충돌 방지) 병합 대상에 넣는다.
+    "biz_description.json",
+    "biz_description_fail.json",
 ]
 
 
