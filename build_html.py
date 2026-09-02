@@ -3974,8 +3974,15 @@ def build_my_stocks(data):
         #         ② 제목 **맨 앞**에 종목명이 나오면 그 종목이 주인공인 기사다
         #         ③ 시황·수급 나열 기사는 뒤로 민다
         #         같은 점수면 최신 우선.
+        # 🔴 2026-09-02 실측 — 아모레퍼시픽 카드에 "글로벌 대학생 마케팅
+        #    공모전 시상식 개최" 같은 홍보성 기사가 맨 위에 떴다. 제목에
+        #    종목명이 있어서(+20점) 잡음단어에도 안 걸려 최상위로 올라간
+        #    것. 시황 잡음과는 다른 유형(회사 홍보·CSR성)이라 목록을
+        #    따로 늘린다.
         _잡음 = ("순매수", "순매도", "상위", "특징주 마감", "코스피 마감",
-                "코스닥 마감", "장마감", "개장", "시황")
+                "코스닥 마감", "장마감", "개장", "시황",
+                "공모전", "시상식", "개최", "봉사활동", "기부", "MOU 체결",
+                "업무협약", "채용설명회", "인재 발굴")
         for _n in _snews:
             _lst = list(reversed(_snews[_n]))          # 최신순
             _sc = []
@@ -4002,6 +4009,14 @@ def build_my_stocks(data):
                     _p -= 30
                 _p += (len(_lst) - _i) * 0.01          # 동점이면 최신 우선
                 _sc.append((_p, _i, _it))
+            # 🔴 2026-09-02 — 감점만으로 부족했다. 아모레퍼시픽 실측:
+            #    "공모전 시상식 개최"가 종목명 앞쪽(+20) + 잡음단어(-30)
+            #    = -10점인데도, **다른 대안이 없으면** 그대로 1등으로
+            #    뽑혔다. 최종 점수가 0 미만이면 아예 후보에서 뺀다 —
+            #    그 결과 이 종목에 쓸 만한 기사가 하나도 없으면
+            #    "기사 없음"이 뜬다. 홍보성 기사를 억지로 보여주는 것보다
+            #    정직하게 없다고 하는 게 낫다(원칙14).
+            _sc = [x for x in _sc if x[0] >= 0]
             _sc.sort(key=lambda x: (-x[0], x[1]))
             # 🔴 2026-09-01 (3차) — 5→3으로 줄임. 뉴스 검색 대상을
             #    상장사 전체(3,956개)로 넓히면서 CP_STOCK_NEWS가 2.69MB까지
@@ -5227,8 +5242,7 @@ def build_my_stocks(data):
    out+='<p class="sc-note">지금 시가총액은 <b>연간 영업이익의 '+배.toFixed(0)+'배</b>예요. '+
     '시장이 앞으로 더 벌 거라고 보고 있다는 뜻이에요.</p>';
   }
-  out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선). 최근 확정 연도 기준이라 '+
-   '올해 실적은 아직 안 들어가 있어요.</p>';
+  out+='<p class="sc-src">출처 — DART 사업보고서(연결 우선)</p>';
   return out+'</div>';
  }
  function scToggle(nm, id){
@@ -5310,9 +5324,7 @@ def build_my_stocks(data):
     _뉴.slice(0,4).forEach(function(n){
      _lst+='<p class="sc-news">'+(n.k?'<span class="sc-kind">'+n.k+'</span> ':'')+
       '<a href="'+n.u+'" target="_blank">'+n.t+'</a></p>';});
-    _lst+='<p class="sc-note">이 종목 이름이 들어간 <b>최근 기사·공시</b>예요. '+
-     '재료가 실제 매출로 잡히기까지는 보통 <b>2~4분기</b>가 걸려서, '+
-     '지금 주가에 반영된 건 대개 <b>기대</b>예요.</p>';
+    _lst+='<p class="sc-note">이 종목 이름이 들어간 <b>최근 기사·공시</b>예요.</p>';
    }else{
     _lst='<p class="sc-note">기록에 남은 기간 안에 이 종목 이름이 들어간 '+
      '기사·공시가 <b>없었어요</b>.</p>';
@@ -6460,6 +6472,55 @@ def _zone_size_split(구역명):
         return None
 
 
+def build_theme_spotlight():
+    """🔥 오늘 뜬 테마 — 핵심편 독립 코너.
+
+    🆕 2026-09-02 HO 지시 — "섹터는 어느 정도 체계가 잡혔는데, 테마가
+    문제다. 사람들이 테마에 더 주목할 것 같다." 지금까지 테마는
+    핵심편 "오늘 상위 섹터" 카드 안에 곁다리(_zone_themes, "그중에서도
+    HBM·CXL 테마가 이끌었어요")로만 있었다. 심층편엔 "오늘의 주인공"이
+    있지만, 대부분이 보는 3분 요약(핵심편)엔 테마가 독립적으로 없었다.
+    ⚠️ 새 수집 0회 — data["주도섹터"](이미 매일 저장 중)와
+       theme_return_badge()(이미 있음, 8/29부터)를 재배치만 한다.
+    ⚠️ 심층편 "오늘의 주인공"(build_sectors, 종목 목록까지 상세)과
+       역할을 나눈다 — 여긴 순위·등락·확산도·등판배지까지만(요약),
+       종목 목록은 심층편에서 봐야 원칙4(중복 금지)를 지킨다.
+    """
+    _최근 = archive_days(1)
+    if not _최근:
+        return ""
+    _, _오늘d = _최근[-1]
+    주도 = [s for s in (_오늘d.get("주도섹터") or []) if s.get("테마명")][:6]
+    if not 주도:
+        return ""
+
+    줄 = []
+    for i, s in enumerate(주도, 1):
+        테마명 = s.get("테마명", "")
+        등락 = s.get("테마등락")
+        확산 = s.get("확산도")
+        섹터 = s.get("계좌구역")
+        배지 = theme_return_badge(테마명)
+        c = "#ff6b4a" if (등락 or 0) >= 0 else "#5b9bff"
+        줄.append(
+            '<div class="th-row">'
+            f'<span class="th-rank">{i}</span>'
+            '<div class="th-mid">'
+            f'<span class="th-name">{테마명}</span>'
+            + (f'<span class="th-zone">{섹터}</span>' if 섹터 else '')
+            + '</div>'
+            '<div class="th-right">'
+            f'<b style="color:{c}">{(등락 or 0):+.1f}%</b>'
+            + (f'<span class="th-sp">확산 {확산:.0f}%</span>' if 확산 is not None else '')
+            + '</div>'
+            + (f'<div class="th-badge">{배지}</div>' if 배지 else '')
+            + '</div>'
+        )
+    return (f'<div class="sc-blk th-blk"><p class="sc-h">🔥 오늘 뜬 테마</p>'
+            f'<p class="th-sub">섹터보다 좁고 빠른 층 — 오늘 실제로 돈이 몰린 이야기예요.</p>'
+            + "".join(줄) + '</div>')
+
+
 def build_sector_ladder():
     """🪜 섹터 순위 사다리 — 최근 며칠 순위 이동을 선 하나로 보여준다.
 
@@ -6979,9 +7040,19 @@ def build_sector_scoreboard():
   // ⚠️ 초기 체크는 HTML의 checked 속성으로 판단해야 한다.
   //    .checked(프로퍼티)는 다른 패널의 같은 섹터를 훑는 도중 덮여
   //    전부 false가 될 수 있다(실제로 선이 하나도 안 보였다).
+  // 🔴 2026-09-02 HO 지시 — "기본 체크박스는 6개만(상위3+하위3)".
+  //    [원인] 탭이 4개(당일·5일·20일·60일)인데, 각 탭마다 그 탭 기준
+  //    상위3+하위3(6개)이 checked다. 예전엔 **전체 탭**의 체크박스를
+  //    다 훑어서 합쳤다 — 탭마다 다른 섹터가 뽑히면 최대 24개까지
+  //    합쳐질 수 있었다. → **처음 보이는 탭(기본 5일)만** 훑는다.
+  //    탭을 바꿔도 이 6개 섹터명은 그대로 유지된다(섹터명 자체는
+  //    탭과 무관하니, "내가 고른 6개"가 계속 이어지는 게 자연스럽다).
   var s={};
-  document.querySelectorAll('.sb-ck').forEach(function(c){
-   if(c.hasAttribute('checked')) s[c.dataset.zone]=1; });
+  document.querySelectorAll('.sb-panel').forEach(function(pnl){
+   if(pnl.style.display==='none') return;
+   pnl.querySelectorAll('.sb-ck').forEach(function(c){
+    if(c.hasAttribute('checked')) s[c.dataset.zone]=1; });
+  });
   window.CP_SECT=s;
  }
  // 보이는 라벨만 모아 겹칠 때만 밀어낸다. 안 겹치면 선 옆에 그대로 둔다.
@@ -9281,6 +9352,10 @@ def build_core(핵심편, data, 해석):
             #    여기까지가 '시장 이야기'다. 머리를 한 번 정리하고
             #    아래 섹터·내 종목으로 넘어가게 한다.
             + build_midsummary(data, 해석)
+            # 🆕 2026-09-02 HO 지시 — 테마를 섹터보다 먼저 보여준다.
+            #    "섹터는 주소, 테마는 오늘의 사건"이라는 철학대로,
+            #    좁고 빠른 층(테마)을 넓고 안정된 층(섹터) 앞에 둔다.
+            + build_theme_spotlight()
             # 🆕 2026-08-22 HO 지시 — 「오늘 주도 섹터」(사다리)를 뒤집어보기 뒤로.
             #    ⚠️ 섹터 코너는 핵심편에 이것 하나뿐이다(칩은 2026-08-22에 제거).
             #       상위는 사다리 그림, 하위는 그 카드 안 한 줄로 흡수했다.
@@ -12203,6 +12278,23 @@ html{{scroll-behavior:smooth}}
 .sc-more{{margin:8px 0 0;font-size:11px;font-weight:700;color:#f0c65a;
   cursor:pointer;text-align:center;padding:6px;background:#141922;border-radius:7px}}
 .sc-blk{{background:#141922;border-radius:8px;padding:8px 9px;margin-top:7px}}
+/* 🆕 2026-09-02 — 「오늘 뜬 테마」 독립 코너 */
+.th-blk{{margin:0 0 10px}}
+.th-sub{{margin:2px 0 8px;font-size:10.5px;color:#7d848f}}
+.th-row{{display:flex;align-items:center;gap:8px;padding:7px 2px;
+  border-bottom:1px solid #1e2531;flex-wrap:wrap}}
+.th-row:last-child{{border-bottom:none}}
+.th-rank{{flex:0 0 auto;width:18px;height:18px;border-radius:50%;
+  background:#232a36;color:#c9d0d9;font-size:10px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}}
+.th-mid{{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}}
+.th-name{{font-size:13px;font-weight:800;color:#f2f4f7}}
+.th-zone{{font-size:9.5px;color:#6f7784}}
+.th-right{{flex:0 0 auto;text-align:right}}
+.th-right b{{font-size:13px;font-weight:900}}
+.th-sp{{display:block;font-size:9px;color:#7d848f;margin-top:1px}}
+.th-badge{{flex:0 0 100%;margin-top:2px}}
+.th-badge .sc-str{{font-size:9.5px}}
 .sc-news{{margin:3px 0 0;font-size:10.5px;line-height:1.55}}
 /* 🆕 2026-08-26 — 「왜 주목받나」의 수급·레이더 줄. 뉴스 링크와 구분되게
    왼쪽에 얇은 띠를 두고 글자색을 한 단계 밝게 한다. */
