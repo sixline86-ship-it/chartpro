@@ -199,7 +199,7 @@ def trading_day_context(today):
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = True
 
-DATE = datetime.now().strftime("%Y%m%d")
+DATE = "20260901"
 # 🔴 2026-09-01 대형 사고 발견·수정 — 이 줄이 "20260831"로 하드코딩된 채
 #    실제 전달 파일에 그대로 남아 있었다. 원인: 미리보기 빌드 때마다
 #    /home/claude/preview에서만 임시로 날짜를 고정해야 했는데, 어느
@@ -536,7 +536,14 @@ def _mkt_ammo_spark(시장="코스피", W=118, H=52):
 
 
 def _mkt_mini_gauge(시장="코스피"):
-    """성적표 카드용 미니 계기판 — 심층편과 같은 계기를 더 작게."""
+    """성적표 카드용 미니 계기판 — 심층편과 같은 계기를 더 작게.
+
+    🔴 2026-09-01 HO 지시 — "계기판을 줄여서 세로 그래프가 한 줄에 다
+       들어가게" + "실탄=외국인+기관 설명을 계기판 밑에".
+       [WHY] 실측(320px): 계기판 92px + 텍스트 115px + 실탄막대 118px =
+       325px인데 카드 폭은 228px뿐이라 자동으로 세로로 쌓이고 있었다.
+       92→60px로 줄이고, 오른쪽 텍스트 폭도 좁혀서(CSS) 한 줄에 담는다.
+    """
     시리즈 = _mkt_ammo_series(시장, FLOW_창 + 4)
     if len(시리즈) < 3:
         return ""
@@ -546,7 +553,8 @@ def _mkt_mini_gauge(시장="코스피"):
     c = FS_BUY if st["v"] >= 0 else FS_SELL
     ico, key = _fs_keyfact(st)
     return (f'<div class="sc2-g">'
-            f'<div class="sc2-g-l">{_fs_gauge(st, 92)}</div>'
+            f'<div class="sc2-g-l">{_fs_gauge(st, 100)}'
+            f'<p class="sc2-g-def">실탄=외국인+기관</p></div>'
             f'<div class="sc2-g-r">'
             f'<p class="sc2-g-v" style="color:{c}">{_flow_amt(st["v"])}</p>'
             f'<p class="sc2-g-s">실탄 · {st["dir"]} <b>{st["rk"]}위</b>/{st["n"]}일</p>'
@@ -3562,16 +3570,25 @@ def _mystock_payload():
                         _코드]
     if not days:
         return None
-    시장 = {}
+    # 🔴 2026-09-01 HO 지시 — "코스닥 종목도 코스피랑 비교되고 있는 거
+    #    아니야?" → 맞았다. 실측 확인: 여기 시장 딕셔너리가 "코스피등락"만
+    #    읽어서 모든 종목(코스닥 포함)에 공통으로 쓰이고 있었다.
+    #    market_history.json에는 코스닥등락도 34일치 다 있다(새 수집 0회) —
+    #    그냥 안 읽고 있었을 뿐이다. 코스피·코스닥 두 배열을 각각 만들어
+    #    JS에서 종목의 시장구분(meta[nm][3], 이미 존재)에 맞게 고르게 한다.
+    시장_코스피, 시장_코스닥 = {}, {}
     try:
         with open("market_history.json", encoding="utf-8") as f:
             for r in ((json.load(f) or {}).get("일별") or []):
-                시장[str(r.get("날짜", "")).replace("-", "")] = r.get("코스피등락")
+                _d = str(r.get("날짜", "")).replace("-", "")
+                시장_코스피[_d] = r.get("코스피등락")
+                시장_코스닥[_d] = r.get("코스닥등락")
     except Exception:
         pass
     return {
         "days": days,
-        "mkt": [시장.get(d) for d in days],
+        "mkt_kospi": [시장_코스피.get(d) for d in days],
+        "mkt_kosdaq": [시장_코스닥.get(d) for d in days],
         "stocks": meta,
         "ret": {nm: [per[nm].get(d) for d in days] for nm in per},
     }
@@ -3964,23 +3981,20 @@ def build_my_stocks(data):
             _sc = []
             for _i, _it in enumerate(_lst):
                 _t = _it.get("t") or ""
-                # 🔴 2026-09-01 (4차) 실측 버그 발견 — 제목에 종목명이
-                #    아예 없는 기사("코스피 3.12% 급락에도 강원 코스닥주
-                #    강세…메쥬 8.88% 상승")가 휴젤 카드에 그냥 떴다.
-                #    stock_news_raw는 네이버가 "관련 뉴스"로 묶어준 걸
-                #    그대로 가져온 거라, 종목명이 본문에만 있고 제목엔
-                #    없는 시황 나열 기사가 섞여 있다. 원래는 "잡음 단어"
-                #    목록에 걸려야 걸러졌는데, 그 목록에 없는 표현이면
-                #    감점 없이 0점 기본값으로 살아남았다.
-                #    → 제목에 종목명이 **아예 없으면 통째로 제외**한다.
-                #    원칙14 — 관련 없는 기사를 "이 종목 이슈"라고
-                #    보여주는 것보다, 없으면 없다고 하는 게 낫다.
-                if _n not in _t:
-                    continue
+                # 🔴 2026-09-02 실측 재조정 — "제목에 종목명 없으면 통째로
+                #    제외"가 너무 셌다. 실측: 네이버가 찾아준 기사의
+                #    65.5%가 이 필터 하나로 사라지고 있었다("기사 없음"
+                #    종목이 많다는 HO 지적의 진짜 원인). 완전 배제 대신
+                #    큰 감점(-40)만 준다 — 잡음단어(코스피·특징주 등,
+                #    -30)까지 같이 걸리면 사실상 순위 밖으로 밀려나
+                #    시황 나열 기사는 여전히 안 뜨지만, 종목명이 제목엔
+                #    없어도 실제 관련 있는 기사는 다른 대안이 없을 때
+                #    최후 수단으로 노출될 수 있다.
                 _p = 50 if "공시" in (_it.get("k") or "") else 0
-                # 제목 앞쪽에 종목명이 있으면 그 종목이 주인공인 기사다
                 _pos = _t.find(_n)
-                if 0 <= _pos <= 6:
+                if _pos == -1:
+                    _p -= 40
+                elif 0 <= _pos <= 6:
                     _p += 20
                 elif _pos > 20:
                     _p -= 5
@@ -4200,6 +4214,15 @@ def build_my_stocks(data):
  function get(){try{return JSON.parse(localStorage.getItem(K))||[]}catch(e){return []}}
  function set(v){try{localStorage.setItem(K,JSON.stringify(v))}catch(e){}}
  // 내 관심종목이 속한 섹터 집합 — 계좌 구역·섹터 성적표·시총별 섹터가 함께 쓴다.
+ // 🔴 2026-09-01 HO 지시 — "코스닥 종목도 코스피 대비인 거야?" 실측 확인
+ //    후 수정. P.stocks[nm][3]에 이미 시장구분("코스피"/"코스닥")이 있다
+ //    (전부터 있었는데 안 쓰고 있었을 뿐). 코스닥이면 코스닥 지수, 그
+ //    외(코스피·정보없음)는 코스피 지수를 쓴다 — 정보 없을 때 코스피로
+ //    fallback하는 게 원래 동작(전부 코스피였음)과 제일 가깝다.
+ function mktFor(nm){
+  var m=P.stocks[nm];
+  return (m && m[3]==='코스닥') ? P.mkt_kosdaq : P.mkt_kospi;
+ }
  window.cpMyZones=function(){var s={};
   get().forEach(function(nm){((P.stocks[nm]||[[]])[0]||[]).forEach(function(z){s[z]=1;});});
   return s;};
@@ -4214,7 +4237,8 @@ def build_my_stocks(data):
  function fmt(v){return (v>=0?'+':'')+v.toFixed(1);}
  function calc(nm,n){
   var r=P.ret[nm]; if(!r) return null;
-  var idx=[]; for(var i=0;i<P.days.length;i++){if(r[i]!=null&&P.mkt[i]!=null)idx.push(i);}
+  var mk=mktFor(nm);
+  var idx=[]; for(var i=0;i<P.days.length;i++){if(r[i]!=null&&mk[i]!=null)idx.push(i);}
   idx=idx.slice(-n);
   /* 🆕 2026-08-24 HO 지적 — 당일 탭에 등락률이 안 나오던 버그.
      [원인] "2일 미만이면 통계가 안 된다"는 방어가 **당일 탭까지 같이 막고** 있었다.
@@ -4223,7 +4247,7 @@ def build_my_stocks(data):
   var 최소 = (n<=1) ? 1 : 2;
   if(idx.length<최소) return {short:true,have:idx.length};
   var tc=1,mc=1,w=0;
-  idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100); if(r[i]>P.mkt[i])w++;});
+  idx.forEach(function(i){tc*=(1+r[i]/100); mc*=(1+mk[i]/100); if(r[i]>mk[i])w++;});
   return {ex:(tc-mc)*100, ret:(tc-1)*100, win:w, tot:idx.length};
  }
 
@@ -4303,7 +4327,17 @@ def build_my_stocks(data):
     var _주 = (curW<=1) ? fmt(c.ret)+'%'  : fmt(c.ex)+'%p';
     var _보 = (curW<=1) ? '시장 대비 '+fmt(c.ex)+'%p' : fmt(c.ret)+'%';
     var _주색 = (curW<=1) ? (c.ret>=0?'#ff6b4a':'#5b9bff') : col;
+    // 🔴 2026-09-01 HO 지시 — "등락률 밑에 시장대비 글자를 넣어줘."
+    //    [WHY] 5·20·60일 탭은 큰 글씨가 %p(초과수익)인데 라벨이 없어서
+    //    "이게 등락률인가?" 헷갈렸다. 당일 탭엔 이미 "시장 대비"가 붙어
+    //    있으니 여기도 맞춘다. 어느 시장 기준인지(코스피/코스닥)도 같이
+    //    밝힌다 — 코스닥 종목이 섞여 있으면 그냥 "시장대비"만으론
+    //    어느 지수인지 여전히 안 보인다.
+    var _mkNm = (mktFor(nm)===P.mkt_kosdaq) ? '코스닥' : '코스피';
+    var _라벨 = (curW<=1) ? '' :
+      '<div style="font-size:9px;color:#6f7784">'+_mkNm+' 대비</div>';
     right='<div style="text-align:right;flex:none;width:82px">'+
+     _라벨+
      '<div style="font-size:15px;font-weight:800;color:'+_주색+'">'+_주+'</div>'+
      '<div style="font-size:11px;color:#7d848f">'+_보+'</div>'+
      /* 🆕 2026-08-25 HO 지시 — 당일 탭의 '시장 상회/하회' 글자 제거.
@@ -5167,17 +5201,22 @@ def build_my_stocks(data):
   else if(영.length>=2&&영[영.length-2]!==null&&영[영.length-2]<0&&끝.영업이익>0)
    적자경고='<p class="sc-warn">⚠️ 적자였다가 <b>흑자로 돌아선</b> 상태예요 — 이어지는지가 관건이에요</p>';
 
+  var 최신연도 = ys[ys.length - 1];
   var out='<div class="sc-fin"><p class="sc-h">💰 돈은 벌고 있나 <span class="sc-sub">'+
    기간표시+'</span></p>'+
-   '<div class="sc-row"><span class="sc-k">매출</span>'+_bars(매)+
+   // 🔴 2026-09-01 (3차) HO 지시 — "매출·영업이익에 기간이 안 나온다."
+   //    [WHY] 위 헤더(기간표시)에만 "2025년 연결 기준"이 있고, 각 항목
+   //    라벨은 그냥 "매출"이라 눈이 헤더까지 안 올라가면 몇 년도인지
+   //    바로 안 보였다. 라벨 자체에 연도를 박아 헤더를 안 봐도 되게 한다.
+   '<div class="sc-row"><span class="sc-k">매출('+최신연도+')</span>'+_bars(매)+
    '<b class="sc-v">'+(_fmtEok(끝.매출)||'—')+'</b></div>'+
-   '<div class="sc-row"><span class="sc-k">영업이익</span>'+_bars(영)+
+   '<div class="sc-row"><span class="sc-k">영업이익('+최신연도+')</span>'+_bars(영)+
    '<b class="sc-v" style="color:'+((끝.영업이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
    (_fmtEok(끝.영업이익)||'—')+'</b></div>'+
    이익률행;
   // 🔴 2026-09-01 (2차) HO 지시 — "순이익은 영업이익률 밑에 나오게 해줘."
   //    [매출→영업이익→영업이익률→순이익→부채비율] 순서로 고정.
-  out+='<div class="sc-row"><span class="sc-k">순이익</span>'+_bars(순)+
+  out+='<div class="sc-row"><span class="sc-k">순이익('+최신연도+')</span>'+_bars(순)+
    '<b class="sc-v" style="color:'+((끝.순이익||0)>=0?'#ff6b4a':'#5b9bff')+'">'+
    (_fmtEok(끝.순이익)||'—')+'</b></div>';
   out+=부채+증+적자경고;
@@ -5386,14 +5425,21 @@ def build_my_stocks(data):
   return '';                           // ③ 뚜렷하지 않으면 침묵
  }
  function drawTodayBars(my, host){
-  /* 당일 초과수익 막대 — 종목별로 '오늘 시장을 얼마나 이겼나'를 나란히. */
+  /* 당일 초과수익 막대 — 종목별로 '오늘 시장을 얼마나 이겼나'를 나란히.
+     🔴 2026-09-01 — 종목마다 자기 시장(코스피/코스닥)으로 계산한다.
+     [WHY] 예전엔 전부 "코스피 대비"였다(코스닥 종목도). 이제 mktFor(nm)로
+     종목별 정확한 기준을 쓰고, 점선 라벨도 실제 섞인 시장을 반영한다. */
   var last=P.days.length-1;
-  while(last>=0 && P.mkt[last]==null) last--;
+  while(last>=0 && P.mkt_kospi[last]==null && P.mkt_kosdaq[last]==null) last--;
   if(last<0||!my.length){host.innerHTML=''; return;}
-  var mv=P.mkt[last], rows=[];
+  var rows=[], mkVals={};
   my.forEach(function(nm){var r=P.ret[nm];
    if(!r||r[last]==null) return;
-   rows.push({nm:nm, ex:r[last]-mv, ret:r[last]});});
+   var mk=mktFor(nm), mv=mk[last];
+   if(mv==null) return;
+   var mkNm=(mk===P.mkt_kosdaq)?'코스닥':'코스피';
+   mkVals[mkNm]=mv;
+   rows.push({nm:nm, ex:r[last]-mv, ret:r[last], mkNm:mkNm});});
   if(!rows.length){host.innerHTML=''; return;}
   rows.sort(function(a,b){return b.ex-a.ex;});
   var W=360,H=Math.max(70,26+rows.length*22),L=70,R=52,mx=1;  /* R=수치 자리. +33.1%p가 잘려 넓혔다 */
@@ -5402,11 +5448,16 @@ def build_my_stocks(data):
   /* 🆕 2026-08-24 HO 지시 — 시장평균을 그래프에 직관적으로.
      [WHY] 막대가 0선 기준이면 "0보다 크다"는 건 알겠는데
            **그 0이 코스피라는 걸** 모른다. 선에 이름을 붙여준다.
-     세로 점선 + 상단 라벨로 "여기가 코스피" 를 못 박는다. */
+     세로 점선 + 상단 라벨로 "여기가 코스피" 를 못 박는다.
+     ⚠️ 코스닥이 섞여 있으면 "코스피"라고 단정할 수 없다 — 실제 섞인
+        시장 전부를 라벨에 나열한다(값 자체는 종목마다 이미 맞게 계산돼
+        있으니, 이 라벨은 "0선이 뭘 뜻하는지" 설명일 뿐이다). */
+  var _mkKeys=Object.keys(mkVals);
+  var _mkLabel=_mkKeys.map(function(k){return k+' '+fmt(mkVals[k])+'%';}).join(' · ');
   var g='<line x1="'+z+'" y1="16" x2="'+z+'" y2="'+(H-6)+'" stroke="#f0c65a" '+
         'stroke-width="1.4" stroke-dasharray="3 2"/>'+
         '<text x="'+z+'" y="10" text-anchor="middle" font-size="8.5" font-weight="800" '+
-        'fill="#f0c65a">코스피 '+fmt(mv)+'%</text>'+
+        'fill="#f0c65a">'+_mkLabel+'</text>'+
         /* ⚠️ 화살표는 **가리키는 방향**이 곧 뜻이다. 반대로 쓰면 정반대로 읽힌다. */
         '<text x="'+(z+half*0.55)+'" y="10" text-anchor="middle" font-size="8" '+
         'fill="#ff6b4a">이긴 쪽 →</text>'+
@@ -5427,7 +5478,7 @@ def build_my_stocks(data):
  function drawChart(my){
   var host=document.getElementById('ms-chart'); if(!host) return;
   var W=360,H=150,L=30,R=10,T=12,B=20;
-  var idx=[]; for(var i=0;i<P.days.length;i++){if(P.mkt[i]!=null)idx.push(i);}
+  var idx=[]; for(var i=0;i<P.days.length;i++){if(P.mkt_kospi[i]!=null||P.mkt_kosdaq[i]!=null)idx.push(i);}
   /* 🆕 2026-08-24 HO 지시 — **당일 탭에도 그래프**를 준다.
      [문제] 당일(curW=1)이면 점이 1개라 선을 못 그려서 그래프가 통째로 사라졌다.
             탭을 눌렀는데 화면이 비면 고장으로 보인다.
@@ -5444,10 +5495,14 @@ def build_my_stocks(data):
   var _부족=(idx.length<_요청);
   if(!my.length||idx.length<3){host.innerHTML=''; return;}
   var series=[],all=[];
+  // 🔴 2026-09-01 — 종목마다 자기 시장(mktFor)으로 누적 초과수익 계산.
+  //    예전엔 전부 P.mkt(코스피)만 썼다. 코스닥 종목이 섞여 있으면
+  //    누적선 자체가 틀린 기준으로 그려지고 있었다.
   my.forEach(function(nm){var r=P.ret[nm]; if(!r) return;
+   var mk=mktFor(nm);
    var tc=1,mc=1,pts=[];
-   idx.forEach(function(i){if(r[i]==null)return;
-    tc*=(1+r[i]/100); mc*=(1+P.mkt[i]/100);
+   idx.forEach(function(i){if(r[i]==null||mk[i]==null)return;
+    tc*=(1+r[i]/100); mc*=(1+mk[i]/100);
     var v=(tc-mc)*100; pts.push(v); all.push(v);});
    if(pts.length>=3) series.push({nm:nm,pts:pts});});
   if(!series.length){host.innerHTML=''; return;}
@@ -5577,7 +5632,7 @@ def build_my_stocks(data):
             #    똑같은 크기(11.5px 회색)라 묻혀 보인다. 이 카드는 핵심편의
             #    새 진입점이라 제목을 눈에 띄게 키운다("등록하기"로 행동 유도도 함께).
             '<p style="margin:0 0 6px;font-size:17px;font-weight:800;color:#f0c65a">'
-            '📋 내 종목 등록하기</p>'
+            '📋 내 종목 추적하기</p>'
             '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
             '시장 대비 성적(5·20·60일), 그날의 뉴스와 공시, 소속 섹터 변화까지 '
@@ -11188,7 +11243,7 @@ def build_html(data, report):
     #     §8 규칙대로 **제목 라벨까지 함께** hide() 안에 넣는다(라벨만 남는 실수 방지).
     _mystock_deep = hide("심층편관심종목",
         '<p class="sec-label"><small>내 자리</small>'
-        '📋 내 종목 등록하기</p>'
+        '📋 내 종목 추적하기</p>'
         + build_my_stocks(data) + build_stock_brief())
 
     날짜 = f"{data['날짜'][:4]}.{data['날짜'][4:6]}.{data['날짜'][6:]}"
@@ -12119,7 +12174,7 @@ html{{scroll-behavior:smooth}}
 .sc-why-m{{margin:4px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}}
 .sc-fin{{background:#141922;border-radius:8px;padding:8px 9px}}
 .sc-row{{display:flex;align-items:center;gap:7px;margin-top:5px;flex-wrap:wrap}}
-.sc-k{{font-size:10.5px;color:#8b93a0;width:52px;flex:none}}
+.sc-k{{font-size:9.5px;color:#8b93a0;width:68px;flex:none}}
 .sc-v{{font-size:12px;font-weight:800;color:#e8eaee}}
 .sc-warn{{margin:6px 0 0;font-size:10.5px;color:#e0c060;line-height:1.55}}
 .sc-note{{margin:6px 0 0;font-size:10.5px;color:#a8b0ba;line-height:1.6}}
@@ -12303,25 +12358,34 @@ html{{scroll-behavior:smooth}}
 .sc2-tag{{display:inline-block;font-size:9.5px;font-weight:800;padding:.1rem .45rem;border-radius:20px;border:1px solid #2a3342}}
 .sc2-txt{{font-size:10.5px;color:#8b93a0;margin:.28rem 0 0;line-height:1.6}}
 .sc2-txt b{{color:#c9d0d9}}
-.sc2-bot{{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.55rem;
-  align-items:center;margin:.6rem 0 0;padding:.55rem 0 0;
+.sc2-bot{{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.6rem;
+  align-items:center;margin:.7rem 0 0;padding:.6rem 0 0;
   border-top:1px solid rgba(255,255,255,.07)}}
-.sc2-g{{display:flex;align-items:center;gap:.45rem;min-width:0}}
-.sc2-g-l{{flex:0 0 auto}}
-.sc2-g-r{{min-width:0}}
-.sc2-g-v{{margin:0;font-size:13px;font-weight:900;letter-spacing:-.3px}}
-.sc2-g-s{{margin:.1rem 0 0;font-size:9.5px;color:#8b93a0;white-space:nowrap}}
+/* 🔴 2026-09-02 HO 지시 — "계기판과 실탄 막대가 너무 작아. 더 키워줘."
+   [WHY] 8/31에 320px 한 줄에 억지로 우겨넣으려 60px까지 줄였는데,
+   이번엔 크기가 우선이다. 크게 키우고, 정말 좁은 화면(360px 이하)
+   에서만 자동으로 세로로 쌓이게 한다 — 큰 화면에서 항상 크게 보이고
+   좁은 화면에서도 안 잘린다. */
+.sc2-g{{display:contents}}
+.sc2-g-l{{display:flex;flex-direction:column;align-items:center;gap:.15rem}}
+.sc2-g-def{{margin:0;font-size:8.5px;color:#6f7784;font-weight:700;
+  white-space:nowrap;letter-spacing:-.1px}}
+.sc2-g-r{{min-width:0;max-width:118px}}
+.sc2-g-v{{margin:0;font-size:15px;font-weight:900;letter-spacing:-.3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.sc2-g-s{{margin:.12rem 0 0;font-size:10.5px;color:#8b93a0;line-height:1.35}}
 .sc2-g-s b{{color:#c9d0d9}}
-.sc2-g-k{{display:inline-block;margin:.22rem 0 0;font-size:9px;font-weight:800;
-  padding:.08rem .38rem;border-radius:20px;border:1px solid #2a3342;
+.sc2-g-k{{display:inline-block;margin:.26rem 0 0;font-size:9.5px;font-weight:800;
+  padding:.1rem .4rem;border-radius:20px;border:1px solid #2a3342;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
 .sc2-spark{{flex:0 0 auto;text-align:center}}
-.sc2-spark-t{{margin:0 0 .1rem;font-size:8.5px;color:#6f7784;font-weight:700;
+.sc2-spark-t{{margin:0 0 .15rem;font-size:9.5px;color:#6f7784;font-weight:700;
   white-space:nowrap}}
-.sc2-spark svg{{width:118px;height:52px;display:block}}
+.sc2-spark svg{{width:150px;height:66px;display:block}}
+/* 정말 좁은 화면에서만 세로로 쌓는다 — 320px에서 실측해 정한 문턱. */
 @media (max-width:400px){{
-  .sc2-bot{{grid-template-columns:1fr;gap:.45rem}}
-  .sc2-spark{{justify-self:start}}
+  .sc2-bot{{grid-template-columns:1fr;justify-items:center;gap:.5rem}}
+  .sc2-g-l{{flex-direction:row;gap:.6rem}}
 }}
 @media (max-width:359px){{.sc2{{grid-template-columns:1fr}}}}
 /* ── 수급 관제신호 v5 ── */
