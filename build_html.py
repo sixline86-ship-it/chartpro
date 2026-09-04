@@ -508,7 +508,7 @@ def _mkt_ammo_series(시장="코스피", days=5):
     return out[-days:]
 
 
-def _mkt_ammo_spark(시장="코스피", W=118, H=52):
+def _mkt_ammo_spark(시장="코스피", W=118, H=64):
     """성적표 카드용 실탄 5일 세로 막대 (작게)."""
     시리즈 = _mkt_ammo_series(시장, 5)
     if len(시리즈) < 2:
@@ -532,7 +532,8 @@ def _mkt_ammo_spark(시장="코스피", W=118, H=52):
         if i == n - 1:
             g.append(f'<text x="{x+bw/2:.0f}" y="{H-1.5:.0f}" font-size="7" '
                      f'fill="#c9d0d9" text-anchor="middle" font-weight="800">{날[i]}</text>')
-    return (f'<div class="sc2-spark"><p class="sc2-spark-t">최근 {n}일 실탄</p>'
+    return (f'<div class="sc2-spark"><p class="sc2-spark-t">최근 {n}일 실탄'
+            f'<span class="sc2-spark-def">실탄=외국인+기관</span></p>'
             f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg></div>')
 
 
@@ -563,30 +564,125 @@ def _mkt_mini_gauge(시장="코스피"):
             f'</div></div>')
 
 
+def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
+    """[칸2] 5일 지수 캔들차트 — archive의 시가·고가·저가·종가로.
+
+    🔴 2026-09-02 (2차) HO 지시 — "지수 그래프를 캔들로." 선그래프에서
+       교체한다. archive_days()의 지수수급.지수.{시장}에 시가·고가·저가가
+       실측 확인됨(코스피 8일치·코스닥 8일치, 2026-09-02 기준) — 새 수집
+       불필요, archive_days()로 이미 있는 걸 읽기만 한다.
+    ⚠️ market_history.json이 아니라 archive를 쓴다 — market_history엔
+       종가만 있고, 캔들에 필요한 시가·고가·저가가 없다(실측 확인,
+       0일치). archive는 코스피·코스닥 둘 다 시고저가 있어 소스를
+       하나로 통일할 수 있다.
+    """
+    키 = _mkt_key(시장)
+    if not 키:
+        return ""
+    시리즈 = []
+    try:
+        for 날짜, d in archive_days(days + 6):
+            지수 = ((d.get("지수수급") or {}).get("지수") or {}).get(키) or {}
+            시, 고, 저, 종 = (_to_float(지수.get("시가")), _to_float(지수.get("고가")),
+                          _to_float(지수.get("저가")), _to_float(지수.get("종가")))
+            if None in (시, 고, 저, 종):
+                continue
+            시리즈.append((str(날짜), 시, 고, 저, 종))
+    except Exception:
+        return ""
+    시리즈 = 시리즈[-days:]
+    if len(시리즈) < 2:
+        return ""
+    전체고 = max(x[2] for x in 시리즈)
+    전체저 = min(x[3] for x in 시리즈)
+    rng = (전체고 - 전체저) or 1
+    n = len(시리즈)
+    pad = 4
+    간격 = (W - pad * 2) / n
+    bw = max(3, 간격 * 0.55)
+
+    def _y(v):
+        return H - 10 - (v - 전체저) / rng * (H - 18)
+
+    g = []
+    for i, (d, 시, 고, 저, 종) in enumerate(시리즈):
+        cx = pad + 간격 * i + 간격 / 2
+        상승 = 종 >= 시
+        c = FS_BUY if 상승 else FS_SELL
+        y시, y종 = _y(시), _y(종)
+        top, bot = min(y시, y종), max(y시, y종)
+        # 🔴 2026-09-02 (4차) 실측 버그 발견 — "꼬리가 왜 보이냐, 몸통에
+        #    가려야지." [원인] 꼬리(line)를 먼저 그리고 몸통(rect)을
+        #    나중에 덮는데, 몸통에 반투명(opacity .55, 오늘 아닌 날 흐리게
+        #    하려던 것)을 주니 **그 반투명 몸통 사이로 밑의 꼬리가 비쳐
+        #    보였다.** line·rect를 <g opacity>로 묶으면, 그룹 안에서는
+        #    rect가 여전히 완전 불투명하게 line을 가리고(서로 상대적
+        #    불투명 유지), 그룹 전체만 배경 대비 흐려진다 — 그러면
+        #    "오늘만 진하게" 효과는 그대로 살면서 꼬리 비침은 사라진다.
+        g.append(f'<g opacity="{1 if i==n-1 else .55}">'
+                  f'<line x1="{cx:.1f}" y1="{_y(고):.1f}" x2="{cx:.1f}" y2="{_y(저):.1f}" '
+                  f'stroke="{c}" stroke-width="1.2"/>'
+                  f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
+                  f'height="{max(1.5,bot-top):.1f}" fill="{c}"/></g>')
+    날 = f"{시리즈[-1][0][4:6]}/{시리즈[-1][0][6:]}"
+    return (f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
+            + "".join(g) +
+            f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="7.5" '
+            f'fill="#6f7784" font-weight="700">{날}</text></svg>')
+
+
+def _mkt_supply3(수급):
+    """[칸3] 외국인·기관·개인 3칸 — 억 대신 **조** 단위, 이 순서 고정.
+
+    🆕 2026-09-02 HO 지시 — "외국인, 기관, 개인 순으로, 조 단위로."
+    ⚠️ 원본은 억 단위 숫자(예: -4968)라서 10000으로 나눠 조로 바꾼다.
+       소수점 둘째 자리까지 — 조 단위에서 소수 둘째 자리면 100억
+       단위까지는 구분된다(반올림 오차가 크지 않다).
+    """
+    수급 = 수급 or {}
+    항목 = [("외국인", 수급.get("외국인")), ("기관", 수급.get("기관계")),
+            ("개인", 수급.get("개인"))]
+    칸 = []
+    for k, v in 항목:
+        try:
+            조 = float(v) / 10000
+            표시 = f"{조:+.2f}조"
+            색 = FS_BUY if 조 >= 0 else FS_SELL
+        except (TypeError, ValueError):
+            표시, 색 = "—", "#6f7784"
+        칸.append(f'<div class="sc3-c"><p class="sc3-k">{k}</p>'
+                  f'<p class="sc3-v" style="color:{색}">{표시}</p></div>')
+    return f'<div class="sc3">{"".join(칸)}</div>'
+
+
 def build_score_card(이름, 지수, 수급):
-    """지수 카드 한 장 (SCORE B 배치). [수급막대→실탄5일→미니계기판→멘트]."""
+    """지수 카드 한 장 — 정확한 2×2 격자 (2026-09-02 HO 지시로 전면 재구성).
+
+    [1행1열] 지수·등락률        [1행2열] 5일 지수 선그래프
+    [2행1열] 외국인·기관·개인    [2행2열] 5일 실탄 막대(+설명)
+
+    ⚠️ 예전 버전(가로 수급막대·원형 계기판)은 이 격자로 완전히
+       대체됐다. _sc_flowbar()·_mkt_mini_gauge()는 지우지 않고 그대로
+       남겨뒀다(원칙3) — 되살리려면 여기서 다시 부르면 된다.
+    """
     태그, 색, 글 = _sc_read(수급 or {})
     설명 = ""
     if 태그:
         설명 = (f'<div class="sc2-tagbox"><span class="sc2-tag" style="border-color:{색}55;'
                 f'color:{색}">{태그}</span><p class="sc2-txt">{글}</p></div>')
-    _spark = _mkt_ammo_spark(이름)
-    _gauge = _mkt_mini_gauge(이름)
-    _아래 = ""
-    if _spark or _gauge:
-        _아래 = f'<div class="sc2-bot">{_gauge}{_spark}</div>'
-    # ⚠️ 설명글은 **카드 전체 폭**을 쓴다(2026-08-19).
-    #    왼쪽 좁은 칸에 넣으면 두세 줄로 접혀 읽기가 힘들다.
+    _칸2 = _mkt_index_spark(이름)
+    _칸4 = _mkt_ammo_spark(이름)
     return f'''<div class="idx-card2 sc2wrap">
-      <div class="sc2">
-        <div class="sc2-l">
+      <div class="sc4">
+        <div class="sc4-c1">
           <p class="ic-mkt">{이름}</p>
           <p class="ic-num">{지수.get('종가','—')}</p>
           <p class="{idx_dir_class(지수)}">{_pct_signed(지수.get('등락률'))}</p>
         </div>
-        <div class="sc2-r">{_sc_flowbar(수급 or {})}</div>
+        <div class="sc4-c2">{_칸2}</div>
+        <div class="sc4-c3">{_mkt_supply3(수급)}</div>
+        <div class="sc4-c4">{_칸4}</div>
       </div>
-      {_아래}
       {설명}
     </div>'''
 
@@ -3734,6 +3830,27 @@ def build_my_stocks(data):
         _bizport = {}
     이름배열JS += "window.CP_BIZPORT=" + json.dumps(_bizport, ensure_ascii=False) + ";"
 
+    # 🆕 2026-09-04 정식 연결 — "이 회사는 무엇을 만들어 파는가"(기업 설명).
+    #  [WHY] biz_desc_parser.py가 DART 원문을 읽어 만든 biz_description.json이
+    #  이제 99.6% 커버리지(2026-09-04 실측, 회사명 환각 재검증까지 마침)라
+    #  화면에 연결할 근거가 충분하다.
+    #  ⚠️ "설명"이 null인 항목(정직한 "근거부족")은 화면에 보낼 이유가
+    #     없다 — 어차피 못 쓸 데이터라 용량만 늘린다. 여기서 미리 거른다.
+    _bizdesc = {}
+    try:
+        if os.path.exists("biz_description.json"):
+            with open("biz_description.json", encoding="utf-8") as _f:
+                _bd원본 = json.load(_f) or {}
+            _bizdesc = {k: v.get("설명") for k, v in _bd원본.items() if v.get("설명")}
+            print(f"   🏢 기업 설명 {len(_bizdesc)}종목 적재 "
+                  f"(전체 {len(_bd원본)}개 중 실제 설명 있는 것만)")
+        else:
+            print("   🏢 biz_description.json 없음 — 기업 설명은 업종 분류로 대체(정상)")
+    except Exception as e:
+        print(f"   ⚠️ 기업 설명 적재 실패 — {type(e).__name__}")
+        _bizdesc = {}
+    이름배열JS += "window.CP_BIZDESC=" + json.dumps(_bizdesc, ensure_ascii=False) + ";"
+
     # 🆕 2026-09-01 (3차) HO 지시 — "이 회사 한번 제대로 알아볼까?" 느낌을
     #    주는 두 가지. 둘 다 **새 수집 0회** — 이미 있는 데이터를 다르게
     #    엮기만 한다.
@@ -5273,7 +5390,23 @@ def build_my_stocks(data):
    var 회사='';
    var _업=개.업종명||'', _설=개.설립연||'';
    var _본문='';
-   if(_업){
+   // 🆕 2026-09-04 정식 연결 — DART 원문 기반 실제 설명이 있으면 최우선.
+   //    "전기전자·부품 쪽 회사예요" 같은 업종 분류보다 훨씬 구체적이다
+   //    ("LG디스플레이는 TV·스마트폰... 화면 패널을 만들어..." 형태).
+   //    ⚠️ 없으면(근거부족·미수집) 기존 업종 분류 문장으로 그대로 폴백한다
+   //    (원칙14 — 없으면 없다고 짧게 끝내거나, 있는 재료로 대체한다).
+   var _설명AI=(window.CP_BIZDESC||{})[nm]||null;
+   var _설명더있음=false;
+   if(_설명AI){
+    // 🆕 2026-09-04 (2차) HO 지시 — "어떤 회사냐면요가 너무 길다."
+    //    [WHY] 재파싱 없이 **보여주는 방식만** 바꾼다 — 원칙대로 앞면은
+    //    요약, 나머지(불릿 세부 사업)는 «자세히 보기»로 옮긴다(재무를
+    //    이미 그렇게 분리한 것과 같은 방식). 문단 구분(빈 줄)을 기준으로
+    //    첫 문단(핵심 1~2문장)만 요약에 남긴다.
+    var _문단들=_설명AI.split(/\\n\\n+/);
+    _본문=_문단들[0].replace(/\\n/g,'<br>');
+    _설명더있음=_문단들.length>1;
+   }else if(_업){
     /* ⚠️ 조사는 반드시 _josa()로. «기계·장비 제조이», «반도체으로» 같은
        문장이 그대로 나갔다. 업종명·섹터명은 매일 바뀌므로 코드로 막는다. */
     _본문='<b>'+_업+'</b>'+_josa(_업,'이가')+' 본업이에요';
@@ -5304,6 +5437,7 @@ def build_my_stocks(data):
    if(_본문||테마.length||_연혁){
     회사='<div class="sc-blk"><p class="sc-h">🏢 어떤 회사냐면요</p>'+
      (_본문?'<p class="sc-biz">'+_본문+'</p>':'')+_연혁+
+     (_설명더있음?'<p class="sc-src">사업 부문별 자세한 내용은 «자세히 보기»에서 볼 수 있어요.</p>':'')+
      (테마.length?'<p class="sc-note">시장에서는 '+
        테마.map(function(t){return '<b>'+t+'</b>';}).join(' · ')+
        ' 테마로 묶여 있어요.</p>':'')+_gapLine+
@@ -5366,6 +5500,19 @@ def build_my_stocks(data):
       여기서 **다시** 읽는다 — scToggle과 scMore는 별개 함수라 변수를
       못 나눠 쓴다(간단히 재조회하는 쪽이 상태 관리보다 안전하다). */
    var _bp=(window.CP_BIZPORT||{})[nm]||null;
+   // 🆕 2026-09-04 (2차) — 요약에서 뺀 회사 설명 나머지 문단(불릿 등)을
+   // 여기서 다시 조립한다. scToggle과 상태를 못 나눠 쓰니(별개 함수),
+   // window.CP_BIZDESC를 여기서 다시 조회하는 쪽이 간단하고 안전하다.
+   var _설명전체=(window.CP_BIZDESC||{})[nm]||null;
+   var _설명나머지='';
+   if(_설명전체){
+    var _문단들2=_설명전체.split(/\\n\\n+/);
+    if(_문단들2.length>1){
+     _설명나머지='<div class="sc-blk"><p class="sc-h">🏢 회사 설명 자세히</p>'+
+      '<p class="sc-biz">'+_문단들2.slice(1).join('\\n\\n')
+        .replace(/\\n/g,'<br>').replace(/^- /gm,'&nbsp;&nbsp;• ')+'</p></div>';
+    }
+   }
    var _포트='';
    if(_bp&&_bp.부문&&_bp.부문.length){
     var _rows='';
@@ -5385,6 +5532,7 @@ def build_my_stocks(data):
      '</p></div>';
    }
    d.innerHTML=
+    _설명나머지+
     _포트+
     _fin(nm,true)+
     '<p class="sc-disc">투자 판단을 대신하지 않아요. 조건과 숫자를 그대로 보여드릴 뿐이에요.</p>';
@@ -12474,7 +12622,37 @@ html{{scroll-behavior:smooth}}
 .sc2-spark{{flex:0 0 auto;text-align:center}}
 .sc2-spark-t{{margin:0 0 .15rem;font-size:9.5px;color:#6f7784;font-weight:700;
   white-space:nowrap}}
-.sc2-spark svg{{width:150px;height:66px;display:block}}
+.sc2-spark-def{{display:block;font-size:7.5px;color:#5b6270;font-weight:600;
+  margin-top:1px;white-space:nowrap}}
+.sc2-spark svg{{width:100%;max-width:150px;height:52px;display:block;margin:0 auto}}
+/* 🔴 2026-09-02 HO 지시 — 정확한 2×2 격자로 전면 재구성.
+   [1행1열] 지수·등락률 [1행2열] 5일 지수선그래프
+   [2행1열] 수급 3칸    [2행2열] 5일 실탄막대
+   ⚠️ 옛 .sc2-bot·.sc2-g 블록은 이제 안 쓰이지만 지우지 않는다(원칙3). */
+/* 🔴 2026-09-02 (3차) HO 지시 — "경계선은 더 살짝, 내용물이 칸을 꽉
+   채우게, 3·4사분면은 1·2사분면보다 작아도 됨."
+   [WHY] grid에 align-items를 안 정했더니 기본값(stretch)이 적용돼,
+   내용이 짧은 칸도 옆 칸 높이만큼 억지로 늘어나 위아래에 빈 여백이
+   생겼다. align-items:start로 바꾸면 각 칸이 **자기 내용 크기만큼만**
+   차지한다 — 그러면 3·4행(수급·실탄, 원래 콘텐츠가 더 작음)이 자연히
+   1·2행(가격·캔들)보다 작아진다. 경계선 색도 더 옅게(opacity 낮춤). */
+/* 🔴 2026-09-02 (4차) HO 지시 — "비대칭 말고 대칭으로. 깔끔하고
+   꽉 차게." 4칸 모두 같은 높이(min-height)로 강제하고, 대신
+   3·4행(수급·실탄) 쪽 글자·차트 크기를 키워서 그 높이를 내용으로
+   자연스럽게 채운다 — "대칭"과 "꽉 참"을 동시에 만족시키는 방법은
+   박스는 같게, 안의 내용을 그 박스에 맞게 키우는 것이다. */
+.sc4{{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
+  gap:6px}}
+.sc4-c1,.sc4-c2,.sc4-c3,.sc4-c4{{border:1px solid rgba(255,255,255,.08);
+  border-radius:8px;padding:8px 7px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;
+  min-height:103px;box-sizing:border-box}}
+.sc3{{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;width:100%}}
+.sc3-c{{text-align:center}}
+.sc3-k{{margin:0;font-size:9.5px;color:#7d848f}}
+.sc3-v{{margin:3px 0 0;font-size:12px;font-weight:800;letter-spacing:-.3px;
+  white-space:nowrap}}
+@media (max-width:359px){{.sc4{{grid-template-columns:1fr}}}}
 /* 정말 좁은 화면에서만 세로로 쌓는다 — 320px에서 실측해 정한 문턱. */
 @media (max-width:400px){{
   .sc2-bot{{grid-template-columns:1fr;justify-items:center;gap:.5rem}}
