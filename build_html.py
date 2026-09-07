@@ -660,6 +660,158 @@ def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
             f'fill="#9aa2ae" font-weight="800">{날}</text></svg>')
 
 
+MACRO_HIST_PATH = "macro_history.json"
+_MACRO_HIST_CACHE = None
+
+
+def _macro_ohlc(key, days=5):
+    """macro_history.json에서 최근 days거래일 (날짜,시,고,저,종,미확정).
+
+    🆕 2026-09-07 — 캔들용. archive의 «매크로»엔 값·등락률뿐이라 캔들을
+       못 그린다. collect_data가 yfinance OHLC를 이 파일에 따로 적재한다.
+    """
+    global _MACRO_HIST_CACHE
+    if _MACRO_HIST_CACHE is None:
+        try:
+            with open(MACRO_HIST_PATH, encoding="utf-8") as f:
+                _MACRO_HIST_CACHE = (json.load(f) or {}).get("일별") or {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            _MACRO_HIST_CACHE = {}
+    칸 = _MACRO_HIST_CACHE.get(key) or {}
+    # 🔴 2026-09-07 실측 버그 — macro_history.json은 «항상 최신»이라, 과거
+    #    리포트를 다시 빌드하면 그 날짜보다 **뒤의 캔들**이 찍힌다(미리보기
+    #    빌드에서 09/04 리포트에 09/07 캔들이 나왔다). 카드의 값(archive의
+    #    그날 스냅샷)과 캔들의 날짜가 어긋나면 같은 카드 안에서 서로 다른
+    #    날을 말하는 셈이라 원칙11(단정엔 근거가 있어야 한다) 위반이다.
+    #    → 리포트 날짜(DATE) 이후는 잘라낸다. 정상 발행일엔 당일이 마지막이라
+    #      아무것도 안 잘리고, 재빌드일 때만 효과가 있다.
+    날짜들 = [d for d in sorted(칸.keys()) if str(d) <= str(DATE)]
+    out = []
+    for 날 in 날짜들[-days:]:
+        r = 칸[날] or {}
+        try:
+            out.append((날, float(r["시"]), float(r["고"]),
+                        float(r["저"]), float(r["종"]), bool(r.get("미확정"))))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _mkt_macro_spark(key, W=140, H=44):
+    """[매크로 칸2] 5일 캔들 — 코스피 캔들(_mkt_index_spark)과 같은 문법.
+
+    🔴 2026-09-07 HO 지시 — "환율·채권·유가·금도 캔들로 해줘."
+       yfinance가 원래 OHLC를 다 주는데 collect_data가 종가만 쓰고 버리고
+       있었다(실측 확인). 수집부에서 시고저를 macro_history.json에 적재하도록
+       고쳤고, 여기서 그걸 읽어 진짜 캔들을 그린다.
+
+    [코스피 캔들과 다르게 처리해야 하는 것 2가지]
+      ① **미확정 봉** — 코스피는 15:30에 장이 끝나 하루가 확정되지만,
+         환율·유가·금은 24시간 시장이라 우리 발행(18시 KST) 시점에 그날
+         봉이 **아직 진행 중**이다. 확정된 하루인 척하면 거짓말이 되므로
+         점선 테두리로 «아직 안 끝났다»를 표시한다.
+      ② **납작 봉** — 시가=고가=저가=종가인 날이 실제로 있다(실측: 국제 금
+         22일 중 2일). 그대로 그리면 높이 0이라 아무것도 안 보인다. 그 날을
+         빼면 날짜축이 어긋나므로, 최소 높이의 가로 막대로 남긴다.
+    ⚠️ 폴백 없음 — 이력 파일이 없으면 빈 문자열을 돌려주고 카드 칸이 빈다.
+       옛 선그래프로 되돌리지 않는 이유는, 같은 카드에서 어떤 날은 선이고
+       어떤 날은 캔들이면 읽는 사람이 그 차이를 «시장의 변화»로 오해하기
+       때문이다(원칙5·10).
+    """
+    시리즈 = _macro_ohlc(key, 5)
+    if len(시리즈) < 2:
+        return ""
+    전체고 = max(x[2] for x in 시리즈)
+    전체저 = min(x[3] for x in 시리즈)
+    rng = (전체고 - 전체저) or (abs(전체고) * 0.001 or 1)
+    n = len(시리즈)
+    pad = 4
+    간격 = (W - pad * 2) / n
+    bw = max(3, 간격 * 0.55)
+
+    def _y(v):
+        return H - 10 - (v - 전체저) / rng * (H - 18)
+
+    g = []
+    미확정있음 = False
+    for i, (d, 시, 고, 저, 종, 미확정) in enumerate(시리즈):
+        cx = pad + 간격 * i + 간격 / 2      # ⚠️ 코스피 캔들과 동일 공식
+        상승 = 종 >= 시
+        c = FS_BUY if 상승 else FS_SELL
+        y시, y종 = _y(시), _y(종)
+        top, bot = min(y시, y종), max(y시, y종)
+        # 몸통+꼬리를 <g opacity>로 묶는다 — 안 묶고 몸통에만 반투명을 주면
+        # 먼저 그린 꼬리가 몸통 사이로 비친다(코스피 캔들에서 겪은 사고).
+        _op = 1 if i == n - 1 else .75
+        _몸 = (f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
+               f'height="{max(1.5,bot-top):.1f}" fill="{c}"/>')
+        if 미확정 and i == n - 1:
+            미확정있음 = True
+            # 진행 중인 봉 — 속을 비우고 점선 테두리로 «아직 안 끝났다».
+            _몸 = (f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
+                   f'height="{max(1.5,bot-top):.1f}" fill="none" stroke="{c}" '
+                   f'stroke-width="1.1" stroke-dasharray="2 1.5"/>')
+        g.append(f'<g opacity="{_op}">'
+                 f'<line x1="{cx:.1f}" y1="{_y(고):.1f}" x2="{cx:.1f}" y2="{_y(저):.1f}" '
+                 f'stroke="{c}" stroke-width="1.5"/>{_몸}</g>')
+    날 = f"{시리즈[-1][0][4:6]}/{시리즈[-1][0][6:]}"
+    라벨 = f'{날} 진행중' if 미확정있음 else 날
+    _색 = "#e0c060" if 미확정있음 else "#9aa2ae"
+    return (f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
+            + "".join(g) +
+            f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="10" '
+            f'fill="{_색}" font-weight="800">{라벨}</text></svg>')
+
+
+def build_macro_card2(item, key):
+    """[종합 탭] 매크로 카드 — 코스피 카드(build_score_card)와 같은 디자인 언어.
+
+    🔴 2026-09-07 HO 지시 — "환율·금리·채권·유가도 코스피·코스닥과 같은
+       디자인으로 잘 해줘."
+
+    [왜 2×2가 아니라 1×2인가 — 지어내지 않기 위해서]
+      코스피 카드의 2×2 격자는 [지수][캔들] / [수급 3칸][실탄 막대] 인데,
+      아래 두 칸은 **매크로에 존재할 수 없는 정보**다:
+        · 수급(외국인·기관·개인 순매수)은 «주식시장» 개념이다. 환율·유가에
+          외국인 순매수라는 숫자는 아예 없다.
+        · 실탄(외국인+기관)도 같은 이유로 없다.
+      없는 칸을 «—»로 채우면 4칸 중 2칸이 영구 빈칸인 카드가 되고, 이는
+      원칙2(없는 비교는 만들지 않는다)·원칙14(없으면 없다고 짧게 끝낸다)를
+      정면으로 어긴다. 그래서 **코스피 카드의 윗줄(1행)을 그대로 가져와**
+      [값·등락률][5일 캔들] 2칸으로 만든다 — 테두리·모서리·여백·폰트·
+      색규칙·날짜 글자 크기가 전부 동일하므로 나란히 놓으면 같은 카드
+      가족으로 읽히면서도, 없는 걸 억지로 채우지 않는다.
+    """
+    if not item or not isinstance(item.get("값"), (int, float)):
+        return ""
+    try:
+        값 = float(item["값"])
+        등 = float(item.get("등락률") or 0)
+    except (TypeError, ValueError):
+        return ""
+    # ⚠️ yfinance가 가끔 nan을 준다(실측: 2026-08-29 유가). nan은 자기 자신과
+    #    다르다는 성질로 걸러낸다 — 안 거르면 화면에 "nan"이 그대로 찍힌다.
+    if 값 != 값 or 등 != 등:
+        return ""
+    단위 = item.get("단위", "")
+    값표시 = f"{단위}{값:,.2f}" if 단위 == "$" else f"{값:,.2f}{단위}"
+    # 색 규칙은 지수와 동일 — 상승 빨강 / 하락 파랑(HTS 관례).
+    # ⚠️ 클래스명은 반드시 지수 카드와 같은 것(ic-chg-up/dn)을 쓴다. 임의로
+    #    ic-up/ic-dn 같은 이름을 지어 쓰면 CSS에 그런 규칙이 없어 색이
+    #    통째로 안 먹는다(회색으로 나옴).
+    _cls = "ic-chg-dn" if 등 < 0 else "ic-chg-up"
+    return f'''<div class="idx-card2 sc2wrap">
+      <div class="sc4 sc4-macro">
+        <div class="sc4-c1">
+          <p class="ic-mkt">{item.get('표시명', key)}</p>
+          <p class="ic-num">{값표시}</p>
+          <p class="{_cls}">{등:+.2f}%</p>
+        </div>
+        <div class="sc4-c2">{_mkt_macro_spark(key)}</div>
+      </div>
+    </div>'''
+
+
 def _mkt_supply3(수급):
     """[칸3] 외국인·기관·개인 3칸 — 억 대신 **조** 단위, 이 순서 고정.
 
@@ -9226,9 +9378,23 @@ def build_core(핵심편, data, 해석):
     #    코스닥 각각의 미니 계기판이 이미 들어있어, 코스피만 크게 한 번
     #    더 보여주면 원칙5(같은 그림 두 번) 위반이 된다. 함수 자체는
     #    안 지웠다(원칙3) — 되살리려면 여기 + core_flow_gauge()만 붙이면 됨.
+    # 🆕 2026-09-07 HO 지시 — 종합 자리에 «환율·금리·채권·유가»도 지수와
+    #    같은 디자인으로 넣는다.
+    #    ⚠️ 「채권」과 「금리」는 우리 데이터에서 **같은 지표 하나**다 —
+    #       미국채 10년물 금리(^TNX)가 곧 채권 가격의 뒷면이라, 따로 두 칸을
+    #       만들면 같은 숫자를 두 번 보여주게 된다(원칙5). 국내 국고채는
+    #       아예 수집하지 않으므로 만들 수 없다. 그래서 금리 1칸으로 두고,
+    #       남는 한 칸은 이미 수집 중인 국제 금(안전자산 심리)을 넣는다.
+    _매크로 = data.get("매크로") or {}
+    _macro_cards = "".join(
+        build_macro_card2(_매크로.get(k), k)
+        for k in ("원달러환율", "미국채10년", "WTI유가", "국제금"))
+    _macro_grid = (f'<div class="macro-grid2">{_macro_cards}</div>'
+                   if _macro_cards else "")
     지수스트립 = (f'<div class="idx-grid" id="score">'
                 f'{build_score_card("KOSPI", _코, 코수)}'
                 f'{build_score_card("KOSDAQ", _닥, _닥수)}</div>'
+                + _macro_grid
                 + _flow_comment())
 
     def _f(v):
@@ -12702,6 +12868,32 @@ html{{scroll-behavior:smooth}}
 .sc3-v{{margin:3px 0 0;font-size:12px;font-weight:800;letter-spacing:-.3px;
   white-space:nowrap;display:inline-block;padding:2px 8px;
   border:1px solid rgba(255,255,255,.18);border-radius:6px}}
+/* 🆕 2026-09-07 — 매크로(환율·유가·금리·금) 카드는 1행 2열.
+   .sc4-c1~c4의 칸 스타일(테두리·모서리·여백·min-height)을 그대로 상속받으므로
+   코스피 카드와 완전히 같은 모양이고, 행이 하나뿐이라는 점만 다르다.
+   [WHY 1행인가] 매크로엔 수급·실탄 데이터가 존재하지 않는다(아랫줄에 채울
+   내용이 원천적으로 없다) — build_macro_card2 주석 참고. */
+/* 🔴 minmax(0,1fr)이 핵심 — 그냥 1fr이면 min-width:auto가 기본이라
+   칸 안의 큰 숫자(1,351.40)가 칸을 밀어 넓혀서 옆 칸(추이 그래프)이
+   카드 밖으로 잘려 나간다(실측: 환율 그래프가 통째로 안 보였다). */
+.sc4-macro{{grid-template-rows:1fr;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+/* 매크로 카드는 값 자릿수가 지수보다 짧아(1,351.40) 21px면 허전하다.
+   대신 지수(6,687.21)보다 커지면 위계가 뒤집히므로 살짝 작게 둔다.
+   ⚠️ $4,513.70처럼 긴 값이 2열 안에서 안 잘리도록 좁은 폭에선 더 줄인다. */
+.sc4-macro .ic-num{{font-size:19px;white-space:nowrap}}
+.sc4-macro .ic-mkt{{white-space:nowrap}}
+/* 지수 카드는 4칸이라 칸당 103px가 필요했지만, 매크로는 2칸뿐이라
+   그 높이를 그대로 쓰면 카드가 텅 빈다. 78px로 낮춰 내용에 맞춘다. */
+.sc4-macro .sc4-c1,.sc4-macro .sc4-c2{{min-height:78px;min-width:0}}
+/* 🔴 2026-09-07 (2차) — 매크로 카드도 코스피·코스닥과 똑같이 «전체 폭,
+   세로 스택»으로 둔다.
+   [WHY] 처음엔 4장을 2열로 깔았는데, 390px에서 카드 하나가 185px,
+   그 안 칸이 88px밖에 안 돼 «1,351.40»이 칸 밖으로 넘치고 «원/달러 환율»이
+   두 줄로 쪼개졌다(실측). 지수 카드가 좌우 2칸이 아니라 세로로 쌓는 것과
+   같은 이유다 — 폭을 반으로 줄이면 같은 디자인이 아니게 된다. */
+.macro-grid2{{display:grid;grid-template-columns:minmax(0,1fr);
+  gap:8px;margin-top:8px}}
+@media (max-width:359px){{.macro-grid2{{grid-template-columns:1fr}}}}
 @media (max-width:359px){{.sc4{{grid-template-columns:1fr}}}}
 /* 정말 좁은 화면에서만 세로로 쌓는다 — 320px에서 실측해 정한 문턱. */
 @media (max-width:400px){{
