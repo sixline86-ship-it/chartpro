@@ -508,8 +508,19 @@ def _mkt_ammo_series(시장="코스피", days=5):
     return out[-days:]
 
 
-def _mkt_ammo_spark(시장="코스피", W=118, H=64):
-    """성적표 카드용 실탄 5일 세로 막대 (작게)."""
+def _mkt_ammo_spark(시장="코스피", W=140, H=64):
+    """성적표 카드용 실탄 5일 세로 막대 (작게).
+
+    🆕 2026-09-07 HO 지시 — "실탄이랑 캔들 날짜별로 세로 줄 좀 맞춰줘."
+    [원인] 이 함수는 W=118·바 왼쪽 끝 기준(x=4+i*간격)으로 그리고, 캔들
+       (_mkt_index_spark)은 W=140·칸 중앙 기준(cx=4+i*간격+간격/2)으로
+       그렸다. 두 svg 모두 카드에서 같은 폭(칸4/칸2, sc4 grid의 같은
+       열)으로 늘어나 보이므로, 내부 좌표계가 다르면 겹쳐 봤을 때 같은
+       날짜라도 x위치가 살짝씩 어긋난다.
+    [고침] W를 캔들과 동일한 140으로 맞추고, 막대 중심도 캔들과 똑같은
+       공식(cx=4+i*간격+간격/2)으로 계산한다 — 이제 두 좌표계가 완전히
+       같아서 같은 날짜는 항상 같은 x에 온다. */
+    """
     시리즈 = _mkt_ammo_series(시장, 5)
     if len(시리즈) < 2:
         return ""
@@ -518,23 +529,36 @@ def _mkt_ammo_spark(시장="코스피", W=118, H=64):
     mx = max(abs(v) for v in vals) or 1
     z = H * 0.40
     n = len(vals)
-    간격 = (W - 8) / max(1, n)
-    bw = max(5, 간격 - 3.5)
-    g = [f'<line x1="3" y1="{z:.1f}" x2="{W-3}" y2="{z:.1f}" '
+    pad = 4
+    간격 = (W - pad * 2) / max(1, n)
+    bw = max(5, 간격 * 0.55)
+    g = [f'<line x1="{pad}" y1="{z:.1f}" x2="{W-pad}" y2="{z:.1f}" '
          f'stroke="#fff" stroke-opacity=".16"/>']
     for i, v in enumerate(vals):
-        x = 4 + i * 간격
+        cx = pad + i * 간격 + 간격 / 2      # ⚠️ 캔들(_mkt_index_spark)과 동일 공식
+        x = cx - bw / 2
         y = z - (v / mx) * ((z - 2) if v >= 0 else (H - 11 - z))
         c = FS_BUY if v >= 0 else FS_SELL
         g.append(f'<rect x="{x:.1f}" y="{min(z,y):.1f}" width="{bw:.1f}" '
                  f'height="{max(1.5,abs(y-z)):.1f}" rx="2" fill="{c}" '
                  f'opacity="{1 if i==n-1 else .45}"/>')
         if i == n - 1:
-            g.append(f'<text x="{x+bw/2:.0f}" y="{H-1.5:.0f}" font-size="7" '
+            # 🆕 2026-09-07 HO 지시 — "날짜가 너무 작다." 7px → 10px로 확대.
+            g.append(f'<text x="{cx:.0f}" y="{H-1.5:.0f}" font-size="10" '
                      f'fill="#c9d0d9" text-anchor="middle" font-weight="800">{날[i]}</text>')
+    # 🔴 2026-09-07 (2차) HO 지시 — "날짜가 여전히 안 커졌다 / 세로줄이
+    # 여전히 안 맞는다." [진짜 원인] 지난 수정은 좌표계(W·공식)만 캔들과
+    # 맞췄을 뿐, 실제 렌더 크기는 여전히 외부 CSS(.sc2-spark svg{{height:52px}})
+    # 가 정했다 — 그런데 viewBox 높이는 H(64)라서 52/64≈0.81배로 눌려
+    # 찌그러지며 글자(font-size=10)도 같이 0.81배로 줄어 다시 작아 보였다.
+    # 캔들은 인라인 style로 viewBox와 렌더 높이를 **똑같이** 맞춰서 이
+    # 문제가 없었다(H=44=44px). 실탄도 똑같이 인라인으로 맞춘다 — 이러면
+    # 가로·세로 배율이 항상 1:1이라 글자 크기도 그대로 나오고, 캔들과
+    # 정확히 같은 배율로 그려져 같은 날짜가 항상 같은 x에 온다.
     return (f'<div class="sc2-spark"><p class="sc2-spark-t">최근 {n}일 실탄'
             f'<span class="sc2-spark-def">실탄=외국인+기관</span></p>'
-            f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg></div>')
+            f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
+            f'{"".join(g)}</svg></div>')
 
 
 def _mkt_mini_gauge(시장="코스피"):
@@ -619,16 +643,21 @@ def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
         #    rect가 여전히 완전 불투명하게 line을 가리고(서로 상대적
         #    불투명 유지), 그룹 전체만 배경 대비 흐려진다 — 그러면
         #    "오늘만 진하게" 효과는 그대로 살면서 꼬리 비침은 사라진다.
-        g.append(f'<g opacity="{1 if i==n-1 else .55}">'
+        # 🆕 2026-09-07 HO 지시 — "캔들을 조금 진하게." 과거일(오늘 아닌 날)
+        # 투명도를 .55→.75로 올려 전체적으로 더 선명하게 만든다. 오늘(마지막
+        # 날)은 원래도 1(완전 불투명)이라 더 진하게 할 게 없다 — 대신 심지
+        # 두께를 1.2→1.5로 살짝 키워 전체적으로 더 또렷해 보이게 한다.
+        g.append(f'<g opacity="{1 if i==n-1 else .75}">'
                   f'<line x1="{cx:.1f}" y1="{_y(고):.1f}" x2="{cx:.1f}" y2="{_y(저):.1f}" '
-                  f'stroke="{c}" stroke-width="1.2"/>'
+                  f'stroke="{c}" stroke-width="1.5"/>'
                   f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
                   f'height="{max(1.5,bot-top):.1f}" fill="{c}"/></g>')
     날 = f"{시리즈[-1][0][4:6]}/{시리즈[-1][0][6:]}"
+    # 🆕 2026-09-07 HO 지시 — "날짜가 너무 작다." 7.5px → 10px로 확대.
     return (f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
             + "".join(g) +
-            f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="7.5" '
-            f'fill="#6f7784" font-weight="700">{날}</text></svg>')
+            f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="10" '
+            f'fill="#9aa2ae" font-weight="800">{날}</text></svg>')
 
 
 def _mkt_supply3(수급):
@@ -5622,15 +5651,13 @@ def build_my_stocks(data):
         있으니, 이 라벨은 "0선이 뭘 뜻하는지" 설명일 뿐이다). */
   var _mkKeys=Object.keys(mkVals);
   var _mkLabel=_mkKeys.map(function(k){return k+' '+fmt(mkVals[k])+'%';}).join(' · ');
+  // 🆕 2026-09-07 HO 지시 — "이긴 쪽/진 쪽" 화살표 라벨 삭제. 막대 자체가
+  // 색(빨강/파랑)과 방향(오른쪽/왼쪽)으로 이미 뜻을 전달해서 군더더기였다.
+  // 기준선이 어느 시장인지 알려주는 점선 라벨(_mkLabel)만 남긴다.
   var g='<line x1="'+z+'" y1="16" x2="'+z+'" y2="'+(H-6)+'" stroke="#f0c65a" '+
         'stroke-width="1.4" stroke-dasharray="3 2"/>'+
         '<text x="'+z+'" y="10" text-anchor="middle" font-size="8.5" font-weight="800" '+
-        'fill="#f0c65a">'+_mkLabel+'</text>'+
-        /* ⚠️ 화살표는 **가리키는 방향**이 곧 뜻이다. 반대로 쓰면 정반대로 읽힌다. */
-        '<text x="'+(z+half*0.55)+'" y="10" text-anchor="middle" font-size="8" '+
-        'fill="#ff6b4a">이긴 쪽 →</text>'+
-        '<text x="'+(z-half*0.55)+'" y="10" text-anchor="middle" font-size="8" '+
-        'fill="#5b9bff">← 진 쪽</text>';
+        'fill="#f0c65a">'+_mkLabel+'</text>';
   rows.forEach(function(x,i){
    var y=20+i*22, w=Math.abs(x.ex)/mx*half*0.9;
    var c=x.ex>=0?'#ff6b4a':'#5b9bff';
@@ -12626,12 +12653,22 @@ html{{scroll-behavior:smooth}}
 .sc2-g-k{{display:inline-block;margin:.26rem 0 0;font-size:9.5px;font-weight:800;
   padding:.1rem .4rem;border-radius:20px;border:1px solid #2a3342;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
-.sc2-spark{{flex:0 0 auto;text-align:center}}
+/* 🔴 2026-09-07 (2차) HO 지시 — 캔들·실탄 세로줄 정렬 재수정.
+   [원인] .sc2-spark가 flex:0 0 auto라 폭이 "내용 크기만큼" 줄어들 수
+   있었다(캔들은 래퍼 없이 칸에 바로 들어가 칸 폭 그대로였는데, 실탄만
+   래퍼 div를 한 겹 더 거치며 폭이 미묘하게 달라질 수 있었다). width:100%를
+   명시해 캔들이 들어있는 .sc4-c2와 똑같은 폭을 쓰도록 고정한다. */
+.sc2-spark{{flex:0 0 auto;text-align:center;width:100%}}
 .sc2-spark-t{{margin:0 0 .15rem;font-size:9.5px;color:#6f7784;font-weight:700;
   white-space:nowrap}}
 .sc2-spark-def{{display:block;font-size:7.5px;color:#5b6270;font-weight:600;
   margin-top:1px;white-space:nowrap}}
-.sc2-spark svg{{width:100%;max-width:150px;height:52px;display:block;margin:0 auto}}
+/* 🔴 2026-09-07 (2차) — max-width:150px·height:52px 강제를 없앤다.
+   이제 svg 자체 inline style(width:100%;height:Hpx)이 크기를 정확히
+   맡는다. 여기서 또 다른 값(150px·52px)으로 덮어씌우면 화면 폭에 따라
+   캔들(제약 없음)과 실탄(150px 상한)이 서로 다른 폭으로 렌더돼 넓은
+   화면에서 다시 어긋난다. */
+.sc2-spark svg{{display:block;margin:0 auto}}
 /* 🔴 2026-09-02 HO 지시 — 정확한 2×2 격자로 전면 재구성.
    [1행1열] 지수·등락률 [1행2열] 5일 지수선그래프
    [2행1열] 수급 3칸    [2행2열] 5일 실탄막대
@@ -12657,8 +12694,14 @@ html{{scroll-behavior:smooth}}
 .sc3{{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;width:100%}}
 .sc3-c{{text-align:center}}
 .sc3-k{{margin:0;font-size:9.5px;color:#7d848f}}
+/* 🆕 2026-09-07 HO 지시 — 외국인·기관·개인 숫자에 살짝 테두리를 둘러
+   달라는 요청. display:inline-block으로 글자 크기만큼만 테두리가
+   붙게 하고(부모 .sc3-c가 text-align:center라 가운데 정렬은 그대로
+   유지된다), 색은 각 숫자 색(매수 초록/매도 보라)의 옅은 버전을 그대로
+   테두리에 써서 숫자 색과 위화감이 없게 한다. */
 .sc3-v{{margin:3px 0 0;font-size:12px;font-weight:800;letter-spacing:-.3px;
-  white-space:nowrap}}
+  white-space:nowrap;display:inline-block;padding:2px 8px;
+  border:1px solid rgba(255,255,255,.18);border-radius:6px}}
 @media (max-width:359px){{.sc4{{grid-template-columns:1fr}}}}
 /* 정말 좁은 화면에서만 세로로 쌓는다 — 320px에서 실측해 정한 문턱. */
 @media (max-width:400px){{
