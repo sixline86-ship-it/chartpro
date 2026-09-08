@@ -1453,12 +1453,77 @@ def update_market_history(지수수급, 파생, 게이지, 등락수, 시장조�
     return 본체
 
 
+MACRO_HIST_PATH = "macro_history.json"
+MACRO_HIST_저장일수 = 20   # 화면엔 5일만 쓰지만, 넉넉히 저장해 나중 확장에 대비
+
+
+def _macro_hist_load():
+    """macro_history.json 읽기 — 없으면 빈 뼈대."""
+    try:
+        with open(MACRO_HIST_PATH, encoding="utf-8") as f:
+            본체 = json.load(f)
+        if isinstance(본체, dict) and isinstance(본체.get("일별"), dict):
+            return 본체
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {"버전": SCRIPT_VERSION, "일별": {}}
+
+
+def save_macro_history(수집):
+    """매크로 시·고·저·종을 날짜별로 **영구 누적**한다.
+
+    🆕 2026-09-07 HO 지시 — "환율·채권·유가·금도 캔들로."
+
+    [왜 별도 파일인가]
+      archive/data_*.json에 시고저를 넣으면 **오늘부터만** 쌓인다(코스피 캔들이
+      정확히 그래서 20거래일을 기다려야 했다). 그런데 yfinance는 과거 OHLC를
+      한 번에 내려주므로, 별도 이력 파일에 백필하면 **첫날부터 바로 캔들**이
+      나온다. 기다릴 이유가 없는데 기다리는 건 손해다.
+
+    [덮어쓰기 규칙]
+      같은 날짜가 이미 있어도 **새 값으로 갱신한다.** 매크로는 24시간 시장이라
+      장중에 수집하면 그날 봉이 미완성인데, 다음날 다시 받으면 완성된 값이
+      온다. 지수(확정 종가)와 달리 여기선 최신값이 더 정확하다.
+      ⚠️ 단, 과거 날짜를 **지우지는** 않는다(원칙3).
+    """
+    본체 = _macro_hist_load()
+    본체["버전"] = SCRIPT_VERSION
+    갱신 = 0
+    for key, rows in (수집 or {}).items():
+        if not rows:
+            continue
+        칸 = 본체["일별"].setdefault(key, {})
+        for r in rows:
+            날 = r.get("날짜")
+            if not 날:
+                continue
+            칸[날] = {"시": r["시"], "고": r["고"], "저": r["저"], "종": r["종"],
+                     "미확정": bool(r.get("미확정"))}
+            갱신 += 1
+        # 저장일수 초과분은 오래된 것부터 정리 — 이 파일은 «캔들용»이라
+        # 영구 보관 대상이 아니다(영구 이력은 market_history.json 담당).
+        if len(칸) > MACRO_HIST_저장일수:
+            for 낡 in sorted(칸.keys())[:-MACRO_HIST_저장일수]:
+                칸.pop(낡, None)
+    try:
+        with open(MACRO_HIST_PATH, "w", encoding="utf-8") as f:
+            json.dump(본체, f, ensure_ascii=False, indent=1)
+        일수 = {k: len(v) for k, v in 본체["일별"].items()}
+        print(f"✅ macro_history 갱신: {갱신}건 반영 · 보유 {일수}")
+    except OSError as e:
+        print(f"⚠️ macro_history 저장 실패: {type(e).__name__}: {str(e)[:120]}")
+    return 본체
+
+
 def collect_macro():
     결과 = {}
+    이력 = {}
     for key, info in MACRO_TICKERS.items():
         try:
             t = yf.Ticker(info["심볼"])
-            hist = t.history(period="5d")
+            # 🆕 2026-09-07 — 5d → 1mo. 캔들 백필용으로 과거분을 같이 받는다.
+            #    요청 횟수는 그대로 1회다(기간만 늘림 — 추가 비용 0).
+            hist = t.history(period="1mo")
             if hist.empty or len(hist) < 2:
                 print(f"⚠️ {info['표시명']}: 데이터 부족")
                 결과[key] = None
@@ -1472,12 +1537,44 @@ def collect_macro():
                 "표시명": info["표시명"],
                 "단위": info["단위"],
             }
+            # ── 캔들용 OHLC 추출 ──
+            # ⚠️ 지표마다 타임존이 다르다(실측: 환율=London, 미국채=Chicago,
+            #    유가·금=New_York). 그래서 한국 날짜로 억지로 바꾸지 않고
+            #    **그 지표 자신의 거래일**을 그대로 쓴다. 카드마다 독립된
+            #    그래프라 서로 날짜를 맞출 필요가 없고, 억지 변환이 오히려
+            #    하루씩 밀리는 오차를 만든다.
+            try:
+                _오늘그곳 = str(datetime.now(hist.index.tz).date()).replace("-", "")
+            except Exception:
+                _오늘그곳 = None
+            줄 = []
+            for _dt, _r in hist.tail(MACRO_HIST_저장일수).iterrows():
+                try:
+                    시, 고 = float(_r["Open"]), float(_r["High"])
+                    저, 종 = float(_r["Low"]), float(_r["Close"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                # nan 방어 — 자기 자신과 다르면 nan이다(실측: 8/29 유가).
+                if any(v != v for v in (시, 고, 저, 종)):
+                    continue
+                _날 = str(_dt.date()).replace("-", "")
+                줄.append({"날짜": _날,
+                          "시": round(시, 4), "고": round(고, 4),
+                          "저": round(저, 4), "종": round(종, 4),
+                          # 그 시장의 «오늘» 봉이면 아직 장이 안 끝났을 수 있다.
+                          # 24시간 시장이라 우리 발행(18시 KST) 시점엔 진행 중인
+                          # 경우가 대부분 — 화면에서 «진행 중»으로 표시한다.
+                          "미확정": (_오늘그곳 is not None and _날 == _오늘그곳)})
+            if 줄:
+                이력[key] = 줄
         except Exception as e:
-            print(f"⚠️ {info['표시명']} 수집 실패: {e}")
+            print(f"⚠️ {info['표시명']} 수집 실패: {type(e).__name__}: {str(e)[:120]}")
             결과[key] = None
 
     성공 = sum(1 for v in 결과.values() if v is not None)
     print(f"✅ 환율/유가/금리 {성공}/{len(MACRO_TICKERS)}건 수집")
+    if 이력:
+        save_macro_history(이력)
     return 결과
 
 
