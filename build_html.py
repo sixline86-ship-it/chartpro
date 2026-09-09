@@ -763,11 +763,63 @@ def _mkt_macro_spark(key, W=140, H=44):
             f'fill="{_색}" font-weight="800">{라벨}</text></svg>')
 
 
-def build_macro_card2(item, key):
+_MACRO_NOTE_예산 = 120  # 대략 4줄까지 허용 — «문장을 자르지 않는다»가 우선이라
+                        # 줄 수보다 문장 완결을 먼저 지킨다.
+
+
+def _macro_note(text):
+    """매크로 카드 해설을 **완결된 문장만** 골라 쓰고 숫자를 강조한다.
+
+    🔴 2026-09-07 (6차) HO 지시 — "마지막에 …로 되어 있는데 문장을
+       마무리해줘. 더 짧게 하든지, 안 되면 3줄로 하든지, 끊기지 않게."
+
+    [지금까지의 시행착오 — 왜 결국 이 방식인가]
+      ① CSS line-clamp(줄 단위) → «2년 2개월 만의 최…»처럼 단어 중간에서
+         잘렸다.
+      ② 쉼표(절) 단위로 끊고 «…» 붙이기 → 단어는 안 깨졌지만 여전히
+         «큰 변화는 아니라서…»처럼 말이 끝나지 않아 읽다 만 느낌이었다.
+      ③ **완결된 문장만 넣는다(지금).** 예산(95자) 안에 통째로 들어가는
+         문장만 쓰고, 안 들어가면 아예 안 넣는다. 말줄임표가 필요 없어진다.
+      · 첫 문장은 길어도 무조건 넣는다 — 핵심(«얼마·몇 %»)이 거기 있고,
+        한 문장도 없으면 카드가 비어버린다.
+
+    ⚠️ 그래서 카드마다 1~2문장으로 길이가 조금씩 다르다. 이건 버그가 아니라
+       «문장을 자르지 않는다»는 원칙의 결과다. 더 길게 보여주고 싶다면
+       해설을 짧은 문장들로 쓰게 generate_report 프롬프트를 손보는 게 맞다
+       (지금 프롬프트는 «한 줄 해설»이라 돼 있는데 실제론 3~4문장이 온다).
+
+    [강조]
+      숫자+단위(1,351.4원 · 0.51% · 2.15조)만 굵게+밝게 한다. 형용사나
+      전망 표현을 강조하면 «단정»으로 읽히는데(원칙11), 숫자는 사실이라
+      강조해도 뜻이 바뀌지 않는다.
+    """
+    t = (text or "").strip()
+    if not t:
+        return ""
+    문장 = [s for s in re.split(r'(?<=[.!?])\s+', t) if s.strip()]
+    if not 문장:
+        return ""
+    고른, 길이 = [], 0
+    for i, s in enumerate(문장):
+        if i > 0 and 길이 + len(s) > _MACRO_NOTE_예산:
+            break          # ⚠️ 여기서 «…»를 붙이지 않는다 — 앞 문장이 이미
+                           #    온전히 끝나 있어 덧붙일 말이 없다.
+        고른.append(s)
+        길이 += len(s)
+    out = " ".join(고른)
+    # ⚠️ 강조는 «치환»이라 순서가 중요하다 — 먼저 태그를 넣으면 그 안의
+    #    숫자를 또 잡는다. 그래서 한 번의 sub로 끝낸다.
+    out = re.sub(
+        r'([+\-]?\d[\d,\.]*\s*(?:%p|%|원대|원|달러|조원|조|억원|억|배|년|개월|포인트)?)',
+        r'<b class="mc2-hl">\1</b>', out)
+    return out
+
+
+def build_macro_card2(item, key, 해설=""):
     """[종합 탭] 매크로 카드 — 코스피 카드(build_score_card)와 같은 디자인 언어.
 
     🔴 2026-09-07 HO 지시 — "환율·금리·채권·유가도 코스피·코스닥과 같은
-       디자인으로 잘 해줘."
+       디자인으로 잘 해줘." + (2차) "설명글이 빠졌다, 2~3줄로 코멘트."
 
     [왜 2×2가 아니라 1×2인가 — 지어내지 않기 위해서]
       코스피 카드의 2×2 격자는 [지수][캔들] / [수급 3칸][실탄 막대] 인데,
@@ -781,6 +833,15 @@ def build_macro_card2(item, key):
       [값·등락률][5일 캔들] 2칸으로 만든다 — 테두리·모서리·여백·폰트·
       색규칙·날짜 글자 크기가 전부 동일하므로 나란히 놓으면 같은 카드
       가족으로 읽히면서도, 없는 걸 억지로 채우지 않는다.
+
+    [해설 — 새로 만든 게 아니라 있던 걸 연결한 것]
+      기존 심층편 카드(build_macro_card)가 쓰던 해석글.매크로해설(지표당
+      Claude가 쓰는 **한 줄** 해설, generate_report.py 프롬프트에 그렇게
+      명시돼 있다)을 그대로 물려받는다. 새로 생성하는 게 아니라 이미 있는
+      필드를 연결만 하는 것 — 과금 없음. 한 줄짜리라 2~3줄을 넘지 않는다.
+      ⚠️ 재사용(무료) 모드로 빌드하면 해석글 자체가 전날 것을 승계하므로
+      해설도 전날 문구가 그대로 나온다 — 새로 생성해야 그날 것으로 바뀐다
+      (다른 Claude 해설 필드들과 동일한 특성, §운영 주의 참고).
     """
     if not item or not isinstance(item.get("값"), (int, float)):
         return ""
@@ -800,6 +861,8 @@ def build_macro_card2(item, key):
     #    ic-up/ic-dn 같은 이름을 지어 쓰면 CSS에 그런 규칙이 없어 색이
     #    통째로 안 먹는다(회색으로 나옴).
     _cls = "ic-chg-dn" if 등 < 0 else "ic-chg-up"
+    _노트 = _macro_note(해설)
+    해설HTML = f'<p class="mc2-note">{_노트}</p>' if _노트 else ''
     return f'''<div class="idx-card2 sc2wrap">
       <div class="sc4 sc4-macro">
         <div class="sc4-c1">
@@ -809,6 +872,7 @@ def build_macro_card2(item, key):
         </div>
         <div class="sc4-c2">{_mkt_macro_spark(key)}</div>
       </div>
+      {해설HTML}
     </div>'''
 
 
@@ -819,6 +883,13 @@ def _mkt_supply3(수급):
     ⚠️ 원본은 억 단위 숫자(예: -4968)라서 10000으로 나눠 조로 바꾼다.
        소수점 둘째 자리까지 — 조 단위에서 소수 둘째 자리면 100억
        단위까지는 구분된다(반올림 오차가 크지 않다).
+    🔴 2026-09-07 (5차) — 지수 카드 4칸을 정확히 반반으로 나누면서 이 칸이
+       220→146px로 좁아졌다. 「+0.48조」를 세 개 나란히 놓으면 한 칸이
+       42px뿐이라 «조»까지 넣을 자리가 없다(실측: 서로 겹침).
+       → 단위 «조»를 숫자에서 빼고 **머리글에 한 번만** 적는다. 세 숫자가
+         모두 같은 단위라 한 번만 밝히면 충분하고(원칙4), 숫자가 짧아져
+         읽기도 더 편하다. 원칙12(단위를 바꿔 말하지 않는다)는 그대로 —
+         단위를 감추는 게 아니라 위치만 옮긴 것이다.
     """
     수급 = 수급 or {}
     항목 = [("외국인", 수급.get("외국인")), ("기관", 수급.get("기관계")),
@@ -827,13 +898,14 @@ def _mkt_supply3(수급):
     for k, v in 항목:
         try:
             조 = float(v) / 10000
-            표시 = f"{조:+.2f}조"
+            표시 = f"{조:+.2f}"
             색 = FS_BUY if 조 >= 0 else FS_SELL
         except (TypeError, ValueError):
             표시, 색 = "—", "#6f7784"
         칸.append(f'<div class="sc3-c"><p class="sc3-k">{k}</p>'
                   f'<p class="sc3-v" style="color:{색}">{표시}</p></div>')
-    return f'<div class="sc3">{"".join(칸)}</div>'
+    return (f'<p class="sc3-unit">순매수 <b>조 원</b></p>'
+            f'<div class="sc3">{"".join(칸)}</div>')
 
 
 def build_score_card(이름, 지수, 수급):
@@ -897,31 +969,14 @@ def build_gauge(gauge, 오늘한줄평, 지수=None):
         배지HTML = '<div class="gz-badges">' + "".join(
             f'<span class="gz-badge">{b}</span>' for b in 배지들) + '</div>'
 
-    # 🆕 2026-08-22 HO 지시 — 심층편 「오늘의 성적표」를 핵심편으로 옮기면서
-    #    심층편 첫머리에 지수가 사라졌다. 관제지수 카드 **오른쪽 빈 공간**에
-    #    코스피·코스닥의 지수와 등락률만 간략히 넣는다. (스타일 A)
-    #    ⚠️ 여기는 '요약'이다 — 수급·태그·설명은 넣지 않는다. 그건 핵심편 성적표 몫.
+    # 🔴 2026-09-07 HO 지시 — 여기(관제지수 카드)의 코스피·코스닥 지수 요약을
+    #    **삭제**하고 핵심편 신호등 바로 밑으로 옮겼다(build_signal_head).
+    #    [WHY] 지수·등락률은 이미 ① 핵심편 신호등 밑 ② 핵심편 지수 2×2 카드
+    #    두 곳에 있다. 여기까지 세 번째로 두면 원칙5(같은 그림 두 번) 위반이
+    #    명백하다. 심층편 이 카드의 주인공은 «왜 그 점수인가»(근거표)다.
+    #    ⚠️ gz-idx CSS와 IDX_UP/DN 상수는 그대로 둔다 — 되살릴 때 필요하고,
+    #       핵심편 새 지수줄이 같은 색 상수를 쓴다.
     지수칸 = ""
-    if 지수:
-        줄들 = []
-        for 라벨, 키 in (("코스피", "코스피"), ("코스닥", "코스닥")):
-            d = (지수 or {}).get(키) or {}
-            종가, 등락 = d.get("종가"), d.get("등락률")
-            if 종가 is None and 등락 is None:
-                continue
-            try:
-                _v = float(str(등락).replace(",", ""))
-            except (TypeError, ValueError):
-                _v = None
-            색 = "#8b93a0" if _v is None else (IDX_UP if _v >= 0 else IDX_DN)
-            등락문 = "—" if _v is None else f"{_v:+.2f}%"
-            종가문 = "—" if 종가 is None else f"{float(str(종가).replace(',', '')):,.2f}"
-            줄들.append(
-                f'<div class="gz-idx-row"><span class="gz-idx-n">{라벨}</span>'
-                f'<span class="gz-idx-v">{종가문}</span>'
-                f'<span class="gz-idx-p" style="color:{색}">{등락문}</span></div>')
-        if 줄들:
-            지수칸 = f'<div class="gz-idx">{"".join(줄들)}</div>'
 
     return f'''
   <div class="gauge-box">
@@ -2565,7 +2620,13 @@ def _header_data(지수수급, 파생, 코수, 사건명=None):
         이름 = _ev or ("함께 오른 하루" if 코등 > 0 else
                        "함께 내린 하루" if 코등 < 0 else "숨 고른 하루")
         이모 = ("🔴" if 코등 > 0 else "🔵" if 코등 < 0 else "⚪")
-        성격부제 = "코스피·코스닥 지수 흐름 요약"
+        # 🔴 2026-09-07 HO 지시 — "중복되는 글자나 문장은 최소화."
+        #    예전엔 "코스피·코스닥 지수 흐름 요약"이라고 적었는데, 이제 이
+        #    문장 **바로 밑에 실제 코스피·코스닥 숫자**가 붙는다(sh-idx).
+        #    무엇이 나올지 예고하는 문장은 그 무엇이 바로 밑에 있으면
+        #    군더더기다(원칙4: 중복해서 말하지 않는다). 빈 문자열이면
+        #    ix-mood-s 자체가 안 그려진다.
+        성격부제 = ""
 
     # 수급 특징 — 최대 20일 범위에서 '가장 눈에 띄는 신호' 자동 선택(코드 계산).
     #   flow_history의 외현/기관을 읽어, 전환/최대/연속/순위 중 강한 것 하나를 문장으로.
@@ -2989,11 +3050,189 @@ def build_signal_head(지수수급, 파생, 코수, 관제=None, 사건명=None)
         아이콘HTML = _head_icon(코등, 링색, d["이모"],
                              관제점수=_관.get("점수"), 관제구간=_관.get("구간"),
                              태그색=d.get("태그색"))
+        # 🔴 2026-09-07 HO 지시 — 심층편 관제지수 카드에 있던 지수 요약을
+        #    여기(신호등 바로 밑)로 옮긴다. "심플하면서 임팩트있게."
+        #
+        #    [디자인 판단 — 왜 이 모양인가]
+        #      · 「코스피」 같은 라벨을 크게 쓰지 않는다. 이름은 작게 죽이고
+        #        **숫자와 등락률만 크게** 살린다 — 사람이 여기서 궁금한 건
+        #        이름이 아니라 «얼마, 몇 %»다.
+        #      · 등락률 앞에 ▲▼를 붙여 색을 못 보는 상황(흑백 캡처·색약)에서도
+        #        방향이 읽히게 한다. 색만으로 뜻을 나르지 않는다.
+        #      · 「지수」·「등락률」 같은 설명 단어를 전부 뺐다. 숫자 두 개가
+        #        나란히 있으면 설명 없이도 읽힌다(HO: 중복 문구 최소화).
+        #      · 가운데 얇은 세로 구분선 하나로 코스피/코스닥을 가른다 —
+        #        박스를 두 개 그리면 아래 2×2 카드와 모양이 겹쳐 시끄럽다.
+        #    ⚠️ 아래 지수 2×2 카드와 «같은 그림»이 되지 않게, 여기는 종가+
+        #       등락률 딱 두 값만 둔다. 수급·캔들·거래대금은 전부 카드 몫이다.
+        # 🔴 2026-09-07 (3차) HO 지시 — 헤더의 코스피·코스닥 지수줄을 **뺀다.**
+        #    [경위] 2차 때 심층편 관제지수 카드에 있던 지수 요약을 여기로
+        #    옮겼는데, 정작 **바로 아래 지수 2×2 카드**가 같은 종가·등락률을
+        #    더 크고 자세히(캔들·수급까지) 보여준다. 두 줄 사이에 같은 숫자가
+        #    두 번 나오는 셈이라 원칙5·원칙4 위반이 맞다.
+        #    ⚠️ .sh-idx / .sh-i / .sh-n / .sh-v / .sh-p CSS는 남겨둔다 —
+        #       되살릴 때 쓰고, 없앤다고 화면이 나아지지 않는다.
+        지수줄 = ""
+        _부제 = (d.get("성격부제") or "").strip()
+        _부제HTML = f'<p class="ix-mood-s">{_부제}</p>' if _부제 else ''
+
+        # 🔴 2026-09-07 HO 지시 — 심층편에 있던 관제지수를 **여기로 통째로**
+        #    가져온다. 배치는 «왼쪽 관제지수 · 오른쪽 신호등».
+        #
+        #    [왜 합치는 게 맞나]
+        #      원래 이 둘은 **같은 것을 두 가지 방식으로 말하고** 있었다 —
+        #      신호등(색)도 «오늘 시장이 어떤가»이고 관제지수(점수)도 그렇다.
+        #      떨어뜨려 놓으니 심층편의 게이지가 핵심편 신호등의 반복처럼
+        #      보였다. 나란히 붙이면 «점수(정밀) + 색(직관)»이 서로를
+        #      보완하는 한 덩어리가 된다.
+        #
+        #    [중복 제거 — HO: "멘트는 중복은 최소화"]
+        #      · 한줄평 삭제 — 사건명(위 큰 글씨)과 사실상 같은 말이다.
+        #        예: 사건명 "개인은 던졌다, 기관이 다 받았다"
+        #            한줄평 "쌍끌이 2.15조 매수에 급등, 개인은 3.72조 던졌다"
+        #      · 제목을 "📡 관제지수 (0~100) — 오늘 시장의 온도" →
+        #        "관제지수"로 줄임. 0~100인 건 눈금이 이미 말한다.
+        #      · 배지들은 근거 성격이라 접힌 «점수 근거» 안으로 옮겼다.
+        _게이지 = ""
+        _근거 = ""
+        try:
+            if _관.get("점수") is not None:
+                _점 = _관["점수"]
+                _needle = max(0, min(100, _점))
+                # 🔴 2026-09-07 (2차) HO 지시 — "관제지수에 지수나 등락률은
+                #    빼라, 밑에 있잖아." 맞는 지적이다. 이 헤더는 이미
+                #    ① 지수줄(코스피 6,687.21 ▲1.64%)을 바로 밑에 두고
+                #    ② 그 아래 지수 2×2 카드가 또 한 번 보여준다.
+                #    근거표 안에서 세 번째로 같은 숫자를 반복할 이유가 없다.
+                #    [무엇을 빼고 무엇을 남겼나]
+                #      · «코스피 +1.64%, 코스닥 +2.95%» 근거 문구 → 뺀다.
+                #      · «지수 등락률 79점 가중 43%» 행 자체는 **남긴다** —
+                #        84점이 어떻게 나왔는지 설명하는데 43%짜리 항목을
+                #        통째로 빼면 가중합이 안 맞아 근거가 거짓이 된다.
+                #      · 배지 «📈 코스피·코스닥 동반 상승» → 뺀다(같은 말).
+                def _근거문(x):
+                    _요 = str(x.get("요소", ""))
+                    return "" if "등락" in _요 else str(x.get("근거", ""))
+                _행 = "".join(
+                    f'<div class="gz-row"><span class="gz-el">{x["요소"]}</span>'
+                    f'<span class="gz-sc">{x["점수"]}점</span>'
+                    f'<span class="gz-w">가중 {x["가중치"]}%</span>'
+                    f'<span class="gz-ev">{_근거문(x)}</span></div>'
+                    for x in (_관.get("상세") or []))
+                # 🔴 2026-09-07 (3차) HO 지시 — "심층편에 있었던 알약 부분도
+                #    넣어줘." 2차에서 접힘(«점수 근거») 안으로 넣었는데, 이건
+                #    심층편에서 원래 **겉으로 보이던** 요약 배지였다. 접으면
+                #    안 보이니 되살린다 — 게이지 바로 밑, 접힘 위.
+                #    ⚠️ «코스피·코스닥 동반 상승» 배지도 이제 되살린다. 2차 때
+                #       뺐던 이유는 바로 밑 지수줄과 겹쳐서였는데, 그 지수줄을
+                #       이번에 없앴으므로 겹칠 대상이 사라졌다.
+                _배지 = ""
+                if _관.get("배지"):
+                    _배지 = ('<div class="gz-badges sh-badges">' + "".join(
+                        f'<span class="gz-badge">{b}</span>'
+                        for b in _관["배지"]) + '</div>'
+                        # 🔴 2026-09-07 (5차) HO 지시 — "3번째가 짤리는데
+                        #    짤리면 안 되지, 그냥 없애줘야지."
+                        #    [왜 JS인가] 배지 글자 길이는 매일 다르고 화면 폭도
+                        #    기기마다 달라서, 파이썬 빌드 시점에 «몇 개가 들어가나»를
+                        #    알 수 없다. 실제 폭은 브라우저만 안다. 그래서 그려진
+                        #    뒤에 재보고 **줄 밖으로 나가는 배지를 숨긴다.**
+                        #    잘린 채 보이는 것보다 아예 없는 게 낫다(원칙14와 같은 태도).
+                        #    ⚠️ 화면 회전·창 크기 변경에도 다시 계산한다.
+                        '<script>(function(){'
+                        'function fit(){'
+                        ' var w=document.querySelector(".sh-badges"); if(!w) return;'
+                        ' var kids=w.children, max=w.clientWidth, used=0, gap=6;'
+                        ' for(var i=0;i<kids.length;i++){'
+                        '  var el=kids[i]; el.style.display="";'
+                        '  var need=el.offsetWidth+(used?gap:0);'
+                        '  if(used+need>max){ el.style.display="none"; }'
+                        '  else { used+=need; }'
+                        ' }'
+                        '}'
+                        'if(document.readyState!=="loading")fit();'
+                        'else document.addEventListener("DOMContentLoaded",fit);'
+                        'window.addEventListener("resize",fit);'
+                        '})();</script>')
+                # ⚠️ <details>를 쓴다 — JS 없이 브라우저가 여닫아 준다.
+                #    HO 지시 "내용을 펼치지 말고 화살표탭으로": open 속성 없음(닫힘).
+                # 🔴 2026-09-07 (4차) HO 지시
+                #  ② «관제지수 점수 근거» → «점수 근거». 카드 제목이 이미
+                #     «관제지수»라 앞 두 글자는 그냥 반복이다(원칙4).
+                #  ③ 그걸 구간 라벨(과열 🌋)과 **같은 줄 오른쪽**에 작게 둔다 —
+                #     그 줄 오른쪽이 계속 비어 있었다.
+                # 🔴 2026-09-07 (6차) HO 지시 — "점수 근거를 누르니까 신호등도
+                #    내려오고 개판이다. 가로 그래프 바로 오른쪽 밑에 넣고,
+                #    설명글은 그래프 밑으로 나오게."
+                #    [원인] 접힘을 «구간 라벨 줄»(2열 격자 안쪽)에 넣어둬서,
+                #    펼치면 격자의 오른쪽 칸이 세로로 늘어나고 → 격자 행 높이가
+                #    커지고 → align-items:center인 왼쪽 신호등이 한가운데로
+                #    끌려 내려갔다. 격자 안에서 여닫으면 반드시 생기는 일이다.
+                #    [해법] 접힘을 **격자 밖·온도계 아래**로 옮긴다. 그러면
+                #    펼쳐도 위쪽(신호등·점수·사건명)은 전혀 움직이지 않고,
+                #    설명글만 그래프 밑에서 아래로 자란다.
+                if _행:
+                    _근거 = (f'<details class="gz-fold sh-fold"><summary class="gz-sum">'
+                             f'관제점수 근거</summary>'
+                             f'<div class="gz-detail">{_행}'
+                             f'<p class="gz-note">※ 각 요소를 0~100으로 환산해 '
+                             f'가중 합산한 자체 참고 지표입니다. 거래대금(평소 대비)·'
+                             f'극단 심리 지표는 데이터가 쌓이는 대로 추가됩니다.</p>'
+                             f'</div></details>')
+                #  ① 점수 옆 빈 공간에 사건명("개인은 던졌다…")을 넣는다.
+                #     84라는 숫자만으론 «그래서 무슨 일인데»가 안 풀린다.
+                #     점수(정도) + 사건명(내용)이 붙어야 한 문장이 된다.
+                #     ⚠️ 아래 _무드에서는 사건명을 빼야 한다 — 안 그러면
+                #        같은 문장이 두 번 나온다.
+                _사건 = (d.get("성격이름") or "").strip()
+                _사건HTML = (f'<p class="sh-gz-ev"><span class="yl">{_사건}</span></p>'
+                             if _사건 else "")
+                # 🔴 2026-09-07 (5차) HO 지시 — "온도계가 오른쪽으로 치우쳤다,
+                #    좌우 공백이 같도록."
+                #    [왜 계속 안 맞았나] 온도계를 2열 격자의 «오른쪽 칸» 안에
+                #    넣어둔 게 근본 원인이었다. 왼쪽엔 신호등 칸(24px)+간격(12px)
+                #    =36px가 있고 오른쪽은 카드 끝이라, 오른쪽 여백을 5px든
+                #    12px든 아무리 조절해도 36px과 같아질 수가 없었다.
+                #    [해법] 온도계와 눈금을 **격자 밖으로 꺼낸다.** 카드 전체
+                #    폭을 쓰면 좌우 여백이 둘 다 0이 되어 «구조적으로» 대칭이다.
+                #    숫자를 맞추는 대신 맞출 필요가 없는 구조로 바꾼 것.
+                _온도계 = (
+                    f'<div class="gz-track sh-track">'
+                    f'<div class="gz z1"></div><div class="gz z2"></div>'
+                    f'<div class="gz z3"></div><div class="gz z4"></div>'
+                    f'<div class="gz z5"></div>'
+                    f'<div class="gz-needle" style="left:{_needle}%"></div></div>'
+                    f'<div class="gz-scale"><span>혹한</span><span>한파</span>'
+                    f'<span>보통</span><span>온기</span><span>과열</span></div>')
+                _게이지 = (
+                    f'<div class="sh-gz">'
+                    f'<div class="sh-gz-r">{아이콘HTML}</div>'
+                    f'<div class="sh-gz-l">'
+                    f'<p class="sh-gz-t">관제지수</p>'
+                    f'<div class="sh-gz-head">'
+                    f'<p class="sh-gz-n">{_점}<span class="sh-gz-u">/100</span></p>'
+                    f'{_사건HTML}</div>'
+                    f'<div class="sh-gz-labrow">'
+                    f'<p class="sh-gz-lab">{_관.get("구간","")} {_관.get("이모지","")}</p>'
+                    f'</div>'
+                    f'</div>'
+                    f'</div>' + _온도계 + _근거 + _배지)
+                _근거 = ""   # 게이지 안에 이미 들어갔다 — 아래에서 또 붙이지 않는다
+        except Exception as e:
+            print(f"   ⚠️ 관제지수 렌더 실패 — {type(e).__name__} (신호등은 정상)")
+            _게이지 = ""
+            _근거 = ""
+
+        # 게이지가 그려졌으면 신호등도 사건명도 그 안에 이미 들어갔다.
+        # 실패했을 때만 예전처럼 아이콘+사건명을 단독으로 세운다
+        # (원칙15 — 없어도 되는 코너 때문에 있어야 하는 코너까지 죽으면 안 된다).
+        _무드 = (_부제HTML if _게이지 else
+                 f'<div class="ix-mood">{아이콘HTML}'
+                 f'<div class="ix-mood-txt"><p class="ix-mood-t">'
+                 f'<span class="yl">{d["성격이름"]}</span></p>'
+                 f'{_부제HTML}</div></div>')
         return (f'<div class="ix-head" style="margin-bottom:.6rem">'
-                f'<div class="ix-mood">{아이콘HTML}'
-                f'<div class="ix-mood-txt"><p class="ix-mood-t">'
-                f'<span class="yl">{d["성격이름"]}</span></p>'
-                f'<p class="ix-mood-s">{d["성격부제"]}</p></div></div></div>')
+                f'{_게이지}{_무드}{지수줄}{_근거}</div>')
     except Exception as e:
         print(f"   ⚠️ 신호등 렌더 실패 — {type(e).__name__} (나머지는 정상 발행)")
         return ""
@@ -9385,10 +9624,18 @@ def build_core(핵심편, data, 해석):
     #       만들면 같은 숫자를 두 번 보여주게 된다(원칙5). 국내 국고채는
     #       아예 수집하지 않으므로 만들 수 없다. 그래서 금리 1칸으로 두고,
     #       남는 한 칸은 이미 수집 중인 국제 금(안전자산 심리)을 넣는다.
+    # 🆕 2026-09-07 (2차) HO 지시 — "환율·채권·금리·유가 설명글이 빠졌다."
+    #    [원인] 기존 심층편 카드(build_macro_card)엔 해석글의 «매크로해설»
+    #    (Claude가 쓰는, 지표당 한 줄 해설)이 붙어 있었는데, 이 종합 탭
+    #    카드(build_macro_card2)를 새로 만들면서 값·캔들만 넣고 해설을
+    #    안 물려받았다. 같은 필드를 그대로 재사용한다 — 새로 생성하는 게
+    #    아니라 이미 있는 걸 연결만 하는 거라 추가 비용 없음.
     _매크로 = data.get("매크로") or {}
+    _매크로해설 = 해석.get("매크로해설") or {}
     _macro_cards = "".join(
-        build_macro_card2(_매크로.get(k), k)
-        for k in ("원달러환율", "미국채10년", "WTI유가", "국제금"))
+        build_macro_card2(_매크로.get(k), k, _매크로해설.get(라벨, ""))
+        for k, 라벨 in (("원달러환율", "환율"), ("미국채10년", "금리"),
+                       ("WTI유가", "유가"), ("국제금", "금")))
     _macro_grid = (f'<div class="macro-grid2">{_macro_cards}</div>'
                    if _macro_cards else "")
     지수스트립 = (f'<div class="idx-grid" id="score">'
@@ -9700,7 +9947,10 @@ def build_core(핵심편, data, 해석):
             # 🆕 2026-08-26 HO 기획 — 「오늘 이상했던 것」 바로 뒤에 중간 요약.
             #    여기까지가 '시장 이야기'다. 머리를 한 번 정리하고
             #    아래 섹터·내 종목으로 넘어가게 한다.
-            + build_midsummary(data, 해석)
+            # 🙈 2026-09-07 HO 지시 — 일단 숨김. 삭제가 아니라 가림이다
+            #    (원칙3: 틀린 걸 지우지 않는다). 되살리려면 HIDDEN_CHAPTERS
+            #    목록에서 "중간정리" 한 줄만 지우면 된다.
+            + hide("중간정리", build_midsummary(data, 해석))
             # 🆕 2026-09-02 HO 지시 — 테마를 섹터보다 먼저 보여준다.
             #    "섹터는 주소, 테마는 오늘의 사건"이라는 철학대로,
             #    좁고 빠른 층(테마)을 넓고 안정된 층(섹터) 앞에 둔다.
@@ -10342,6 +10592,10 @@ HIDDEN_CHAPTERS = {
     "포착성적",           # 2026-08-21 — 표본이 쌓이면 되살릴 것
     "군중나침반",         # 2026-08-21 — 신용잔고를 수급 타임라인으로 옮김
     "섹터크기별",         # 🆕 2026-08-22 HO 지시 — 심층편에서 가림
+    "심층편관제지수",     # 🆕 2026-09-07 HO 지시 — 핵심편 신호등 섹션으로
+                        #    옮겼다. 되살리려면 이 줄만 삭제.
+    "중간정리",           # 🆕 2026-09-07 HO 지시 — 「🧠 오늘 이것만 확실히
+                        #    기억합시다」 일단 가림. 되살리려면 이 줄만 삭제.
     "삼줄요약",           # 2026-08-19 — '딱 N가지'와 역할 중복
     "수급타일",           # 2026-08-19 — 헤더 수급 막대와 같은 말
     "수급특징",           # 2026-08-19 — 계기판 배지와 겹침
@@ -11982,6 +12236,20 @@ html{{scroll-behavior:smooth}}
 .mr-label{{font-size:11px;color:var(--sub);margin-bottom:3px}}
 .mr-val{{font-size:15px;font-weight:700;color:var(--sub)}}
 .mr-comment{{font-size:10.5px;color:var(--sub);margin-top:6px;line-height:1.6}}
+/* 🆕 2026-09-07 — 종합 탭 매크로 카드(sc4-macro)용 해설. mr-comment와
+   같은 톤이지만, 카드 안(sc4 격자 밖)에 붙는 거라 좌우 여백을 카드
+   패딩에 맞춰 살짝 준다. */
+/* 🔴 2026-09-07 (3차) — max-height:3.2em으로 잘랐더니 "2년 2개월 만의
+   최저" 처럼 **문장 중간이 뚝 잘려** 지저분했다(실측). line-clamp는
+   줄 단위로 자르고 말줄임표(…)까지 자동으로 붙여준다 — Chromium 계열
+   웹뷰(카카오톡 인앱 브라우저 포함)에서 표준으로 지원된다. */
+/* 🔴 2026-09-07 (3차) — line-clamp를 뺐다. 이제 _macro_note()가 파이썬에서
+   **문장 경계로** 자르므로 화면엔 항상 완결된 문장만 나온다. CSS로 또
+   자르면 그 완결된 문장이 다시 «최…»처럼 끊긴다. */
+.mc2-note{{font-size:11px;color:#9aa2ae;line-height:1.65;margin:7px 2px 0}}
+/* 숫자만 강조 — 사실이라 강조해도 뜻이 안 바뀐다. 형용사·전망을 강조하면
+   «단정»으로 읽혀 원칙11에 걸린다. */
+.mc2-hl{{color:#dfe5ec;font-weight:800}}
 .watch-item{{background:#23262b;color:#e8e6e2;border-radius:var(--rmd);padding:.75rem .95rem;font-size:12.5px;line-height:1.7;margin-bottom:8px}}
 .tv-wrap{{background:var(--bg);border:.5px solid var(--line);border-radius:var(--rlg);overflow:hidden;margin-bottom:1rem}}
 .tv-row-wrap{{padding:.8rem 1.1rem;border-bottom:.5px solid var(--line)}}
@@ -12132,7 +12400,92 @@ html{{scroll-behavior:smooth}}
 .ix-mood-emoji{{font-size:32px;line-height:1;flex-shrink:0}}
 .ix-mood-txt{{flex:1}}
 .ix-mood-t{{font-size:18px;font-weight:900;letter-spacing:-.02em;line-height:1.15;color:#f0efec}}
+/* 🔴 2026-09-07 — 핵심편 헤더: «왼쪽 관제지수 · 오른쪽 신호등».
+   [배치 의도] 점수·눈금은 가로로 길어야 읽히므로 넓은 왼쪽(1fr)에 두고,
+   신호등은 세로로 긴 아이콘이라 좁은 오른쪽(auto)에 세운다. 두 요소가
+   같은 것(오늘 시장 상태)을 «숫자»와 «색»으로 각각 말하므로 나란히 둔다. */
+/* 🔴 2026-09-07 (2차) HO 지시 — «왼쪽 신호등 · 오른쪽 관제지수»로 교체.
+   [배치 의도] 신호등은 세로로 긴 아이콘이라 좁은 칸(auto), 점수·눈금은
+   가로로 길어야 읽히므로 넓은 칸(1fr). 신호등이 먼저 오는 게 읽는
+   순서와도 맞다 — 색(직관)으로 먼저 훑고, 숫자(정밀)로 확인한다. */
+.sh-gz{{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;
+  align-items:center}}
+.sh-gz-r{{display:flex;align-items:center;justify-content:center}}
+.sh-gz-t{{margin:0;font-size:10.5px;color:#7d848f;font-weight:700;
+  letter-spacing:.3px}}
+/* 🔴 2026-09-07 (4차) ① 점수와 사건명을 한 줄에 — 점수 오른쪽이 계속
+   비어 있었다. baseline 정렬로 숫자 밑선과 글자 밑선을 맞춘다. */
+.sh-gz-head{{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}}
+/* ⚠️ 두 줄이 될 때 «…기관이 다 받았 / 다» 처럼 마지막 한 글자만 넘어가
+   보기 흉했다(실측). text-wrap:balance로 줄 길이를 고르게 나눈다.
+   🔴 그런데 balance만 주니 «개인은 던졌다, 기 / 관이 다 받았다»처럼
+      «기관»이 한가운데서 쪼개졌다 — CSS 기본값이 한중일 문자는 아무
+      글자에서나 끊기 때문이다. word-break:keep-all로 **띄어쓰기에서만**
+      끊게 한다. 둘을 같이 써야 «개인은 던졌다, / 기관이 다 받았다»가 된다. */
+.sh-gz-ev{{margin:0;font-size:14.5px;font-weight:800;line-height:1.35;
+  flex:1 1 150px;min-width:0;text-wrap:balance;word-break:keep-all}}
+/* 🔴 (6차) «관제점수 근거» — 온도계 눈금 바로 아래, 오른쪽 끝.
+   격자 밖이라 여닫아도 위쪽(신호등·점수·사건명)이 전혀 안 움직인다.
+   요약만 오른쪽으로 밀고(펼침 표시), 설명글은 전체 폭으로 아래에 깔린다. */
+.sh-fold{{margin-top:6px;border-top:0;padding-top:0}}
+.sh-fold .gz-sum{{justify-content:flex-end;font-size:10.5px;color:#9aa2ae;
+  font-weight:700}}
+.sh-fold .gz-detail{{margin-top:7px}}
+/* labrow에 더는 접힘이 없으므로 좌우 배분이 필요 없다 */
+.sh-gz-labrow{{display:flex;align-items:center;gap:8px;margin:2px 0 7px;
+  flex-wrap:wrap}}
+/* 🔴 (5차) 온도계를 격자 밖으로 빼면서 이 패딩은 불필요해졌다.
+   글자 칸은 오른쪽 끝까지 써도 문제없다. */
+/* 점수는 이 카드의 주인공이라 크게. «/100»은 단위라 작게 붙여 위계를 만든다. */
+.sh-gz-n{{margin:1px 0 0;font-size:30px;font-weight:800;color:#e8ecf1;
+  line-height:1.05;letter-spacing:-1px}}
+.sh-gz-u{{font-size:13px;color:#7d848f;font-weight:700;margin-left:2px}}
+.sh-gz-lab{{margin:0;font-size:11.5px;color:#e0c060;font-weight:800}}
+/* 🔴 (4차) ④ 알약은 «한 줄만». 세 개를 세로로 쌓으면 헤더가 그만큼
+   길어져 정작 중요한 지수 카드가 밀린다. 한 줄에 두고 넘치면 옆으로
+   밀어 볼 수 있게 한다(스크롤바는 숨김 — 칩 네비와 같은 방식). */
+/* 🔴 (5차) 알약은 «한 줄», 그리고 «잘리지 않게». 넘치는 배지는 위
+   스크립트가 display:none으로 숨긴다. 스크롤·페이드를 쓰지 않는 이유는
+   리포트가 캡처로 공유되는 일이 많아서다 — 캡처엔 스크롤이 안 담긴다. */
+.sh-badges{{margin-top:10px;flex-wrap:nowrap;overflow:hidden}}
+/* ⚠️ 넘치면 숨기는 방식이라, 배지가 크면 «1개만 보이는» 날이 생긴다
+   (실측: 390px에서 3개 중 1개). 헤더용은 심층편보다 살짝 작게 잡아
+   같은 폭에 2개가 들어가게 한다 — 정보를 더 살리기 위한 조정이다. */
+.sh-badges .gz-badge{{flex:0 0 auto;white-space:nowrap;
+  font-size:9.5px;padding:3px 8px}}
+/* 온도계·눈금은 격자 밖 전체 폭 — 좌우 여백이 둘 다 0이라 구조적으로 대칭. */
+.sh-track{{margin-top:2px}}
+/* 화살표 접힘 — JS 없이 브라우저 기본 동작(<details>)을 쓴다. */
+.gz-fold{{margin-top:10px;border-top:1px solid rgba(255,255,255,.07);
+  padding-top:8px}}
+.gz-sum{{cursor:pointer;font-size:11.5px;color:#e0c060;font-weight:800;
+  list-style:none;display:flex;align-items:center;gap:5px}}
+/* 브라우저 기본 삼각형을 지우고 직접 그린다 — 사파리는 ::-webkit-details-marker. */
+.gz-sum::-webkit-details-marker{{display:none}}
+.gz-sum::marker{{content:""}}
+.gz-sum::before{{content:"▸";display:inline-block;transition:transform .15s;
+  font-size:10px}}
+.gz-fold[open] .gz-sum::before{{transform:rotate(90deg)}}
+.gz-fold .gz-detail{{margin-top:8px}}
+@media (max-width:339px){{.sh-gz-n{{font-size:26px}}}}
 .ix-mood-s{{font-size:11px;color:#9aa0a8;margin-top:3px;line-height:1.4}}
+/* 🔴 2026-09-07 — 신호등 바로 밑 지수줄. 심층편 관제지수 카드에서 옮겨온 것.
+   [디자인 의도] 라벨(코스피/코스닥)은 10px 회색으로 죽이고 종가는 20px
+   흰색으로 살린다 — 여기서 눈이 먼저 닿아야 하는 건 이름이 아니라 숫자다.
+   가운데 세로 실선 하나로만 둘을 가른다(박스를 그리면 바로 아래 2×2
+   카드와 모양이 겹쳐 화면이 시끄러워진다). */
+.sh-idx{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07)}}
+.sh-i{{display:flex;flex-direction:column;align-items:center;gap:1px;
+  padding:0 4px;min-width:0}}
+/* 오른쪽 칸에만 왼쪽 테두리 — 두 칸 사이에 선이 하나만 생긴다. */
+.sh-i+.sh-i{{border-left:1px solid rgba(255,255,255,.07)}}
+.sh-n{{font-size:10px;color:#7d848f;font-weight:700;letter-spacing:.2px}}
+.sh-v{{font-size:20px;font-weight:800;color:#e8ecf1;letter-spacing:-.5px;
+  line-height:1.15;white-space:nowrap}}
+/* ▲▼를 붙여 색 없이도 방향이 읽히게 한다(흑백 캡처·색약 대비). */
+.sh-p{{font-size:12px;font-weight:800;white-space:nowrap}}
+@media (max-width:339px){{.sh-v{{font-size:17px}}}}
 .ix-bars{{background:rgba(255,255,255,.03);border-radius:12px;padding:.95rem .9rem .75rem}}
 .ix-bar-row{{display:flex;align-items:center;gap:9px;margin-bottom:11px}}
 .ix-bn{{width:48px;font-size:12px;font-weight:800;color:#dfe3e8;flex-shrink:0}}
@@ -12851,13 +13204,30 @@ html{{scroll-behavior:smooth}}
    3·4행(수급·실탄) 쪽 글자·차트 크기를 키워서 그 높이를 내용으로
    자연스럽게 채운다 — "대칭"과 "꽉 참"을 동시에 만족시키는 방법은
    박스는 같게, 안의 내용을 그 박스에 맞게 키우는 것이다. */
-.sc4{{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;
-  gap:6px}}
+/* 🔴 2026-09-07 (5차) HO 지시 — "1,2사분면 크기 같게, 3,4도 같게."
+   [원인] 그냥 1fr은 min-width:auto가 기본이라, 칸 안의 큰 숫자
+   (6,687.21)가 칸을 밀어 넓힌다. 실측 결과 390px에서 c1=220.5px vs
+   c2=84.6px로 2.6배까지 벌어져 있었다.
+   [고침] minmax(0,1fr)로 «내용이 밀지 못하는 1fr»을 만든다. 이제
+   좌우가 정확히 반반이다. 높이는 이미 min-height로 맞춰 뒀다. */
+.sc4{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  grid-template-rows:1fr 1fr;gap:6px}}
 .sc4-c1,.sc4-c2,.sc4-c3,.sc4-c4{{border:1px solid rgba(255,255,255,.08);
   border-radius:8px;padding:8px 7px;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;
-  min-height:103px;box-sizing:border-box}}
-.sc3{{display:grid;grid-template-columns:repeat(3,1fr);gap:3px;width:100%}}
+/* 🔴 2026-09-07 (3차) 실측 회귀 수정 — min-height:103px이었는데, 실탄
+   차트 높이를 52→64px로 키우면서 4번 칸만 실제 115.1px가 됐다.
+   2열 배치(360px 이상)에선 grid가 같은 행을 stretch로 맞춰줘 티가 안
+   났지만, 1열로 떨어지는 320px에선 행이 각자라 «4번 칸만 12px 큰»
+   비대칭이 실제로 보였다(실측: c1~c3=103px, c4=115.1px).
+   → 실측 최대값(115px)을 4칸 공통 최소높이로 못박아 모든 폭에서 대칭. */
+  min-height:115px;box-sizing:border-box}}
+/* 🔴 2026-09-07 (5차) — sc4를 minmax(0,1fr)로 반반 나누면서 3사분면 폭이
+   220→146px로 좁아졌다. 그런데 repeat(3,1fr)은 min-width:auto가 기본이라
+   «+1.67조» 같은 내용이 칸을 밀어 넓혀, 세 번째(개인) 칸이 4사분면 위로
+   넘쳐 겹쳤다(실측). minmax(0,1fr)로 내용이 밀지 못하게 막는다. */
+.sc3{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;
+  width:100%}}
 .sc3-c{{text-align:center}}
 .sc3-k{{margin:0;font-size:9.5px;color:#7d848f}}
 /* 🆕 2026-09-07 HO 지시 — 외국인·기관·개인 숫자에 살짝 테두리를 둘러
@@ -12865,8 +13235,14 @@ html{{scroll-behavior:smooth}}
    붙게 하고(부모 .sc3-c가 text-align:center라 가운데 정렬은 그대로
    유지된다), 색은 각 숫자 색(매수 초록/매도 보라)의 옅은 버전을 그대로
    테두리에 써서 숫자 색과 위화감이 없게 한다. */
+/* 🔴 (5차) 단위 머리글 — «최근 5일 실탄» 제목(sc2-spark-t)과 같은 톤으로
+   맞춰 4사분면끼리 위계가 어긋나지 않게 한다. */
+.sc3-unit{{margin:0 0 5px;font-size:9.5px;color:#7d848f;font-weight:700;
+  text-align:center}}
+.sc3-unit b{{color:#9aa2ae}}
+/* «조»를 뺀 만큼 자리가 생겨 폰트를 12px로 되돌린다. */
 .sc3-v{{margin:3px 0 0;font-size:12px;font-weight:800;letter-spacing:-.3px;
-  white-space:nowrap;display:inline-block;padding:2px 8px;
+  white-space:nowrap;display:inline-block;padding:2px 5px;max-width:100%;
   border:1px solid rgba(255,255,255,.18);border-radius:6px}}
 /* 🆕 2026-09-07 — 매크로(환율·유가·금리·금) 카드는 1행 2열.
    .sc4-c1~c4의 칸 스타일(테두리·모서리·여백·min-height)을 그대로 상속받으므로
@@ -13134,7 +13510,12 @@ html{{scroll-behavior:smooth}}
     <button type="button" class="cp-chip" data-go="nv-catch">포착 그 후</button>
     <button type="button" class="cp-chip" data-go="nv-score">채점표</button>
   </nav>
-  {build_gauge(data.get('관제지수'), 오늘한줄평, 지수)}
+  <!-- 🔴 2026-09-07 HO 지시 — 관제지수를 핵심편 신호등 섹션으로 옮겼다
+       (build_signal_head 안, 왼쪽 관제지수·오른쪽 신호등). 여기 그대로
+       두면 같은 카드가 두 번 나오므로 가린다(원칙5). 삭제가 아니라
+       가림이라 build_gauge() 함수는 그대로 살아있다(원칙3) — 되살리려면
+       HIDDEN_CHAPTERS에서 "심층편관제지수" 한 줄만 지우면 된다. -->
+  {hide("심층편관제지수", build_gauge(data.get('관제지수'), 오늘한줄평, 지수))}
 
   <!-- 🆕 2026-08-22 — 핵심편 헤더가 같은 성적표 카드를 쓰게 되면서 여기는 중복이 됐다.
        ⚠️ 예전엔 여기에 빈 <div id="score">만 남겨뒀는데, 「확인 ↓」을 누르면
