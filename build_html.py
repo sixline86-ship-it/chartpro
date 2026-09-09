@@ -588,7 +588,7 @@ def _mkt_mini_gauge(시장="코스피"):
             f'</div></div>')
 
 
-def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
+def _mkt_index_spark(시장="코스피", days=5, W=140, H=50):
     """[칸2] 5일 지수 캔들차트 — archive의 시가·고가·저가·종가로.
 
     🔴 2026-09-02 (2차) HO 지시 — "지수 그래프를 캔들로." 선그래프에서
@@ -626,7 +626,13 @@ def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
     bw = max(3, 간격 * 0.55)
 
     def _y(v):
-        return H - 10 - (v - 전체저) / rng * (H - 18)
+        # 🔴 2026-09-07 (2차) HO 지시 — "날짜가 너무 캔들에 붙어 있다."
+        #    캔들 바닥이 H-10, 날짜 글자 밑선이 H-1이라 글자 윗부분이
+        #    캔들과 겹쳤다. 바닥을 H-16으로 올려 약 5px 틈을 만든다
+        #    (H도 44→50으로 키워 캔들 크기는 그대로 유지).
+        #    ⚠️ 매크로 캔들(_mkt_macro_spark)과 같은 공식을 쓴다 — 두 카드가
+        #       나란히 보이므로 여백이 다르면 바로 티가 난다.
+        return H - 16 - (v - 전체저) / rng * (H - 24)
 
     g = []
     for i, (d, 시, 고, 저, 종) in enumerate(시리즈):
@@ -657,7 +663,7 @@ def _mkt_index_spark(시장="코스피", days=5, W=140, H=44):
     return (f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
             + "".join(g) +
             f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="10" '
-            f'fill="#9aa2ae" font-weight="800">{날}</text></svg>')
+            f'fill="#c9d0d9" font-weight="800">{날}</text></svg>')
 
 
 MACRO_HIST_PATH = "macro_history.json"
@@ -697,7 +703,7 @@ def _macro_ohlc(key, days=5):
     return out
 
 
-def _mkt_macro_spark(key, W=140, H=44):
+def _mkt_macro_spark(key, W=140, H=50):
     """[매크로 칸2] 5일 캔들 — 코스피 캔들(_mkt_index_spark)과 같은 문법.
 
     🔴 2026-09-07 HO 지시 — "환율·채권·유가·금도 캔들로 해줘."
@@ -730,7 +736,10 @@ def _mkt_macro_spark(key, W=140, H=44):
     bw = max(3, 간격 * 0.55)
 
     def _y(v):
-        return H - 10 - (v - 전체저) / rng * (H - 18)
+        # 🔴 2026-09-07 — 예전엔 H-10이라 캔들 바닥(34)과 날짜 글자 윗변(≈33)이
+        #    겹쳐 «09/09 진행중»이 캔들에 달라붙어 보였다. 바닥을 H-16으로
+        #    올려 약 5px 틈을 만든다(H도 44→50으로 키워 캔들 크기는 유지).
+        return H - 16 - (v - 전체저) / rng * (H - 24)
 
     g = []
     미확정있음 = False
@@ -748,15 +757,32 @@ def _mkt_macro_spark(key, W=140, H=44):
         if 미확정 and i == n - 1:
             미확정있음 = True
             # 진행 중인 봉 — 속을 비우고 점선 테두리로 «아직 안 끝났다».
-            _몸 = (f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
-                   f'height="{max(1.5,bot-top):.1f}" fill="none" stroke="{c}" '
-                   f'stroke-width="1.1" stroke-dasharray="2 1.5"/>')
+            # 🔴 2026-09-07 HO 지적 — "점선 캔들의 몸통 사각형이 삐뚤다."
+            #   [원인 2가지]
+            #    ① 좌표가 소수(예: x=61.4)라 1.1px 선이 픽셀 경계에 걸쳐
+            #       변마다 다른 두께로 뭉개졌다. → 좌표를 **0.5 격자에
+            #       맞춰** 반올림하고 선 두께를 1로 둔다. 홀수 두께 선은
+            #       중심이 .5에 있을 때 가장 또렷하다.
+            #    ② 몸통이 얇은 날(시가≈종가)엔 높이가 최소 1.5px라
+            #       위·아래 변이 겹쳐 «찌그러진 선»처럼 보였다.
+            #       → 점선일 때만 최소 높이를 5px로 준다. 속이 비어 있어
+            #         조금 키워도 다른 봉과 크기가 어긋나 보이지 않는다.
+            _hx = round(cx - bw / 2) + .5
+            _hw = max(3, round(bw))
+            _hh = max(5, round(bot - top))
+            _hy = round(top) + .5
+            _몸 = (f'<rect x="{_hx}" y="{_hy}" width="{_hw}" height="{_hh}" '
+                   f'fill="none" stroke="{c}" stroke-width="1" '
+                   f'stroke-dasharray="1.6 1.4"/>')
         g.append(f'<g opacity="{_op}">'
                  f'<line x1="{cx:.1f}" y1="{_y(고):.1f}" x2="{cx:.1f}" y2="{_y(저):.1f}" '
                  f'stroke="{c}" stroke-width="1.5"/>{_몸}</g>')
     날 = f"{시리즈[-1][0][4:6]}/{시리즈[-1][0][6:]}"
     라벨 = f'{날} 진행중' if 미확정있음 else 날
-    _색 = "#e0c060" if 미확정있음 else "#9aa2ae"
+    _색 = "#e0c060" if 미확정있음 else "#c9d0d9"
+    # 🔴 HO 지적 — "«09/09 진행중» 글자가 너무 캔들에 붙어 있다."
+    #    캔들 바닥이 H-16, 글자 밑선이 H-1이라 글자 윗부분이 캔들과 겹쳤다.
+    #    아래 _y()에서 캔들 바닥을 H-16으로 올려 5px 정도 틈을 만든다.
     return (f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
             + "".join(g) +
             f'<text x="{W-pad:.0f}" y="{H-1}" text-anchor="end" font-size="10" '
@@ -904,7 +930,7 @@ def _mkt_supply3(수급):
             표시, 색 = "—", "#6f7784"
         칸.append(f'<div class="sc3-c"><p class="sc3-k">{k}</p>'
                   f'<p class="sc3-v" style="color:{색}">{표시}</p></div>')
-    return (f'<p class="sc3-unit">순매수 <b>조 원</b></p>'
+    return (f'<p class="sc3-unit">순매수 <b>(조 원)</b></p>'
             f'<div class="sc3">{"".join(칸)}</div>')
 
 
@@ -2949,6 +2975,14 @@ def build_core_accum(매집):
             등 = s.get("장기등락률") if 등락필드 == "등락률" else s.get("등락률")
         등문 = "—" if 등 is None else f"{등:+.1f}%"
         등색 = "#8b93a0" if 등 is None else ("#ff6b4a" if 등 >= 0 else "#5b9bff")
+        # 🔴 2026-09-07 (2차) HO 지시 — "이게 뭐야 정신사납게. 간단하게
+        #    «하락한 종목일수록 점수가 높습니다» 뭐 이런 식으로."
+        #    [1차의 잘못] 등락 구간별로 세 갈래 문장을 만들어 카드마다 두
+        #    줄씩 붙였다. 종목마다 다른 말이 길게 붙으니 목록 전체가
+        #    시끄러웠다. 규칙은 종목별로 다르지 않고 **하나**다 —
+        #    그러니 종목마다 반복할 게 아니라 **아래 기준 설명에 한 번만**
+        #    적으면 된다(원칙4·13). 여기선 문구를 아예 없앤다.
+        등해석 = ""
         유형 = "🤝 쌍끌이" if s.get("유형") == "쌍끌이" else f"💼 {s.get('유형','단독')}"
         _이름, _칸 = sc_click(nm, c, 15)
         행들.append(
@@ -2964,7 +2998,7 @@ def build_core_accum(매집):
             f'{_flow_amt(s.get("합산"))}</b>'
             f'{_josa(_flow_amt(s.get("합산")), "을를")} 담았어요 '
             f'(시총의 {s.get("시총대비", 0):.2f}%) · 그동안 주가는 '
-            f'<b style="color:{등색}">{등문}</b></p>{_칸}</div>')
+            f'<b style="color:{등색}">{등문}</b></p>{등해석}{_칸}</div>')
 
     # 🆕 2026-08-22 HO 지시 — 이 코너가 핵심편의 **메인**이라 배경을 따로 준다.
     #    (다른 카드는 #141922 단색, 여기는 청록 그라데이션 + 굵은 테두리)
@@ -2991,7 +3025,14 @@ def build_core_accum(매집):
             f'💡 외인·기관이 <b style="color:#74f0d4">샀다</b>는 것만으론 안 뽑아요. '
             f'금액이 아니라 <b style="color:#74f0d4">시가총액 대비 비율</b>이 크고, '
             f'하루 몰빵이 아니라 <b style="color:#74f0d4">며칠에 걸쳐 연속으로</b> '
-            f'사들인 종목만 올라와요. 덜 오른 종목일수록 위로 옵니다.</p></div>')
+            f'사들인 종목만 올라와요.<br>'
+            # 🔴 2026-09-07 HO 지시 — "«그동안 주가 -11%»를 수익률이 저조하다고
+            #    오해할 것 같다. 간단하게 «하락한 종목일수록 점수가 높습니다»
+            #    이런 식으로 쉽게."
+            #    종목마다 붙이면 시끄러우니(1차 시도의 실패) 규칙은 여기
+            #    한 곳에서만, 대신 줄을 바꿔 눈에 띄게 적는다.
+            f'<b style="color:#74f0d4">📉 주가가 하락한 종목일수록 점수가 높습니다</b> '
+            f'— 이미 오른 걸 쫓아 산 게 아니라는 뜻이라서예요.</p></div>')
 
 
 def build_closing(해석, 날짜표기=""):
@@ -3901,6 +3942,29 @@ def _sector_scores(days=6):
     return out
 
 
+_DESC_오타 = {
+    # 🔴 2026-09-07 HO 발견 — 가온전선 "만들어 팑니다"(→ 팝니다).
+    #    전수 조사 결과 같은 오타가 7종목(가온전선·네이블·일진하이솔루스·
+    #    코아시아·에코앤드림 등)에 있었다. Haiku가 생성한 문장이라
+    #    가끔 이런 게 섞인다.
+    #    ⚠️ 원본 biz_description.json은 건드리지 않는다 — 2.23MB 누적
+    #       파일이고, 재파싱하면 언제든 다시 생길 수 있는 종류의 문제다.
+    #       화면에 내보내기 직전에 고치는 쪽이 안전하고 되돌리기도 쉽다.
+    #    새 오타가 발견되면 이 표에 한 줄씩 추가하면 된다.
+    "팑니다": "팝니다",
+}
+
+
+def _fix_desc_typo(t):
+    """기업 설명(AI 생성)의 알려진 오타를 화면 표시 직전에 교정한다."""
+    if not isinstance(t, str):
+        return t
+    for _잘못, _바름 in _DESC_오타.items():
+        if _잘못 in t:
+            t = t.replace(_잘못, _바름)
+    return t
+
+
 def _radar_slots(이름들):
     """테마명을 12개 고정 각도 슬롯에 배정한다.
 
@@ -4261,7 +4325,8 @@ def build_my_stocks(data):
         if os.path.exists("biz_description.json"):
             with open("biz_description.json", encoding="utf-8") as _f:
                 _bd원본 = json.load(_f) or {}
-            _bizdesc = {k: v.get("설명") for k, v in _bd원본.items() if v.get("설명")}
+            _bizdesc = {k: _fix_desc_typo(v.get("설명"))
+                        for k, v in _bd원본.items() if v.get("설명")}
             print(f"   🏢 기업 설명 {len(_bizdesc)}종목 적재 "
                   f"(전체 {len(_bd원본)}개 중 실제 설명 있는 것만)")
         else:
@@ -4603,6 +4668,37 @@ def build_my_stocks(data):
         print(f"   ⚠️ 층별 성적 읽기 실패 — {type(e).__name__}")
         _층오늘 = {}
     이름배열JS += "window.CP_STRATA=" + json.dumps(_층오늘, ensure_ascii=False) + ";"
+
+    # 🔴 2026-09-07 HO 지시 — 브리핑 문구를 «같은 섹터의 시총이 중간인
+    #    종목들»로 바꿔달라.
+    #    [먼저 확인한 것] 기존 CP_STRATA(대형·중형·소형)는 **코스피·코스닥
+    #    통합 시총 순위**로 나눈 값이라 섹터와 아무 상관이 없다
+    #    (collect_marketcap_universe: 전 종목을 시총순 정렬 후 상위 N=대형).
+    #    그 값에 «같은 섹터의»를 붙이면 사실이 아닌 문장이 된다(원칙11).
+    #    [그래서] data["계좌격자"]에 이미 있는 **섹터 × 크기** 칸을 따로
+    #    넘긴다. 이건 진짜로 «그 섹터 안에서» 계산된 값이라 HO가 원한
+    #    문장을 정직하게 쓸 수 있다. 새 수집 0회 — 이미 매일 저장 중이다.
+    #    ⚠️ 종목 3개 미만 칸은 버린다(_zone_size_split과 같은 규칙) —
+    #       한두 종목이 만든 숫자를 «크기의 특징»이라 부르면 착시다.
+    _섹터층 = {}
+    try:
+        for _행 in ((data.get("계좌격자") or {}).get("행") or []):
+            _zn = (_행 or {}).get("테마")
+            if not _zn:
+                continue
+            _칸 = _행.get("칸") or {}
+            _한칸 = {}
+            for _k in ("대형", "중형", "소형"):
+                _c = _칸.get(_k) or {}
+                _v, _n = _c.get("등락률"), _c.get("종목수") or 0
+                if isinstance(_v, (int, float)) and _n >= 3:
+                    _한칸[_k] = round(float(_v), 2)
+            if len(_한칸) >= 2:
+                _섹터층[_zn] = _한칸
+    except Exception as e:
+        print(f"   ⚠️ 섹터별 크기 읽기 실패 — {type(e).__name__}")
+        _섹터층 = {}
+    이름배열JS += "window.CP_ZONE_STRATA=" + json.dumps(_섹터층, ensure_ascii=False) + ";"
 
     # 🆕 종목별 외국인·기관 일별 순매수 — 「기사가 없어도 남는 단서」
     #  ⚠️ 기사가 거의 안 나오는 중소형주일수록 이게 유일한 재료다.
@@ -5249,7 +5345,15 @@ def build_my_stocks(data):
              ① 같은 섹터 안에서도 이 종목의 «덩치»가 밀린 날인가
              ② 외국인·기관이 이 종목에서 판 날인가
              ③ 둘 다 아니면 «재료가 없었다»까지만 말하고 멈춘다 */
-       var _s2=window.CP_STRATA||{}, _t2=(m[2]||''), _b2=null;
+       /* 🔴 2026-09-07 — 여기도 «같은 섹터 안에서도»라고 말하면서 실제로는
+          시장 전체 기준(CP_STRATA)을 쓰고 있었다. 섹터별 값
+          (CP_ZONE_STRATA)이 있으면 그걸 쓰고, 없으면 문구를 «시장 전체»로
+          정직하게 바꾼다(원칙11 — 단정엔 근거가 있어야 한다). */
+       var _zs3=(window.CP_ZONE_STRATA||{})[_z.z]||null;
+       var _s2=_zs3||(window.CP_STRATA||{}), _t2=(m[2]||''), _b2=null;
+       var _말3=_zs3?'같은 섹터 안에서도':'시장 전체로 보면';
+       var _풀3={'대형':'시총이 큰 종목','중형':'시총이 중간인 종목',
+                '소형':'시총이 작은 종목'};
        ['대형','중형','소형'].forEach(function(k){
         if(_s2[k]===undefined) return;
         if(_b2===null||_s2[k]>_s2[_b2]) _b2=k;
@@ -5257,7 +5361,8 @@ def build_my_stocks(data):
        var _sf2=(window.CP_SFLOW||{})[nm], _flow2=null;
        if(_sf2&&_sf2.length){ _flow2=_sf2[_sf2.length-1][1]+_sf2[_sf2.length-1][2]; }
        if(_t2&&_b2&&_b2!==_t2&&(_s2[_b2]-_s2[_t2])>=0.8){
-        _why=' 같은 섹터 안에서도 <b>'+_b2+'주</b>가 끌고 갔는데 이 종목은 <b>'+_t2+'주</b>라서예요.';
+        _why=' '+_말3+' <b>'+_풀3[_b2]+'</b>들이 끌고 갔는데 이 종목은 <b>'+
+             _풀3[_t2]+'</b>이라서예요.';
        }else if(_flow2!==null&&_flow2<-30){
         _why=' 외국인·기관이 이 종목에선 <b>순매도</b>였어요.';
        }else if(!hits.length&&!n2){
@@ -5280,23 +5385,32 @@ def build_my_stocks(data):
        [WHY] 같은 섹터를 사도 그 안에서 대형만 갔으면 중소형을 든 사람은 소외된다.
              섹터만 말하면 "자리는 좋았는데 왜 나만"이 끝까지 설명되지 않는다. */
     var _st=window.CP_STRATA||{}, _my층=(m[2]||'');
-    if(_my층&&_st[_my층]!==undefined){
+    /* 🔴 2026-09-07 HO 지시 — "«시가총액이 중간인 회사» → «같은 섹터의
+       시총이 중간인 종목들». 앞으로 «같은 섹터»·«시총»·«종목»을 쓸 것."
+       [중요] «같은 섹터»라고 쓰려면 실제로 섹터 안에서 계산한 값이어야 한다.
+         · CP_ZONE_STRATA = 그 섹터 안의 대형·중형·소형 (계좌격자) → «같은 섹터»
+         · CP_STRATA      = 코스피·코스닥 전체 시총순 3등분    → «시장 전체»
+       둘은 다른 숫자다. 섹터 값이 있으면 그걸 쓰고 «같은 섹터»라 부르고,
+       없으면 전체 값을 쓰되 «시장 전체»라고 정확히 밝힌다(원칙11·12). */
+    var _zs2=(window.CP_ZONE_STRATA||{}), _zn2=(_z?_z.z:null);
+    var _섹터층=(_zn2&&_zs2[_zn2])?_zs2[_zn2]:null;
+    var _쓸층=_섹터층||_st, _범위=_섹터층?('같은 섹터('+_zn2+')의 '):'시장 전체에서 ';
+    if(_my층&&_쓸층[_my층]!==undefined){
      var _best=null;
      ['대형','중형','소형'].forEach(function(k){
-      if(_st[k]===undefined) return;
-      if(_best===null||_st[k]>_st[_best]) _best=k;
+      if(_쓸층[k]===undefined) return;
+      if(_best===null||_쓸층[k]>_쓸층[_best]) _best=k;
      });
      /* 🆕 2026-08-26 HO 지시 — «크기»는 처음 보는 사람이 뭘 말하는지 모른다.
-        → **«시가총액이 큰/중간/작은 회사»**로 풀어 쓴다. 대형·중형·소형이라는
-          말 자체를 문장 안에서 정의해 주면 용어집을 안 봐도 읽힌다. */
-     var _풀이={'대형':'시가총액이 큰 회사','중형':'시가총액이 중간인 회사',
-              '소형':'시가총액이 작은 회사'};
-     if(_best&&_best!==_my층&&(_st[_best]-_st[_my층])>=0.8){
-      _add.push('📏 오늘은 <b>'+_풀이[_best]+'</b>들이 '+fmt(_st[_best])+'% 갔는데, '+
-       '이 종목이 속한 <b>'+_풀이[_my층]+'</b>들은 '+fmt(_st[_my층])+'%였어요 — '+
-       '<b style="color:#ff9a3c">같은 업종을 골랐어도 회사 규모 때문에 밀릴 수 있는 날</b>이었어요');
+        → 풀어 쓴다. 🔴 2026-09-07 «회사» → «종목»(HO 지정 어휘). */
+     var _풀이={'대형':'시총이 큰 종목','중형':'시총이 중간인 종목',
+              '소형':'시총이 작은 종목'};
+     if(_best&&_best!==_my층&&(_쓸층[_best]-_쓸층[_my층])>=0.8){
+      _add.push('📏 오늘은 '+_범위+'<b>'+_풀이[_best]+'</b>들이 '+fmt(_쓸층[_best])+'% 갔는데, '+
+       '이 종목이 속한 <b>'+_풀이[_my층]+'</b>들은 '+fmt(_쓸층[_my층])+'%였어요 — '+
+       '<b style="color:#ff9a3c">같은 섹터를 골랐어도 시총 크기 때문에 밀릴 수 있는 날</b>이었어요');
      }else if(_best===_my층){
-      _add.push('📏 오늘은 <b>'+_풀이[_my층]+'</b>들이 '+fmt(_st[_my층])+
+      _add.push('📏 오늘은 '+_범위+'<b>'+_풀이[_my층]+'</b>들이 '+fmt(_쓸층[_my층])+
        '%로 가장 잘 갔어요 — 이 종목이 <b>그 무리에 속해 유리한 날</b>이었어요');
      }
     }
@@ -12246,6 +12360,11 @@ html{{scroll-behavior:smooth}}
 /* 🔴 2026-09-07 (3차) — line-clamp를 뺐다. 이제 _macro_note()가 파이썬에서
    **문장 경계로** 자르므로 화면엔 항상 완결된 문장만 나온다. CSS로 또
    자르면 그 완결된 문장이 다시 «최…»처럼 끊긴다. */
+/* 🆕 2026-09-07 — 매집 레이더 «그동안 주가» 해석 한 줄.
+   숫자 바로 밑에 붙어야 오해가 생기기 전에 맥락이 닿는다. */
+.ar-hint{{display:block;margin-top:5px;font-size:10.5px;color:#8fb3ad;
+  line-height:1.55}}
+.ar-hint b{{color:#74f0d4;font-weight:800}}
 .mc2-note{{font-size:11px;color:#9aa2ae;line-height:1.65;margin:7px 2px 0}}
 /* 숫자만 강조 — 사실이라 강조해도 뜻이 안 바뀐다. 형용사·전망을 강조하면
    «단정»으로 읽혀 원칙11에 걸린다. */
