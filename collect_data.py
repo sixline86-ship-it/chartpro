@@ -2166,6 +2166,24 @@ ACC_L_SOLO = 14         # 중기 단독: 14일(70%) — 5일 기준(4/5=80%)보�
 #      60일치가 안 차면 장기목록은 그냥 비워 둔다(빈 탭은 화면에서 자동으로 꺼진다).
 ACC_LONGEST = 60        # 장기 관찰 기간(거래일). None이면 60일 기능 자체를 끈다
 ACC_PAGES = 3           # frgn 페이지 수 (20행 × 3 = 최대 60행)
+# 🔴 2026-09-07 — 60일 매집을 «매일 절반씩» 갱신한다.
+#   [왜] 발행이 43분 걸렸는데, 그중 약 15분이 이 함수 하나였다.
+#        230종목 × 3페이지 = 690요청 (20일치는 1페이지면 끝나는데,
+#        60일치를 채우려고 2·3페이지를 더 받는다).
+#   [1차 시도] 격일로 «전량» 갱신 → 갱신일 690요청(43분) / 캐시일 230요청(33분).
+#        평균은 줄지만 **발행 시간이 이틀 간격으로 10분씩 출렁였다.**
+#   [지금 방식 — HO 제안] 230종목을 반으로 갈라 **매일 절반만** 60일치를
+#        받는다. 매일 115×3 + 115×1 = 460요청으로 **일정**하다.
+#        · 평균 요청 수는 격일 전량(690↔230)과 똑같지만
+#        · 매일 같은 시간에 발행된다(≈38분, 43분짜리 날이 사라짐)
+#        · 각 종목의 60일 값이 «최대 1거래일 전» 것이라 신선도도 같다
+#   ⚠️ 20일·5일 매집은 **매일 전 종목** 그대로다(1페이지로 끝나므로).
+#      느려진 원인은 오직 3페이지짜리 60일이었다.
+#   ⚠️ 60일 랭킹에 «오늘 계산»과 «어제 계산»이 섞인다. 60일 창이 하루
+#      어긋나는 것(60분의 1)이라 순위에 미치는 영향은 미미하지만,
+#      그래도 화면에 기준일 범위를 밝힌다(원칙11).
+ACC_LONG_주기일 = int(os.environ.get("CP_ACC_LONG_EVERY", "2"))   # 몇 조각으로 나눠 돌릴지(2=반반)
+ACC_LONG_CACHE = "accum_long_cache.json"
 ACC_X_BOTH = 36         # 장기 쌍끌이: 60일 중 36일(60%) — 5·20일과 같은 비율
 ACC_X_SOLO = 42         # 장기 단독: 42일(70%) — 20일 기준(14/20)과 같은 비율
 ACC_BOTH_DAYS = 3       # 🤝쌍끌이 인정 최소 일수 (둘 다 사는 것 자체가 강한 조건이라 3일)
@@ -2186,6 +2204,57 @@ ACC_UNIVERSE = {"코스피": 150, "코스닥": 80}   # 시총 상위 몇 종목�
 # ⚠️ 종목당 1요청을 연속으로 때리면 네이버가 IP를 막을 수 있다.
 #    막히면 그날 매집 레이더가 통째로 빈다. 230종목에 sleep으로 안정성을 산다.
 ACC_SLEEP = 0.15
+
+
+def _acc_거래일번호():
+    """지금까지 쌓인 거래일 수 = archive의 data_*.json 개수.
+
+    🔴 2026-09-07 — «격일»을 달력 날짜 차이로 세면 주말 때문에 어긋난다.
+       금(갱신) → 월은 3일 차이라 무조건 갱신이 되어, 실측 시뮬레이션에서
+       10거래일 중 6일이 갱신일이 됐다(절감 27%). 거래일 번호로 세면
+       정확히 하루 걸러 하루가 되어 절감이 50%로 올라간다.
+    ⚠️ 오늘 파일은 아직 안 쓰였으므로 이 값은 «어제까지의 거래일 수»다.
+       매 거래일 1씩 늘기만 하면 되므로 그대로 써도 문제없다.
+    """
+    try:
+        return len([f for f in os.listdir("archive")
+                    if f.startswith("data_") and f.endswith(".json")])
+    except OSError:
+        return 0
+
+
+def _acc_long_cache_load():
+    """직전까지 계산해 둔 60일 매집 결과를 **종목별로** 읽는다.
+
+    🔴 2026-09-07 (2차) HO 제안 — "격일로 전량 말고, 반반씩 돌리면 안 돼?"
+       맞는 방향이라 그렇게 바꿨다. 그래서 캐시 구조도 «목록»이 아니라
+       «종목명 → 항목» 사전이어야 한다(절반만 갈아끼워야 하므로).
+    """
+    try:
+        with open(ACC_LONG_CACHE, encoding="utf-8") as f:
+            c = json.load(f) or {}
+        종목별 = c.get("종목별")
+        if isinstance(종목별, dict):
+            return 종목별
+        # 옛 구조(목록형)면 종목명 기준 사전으로 옮겨 담는다 — 버리지 않는다.
+        if isinstance(c.get("장기종목"), list):
+            return {x.get("종목명"): {**x, "기준일": c.get("기준일")}
+                    for x in c["장기종목"] if x.get("종목명")}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _acc_long_cache_save(장기목록):
+    try:
+        종목별 = {x["종목명"]: x for x in 장기목록 if x.get("종목명")}
+        with open(ACC_LONG_CACHE, "w", encoding="utf-8") as f:
+            json.dump({"갱신일": DATE, "거래일번호": _acc_거래일번호(),
+                       "장기기간": ACC_LONGEST, "종목별": 종목별},
+                      f, ensure_ascii=False, indent=1)
+        print(f"💾 60일 매집 캐시 저장 ({len(종목별)}종목)")
+    except (OSError, KeyError) as e:
+        print(f"   ⚠️ 60일 매집 캐시 저장 실패: {type(e).__name__}")
 
 
 def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
@@ -2414,12 +2483,25 @@ def collect_accumulation_radar():
     중기목록 = []
     장기목록 = []
     실패 = 0
+    # 🔴 2026-09-07 — 오늘 60일치를 받을 «절반»을 정한다.
+    #    종목 순번 % 주기 == 거래일번호 % 주기 인 종목만 3페이지를 받고,
+    #    나머지는 1페이지(20일)만 받아 어제 계산해 둔 60일 결과를 잇는다.
+    #    ⚠️ 순번은 시총 정렬 순이라 매일 거의 같다 — 같은 종목이 계속
+    #       같은 조에 남아 이틀에 한 번씩 규칙적으로 갱신된다.
+    _장기캐시 = _acc_long_cache_load() if ACC_LONGEST else {}
+    _조 = (_acc_거래일번호() % ACC_LONG_주기일) if ACC_LONGEST else 0
+    _신선, _승계 = 0, 0
+    if ACC_LONGEST:
+        print(f"🗿 60일 매집 — 오늘은 {ACC_LONG_주기일}조 중 {_조+1}조를 갱신합니다 "
+              f"(약 {len(유니버스)//ACC_LONG_주기일}종목만 3페이지, 나머지는 캐시 승계)")
     _수급적재 = []   # 🆕 2026-08-24 — 조건 통과 여부와 무관하게 **전 종목** 저장
     #  ⚠️ 조건을 통과한 종목만 저장하면 "60일 안에 이만한 매집이 있었나"를
     #     판정할 수 없다. 비교 대상이 되려면 안 잡힌 날도 있어야 한다.
-    for 이름, 코드, 시장, 시총 in 유니버스:
+    for _idx, (이름, 코드, 시장, 시총) in enumerate(유니버스):
         time.sleep(ACC_SLEEP)      # ⚠️ 차단 방지 — 빼지 말 것
-        flow = _fetch_investor_flow(코드)
+        # 이 종목이 «오늘 갱신할 조»인가. 아니면 20일치만 받는다(1페이지).
+        _이번조 = bool(ACC_LONGEST) and (_idx % ACC_LONG_주기일 == _조)
+        flow = _fetch_investor_flow(코드, days=(ACC_LONGEST if _이번조 else ACC_LONG))
         if not flow:
             실패 += 1
             continue
@@ -2453,7 +2535,10 @@ def collect_accumulation_radar():
                               "장기등락률": flow.get("장기등락률")})
 
         # ── 장기(60일) 판정 — 2026-08-22. 20일과 **같은 규칙, 기간만 확장** ──
-        if ACC_LONGEST and len(외전체) >= ACC_LONGEST:
+        # 🔴 2026-09-07 — 오늘 «이번 조»면 새로 계산하고, 아니면 어제까지
+        #    계산해 둔 값을 그대로 잇는다. 잇는 항목은 «기준일»을 그대로
+        #    달고 오므로 언제 계산된 값인지 추적된다.
+        if _이번조 and ACC_LONGEST and len(외전체) >= ACC_LONGEST:
             외60, 기60 = 외전체[:ACC_LONGEST], 기전체[:ACC_LONGEST]
             외일60 = sum(1 for v in 외60 if v > 0)
             기일60 = sum(1 for v in 기60 if v > 0)
@@ -2471,7 +2556,17 @@ def collect_accumulation_radar():
                               "외국인": round(외누60, 1), "기관": round(기누60, 1),
                               "유형": 장기[0], "합산": round(장기[1], 1),
                               "시총대비": round(장기[1] / 시총 * 100, 3) if 시총 else None,
-                              "최장기등락률": flow.get("최장기등락률")})
+                              "최장기등락률": flow.get("최장기등락률"),
+                              "기준일": DATE})
+                _신선 += 1
+        elif ACC_LONGEST and not _이번조:
+            # 오늘 조가 아니다 → 어제까지 계산해 둔 결과가 있으면 그대로 잇는다.
+            # ⚠️ 캐시에 없으면 «조건을 통과하지 못한 종목»이라는 뜻이므로
+            #    아무것도 넣지 않는다(없는 걸 만들지 않는다, 원칙2).
+            _옛 = _장기캐시.get(이름)
+            if _옛:
+                장기목록.append(_옛)
+                _승계 += 1
 
         기본 = {"종목명": 이름, "시장": 시장, "코드": 코드, "시총": 시총,
                "외인일수": 외일수, "기관일수": 기일수,
@@ -2542,6 +2637,13 @@ def collect_accumulation_radar():
               else (_x.get("장기등락률") or 0))
         _x["매집강도"] = round((_x.get("시총대비") or 0) / max(0.1, 1 + _d / 100), 4)
     장기목록.sort(key=lambda x: x.get("매집강도") or 0, reverse=True)
+    # 🔴 2026-09-07 — 오늘 계산분 + 승계분을 통째로 캐시에 남긴다.
+    #    (오늘 조에서 조건을 못 넘긴 종목은 장기목록에 없으므로 캐시에서도
+    #     자동으로 빠진다 — 따로 지울 필요가 없다.)
+    _기준일들 = sorted({str(x.get("기준일") or DATE) for x in 장기목록})
+    if ACC_LONGEST and 장기목록:
+        _acc_long_cache_save(장기목록)
+        print(f"🗿 60일 매집 — 오늘 새로 계산 {_신선}종목 · 어제까지 값 승계 {_승계}종목")
     if 장기목록:
         print(f"🗿 장기({ACC_LONGEST}일) 매집 {len(장기목록)}종목 — 1위 {장기목록[0]['종목명']}")
     elif ACC_LONGEST:
@@ -2558,6 +2660,11 @@ def collect_accumulation_radar():
 
     return {"종목": 종목, "중기종목": 중기목록, "중기기간": ACC_LONG,
             "장기종목": 장기목록, "장기기간": ACC_LONGEST,
+            # 🆕 2026-09-07 — 60일 매집이 «언제 기준»인지. 매일 절반씩
+            #    갱신하므로 보통 오늘/어제 두 날짜가 섞인다. 가장 오래된
+            #    기준일을 넘겨 화면에서 «최대 며칠 전 값인지» 밝힌다(원칙11).
+            "장기기준일": (_기준일들[0] if _기준일들 else DATE),
+            "장기기준일범위": _기준일들,
             "장기쌍끌이": ACC_X_BOTH, "장기단독": ACC_X_SOLO,
             "중기쌍끌이": ACC_L_BOTH, "중기단독": ACC_L_SOLO,
             "기간": ACC_DAYS,
