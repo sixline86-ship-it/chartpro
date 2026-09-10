@@ -487,6 +487,8 @@ jobs:
           #    theme_history.json      = 테마 순환 통계 재료(2026-08-29 코드 심음)
           #    macro_history.json      = 환율·금리·유가·금 캔들용 OHLC(2026-09-07 추가).
           #    accum_long_cache.json   = 🔴 60일 매집 격일 갱신 캐시(2026-09-07 추가).
+          #    watch_stocks.json       = ⭐ 관심종목(뉴스 매일 최우선 갱신).
+          #      HO가 GitHub 웹에서 직접 고치는 파일이라 커밋 목록에 둔다.
           #      ⚠️ 여기 빠지면 캐시가 매 실행마다 «없는 상태»로 시작해 결국
           #         매일 60일치를 다시 받는다 — 격일 갱신의 효과(약 10분
           #         절약)가 통째로 사라진다. theme_history.json 누락 사고와
@@ -502,7 +504,7 @@ jobs:
           git add -A archive index.html report_*.html flow_history.json market_history.json \
                   return_sector_log.json watch_tally.json core_accum_log.json strata_history.json \
                   stock_flow_history.json theme_history.json macro_history.json \
-                  accum_long_cache.json thumb/*.png || true
+                  accum_long_cache.json watch_stocks.json thumb/*.png || true
           # ⚠️ 조건부로만 생기는 파일은 반드시 개별 루프 — 하나라도 없으면
           #    -A 한 줄 전체가 pathspec 에러로 실패하는 사고를 이미 겪었다.
           #    stock_capture_log.json = 종목별 예보 성적(2026-08-29 코드 심음).
