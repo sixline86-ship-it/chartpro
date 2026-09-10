@@ -2004,12 +2004,24 @@ def build_accumulation(매집, 설정=None):
                 행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
                   f' · 누적 +{_fmt_eok(s.get("합산"))}', 일수=장기간)
                 for i, s in enumerate(목록, 1))
+        # 🔴 2026-09-07 — 60일 매집은 «매일 절반씩» 갱신한다(발행 시간 평탄화).
+        #    그래서 목록에 오늘 계산분과 어제 계산분이 섞인다. 전부 오늘
+        #    기준인 척하면 원칙11 위반이라, 오늘이 아닌 값이 섞여 있으면
+        #    가장 오래된 기준일을 밝힌다.
+        _범위 = [str(x) for x in (매집.get("장기기준일범위") or []) if x]
+        _오늘 = str(data.get("날짜") or DATE)
+        _옛것 = [x for x in _범위 if x != _오늘]
+        _기준안내 = ""
+        if _옛것:
+            _o = min(_옛것)
+            _기준안내 = (f'<span class="ac-asof">📌 {_o[4:6]}/{_o[6:]}~ 기준 '
+                       f'(절반씩 갱신)</span>')
         장기블록 = f'''
-      <p class="ac-long-s">{장기간}일은 <b>"분기 내내 이어진 방향"</b>입니다.
+      <p class="ac-long-s">{장기간}일은 <b>"분기 내내 이어진 방향"</b>입니다. {_기준안내}<br>
         세 달을 같은 쪽으로 담았다면 단기 이벤트가 아니라 <b>구조적인 판단</b>일 가능성이 큽니다.<br>
         🤝쌍끌이 = 둘 다 {매집.get("장기쌍끌이",36)}일↑ · 💼단독 = 한쪽 {매집.get("장기단독",42)}일↑ ·
         정렬은 <b>매집강도</b>(많이 담겼는데 덜 오른 순)</p>
-      <div class="ac-two">
+      <div class="ac-two">''' + f'''
         <div class="ac-col"><p class="ac-col-t">📊 코스피 · {장기간}일 매집</p>{장기랭킹("코스피")}</div>
         <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {장기간}일 매집</p>{장기랭킹("코스닥")}</div>
       </div>'''
@@ -12365,6 +12377,12 @@ html{{scroll-behavior:smooth}}
 .ar-hint{{display:block;margin-top:5px;font-size:10.5px;color:#8fb3ad;
   line-height:1.55}}
 .ar-hint b{{color:#74f0d4;font-weight:800}}
+/* 🆕 2026-09-07 — 60일 매집이 «오늘이 아닌 날» 기준일 때 붙는 배지.
+   격일 갱신(발행 시간 절약)이라 생기는 표시다. 눈에 띄되 본문을
+   가리지 않게 작고 차분한 색으로. */
+.ac-asof{{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:99px;
+  background:rgba(224,198,96,.13);border:.5px solid rgba(224,198,96,.3);
+  color:#e0c060;font-size:10px;font-weight:800;white-space:nowrap}}
 .mc2-note{{font-size:11px;color:#9aa2ae;line-height:1.65;margin:7px 2px 0}}
 /* 숫자만 강조 — 사실이라 강조해도 뜻이 안 바뀐다. 형용사·전망을 강조하면
    «단정»으로 읽혀 원칙11에 걸린다. */
