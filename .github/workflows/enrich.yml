@@ -1,10 +1,24 @@
 name: 몰아 모으기 (기업 프로필·사업보고서·종목뉴스)
 
 # ⚠️ 이 workflow는 발행(daily.yml)과 완전히 분리돼 있다.
-#    수동(workflow_dispatch)으로만 돈다 — 예약 실행 없음.
 #    발행이 도는 중(16:50~18:20 사이)에는 되도록 실행하지 않는다.
 #    같은 json 파일을 동시에 건드리면 git push가 충돌할 수 있다.
+#
+# 🔴 2026-09-07 — 새벽 예약 실행을 추가한다.
+#   [왜] 종목뉴스가 하루 60종목씩만 갱신돼 3,962종목을 한 바퀴 도는 데
+#        66일이 걸렸다. 그래서 구독자가 어떤 종목을 담든 대부분 «8월 기사»가
+#        떴다. 구독자의 관심종목은 브라우저에만 있어 서버가 알 수 없으므로,
+#        **전 종목을 자주 갱신하는 것 말고는 방법이 없다.**
+#   [왜 여기인가] 발행(daily.yml)은 18:07에 시작해 43분이 걸린다. 거기에
+#        대량 뉴스 수집을 얹으면 발행이 더 늦어진다. 반면 이 워크플로는
+#        timeout 5시간에 발행과 분리돼 있어 **아무리 오래 걸려도 상관없다.**
+#   [효과] 하루 1,000종목이면 약 4일에 전 종목 한 바퀴 → 기사가 «최대 4일 전».
+#        소요는 약 22분인데, 새벽 3시라 아무에게도 영향이 없다.
+#   ⚠️ 발행 시간(18:07)과 겹치지 않게 새벽 3시(KST)로 잡았다.
+#      cron은 UTC 기준이라 KST 03:00 = UTC 18:00(전날).
 on:
+  schedule:
+    - cron: "0 18 * * 0-4"   # UTC 18:00 = KST 익일 03:00 (월~금 새벽)
   workflow_dispatch:
     inputs:
       profile_quota:
@@ -72,14 +86,24 @@ jobs:
           # 🆕 2026-08-31 — 사업 포트폴리오 파서가 Claude API를 쓴다.
           #    daily.yml과 시크릿 이름을 통일했다(같은 키 재사용).
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CP_PROFILE_QUOTA: ${{ github.event.inputs.profile_quota }}
-          CP_BIZ_QUOTA: ${{ github.event.inputs.biz_quota }}
-          CP_SNEWS_QUOTA: ${{ github.event.inputs.news_quota }}
-          CP_BIZPORT_QUOTA: ${{ github.event.inputs.bizport_quota }}
-          CP_RETRY_FAILED: ${{ github.event.inputs.retry_failed }}
-          CP_PORT_RETRY_FAILED: ${{ github.event.inputs.port_retry_failed }}
-          CP_DESC_QUOTA: ${{ github.event.inputs.desc_quota }}
-          CP_DESC_RETRY_FAILED: ${{ github.event.inputs.desc_retry_failed }}
+          # 🔴 2026-09-07 — 예약(cron) 실행에는 inputs가 **없다**(빈 문자열).
+          #    그대로 두면 quota가 0으로 읽혀 아무것도 안 모은다.
+          #    || 로 «예약 실행용 기본값»을 준다. 수동 실행이면 입력값이 이긴다.
+          #    ⚠️ 뉴스 600종목 ≈ 13분. 7일이면 전 종목(3,962)을 한 바퀴 돈다.
+          #    🔴 2026-09-07 1000 → 600으로 낮춤. [왜] 저장소를 private로
+          #       바꾸면 GitHub Actions가 유료(Pro 2,000분/월)가 되는데,
+          #       국내 발행(946분) + 미국 발행 예정(330~440분)까지 더하면
+          #       1000종목(484분)으로는 한도를 넘길 위험이 있다. 600이면
+          #       290분이라 여유가 남는다. 기사가 «최대 4일 전»이든
+          #       «최대 7일 전»이든 체감 차이는 크지 않다.
+          CP_PROFILE_QUOTA: ${{ github.event.inputs.profile_quota || '0' }}
+          CP_BIZ_QUOTA: ${{ github.event.inputs.biz_quota || '30' }}
+          CP_SNEWS_QUOTA: ${{ github.event.inputs.news_quota || '600' }}
+          CP_BIZPORT_QUOTA: ${{ github.event.inputs.bizport_quota || '0' }}
+          CP_RETRY_FAILED: ${{ github.event.inputs.retry_failed || 'no' }}
+          CP_PORT_RETRY_FAILED: ${{ github.event.inputs.port_retry_failed || 'no' }}
+          CP_DESC_QUOTA: ${{ github.event.inputs.desc_quota || '0' }}
+          CP_DESC_RETRY_FAILED: ${{ github.event.inputs.desc_retry_failed || 'no' }}
         run: python catchup_enrich.py
 
       # 🔴 2026-08-28 사고 수정 — 몰아 모으기가 2시간 넘게 도는 사이,
