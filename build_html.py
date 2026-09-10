@@ -433,7 +433,65 @@ def _sc_flowbar(수급, W=205, H=23):
     return f'<svg viewBox="0 0 {W} {len(항목)*H+4}">{"".join(g)}</svg>'
 
 
-def _sc_read(수급):
+def _sc_rank20(시장, 주체, 오늘값, days=20):
+    """오늘 수급이 최근 days거래일 중 **몇 번째로 센 날**인가.
+
+    🔴 2026-09-07 HO 지시 — "«외국인 -2.62조가 빠져나갔습니다»처럼 정보만
+       나열하지 말고, «20일 중 외국인 최대 매도(몇 등)» 같은 성격을 달라."
+       [맞는 지적] 금액만 보면 그게 큰 건지 흔한 건지 알 수가 없다.
+       -2.62조가 20일 중 1등 매도면 «사건»이고, 9등이면 «평범한 날»이다.
+       같은 숫자라도 순위가 붙는 순간 뜻이 생긴다.
+
+    반환: (순위, 표본수, 방향) — 방향은 "매수"/"매도".
+      · 매수인 날은 «매수한 날들 중» 몇 등, 매도인 날은 «매도한 날들 중» 몇 등.
+        사는 날과 파는 날을 한 줄에 세우면 «1등 매수»가 «1등 매도»보다
+        위라는 식의 무의미한 비교가 된다.
+    ⚠️ 표본이 5거래일 미만이면 None을 돌려준다 — 3일 중 1등은 순위가 아니다
+       (표본 5회 룰, 다른 코너와 같은 기준).
+    """
+    if 오늘값 is None:
+        return None
+    _키 = f"{시장}_수급"
+    같은편 = []
+    try:
+        # ⚠️ archive_days()는 **(날짜, data) 튜플** 목록을 준다. dict인 줄 알고
+        #    _d.get(...)을 하면 조용히 실패해 순위가 늘 None이 된다(실측 버그).
+        for _날, _d in archive_days(days):
+            _v = ((_d.get("지수수급") or {}).get(_키) or {}).get(주체)
+            if _v is None:
+                continue
+            try:
+                _f = float(str(_v).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if (_f >= 0) == (오늘값 >= 0):     # 같은 방향인 날만 줄 세운다
+                같은편.append(abs(_f))
+    except Exception:
+        return None
+    if len(같은편) < 5:
+        return None
+    같은편.sort(reverse=True)
+    _오늘 = abs(오늘값)
+    순위 = sum(1 for v in 같은편 if v > _오늘) + 1
+    return (순위, len(같은편), "매수" if 오늘값 >= 0 else "매도")
+
+
+def _sc_rank_말(시장, 주체, 값, days=20):
+    """순위를 «사람 말»로 바꾼다. 말할 만한 순위가 아니면 빈 문자열."""
+    r = _sc_rank20(시장, 주체, 값, days)
+    if not r:
+        return ""
+    순위, 표본, 방향 = r
+    # ⚠️ 5등 밖은 굳이 말하지 않는다 — «20일 중 12등»은 정보가 아니라 소음이다.
+    #    원칙13(나열하지 말고 하나만 짚는다)과 같은 태도.
+    if 순위 > 3:
+        return ""
+    if 순위 == 1:
+        return f"최근 {days}거래일 <b>최대 {방향}</b>"
+    return f"최근 {days}거래일 중 <b>{순위}번째로 큰 {방향}</b>"
+
+
+def _sc_read(수급, 시장=None):
     """수급 세 주체를 보고 '누가 끌었나'를 한 줄로 판정한다 (규칙 기반).
 
     ⚠️ '오를 것이다/내릴 것이다'는 쓰지 않는다.
@@ -451,24 +509,34 @@ def _sc_read(수급):
     큰쪽 = "외국인" if abs(외) >= abs(기) else "기관"
     큰값 = 외 if abs(외) >= abs(기) else 기
 
+    # 🔴 2026-09-07 — «성격»을 한 마디 붙인다. 오늘 움직임이 큰 쪽(외국인/기관 중
+    #    금액이 큰 주체)이 최근 20거래일에서 몇 등인지 본다.
+    #    ⚠️ 말할 만한 순위(3등 이내)가 아니면 빈 문자열이라 아무것도 안 붙는다 —
+    #       평범한 날에 억지로 «12등»을 말하지 않는다(원칙14).
+    _주체키 = "외국인" if 큰쪽 == "외국인" else "기관계"
+    _성격 = _sc_rank_말(시장, _주체키, 큰값) if 시장 else ""
+    _성격문 = f' <span class="sc-rank">📊 {_성격}예요.</span>' if _성격 else ""
+
     if 외 > 0 and 기 > 0:
         return "🔥 두 큰손이 함께 샀다", FS_BUY, (
             f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>"
-            f"{_josa(_flow_amt(기), '이가')} 같이 들어왔습니다.")
+            f"{_josa(_flow_amt(기), '이가')} 같이 들어왔습니다.{_성격문}")
     if 외 < 0 and 기 < 0:
         return "🧊 두 큰손이 함께 팔았다", FS_SELL, (
             f"외국인 <b>{_flow_amt(외)}</b>·기관 <b>{_flow_amt(기)}</b>"
             f"{_josa(_flow_amt(기), '이가')} 같이 빠졌습니다."
-            + (f" 개인만 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
+            + (f" 개인만 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else "")
+            + _성격문)
     if 실 >= 0:
         약 = "기관" if 큰쪽 == "외국인" else "외국인"
         return f"🔥 {큰쪽}이 끌었다", FS_BUY, (
             f"{큰쪽} <b>{_flow_amt(큰값)}</b>"
-            f"{_josa(_flow_amt(큰값), '이가')} {약} 매도를 덮었습니다.")
+            f"{_josa(_flow_amt(큰값), '이가')} {약} 매도를 덮었습니다.{_성격문}")
     return f"🧊 {큰쪽}이 밀었다", FS_SELL, (
         f"{큰쪽} <b>{_flow_amt(큰값)}</b>"
         f"{_josa(_flow_amt(큰값), '이가')} 빠져 나갔습니다."
-        + (f" 개인이 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else ""))
+        + (f" 개인이 <b>{_flow_amt(개)}</b> 받았습니다." if 개 is not None and 개 > 0 else "")
+        + _성격문)
 
 
 def _mkt_key(이름):
@@ -588,7 +656,7 @@ def _mkt_mini_gauge(시장="코스피"):
             f'</div></div>')
 
 
-def _mkt_index_spark(시장="코스피", days=5, W=140, H=50):
+def _mkt_index_spark(시장="코스피", days=5, W=140, H=81):
     """[칸2] 5일 지수 캔들차트 — archive의 시가·고가·저가·종가로.
 
     🔴 2026-09-02 (2차) HO 지시 — "지수 그래프를 캔들로." 선그래프에서
@@ -632,7 +700,7 @@ def _mkt_index_spark(시장="코스피", days=5, W=140, H=50):
         #    (H도 44→50으로 키워 캔들 크기는 그대로 유지).
         #    ⚠️ 매크로 캔들(_mkt_macro_spark)과 같은 공식을 쓴다 — 두 카드가
         #       나란히 보이므로 여백이 다르면 바로 티가 난다.
-        return H - 16 - (v - 전체저) / rng * (H - 24)
+        return H - 26 - (v - 전체저) / rng * (H - 34)
 
     g = []
     for i, (d, 시, 고, 저, 종) in enumerate(시리즈):
@@ -703,7 +771,7 @@ def _macro_ohlc(key, days=5):
     return out
 
 
-def _mkt_macro_spark(key, W=140, H=50):
+def _mkt_macro_spark(key, W=140, H=77):
     """[매크로 칸2] 5일 캔들 — 코스피 캔들(_mkt_index_spark)과 같은 문법.
 
     🔴 2026-09-07 HO 지시 — "환율·채권·유가·금도 캔들로 해줘."
@@ -739,7 +807,7 @@ def _mkt_macro_spark(key, W=140, H=50):
         # 🔴 2026-09-07 — 예전엔 H-10이라 캔들 바닥(34)과 날짜 글자 윗변(≈33)이
         #    겹쳐 «09/09 진행중»이 캔들에 달라붙어 보였다. 바닥을 H-16으로
         #    올려 약 5px 틈을 만든다(H도 44→50으로 키워 캔들 크기는 유지).
-        return H - 16 - (v - 전체저) / rng * (H - 24)
+        return H - 26 - (v - 전체저) / rng * (H - 34)
 
     g = []
     미확정있음 = False
@@ -752,28 +820,18 @@ def _mkt_macro_spark(key, W=140, H=50):
         # 몸통+꼬리를 <g opacity>로 묶는다 — 안 묶고 몸통에만 반투명을 주면
         # 먼저 그린 꼬리가 몸통 사이로 비친다(코스피 캔들에서 겪은 사고).
         _op = 1 if i == n - 1 else .75
-        _몸 = (f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
-               f'height="{max(1.5,bot-top):.1f}" fill="{c}"/>')
         if 미확정 and i == n - 1:
             미확정있음 = True
-            # 진행 중인 봉 — 속을 비우고 점선 테두리로 «아직 안 끝났다».
-            # 🔴 2026-09-07 HO 지적 — "점선 캔들의 몸통 사각형이 삐뚤다."
-            #   [원인 2가지]
-            #    ① 좌표가 소수(예: x=61.4)라 1.1px 선이 픽셀 경계에 걸쳐
-            #       변마다 다른 두께로 뭉개졌다. → 좌표를 **0.5 격자에
-            #       맞춰** 반올림하고 선 두께를 1로 둔다. 홀수 두께 선은
-            #       중심이 .5에 있을 때 가장 또렷하다.
-            #    ② 몸통이 얇은 날(시가≈종가)엔 높이가 최소 1.5px라
-            #       위·아래 변이 겹쳐 «찌그러진 선»처럼 보였다.
-            #       → 점선일 때만 최소 높이를 5px로 준다. 속이 비어 있어
-            #         조금 키워도 다른 봉과 크기가 어긋나 보이지 않는다.
-            _hx = round(cx - bw / 2) + .5
-            _hw = max(3, round(bw))
-            _hh = max(5, round(bot - top))
-            _hy = round(top) + .5
-            _몸 = (f'<rect x="{_hx}" y="{_hy}" width="{_hw}" height="{_hh}" '
-                   f'fill="none" stroke="{c}" stroke-width="1" '
-                   f'stroke-dasharray="1.6 1.4"/>')
+            # 🔴 2026-09-07 (2차) HO 지시 — "점선 캔들 몸통이 너무 찌그러진다.
+            #    그냥 다른 캔들과 동일하게 정상 캔들로. 글자에 «진행중»이라고
+            #    써 있어서 괜찮다."
+            #    [맞다] 캔들 하나가 8×5px 남짓이라 점선 사각형은 어떤 값을
+            #    줘도 깔끔하게 떨어지지 않았다(0.5 격자 정렬·최소 높이까지
+            #    써봤지만 한계). «진행중» 라벨이 이미 같은 뜻을 훨씬 또렷하게
+            #    전달하므로, 그림으로 한 번 더 말할 이유가 없다(원칙4).
+            pass
+        _몸 = (f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" '
+               f'height="{max(1.5,bot-top):.1f}" fill="{c}"/>')
         g.append(f'<g opacity="{_op}">'
                  f'<line x1="{cx:.1f}" y1="{_y(고):.1f}" x2="{cx:.1f}" y2="{_y(저):.1f}" '
                  f'stroke="{c}" stroke-width="1.5"/>{_몸}</g>')
@@ -944,7 +1002,10 @@ def build_score_card(이름, 지수, 수급):
        대체됐다. _sc_flowbar()·_mkt_mini_gauge()는 지우지 않고 그대로
        남겨뒀다(원칙3) — 되살리려면 여기서 다시 부르면 된다.
     """
-    태그, 색, 글 = _sc_read(수급 or {})
+    # ⚠️ _mkt_key로 «KOSPI» → «코스피» 변환 후 넘긴다. 영문 그대로 넘기면
+    #    archive의 «코스피_수급» 키와 안 맞아 순위가 통째로 안 나온다
+    #    (_mkt_index_spark에서 겪었던 것과 같은 함정).
+    태그, 색, 글 = _sc_read(수급 or {}, 시장=_mkt_key(이름))
     설명 = ""
     if 태그:
         설명 = (f'<div class="sc2-tagbox"><span class="sc2-tag" style="border-color:{색}55;'
@@ -4573,8 +4634,13 @@ def build_my_stocks(data):
                     _본제목.setdefault(_n, set()).add(_t)
                     _d날 = _a.get("d", "")
                     _라벨 = (_d날[5:7] + "/" + _d날[8:10]) if len(_d날) >= 10 else (_a.get("s") or "")
+                    # 🆕 2026-09-07 — 정렬용 «실제 날짜»(20260904)도 같이 담는다.
+                    #    k("09/04")는 표시용이라 연도가 없어 정렬에 못 쓴다.
+                    #    브리핑 목록은 최근순이 생명이라 이게 없으면 순서가 엉킨다.
+                    _ymd = "".join(ch for ch in _d날 if ch.isdigit())[:8]
                     _snews.setdefault(_n, []).append(
-                        {"t": _t, "u": _a.get("u", ""), "k": _라벨})
+                        {"t": _t, "u": _a.get("u", ""), "k": _라벨,
+                         "y": int(_ymd) if len(_ymd) == 8 else 0})
                     _병합수 += 1
             print(f"   📰 stock_news_raw 병합 — {_병합수}건 (종목명 직접 검색 결과)")
         except Exception as e:
@@ -4624,20 +4690,40 @@ def build_my_stocks(data):
                     _p -= 30
                 _p += (len(_lst) - _i) * 0.01          # 동점이면 최신 우선
                 _sc.append((_p, _i, _it))
-            # 🔴 2026-09-02 — 감점만으로 부족했다. 아모레퍼시픽 실측:
-            #    "공모전 시상식 개최"가 종목명 앞쪽(+20) + 잡음단어(-30)
-            #    = -10점인데도, **다른 대안이 없으면** 그대로 1등으로
-            #    뽑혔다. 최종 점수가 0 미만이면 아예 후보에서 뺀다 —
-            #    그 결과 이 종목에 쓸 만한 기사가 하나도 없으면
-            #    "기사 없음"이 뜬다. 홍보성 기사를 억지로 보여주는 것보다
-            #    정직하게 없다고 하는 게 낫다(원칙14).
-            _sc = [x for x in _sc if x[0] >= 0]
+            # 🔴 2026-09-07 HO 지적 — "OCI홀딩스는 네이버에 9월 기사가
+            #    있는데 «없음»이라고 뜬다. 모든 종목이 다 그렇다."
+            #    [실측] 이 «0점 미만 제외»가 **670종목(23%)을 통째로** 지우고
+            #    있었다. 원본엔 10건이 있는데 화면엔 0건인 종목이 그만큼이다
+            #    (OCI홀딩스·한국전력·LS ELECTRIC 등).
+            #    [왜 그랬나] 이 점수는 원래 「🔥 요즘 왜 주목받냐면요」에서
+            #    **가장 중요한 3건을 고르려고** 만든 것이다. 거기선 홍보성
+            #    기사를 억지로 1등에 올리느니 «없음»이 낫다. 그런데 같은
+            #    데이터를 «내 종목 브리핑의 기사 목록»에도 쓰면서, 단순
+            #    나열이면 충분한 자리까지 같은 잣대로 잘라버렸다.
+            #    [고침] 버리지 말고 **점수를 같이 넘긴다.**
+            #      · 「왜 주목받나」  → p >= 0 인 것만 (엄격, 기존과 동일)
+            #      · 브리핑 기사 목록 → 전부 (느슨, 최근순 나열)
+            #    같은 재료를 자리에 맞는 잣대로 쓰는 게 맞다.
             _sc.sort(key=lambda x: (-x[0], x[1]))
-            # 🔴 2026-09-01 (3차) — 5→3으로 줄임. 뉴스 검색 대상을
-            #    상장사 전체(3,956개)로 넓히면서 CP_STOCK_NEWS가 2.69MB까지
-            #    커졌다(파일 전체 4.4MB→9.0MB). 실제 화면(_lst.slice(0,4))도
-            #    최대 4개만 보여주므로 5개 저장은 애초에 과했다.
-            _snews[_n] = [x[2] for x in _sc][:3]
+            # ⚠️ 점수 상위 3 + 최신 3을 합쳐 최대 4건. 점수순만 남기면
+            #    브리핑에 정작 «가장 최근 기사»가 빠진다.
+            _고른, _본 = [], set()
+            for _x in _sc[:3]:
+                _고른.append(_x); _본.add(_x[1])
+            for _x in sorted(_sc, key=lambda x: x[1]):
+                if len(_고른) >= 4:
+                    break
+                if _x[1] not in _본:
+                    _고른.append(_x); _본.add(_x[1])
+            # ⚠️ 용량 — 이 데이터는 2,891종목분이라 필드 하나가 곧 수백 KB다.
+            #    필터가 알아야 하는 건 «품질 미달인가»뿐이므로 점수는
+            #    **음수일 때만** 담는다(p 없으면 통과로 읽힌다).
+            def _slim(_x):
+                _o = dict(_x[2])
+                if _x[0] < 0:
+                    _o["p"] = int(_x[0])
+                return _o
+            _snews[_n] = [_slim(_x) for _x in _고른]
     except Exception as e:
         print(f"   ⚠️ 종목별 뉴스 수집 실패 — {type(e).__name__}")
         _snews = {}
@@ -4849,6 +4935,37 @@ def build_my_stocks(data):
     PAY = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     NEWS = json.dumps(뉴스, ensure_ascii=False, separators=(",", ":"))
     DISC = json.dumps(공시, ensure_ascii=False, separators=(",", ":"))
+    # 🔴 2026-09-07 HO 확인 — "일정 같은 건 진행되는 거지? 배당, 유증 등등."
+    #    [실측] 파서(collect_disclosure_dates)는 8/25부터 돌고 있었고
+    #    archive에 25건이 쌓여 있었다. 정확도도 20건 중 19건이었다.
+    #    그런데 **화면 연결이 아예 없었다** — 뽑아만 놓고 안 쓰고 있었다.
+    #    (「뉴스, 공시, 일정 없음」의 «일정»은 자리만 있고 재료가 없던 셈)
+    #    → 오늘 여기서 연결한다. 최근 5거래일치를 모아 회사명으로 찾아 쓴다.
+    #    ⚠️ 지난 날짜(D-day 음수)는 뺀다 — «이미 지난 일정»은 예고가 아니다.
+    _일정 = []
+    try:
+        _본 = set()
+        for _ymd, _d in reversed(archive_days(5)):
+            for _s in (_d.get("공시날짜") or []):
+                _c = _s.get("회사명")
+                if not _c:
+                    continue
+                for _lab, _ymd2 in (_s.get("날짜들") or {}).items():
+                    _dd = (_s.get("D데이") or {}).get(_lab)
+                    if not isinstance(_dd, int) or _dd < 0:
+                        continue
+                    _key = (_c, _lab, _ymd2)
+                    if _key in _본:
+                        continue
+                    _본.add(_key)
+                    _일정.append({"c": _c, "l": _lab,
+                                 "d": f"{str(_ymd2)[4:6]}/{str(_ymd2)[6:]}",
+                                 "dd": _dd, "u": _s.get("링크", "")})
+        print(f"   📅 일정(배당·유증 D-day) {len(_일정)}건 — 화면 연결")
+    except Exception as e:
+        print(f"   ⚠️ 일정 적재 실패 — {type(e).__name__}")
+        _일정 = []
+    이름배열JS += "window.CP_SCHEDULE=" + json.dumps(_일정, ensure_ascii=False) + ";"
 
     JS = ("""<script>
 (function(){
@@ -5141,6 +5258,30 @@ def build_my_stocks(data):
     var inT=(n.t||'').indexOf(nm)>=0, inD=((n.d||'').indexOf(nm)>=0);
     if(inT||inD) hits.push({n:n, w:(inT?2:1)});
    });
+   /* 🔴 2026-09-07 HO 지적 — "OCI홀딩스는 네이버에 9월 기사가 있는데
+      «뉴스, 공시, 일정 없음»이라고 뜬다. 모든 종목이 다 그렇다."
+      [원인 — 재료가 통째로 달랐다]
+        이 목록은 지금까지 NEWS(=archive의 «뉴스원본») **하나만** 봤다.
+        그건 종목별로 검색한 기사가 아니라 **시황 RSS**(한국경제·연합뉴스·
+        아시아경제 등)를 하루 74~90건 긁어온 «시장 전체 뉴스 풀»이다.
+        거기서 종목명이 우연히 걸리는 것만 그 종목 기사로 쳤다.
+        실측: 최근 20거래일 1,193건 중 «OCI홀딩스»는 **0건**, «삼성SDI»는
+        **3건**(8/21·8/26·8/28)뿐이었다. 그래서 «없음»이 뜨고, 떠도 8월 것만
+        보였던 것이다. 기사가 없어서가 아니라 **안 보고 있었다.**
+      [고침] 기업분석 카드가 쓰는 CP_STOCK_NEWS(= stock_news_raw.json,
+        네이버 «종목별 뉴스»를 종목마다 직접 검색한 것)를 여기에도 합친다.
+        이건 그 종목만의 기사라 이름 매칭이 필요 없다(w=2로 제목매칭 취급).
+      ⚠️ 새 수집 0회 — 이미 매일 받아 화면에도 주입 중인 데이터를 연결만 한다.
+      ⚠️ 아래 중복 제거(_fp 12자 지문)가 두 소스에 걸친 같은 기사를 걸러준다. */
+   (function(){
+    var _arr=(window.CP_STOCK_NEWS||{})[nm];
+    if(!_arr||!_arr.length) return;
+    _arr.forEach(function(a){
+     if(!a||!a.t) return;
+     hits.push({n:{t:a.t, u:a.u||'', d:'', s:'',
+                   y:a.y||0, k:a.k||'', o:0, p:(a.p===undefined?0:a.p)}, w:2});
+    });
+   })();
    hits.sort(function(a,b){ return (b.n.y-a.n.y) || (b.w-a.w); });
    // 종목 안에서 «같은 사건» 판정용 느슨한 지문 — 대괄호 머리말·기호 제거 후 앞 12자.
    var _fp=function(t){
@@ -5174,6 +5315,25 @@ def build_my_stocks(data):
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
      '<a href="'+g.u+'" target="_blank" style="font-size:12px;color:#e0c060;'+
      'line-height:1.5;text-decoration:none">'+g.t+(g.s?' '+'★'.repeat(g.s):'')+'</a></div>';}});
+   /* 🔴 2026-09-07 — 📅 일정(배당·유증 D-day). 파서는 8/25부터 돌고 있었는데
+      화면 연결이 없어서 «일정 없음»만 뜨고 있었다. 여기서 잇는다.
+      ⚠️ D-day가 가까운 순으로. 지난 일정은 애초에 안 담겨 온다.
+      ⚠️ 최대 3건 — 한 회사에 날짜가 여러 개(납입일·상장예정일…) 붙는 일이
+         흔해서, 다 쓰면 이 칸이 일정표가 돼버린다(원칙13). */
+   (function(){
+    var _sc=(window.CP_SCHEDULE||[]).filter(function(s){return s.c===nm;});
+    if(!_sc.length) return;
+    _sc.sort(function(a,b){return a.dd-b.dd;});
+    _sc.slice(0,3).forEach(function(s){
+     n2++;
+     var _dtxt=(s.dd===0)?'오늘':('D-'+s.dd);
+     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📅</span>'+
+      '<div><span style="font-size:9.5px;color:#74f0d4;font-weight:800">'+_dtxt+'</span> '+
+      (s.u?'<a href="'+s.u+'" target="_blank" style="font-size:12px;color:#8fe6d4;'+
+           'line-height:1.5;text-decoration:none">':'<span style="font-size:12px;color:#8fe6d4">')+
+      s.l+' '+s.d+(s.u?'</a>':'</span>')+'</div></div>';
+    });
+   })();
    // ⚠️ 조용한 날에도 할 말은 있다 (2026-08-18).
    //    뉴스도 공시도 없으면 '없었습니다'로 끝내지 말고,
    //    **그 종목이 속한 구역이 오늘 어땠는지**를 대신 알려준다.
@@ -5199,15 +5359,26 @@ def build_my_stocks(data):
     /* 🆕 2026-08-26 — 기사에서 그 종목이 나오는 **한 문장**을 그대로 뽑는다.
        [WHY] 제목만 보면 "왜 유력한지"가 안 보인다. 근거를 눈앞에 둔다.
        ⚠️ 지어내지 않는다 — 원문에 있는 문장을 자를 뿐이다. */
+    /* 🔴 2026-09-07 — «원인 단정»에는 품질을 통과한 기사만 쓴다.
+       [경위] 브리핑 «목록»에 점수 0 미만 기사까지 넣도록 바꾸면서(670종목이
+         통째로 «없음»이던 문제 해결), 이 «가장 유력합니다» 단정까지 그
+         기사를 집어들었다. 실측: OCI홀딩스가 «SGC E&C 공사 실적»(-39.9점)을
+         원인으로 단정했다 — 그 종목 얘기도 아닌 기사다.
+       [원칙] 나열은 느슨해도 되지만 **단정에는 근거가 있어야 한다**(원칙11).
+         목록은 «참고하세요»고, 이 문장은 «이것 때문입니다»라 무게가 다르다.
+       ⚠️ p가 없는 항목(RSS 뉴스원본)은 예전처럼 통과시킨다 — 그건 이미
+          종목명 매칭으로 걸러진 것이라 별도 점수가 없다. */
+    var _good=hits.filter(function(h){
+      return (h.n.p===undefined)||(h.n.p>=0); });
     if(n2>0) 왜='오늘 나온 <b>공시</b>가 직접적인 이유로 보입니다';
-    else if(hits.length&&hits[0].w===2){
-     var h0=hits[0].n;
+    else if(_good.length&&_good[0].w===2){
+     var h0=_good[0].n;
      왜=(h0.k?'['+(h0.o?'오늘':h0.k)+'] ':'')+
         '<b>'+h0.t.slice(0,26)+'</b> 뉴스가 가장 유력합니다';
     }
     else if(window.CP_HOT&&window.CP_HOT[nm]) 왜='오늘 <b>'+window.CP_HOT[nm]+'</b>에 잡혔습니다 — 큰손이 붙은 자리입니다';
-    else if(hits.length){
-     var h1=hits[0].n;
+    else if(_good.length){
+     var h1=_good[0].n;
      왜=(h1.k?'['+(h1.o?'오늘':h1.k)+'] ':'')+'관련 <b>뉴스 본문</b>에 언급됐습니다';
     }
     /* 🆕 2026-08-26 HO 지시 — «특별한 재료없이 시장 흐름을 따라감» 삭제.
@@ -6005,7 +6176,12 @@ def build_my_stocks(data):
    /* 🆕 2026-08-26 HO 지시 — "사람들이 제일 궁금한 건 «이 종목이 최근에 왜 올랐나»다".
       그동안 이 내용이 «자세히 보기» 안에 숨어 있어 대부분 못 봤다.
       → **요약 자리로 끌어올린다.** 순서: 회사 소개 → 왜 주목받나 → 재무. */
-   var _뉴=(window.CP_STOCK_NEWS||{})[nm]||[];
+   /* 🔴 2026-09-07 — CP_STOCK_NEWS가 이제 «점수 0 미만»도 담는다(브리핑
+      목록에서 쓰려고). 이 칸은 «가장 중요한 것만 고르는» 자리라 예전
+      기준(p >= 0)을 그대로 지킨다 — 홍보성 기사를 억지로 1등에 올리느니
+      «없었어요»가 낫다(원칙14). p가 없는 옛 데이터는 통과시킨다. */
+   var _뉴전체=(window.CP_STOCK_NEWS||{})[nm]||[];
+   var _뉴=_뉴전체.filter(function(n){ return (n.p===undefined)||(n.p>=0); });
    var _왜='';
    if(_뉴.length){
     var _lst='';
@@ -12383,6 +12559,11 @@ html{{scroll-behavior:smooth}}
 .ac-asof{{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:99px;
   background:rgba(224,198,96,.13);border:.5px solid rgba(224,198,96,.3);
   color:#e0c060;font-size:10px;font-weight:800;white-space:nowrap}}
+/* 🆕 2026-09-07 — 수급 «성격» 한 마디(최근 20거래일 중 몇 등).
+   금액 나열과 시각적으로 구분되게 금색 계열로. 숫자가 아니라 «해석»이라는
+   신호를 색으로 준다. */
+.sc-rank{{color:#e0c060;font-weight:700}}
+.sc-rank b{{color:#f0d68a;font-weight:800}}
 .mc2-note{{font-size:11px;color:#9aa2ae;line-height:1.65;margin:7px 2px 0}}
 /* 숫자만 강조 — 사실이라 강조해도 뜻이 안 바뀐다. 형용사·전망을 강조하면
    «단정»으로 읽혀 원칙11에 걸린다. */
@@ -13349,7 +13530,10 @@ html{{scroll-behavior:smooth}}
    좌우가 정확히 반반이다. 높이는 이미 min-height로 맞춰 뒀다. */
 .sc4{{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
   grid-template-rows:1fr 1fr;gap:6px}}
-.sc4-c1,.sc4-c2,.sc4-c3,.sc4-c4{{border:1px solid rgba(255,255,255,.08);
+/* 🔴 2026-09-07 HO 지시 — "테두리가 너무 흐리다, 아주 조금만 진하게."
+   .08 → .16 (두 배). 칸이 나뉜 게 보이되, 선 자체가 눈에 띄어 내용보다
+   앞서지는 않는 선. */
+.sc4-c1,.sc4-c2,.sc4-c3,.sc4-c4{{border:1px solid rgba(255,255,255,.16);
   border-radius:8px;padding:8px 7px;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;
 /* 🔴 2026-09-07 (3차) 실측 회귀 수정 — min-height:103px이었는데, 실탄
