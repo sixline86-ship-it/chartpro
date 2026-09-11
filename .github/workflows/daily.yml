@@ -504,16 +504,23 @@ jobs:
           git add -A archive index.html report_*.html flow_history.json market_history.json \
                   return_sector_log.json watch_tally.json core_accum_log.json strata_history.json \
                   stock_flow_history.json theme_history.json macro_history.json \
-                  accum_long_cache.json watch_stocks.json thumb/*.png || true
+                  watch_stocks.json thumb/*.png || true
           # ⚠️ 조건부로만 생기는 파일은 반드시 개별 루프 — 하나라도 없으면
           #    -A 한 줄 전체가 pathspec 에러로 실패하는 사고를 이미 겪었다.
           #    stock_capture_log.json = 종목별 예보 성적(2026-08-29 코드 심음).
           #    첫 D+5 스냅샷이 나오는 날부터 파일이 생기므로 조건부로 취급한다 —
           #    이 파일도 위와 같은 사고(누락)를 겪었으니 여기 정식 추가한다.
+          #    🔴 2026-09-11 실측 사고: accum_long_cache.json(격일 갱신 캐시)이
+          #    위 -A 한 줄에 섞여 있었다. 갱신이 없는 날에는 파일이 없으므로
+          #    "fatal: pathspec ... did not match any files"로 -A 줄 전체가 실패했고,
+          #    report_20260911.html·index.html·archive가 통째로 커밋되지 않았다.
+          #    (커밋은 1 file changed로 성공한 척했고, 텔레그램은 404 링크를 발송)
+          #    격일/조건부 파일은 예외 없이 이 루프로 내린다.
           for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
                    biz_report_fail.json stock_news_fail.json \
-                   stock_capture_log.json; do
+                   stock_capture_log.json \
+                   accum_long_cache.json; do
             git add "$f" 2>/dev/null || true
           done
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
@@ -558,6 +565,42 @@ jobs:
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: python notify_admin.py inherited "오늘 해석글 생성 실패 — 직전 거래일 글로 발행"
 
+      # ── 🔴 2026-09-11 신설: 발행물이 실제로 올라갔는지 확인 ──
+      #   이날 accum_long_cache.json 누락으로 `git add -A` 한 줄이 통째로 실패해
+      #   report_YYYYMMDD.html·index.html이 커밋되지 않았는데도 커밋은 성공했고,
+      #   텔레그램은 존재하지 않는 주소(404)를 구독자에게 그대로 발송했다.
+      #   "커밋 성공"은 "파일이 올라갔다"를 뜻하지 않는다 — 원격에서 직접 확인한다.
+      - name: 발행물 원격 확인
+        id: publish_check
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        run: |
+          TODAY=$(date +%Y%m%d)
+          git fetch origin main --quiet
+          MISS=""
+          for f in "report_${TODAY}.html" "index.html" "archive/data_${TODAY}.json"; do
+            git cat-file -e "origin/main:$f" 2>/dev/null || MISS="$MISS $f"
+          done
+          if [ -n "$MISS" ]; then
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+            echo "::error title=발행물 누락::원격에 없는 파일:$MISS"
+            echo "🔴 텔레그램을 보내지 않습니다 — 링크가 404가 됩니다."
+            echo "   👉 위 '자동 커밋 & 배포' 로그에서 'pathspec ... did not match' 를 찾으세요."
+            echo "      조건부(격일·최초생성) 파일이 git add -A 한 줄에 섞이면 그 줄 전체가 실패합니다."
+          else
+            echo "ok=yes" >> "$GITHUB_OUTPUT"
+            echo "✅ 원격 확인 완료 — report_${TODAY}.html · index.html · data_${TODAY}.json"
+          fi
+
+      # ── 발행물 누락 시 관리자 알림 ──
+      - name: 발행물 누락 관리자 알림
+        if: steps.publish_check.outputs.ok == 'no'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py failed "발행물이 원격에 없습니다 — 구독자 발송을 막았습니다. git add pathspec 실패를 의심하세요."
+
       # ── Pages 배포 전파 대기 ──
       #   git push 직후 바로 텔레그램을 보내면, GitHub Pages가 아직 새 페이지를
       #   배포 중일 수 있다(수십 초 소요). 그 틈에 텔레그램이 링크를 미리 크롤링하면
@@ -566,6 +609,7 @@ jobs:
         if: >-
           steps.guard.outputs.run == 'yes' &&
           steps.holiday.outputs.closed != 'yes' &&
+          steps.publish_check.outputs.ok == 'yes' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
@@ -578,6 +622,7 @@ jobs:
           steps.guard.outputs.run == 'yes' &&
           steps.holiday.outputs.closed != 'yes' &&
           steps.time_check.outputs.normal != 'no' &&
+          steps.publish_check.outputs.ok == 'yes' &&
           (env.TELEGRAM_SKIP_ON_FAIL != 'true' || steps.interp_check.outputs.ok == 'yes') &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.telegram, '보냄'))
