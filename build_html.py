@@ -1914,12 +1914,11 @@ def accum_badge(종목명):
         배지 += f'<span class="ab abc">{연속}일 연속</span>'
     elif len(idx) == 1:
         배지 += '<span class="ab abn">오늘 처음</span>'
-    if len(축) < ACC_이력_창:
-        # 🆕 2026-08-25 HO 질문 — 기간 탭(5·20)을 눌러도 이 글자가 안 바뀐다.
-        #  ⚠️ 이 배지는 **탭과 무관하다.** 탭은 '며칠간의 매집을 볼까'이고,
-        #     이 배지는 '과거에도 잡힌 적 있나(차수)'다. 축이 다르다.
-        #     말 자체를 바꿔 오해를 없앤다.
-        배지 += f'<span class="ab abd">차수 판정 {len(축)}일치</span>'
+    # 🔴 HO 지시 2026-09-12 — 「차수 판정 N일치」 배지를 뺀다.
+    #    [무엇이었나] 몇 차 매집인지 판정할 때 «되돌아본 거래일 수»다.
+    #    목표는 ACC_이력_창(60일)인데 기록이 덜 쌓였을 때만 떴다.
+    #    [왜 뺐나] 화면에서 이걸 알아야 할 사람은 없다. 카드가 복잡해질 뿐이다.
+    #    → 로직 문서(logic_v17.md 5장)에 남기고 화면에서는 뺀다.
     return 배지
 
 
@@ -2041,8 +2040,7 @@ def build_accumulation(매집, 설정=None):
           <span class="ac-rank">{i}</span>
           <div class="ac-info">
             <p class="ac-name">{_이름}{유형뱃지(s.get('유형',''))}</p>
-            <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일
-              · 시총 {_fmt_eok(s.get('시총'))}{부가}</p>
+            <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일{부가}</p>
             <p class="ac-badge">{accum_badge(s.get('종목명'))}</p>
             {_칸}
           </div>
@@ -5304,6 +5302,13 @@ def build_my_stocks(data):
    if(_층) zones+='<span style="display:inline-block;font-size:11px;'+
      'margin:0 4px 4px 0;color:#c9ced6">'+_층+'주</span>';
    var _cd=(m&&m[4])?String(m[4]):'';
+   /* 🔴 HO 지시 2026-09-12 — 토론방 옆에 «차트» 알약.
+      [왜] 브리핑을 보다가 «그래서 지금 차트가 어떻지»가 바로 이어진다.
+           리포트가 못 그리는 것(실시간 일봉)은 있는 곳으로 보내주면 된다.
+      [어디로] 네이버 종목 상세(item/main) — 열면 일봉 차트가 바로 보인다.
+      ⚠️ 토론방과 같은 규칙 — 코드가 없으면 알약을 «아예 안 붙인다».
+         죽은 링크를 놓느니 없는 게 낫다(전체 종목의 약 93%가 코드를 가진다). */
+   /* 차트 알약은 «기업분석 옆»으로 옮겼다(2026-09-12) — 여기서는 안 붙인다. */
    if(_cd) zones+='<a href="https://finance.naver.com/item/board.naver?code='+_cd+'" '+
      'target="_blank" rel="noopener" style="display:inline-block;font-size:10px;'+
      'padding:2px 8px;margin:0 4px 4px 0;border-radius:99px;background:#2a2233;'+
@@ -5382,7 +5387,13 @@ def build_my_stocks(data):
    });
    hits=_hits2;
    n1=hits.length;
-   hits.slice(0,5).forEach(function(h){
+   /* 🔴 HO 지시 2026-09-12 — 기사를 2건만 펼치고 나머지는 «더보기»로 접는다.
+      [왜] 종목 하나에 기사가 5건씩 붙으면 종목 10개 = 50줄이 된다.
+      브리핑이 «훑는» 물건인데 스크롤만 길어졌다. 2건이면 흐름을 잡기에 충분하고,
+      더 보고 싶은 사람만 펼치면 된다. */
+   var _NW_OPEN=2;
+   var _nwid='nw'+(window._NW_SEQ=(window._NW_SEQ||0)+1);
+   hits.slice(0,_NW_OPEN).forEach(function(h){
     var n=h.n;
     /* 🆕 2026-08-26 — 날짜를 반드시 붙인다. 20거래일치를 섞어 보여주므로
        안 붙이면 며칠 전 기사를 오늘 일로 오해한다. */
@@ -5395,8 +5406,26 @@ def build_my_stocks(data):
      (n.s?'<span style="font-size:9.5px;color:#6f7784"> · '+n.s+'</span>':'')+
      '</div></div>';
    });
-   if(n1>5) items+='<p style="margin:4px 0 0;font-size:10px;color:#6f7784">'+
-     '외 '+(n1-5)+'건 더 있습니다(중복 제외) · 최근 '+(window.CP_BRIEF_DAYS||20)+'거래일</p>';
+   /* 나머지 기사 — 접어두고 버튼으로 펼친다 */
+   if(n1>_NW_OPEN){
+    var rest='';
+    hits.slice(_NW_OPEN).forEach(function(h){
+     var n=h.n;
+     var 날=n.k?'<span style="font-size:9.5px;color:#e0c060;font-weight:700">'+
+       (n.o?'오늘':n.k)+'</span> ':'';
+     rest+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📰</span>'+
+      '<div>'+날+'<a href="'+n.u+'" target="_blank" style="font-size:12px;color:#8fb4ee;'+
+      'line-height:1.5;text-decoration:none">'+n.t+'</a>'+
+      (h.w===1?'<span style="font-size:9.5px;color:#6f7784"> · 본문 언급</span>':'')+
+      (n.s?'<span style="font-size:9.5px;color:#6f7784"> · '+n.s+'</span>':'')+
+      '</div></div>';
+    });
+    items+='<div id="'+_nwid+'" style="display:none">'+rest+'</div>'+
+     '<p style="margin:5px 0 0"><span onclick="ztog(&quot;'+_nwid+'&quot;)" '+
+     'style="font-size:10px;color:#e0c060;font-weight:700;cursor:pointer">'+
+     '▾ 기사 '+(n1-_NW_OPEN)+'건 더보기</span>'+
+     '<span style="font-size:9.5px;color:#6f7784"> · 최근 '+(window.CP_BRIEF_DAYS||20)+'거래일</span></p>';
+   }
    DISC.forEach(function(g){if(g.c===nm){n2++;
     items+='<div style="display:flex;gap:6px;margin-top:4px"><span style="flex:none">📄</span>'+
      '<a href="'+g.u+'" target="_blank" style="font-size:12px;color:#e0c060;'+
@@ -5917,10 +5946,25 @@ def build_my_stocks(data):
       ⚠️ 「기업분석」 펼침 버튼(.sc-tap)은 .cp-sname 안에 있어야
          클릭 동작이 붙는다(sc_click 규약). 그래서 등락률을
          **.cp-sname 안, 이름과 sc-tap 사이**에 넣는다. */
+   /* 🔴 HO 지시 2026-09-12 — 「기업분석」 «바로 옆»에 차트 알약.
+      [어디로] 네이버 종목 상세(item/main) — 열면 일봉이 바로 보인다.
+      ⚠️ .cp-sname «밖»에 둔다. 안에 넣으면 sc_click의 클릭 영역에 먹혀
+         링크가 안 열리고 기업분석만 펼쳐진다(sc_click 규약).
+      ⚠️ 코드가 없으면 아예 안 붙인다 — 죽은 링크를 놓느니 없는 게 낫다. */
+   var _cd0=(m&&m[4])?String(m[4]):'';
+   var _chart=_cd0?('<a href="https://finance.naver.com/item/main.naver?code='+_cd0+'" '+
+     'target="_blank" rel="noopener" style="display:inline-block;font-size:11px;'+
+     'padding:2px 7px;margin-left:5px;border-radius:99px;background:#18262e;'+
+     'color:#7fd4e8;text-decoration:none;font-weight:700;white-space:nowrap;'+
+     '">📈 차트</a>'):'';
    out+='<div style="padding:11px 0;border-bottom:1px solid #1b212c">'+
-    '<div style="font-size:15px;font-weight:800;color:#e8eaee">'+
+    /* ⚠️ 차트 알약을 .cp-sname «밖»에 두면, 이름+등락률+기업분석이 이미
+       한 줄을 다 쓴 뒤라 차트가 통째로 아랫줄로 밀린다(실측).
+       → .cp-sname «안», 기업분석 배지 바로 뒤에 넣는다. <a>는 자체 클릭이
+         우선이라 sc_click(기업분석 펼침)과 충돌하지 않는다. */
+    '<div class="mb-nameline" style="font-size:14.5px;font-weight:800;color:#e8eaee">'+
     '<span class="cp-sname" id="'+_bid+'-n">'+nm+_tb+
-    '<span class="sc-tap"><i>▾</i>기업분석</span></span></div>'+
+    '<span class="sc-tap"><i>▾</i>기업분석</span>'+_chart+'</span></div>'+
     /* 🆕 2026-09-04 (2차) HO 지시 — 기업분석 펼침칸을 «기사·공시(items)» **위**로
        올린다. [WHY] 예전엔 이름 → 기사/공시 → 기업분석 → 오늘 분석 순서라,
        종목명 눌러 기업분석을 펼치면 방금 읽던 기사 밑으로 카드가 열려 시선이
@@ -6625,7 +6669,23 @@ def build_my_stocks(data):
             # 🆕 2026-08-22 HO 지시 — "내 관심종목 등록"이 다른 카드 소제목과
             #    똑같은 크기(11.5px 회색)라 묻혀 보인다. 이 카드는 핵심편의
             #    새 진입점이라 제목을 눈에 띄게 키운다("등록하기"로 행동 유도도 함께).
-            '<p style="margin:0 0 6px;font-size:17px;font-weight:800;color:#f0c65a">'
+            # 🔴 HO 지시 2026-09-12 — 순서를 뒤집는다.
+            #    [기존] 등록하기 → 성적(그래프) → 목록
+            #    [변경] 성적(그래프) → 등록하기 → 목록
+            #    [왜] 이미 등록한 사람(=매일 보는 사람)에게 등록 폼이 먼저 나오면
+            #    매번 스크롤해서 지나쳐야 한다. 성적이 먼저 보여야 «오늘 어땠나»가
+            #    바로 읽힌다. 등록 폼은 사실상 처음 한 번만 쓰는 자리다.
+            '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
+            '내 종목은 시장을 이기고 있나</p>'
+            f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
+            # 🔴 HO 지시 2026-09-12 — 「내 종목 평균(동일 비중)」 그래프를
+            #    기간 탭 «바로 밑»으로 올린다.
+            #    [왜] 탭을 눌러 기간을 바꾸는 이유가 이 그래프를 보려는 것인데,
+            #    등록 폼·목록·백업 버튼을 다 지나야 나왔다.
+            #    ⚠️ id는 문서에 «하나»여야 한다 — 아래에서 지우고 여기로 «옮겼다».
+            #       (복제하면 getElementById가 위쪽 빈 div를 잡아 전부 멈춘다)
+            '<div id="ms-sum"></div><div id="ms-chart"></div>'
+            '<p style="margin:16px 0 6px;font-size:17px;font-weight:800;color:#f0c65a;padding-top:13px;border-top:1px solid #232a36">'
             '📋 내 종목 추적하기</p>'
             '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
@@ -6643,11 +6703,6 @@ def build_my_stocks(data):
             'padding:9px 14px;cursor:pointer">추가</button></div>'
             '<div id="ms-sug" style="display:none;background:#0f131a;border:1px solid #2a3446;'
             'border-radius:8px;margin:0 0 10px;max-height:186px;overflow-y:auto"></div>'
-            # ⚠️ 제목을 **입력창 바로 밑**에 둔다(2026-08-18 지시).
-            #    등록하자마자 "그래서 내 종목이 이기고 있나"가 바로 이어져야 한다.
-            '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
-            '내 종목은 시장을 이기고 있나</p>'
-            f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
             # 🆕 2026-08-26 — 체크 개수 표시 + 전체/기본 버튼 자리
             '<div id="ms-selbar" style="display:flex;justify-content:space-between;'
             'align-items:center;margin:8px 0 2px;min-height:0"></div>'
@@ -6660,20 +6715,11 @@ def build_my_stocks(data):
             '<button onclick="msImport()" class="ms-bk-b">📥 불러오기</button>'
             '<span class="ms-bk-t">기기를 바꾸거나 앱 캐시를 지우면 목록이 사라집니다 — '
             '코드를 복사해 두세요</span></div>'
-            '<div id="ms-sum"></div><div id="ms-chart"></div>'
-            '<details style="margin:10px 0 0;padding:9px 10px;background:#0f131a;'
-            'border-radius:8px;border:1px solid #1e2531">'
-            '<summary style="font-size:11.5px;color:#e0c060;font-weight:700;'
-            'cursor:pointer;list-style:none">📖 내 종목 보는 방법 '
-            '<span style="color:#6f7784;font-weight:600">(눌러서 펼치기)</span></summary>'
-            '<p style="margin:6px 0 0;font-size:11px;color:#7d848f;line-height:1.65">'
-            '<b style="color:#9aa0aa">%p</b>는 코스피보다 얼마나 더 벌었나입니다. '
-            '아래 작은 숫자는 실제 수익률, 그 아래는 그 기간 코스피를 이긴 날의 수입니다.<br>'
-            '<b style="color:#8fd0e8">파란 태그</b>가 그 종목이 속한 섹터입니다. '
-            '한 종목이 두 섹터에 걸치면 <b style="color:#9aa0aa">오늘 더 세게 움직인 섹터</b>가 앞에 옵니다.<br>'
-            '<b style="color:#9aa0aa">내 종목 평균</b>은 모든 종목을 같은 금액씩 샀다고 가정한 값입니다. '
-            '실제 보유 비중은 받지 않으므로 참고용입니다.<br>'
-            '</p></details></div>' + JS
+            # 🔴 HO 지시 2026-09-12 — 「📖 내 종목 보는 방법」 접힘 블록 삭제.
+            #    [왜] 화면이 이미 스스로 설명한다 — %p·섹터 태그·평균 모두
+            #    그 자리에 짧은 설명이 붙어 있다. 접힌 채로 아무도 안 여는
+            #    도움말이 카드 맨 아래를 차지하고 있었다.
+            '</div>' + JS
             + '<script>' + 이름배열JS + """
 /* 자체 자동완성 (datalist 대체)
    [WHY] 입력창을 누르기만 해도 전 종목 목록이 뜨면 모바일에서 키보드가 가려진다.
@@ -10420,15 +10466,39 @@ def build_core(핵심편, data, 해석):
              + hide("순위섹터맵", build_sector_map())
              + hide("돌아올섹터", build_return_sector()))
 
+    # 🔴 v17 (2026-09-12) — 종목 탭 재구성.
+    #    [무엇이 문제였나] v16 개편 때 build_radar()·build_accumulation()
+    #    (심층편의 «종목 목록» 상세표)이 호출부에서 통째로 빠졌다.
+    #    함수는 살아 있는데 아무 데서도 부르지 않아 화면에 안 나왔다.
+    #    → 핵심편 요약(build_core_*) 아래에 대장주, 그 아래 상세표를 둔다.
+    #    구성: 요약(무엇이 잡혔나) → 대장주(그래서 뭘 보나) → 상세(전체 목록)
     _종목 = (build_core_strong(data.get("강세레이더"))
              + build_core_accum(data.get("매집레이더"))
-             + build_my_stocks(data)
-             + build_stock_brief()
+             + f'<p class="sec-label"><small>테마를 가로질러</small>'
+               f'👑 오늘의 대장주'
+               f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
+               f' · 테마별 1종목</span></p>'
+             + build_theme_leaders(data)
+             + f'<p class="sec-label"><small>강세 레이더 상세</small>'
+               f'📡 오늘 잡힌 강세 종목</p>'
+             + build_radar(data.get("강세레이더"), data.get("설정"))
+             + f'<p class="sec-label"><small>매집 레이더 상세</small>'
+               f'🧲 오늘 잡힌 매집 종목</p>'
+             + build_accumulation(data.get("매집레이더"), data.get("설정"))
+             # 🔴 HO 지시 2026-09-12 — 공시는 「포착」 맨 아래.
+             #    [왜] 공시도 «우리가 골라낸 것»이다. 내 종목(구독자가 담은 것)과
+             #    성격이 다르다. 다만 매일 보는 것은 아니라 맨 아래에 둔다.
              + f'<p class="sec-label"><small>오늘의 중요 공시</small>📋 놓치면 아까운 공시</p>'
              + '<div class="disc-box">'
              + build_disclosures(data.get("공시"), 해석.get("공시해설"))
              + '<p class="disc-note" style="margin-top:.6rem;font-size:9.5px">'
                '별점은 다음 거래일 변동 가능성 참고용이며 방향 예측이 아닙니다.</p></div>')
+
+    # 🔴 HO 지시 2026-09-12 — 「내 종목」을 별도 탭으로 분리한다.
+    #    [왜] 「포착」은 우리가 찾아낸 것, 「내 종목」은 구독자가 등록한 것.
+    #    성격이 다른데 한 탭에 섞여 있어 스크롤이 길었다.
+    _내종목 = (build_my_stocks(data)
+               + build_stock_brief())
 
     # 🔴 2026-09-07 HO 지시 — 「어제의 채점표」 숨김.
     #    삭제가 아니라 가림이다(원칙3). HIDDEN_CHAPTERS에서 "어제채점표"
@@ -10457,8 +10527,12 @@ def build_core(핵심편, data, 해석):
              ("시황", "무슨 일이 있었나", _시황),
              ("수급", "돈은 어디로 갔나", _수급),
              ("테마", "어디가 움직였나", _테마),
-             ("종목", "그래서 내 종목은", _종목),
-             ("성적표", "우리 예보는 맞았나", _성적표)]
+             ("포착", "우리가 잡은 종목", _종목),
+             ("내 종목", "내가 담은 종목", _내종목),
+             # 🔴 HO 지시 2026-09-12 — 「성적표」 탭 숨김.
+             #    삭제가 아니라 가림이다(원칙3). 채점 자체는 계속 돌아가므로
+             #    hide()를 벗기면 그동안의 기록이 그대로 살아난다.
+             ("성적표", "우리 예보는 맞았나", hide("성적표탭", _성적표))]
     _산 = [(k, s, v) for k, s, v in _탭목록 if (v or "").strip()]
     if not _산:
         return 장전경고 + 사건명블록
@@ -11088,9 +11162,20 @@ THEME_TOPN     = int(os.getenv("THEME_TOPN",     "20"))  # 순위 산출 상한
 RADAR_SHOW     = 8                                        # 레이더에 그릴 개수
 SEC_SPREAD_MIN = 50                                       # 섹터 «통째로» 판정 확산도
 
+# ══ 공통 팔레트 — 세 코너가 «같은 색은 같은 세기»를 뜻하도록 통일 ══
+#   [왜] 코너마다 색이 다른 걸 가리키면 구독자가 매번 범례를 다시 읽어야 한다.
+#   색조는 원래도 거의 같았지만 주황이 #ffa63c / #ff9838로 미세하게 달랐다.
+#   이제 한 곳에서만 정의한다 — 바꿀 일이 생기면 여기만 고친다.
+TM_HOT  = "#ff5a4e"   # 가장 셈    — 1~5위 / 고속 / 올라오는 중
+TM_WARM = "#ff9838"   # 중간       — 6~10위 / 가속
+TM_COOL = "#3ecf9a"   # 약함·안정  — 11~20위 / 서행 / 제자리
+TM_DOWN = "#5b9bff"   # 빠짐       — 밀려남 / 후진 (리포트 전체 «하락=파랑» 규칙)
+TM_NEW  = "#ffc93c"   # 신규       — 오늘 첫 등장 (유일하게 노랑을 쓰는 자리)
+TM_FLAT = "#8a93a2"   # 정지·무판정
+
 # 테마 순위 → 색 (3단. 4단은 주황↔노랑 ΔE 28로 구별 안 됐다)
 def _tcol(rk):
-    return "#ff5a4e" if rk <= 5 else ("#ff9838" if rk <= 10 else "#3ecf9a")
+    return TM_HOT if rk <= 5 else (TM_WARM if rk <= 10 else TM_COOL)
 
 SEC_COLOR = "#7fa8d9"   # 섹터는 파스텔 단색 — 색에 의미 없음(장식)
 
@@ -11196,7 +11281,7 @@ _RADAR_ZONE = {
 _RADAR_ETC = 222          # 구역 미상 테마를 모으는 「기타」 방향
 _RADAR_LABEL = [("반도체", 0), ("2차전지", 72), ("에너지", 136),
                 ("건설", 172), ("기타", 222), ("통신", 288), ("자동차", 318)]
-_RC = {"new": "#ffc93c", "in": "#ff5a4e", "hold": "#3ecf9a", "out": "#5b9bff"}
+_RC = {"new": TM_NEW, "in": TM_HOT, "hold": TM_COOL, "out": TM_DOWN}
 _RL = {"new": "오늘 첫 등장", "in": "올라오는 중",
        "hold": "제자리", "out": "밀려나는 중"}
 
@@ -11422,15 +11507,15 @@ def build_coming_themes(data):
             eta = max(1, min(14, round(need / slope)))
 
         km = 0 if old is None else max(-100, min(100, round((old - cur) / 10 * 100 / 20) * 20))
-        if km >= 80:   g, gc = "고속", "#ff5a4e"
-        elif km >= 40: g, gc = "가속", "#ffa63c"
-        elif km > 0:   g, gc = "서행", "#3ecf9a"
-        elif km == 0:  g, gc = "정지", "#8a93a2"
-        else:          g, gc = ("후진" if km > -60 else "급후진"), "#5b9bff"
+        if km >= 80:   g, gc = "고속", TM_HOT
+        elif km >= 40: g, gc = "가속", TM_WARM
+        elif km > 0:   g, gc = "서행", TM_COOL
+        elif km == 0:  g, gc = "정지", TM_FLAT
+        else:          g, gc = ("후진" if km > -60 else "급후진"), TM_DOWN
 
-        c = ("#ff5a4e" if (eta is not None and eta <= 2)
-             else ("#ffa63c" if (eta is not None and eta <= 5)
-                   else ("#5b9bff" if slope < 0 else "#3ecf9a")))
+        c = (TM_HOT if (eta is not None and eta <= 2)
+             else (TM_WARM if (eta is not None and eta <= 5)
+                   else (TM_DOWN if slope < 0 else TM_COOL)))
         lab = ("신호 없음" if eta is None
                else ("오늘 진입권" if eta == 0 else f"D-{eta}"))
         w = 0 if eta is None else max(5, 100 - min(eta, 14) / 14 * 100)
@@ -11619,10 +11704,13 @@ def build_sector_theme(data):
                 f'<div class="tm-sv">중앙 {r["mid"]:+.2f}% · 확산 {r["sp"]:.0f} · {r["n"]}종목</div>'
                 f'<div class="tm-tw">{ts}</div></div>')
 
-    GM = [("주도", "🔥 주도 섹터", "#ff5a4e", "섹터가 통째로 오르고 10위권 테마 보유 — 스윙 가능"),
+    # ⚠️ 이모지는 «Emoji 12.0 이하»만 쓴다.
+    #    🪨(U+1FAA8)는 Emoji 14.0(2021)이라 구형 안드로이드에서 두부(□)로 뜬다.
+    #    같은 이유로 🫧 🩵 🪄 같은 최신 이모지도 쓰지 않는다.
+    GM = [("주도", "🔥 주도 섹터", TM_HOT,  "섹터가 통째로 오르고 10위권 테마 보유 — 스윙 가능"),
           ("단타", "⚡ 단타 섹터", "#e0c060", "섹터는 약한데 테마만 강하다 — 짧게만"),
-          ("추격", "🌱 추격 섹터", "#3ecf9a", "섹터는 오르는데 테마가 아직 — 다음 후보"),
-          ("눌림", "🪨 눌림 섹터", "#c9a227", "뜰 때가 지났는데 잠잠하다"),
+          ("추격", "🌱 추격 섹터", TM_COOL, "섹터는 오르는데 테마가 아직 — 다음 후보"),
+          ("눌림", "⏸️ 눌림 섹터", "#c9a227", "뜰 때가 지났는데 잠잠하다"),
           ("대기", "😴 대기 섹터", "#5f6b7d", "움직임 없음")]
     out = []
     for k, title, c, desc in GM:
@@ -11640,7 +11728,7 @@ def build_sector_theme(data):
                    f'{title}<span>{desc}</span></div>{inner}</div>')
     key = ('<div class="tm-key">'
            '<span><i style="background:#ff5a4e"></i>테마 1~5위</span>'
-           '<span><i style="background:#ff9838"></i>6~10위</span>'
+           '<span><i style="background:' + TM_WARM + '"></i>6~10위</span>'
            '<span><i style="background:#3ecf9a"></i>11~20위</span></div>')
     return key + "".join(out)
 
@@ -11726,9 +11814,180 @@ THEME_V17_CSS = """
 """
 
 
+
+
+# ══════════════════════════════════════════════════════════════
+# 👑 오늘의 대장주 (v17, 2026-09-12)
+#
+#   「테마별로 가장 대장다운 종목 1개씩」 — 테마 순위 순으로 최대 6개.
+#
+#   [강세 레이더와 뭐가 다른가] 실측 겹침 1종목/98종목.
+#     강세 레이더 = 시총 5,000억 이상 «큰 회사» 중 오늘 터진 것
+#     대장주      = 테마 안에서 가장 센 것 (시총 제한 없음)
+#   실제로 대장주 6개 중 5개가 시총 1,000위 밖이다. 강세 레이더는
+#   이런 종목을 조건상 애초에 보지 않는다. 겹치지 않는다.
+#
+#   ⚠️ 「오늘 뜬 테마」는 테마 «안»의 4종목을 보여준다. 대장주는 테마를
+#      «가로질러» 뽑는다. 질문이 다르므로 테마당 1개로 고정한다.
+# ══════════════════════════════════════════════════════════════
+LEADER_MAX = 6          # 화면에 보여줄 대장주 수
+LEADER_W_CH = 0.40      # 강도(등락률)   — HO 확정: 「센 종목」을 보여준다
+LEADER_W_TURN = 0.30    # 회전율
+LEADER_W_THEME = 0.20   # 테마 기여
+LEADER_W_STAY = 0.10    # 연속 등재
+
+
+def _approx_cap(rank):
+    """시총 «금액»이 아직 저장되지 않아 순위로 근사한다.
+
+    ⚠️ 임시다. collect_data가 종목사전에 시총을 담기 시작하면
+       이 함수를 지우고 실제 금액을 쓴다(그날부터 회전율이 정확해진다).
+    """
+    import math
+    try:
+        return max(200.0, 5_000_000 * math.exp(-float(rank) / 380.0))
+    except Exception:
+        return 100_000.0
+
+
+def _leader_stay(name, days=3):
+    """최근 days거래일 중 이 종목이 테마 상위4에 이름을 올린 횟수."""
+    일별 = _theme_hist_all()
+    if not 일별:
+        return 1
+    cnt = 0
+    for d in sorted(일별)[-days:]:
+        for x in (일별.get(d) or []):
+            if name in (x.get("종목들") or []):
+                cnt += 1
+                break
+    return max(cnt, 1)
+
+
+def build_theme_leaders(data):
+    """테마 순위 순으로 «테마당 대장주 1종목»."""
+    import re as _re
+    S = data.get("주도섹터") or []
+    if not S:
+        return '<div class="tm-none">오늘 테마 데이터가 없습니다.</div>'
+    사전 = ((data.get("계좌격자") or {}).get("종목사전")) or {}
+
+    out = []
+    for ti, s in enumerate(S, 1):
+        cand = []
+        for x in (s.get("종목") or []):
+            nm = x.get("종목명")
+            if not nm:
+                continue
+            대금 = x.get("거래대금") or 0
+            try:
+                등 = float(_re.sub(r"[^0-9.\-+]", "", str(x.get("등락률") or "0")) or 0)
+            except Exception:
+                등 = 0.0
+            v = 사전.get(nm)
+            순위 = (v[1] if v and len(v) > 1 else 2000)
+            cap = _approx_cap(순위)
+            turn = min(200.0, 대금 / cap * 100) if 대금 else 0.0
+            cand.append({"n": nm, "ch": 등, "amt": 대금, "turn": turn,
+                         "rank": 순위, "tier": (v[2] if v and len(v) > 2 else "")})
+        if not cand:
+            continue
+        mxT = max((c["turn"] for c in cand), default=0) or 1
+        mxC = max((c["ch"] for c in cand), default=0) or 1
+        for c in cand:
+            c["days"] = _leader_stay(c["n"])
+            c["sc"] = round(c["ch"] / mxC * 100 * LEADER_W_CH
+                            + c["turn"] / mxT * 100 * LEADER_W_TURN
+                            + max(0, (21 - ti) / 20 * 100) * LEADER_W_THEME
+                            + (c["days"] - 1) * 50 * LEADER_W_STAY, 1)
+        best = max(cand, key=lambda c: c["sc"])
+        best["th"] = s.get("테마명") or ""
+        best["thr"] = ti
+        out.append(best)
+
+    # 🔴 테마 순서가 아니라 «대장 점수» 순으로 세운다.
+    #    [사고] 처음엔 테마 순서대로 넣고 앞에서 잘랐더니 화면이
+    #    1위 76점 · 2위 88점처럼 «순위와 점수가 거꾸로» 나왔다.
+    out.sort(key=lambda c: -c["sc"])
+    out = out[:LEADER_MAX]
+
+    if not out:
+        return '<div class="tm-none">오늘 조건을 만족한 대장주가 없습니다.</div>'
+
+    # 🔴 HO 지시 2026-09-12 — 순위(#) 열을 뺀다.
+    #    [왜] 이미 점수 내림차순으로 세워져 있어 순서가 곧 순위다.
+    #    숫자를 한 번 더 쓰면 폭만 먹고 정보는 늘지 않는다.
+    #    대신 그 폭을 «테마명»에 준다 — 어느 테마의 대장인지가 핵심이라서.
+    head = ('<div class="ld-h"><span>종목</span>'
+            '<span>등락</span><span>회전</span><span>연속</span><span>점수</span></div>')
+    rows, tails = [head], []
+    for i, r in enumerate(out, 1):
+        c = TM_HOT if i <= 2 else (TM_WARM if i <= 4 else TM_COOL)
+        tc = TM_HOT if r["turn"] >= 20 else (TM_WARM if r["turn"] >= 10 else TM_COOL)
+        dc = TM_HOT if r["days"] >= 3 else (TM_WARM if r["days"] == 2 else TM_FLAT)
+        chc = TM_HOT if r["ch"] > 0 else TM_DOWN
+        # 🔴 HO 지시 2026-09-12 — 강세·매집 레이더와 «똑같은» 이름 배지를 쓴다.
+        #    [왜] 같은 리포트 안에서 같은 동작(누르면 기업분석)인데 모양이 다르면
+        #    구독자가 두 번 배워야 한다. sc_click의 기본형을 그대로 쓴다
+        #    (크기 13 · 색 강제 안 함 — 배경 밝기는 그 자리가 안다).
+        이름, 칸 = sc_click(r["n"], None, 13)
+        tails.append(칸)
+        rows.append(
+            f'<div class="ld-r">'
+            f'<span class="ld-n">{이름}'
+            f'<i><b style="color:{c}">{r["th"]}</b> · 테마 {r["thr"]}위</i></span>'
+            f'<span class="ld-v" style="color:{chc}">{r["ch"]:+.1f}</span>'
+            f'<span class="ld-v" style="color:{tc}">{r["turn"]:.0f}%</span>'
+            f'<span class="ld-v" style="color:{dc}">{r["days"]}일</span>'
+            f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>')
+    note = ('<div class="ld-f">📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
+            '📌 연속 = 최근 3거래일 중 테마 상위4에 이름 올린 횟수<br>'
+            '⚠️ 시가총액은 현재 순위 기반 근사값입니다 — 회전율에 오차가 있습니다.</div>')
+    return ('<div class="ld-wrap">' + "".join(rows) + "</div>"
+            + "".join(tails) + note)
+
+
+LEADER_CSS = """
+.ld-wrap{font-size:10.5px}
+.ld-h,.ld-r{display:grid;grid-template-columns:1fr 42px 36px 30px 30px;
+  gap:5px;align-items:center;padding:8px 0;border-top:1px solid #1a212b}
+.ld-h{font-size:9px;color:#5f6875;border-top:none;font-weight:700}
+.ld-h span:not(:nth-child(1)){text-align:right}
+.ld-n{font-size:12px;font-weight:700;min-width:0}
+/* 🔴 배지가 아랫줄로 떨어지던 문제.
+   [원인] .cp-sname이 <b>라 이름과 배지가 한 덩어리인데, 칸이 좁으면
+   그 덩어리 «안»에서 줄바꿈이 일어났다. .sc-tap i의 14px 아이콘이
+   줄높이를 밀어 더 도드라졌다.
+   [해결] 이름+배지를 통째로 nowrap 인라인블록으로 묶고, 좁을 땐
+   이름 쪽이 말줄임되게 한다(배지는 절대 안 밀린다). */
+/* 이름+배지는 한 덩어리로 — 좁아도 배지가 아랫줄로 안 떨어지게.
+   ⚠️ 배지 «모양»은 건드리지 않는다. 강세·매집과 같아야 한다(2026-09-12). */
+.ld-n .cp-sname{display:inline-flex;align-items:center;max-width:100%;
+  white-space:nowrap;vertical-align:bottom}
+/* 🔴 테마명을 키운다(8.5 → 10px) — 「어느 테마의 대장인가」가 핵심 정보다 */
+.ld-n i{display:block;font-style:normal;font-size:10px;color:#8b93a0;
+  font-weight:600;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ld-n i b{font-weight:800}
+.ld-v{font-size:10px;font-weight:800;text-align:right}
+.ld-s{font-size:11.5px;font-weight:800;text-align:right}
+.ld-f{margin-top:9px;padding-top:8px;border-top:1px solid #1a212b;
+  font-size:9.5px;color:#5a6474;line-height:1.65}
+
+/* 🔴 내 종목 브리핑 이름줄 — «이름 + 등락률 + 기업분석 + 차트»가 한 줄에.
+   [실측] 컨테이너 274px인데 네 요소 합이 223px이라 «들어가야» 했는데 두 줄이 됐다.
+   원인은 .sc-tap i의 14px 아이콘 + 배지 여백이 실제 폭을 부풀린 것.
+   여기서만 배지·등락률을 한 단계 줄인다(다른 코너의 배지는 건드리지 않는다). */
+.mb-nameline{line-height:1.35}
+.mb-nameline .sc-tap{font-size:8.5px;padding:1px 5px;margin-left:4px}
+.mb-nameline .sc-tap i{font-size:9px;margin-right:1px}
+.mb-nameline a{font-size:10px !important;padding:1px 6px !important;
+  margin-left:4px !important}
+"""
+
 HIDDEN_CHAPTERS = {
     # 🔴 v17 (2026-09-12) — 테마 탭 3코너 재편으로 가린 코너들.
     #    삭제가 아니라 가림이다(원칙3) — 한 줄만 지우면 되살아난다.
+    "성적표탭",           # 🔴 v17 — 탭 자체를 가린다(채점 로직은 계속 돈다)
     "오늘뜬테마요약",     # 「오늘의 주인공」(상세)과 같은 말 — 상세를 승격했다
     "순위섹터맵",         # 「섹터 × 테마」와 중복
     "돌아올섹터",         # 섹터 주기 문구(「보통 N일마다 뜸」)로 흡수
@@ -13572,7 +13831,7 @@ html{{scroll-behavior:smooth}}
    ⚠️ 지금은 6개가 세로로 쌓인다. 탭 전환 JS는 다음 단계. */
 .tabsec{{position:relative;border-radius:14px;padding:14px 13px 18px;
   margin:0 0 14px;border:1px solid rgba(255,255,255,.07);
-  border-left:3px solid var(--tabc,#6b7480);background:var(--tabbg,transparent)}}
+  background:var(--tabbg,transparent)}}
 .tabsec-hd{{display:flex;align-items:baseline;gap:8px;margin:0 0 10px;
   padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.07)}}
 .tabsec-name{{font-size:15px;font-weight:800;color:var(--tabc,#e8ecf1);
@@ -13632,11 +13891,25 @@ html{{scroll-behavior:smooth}}
 .gtab-b[data-go="테마"]{{--tabc:#b48cf0}}
 .gtab-b[data-go="종목"]{{--tabc:#e0c060}}
 .gtab-b[data-go="성적표"]{{--tabc:#74f0d4}}
-/* 탭으로 가르고 나면 섹션마다 테두리를 두르지 않는다 — 한 번에 하나만
-   보이므로 «구획»을 그릴 이유가 없다. 왼쪽 색선만 남겨 지금 어느 탭인지
-   본문에서도 알 수 있게 한다. */
-.tabsec{{border:0;border-left:3px solid var(--tabc,#6b7480);border-radius:0 12px 12px 0;
-  padding:12px 12px 18px;margin:0}}
+/* 🔴 HO 지시 2026-09-12 — 왼쪽 색 띠를 걷어낸다.
+   [왜] 3px 세로줄이 화면 왼쪽을 세로로 가로질러 «틀»처럼 보였다.
+        탭을 눌러 들어온 이상 어느 탭인지는 이미 안다 — 띠가 할 일이 없다.
+   [대신] 같은 색을 **곳곳에 조금씩** 흘린다:
+     · 제목 아래 밑줄 — 색이 «선»이 아니라 «마감»으로 쓰인다
+     · 제목 앞 점(::before) — 4px 동그라미 하나
+     · 맨 위 아주 옅은 그라데이션 — 스크롤하면 자연히 사라진다
+   ⚠️ 어느 것도 글자 대비를 건드리지 않는다(알파 0.03~0.10). */
+.tabsec{{border:0;border-radius:12px;padding:14px 12px 18px;margin:0;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--tabc,#6b7480) 5%, transparent) 0,
+    transparent 120px)}}
+.tabsec-hd{{border-bottom:1px solid
+  color-mix(in srgb, var(--tabc,#6b7480) 28%, transparent)}}
+.tabsec-name::before{{content:"";display:inline-block;width:5px;height:5px;
+  border-radius:50%;background:var(--tabc,#6b7480);margin-right:7px;
+  vertical-align:3px}}
+/* 소제목(sec-label)의 작은 꼬리표에도 같은 색을 옅게 — 탭마다 톤이 달라진다 */
+.tabsec .sec-label small{{color:color-mix(in srgb, var(--tabc,#6b7480) 72%, #8b93a0)}}
 @media (max-width:339px){{.gtab-b{{font-size:12px;padding:12px 7px 11px}}}}
 @media (prefers-reduced-motion:reduce){{.gtab-b,.gtab-b::before{{transition:none}}}}
 .mc2-note{{font-size:11px;color:#9aa2ae;line-height:1.65;margin:7px 2px 0}}
@@ -14275,11 +14548,15 @@ html{{scroll-behavior:smooth}}
 .abn{{color:#77a377}}
 .abd{{color:#5a616b}}
 /* 🆕 2026-08-26 강세 레이더 안내 (조건 설명 바로 밑) */
-.rd-guide{{background:rgba(255,255,255,.55);border:1px solid #e6e2da;
+/* 🔴 HO 지시 2026-09-12 — 다크 계열로 교체.
+   [무엇이 문제였나] 배경이 rgba(255,255,255,.55) 흰색이라 다크 리포트에서
+   이 칸만 하얗게 떠 보였다. v16 다크 전환 때 빠진 잔여 밝은 요소다.
+   [기준] 바로 아래 .sc-guide(종목 카드)가 이미 다크다 — 그 톤에 맞춘다. */
+.rd-guide{{background:#141922;border:1px solid #2a3446;
   border-radius:10px;padding:10px 11px;margin:8px 0 10px}}
-.rd-guide-h{{margin:0 0 6px;font-size:12.5px;font-weight:800;color:var(--ink)}}
-.rd-guide-b{{margin:0;font-size:11.5px;color:#3d4450;line-height:1.75}}
-.rd-guide-n{{margin:6px 0 0;font-size:10.5px;color:#6b7280;line-height:1.6}}
+.rd-guide-h{{margin:0 0 6px;font-size:12.5px;font-weight:800;color:#e8eaee}}
+.rd-guide-b{{margin:0;font-size:11.5px;color:#c9ced6;line-height:1.75}}
+.rd-guide-n{{margin:6px 0 0;font-size:10.5px;color:#7d848f;line-height:1.6}}
 /* 🆕 2026-08-25 종목 카드 */
 .sc-guide{{background:#141922;border:1px solid #2a3446;border-radius:11px;
   padding:11px 12px;margin:14px 0 8px}}
@@ -14892,7 +15169,7 @@ html{{scroll-behavior:smooth}}
   .ft-bad{{grid-column:1 / -1;text-align:left;margin-top:2px}}
   .ft-avg{{white-space:normal}}
 }}
-/* ── v17 테마 3코너 ── */{THEME_V17_CSS}</style>
+/* ── v17 테마 3코너 ── */{THEME_V17_CSS}{LEADER_CSS}</style>
 </head>
 <body>
 <div class="rp">
