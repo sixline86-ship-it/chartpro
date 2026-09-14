@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime, timedelta
 
-SCRIPT_VERSION = "v2026.08.30-a1"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.09.12-v17"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -10387,22 +10387,38 @@ def build_core(핵심편, data, 해석):
              + f'<p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>'
              + build_flow_signal(data.get("파생"), data.get("지수수급"), 해석))
 
-    _테마 = (build_theme_spotlight()
-             + f'<p class="sec-label"><small>오늘의 주인공</small>🏆 오늘의 주인공'
+    # 🔴 v17 (2026-09-12) — 테마 탭 3코너로 재편.
+    #    ① 테마 레이더(지금 어디) → ② 다가오는 테마(다음은 어디)
+    #    → ③ 섹터 × 테마(왜 그런가) → 성적표(검증)
+    #    v16 코너는 삭제가 아니라 HIDDEN_CHAPTERS로 가린다(원칙3).
+    #    · 「오늘 뜬 테마」(요약) = build_theme_spotlight → 「오늘의 주인공」과 중복
+    #    · 「관제 레이더」 = 섹터 기반 → 테마 레이더로 교체
+    #    · 「순위 타일」·「돌아올 섹터」 = ③의 주기 문구로 흡수
+    #    성적표·계좌격자는 «검증»과 «개인화»라 역할이 겹치지 않아 존치한다.
+    _테마 = (hide("오늘뜬테마요약", build_theme_spotlight())
+             + f'<p class="sec-label"><small>지금 어디가</small>'
+               f'📡 테마 레이더'
+               f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
+               f' · 4일 누적 점수 순위</span></p>'
+             + build_theme_radar(data)
+             + f'<p class="sec-label"><small>다음은 어디</small>'
+               f'🛬 다가오는 테마 — 10위권 진입까지</p>'
+             + build_coming_themes(data)
+             + f'<p class="sec-label"><small>왜 그런가</small>'
+               f'🗺️ 섹터 × 테마'
+               f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
+               f' · 섹터는 중앙값 기준</span></p>'
+             + build_sector_theme(data)
+             + f'<p class="sec-label"><small>오늘 뜬 테마</small>🏆 오늘 뜬 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 상승률 + 거래대금 + 확산도 기준</span></p>'
              + build_sectors(data.get("주도섹터"))
-             + f'<p class="sec-label"><small>뜨는 현장</small>'
-               f'📡 관제 레이더 — 오늘 관제탑에 가까워진 주인공</p>'
              + hide("관제레이더", build_sector_radar())
              + hide("핵심편섹터사다리", build_sector_ladder())
              + f'<p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>'
              + build_sector_scoreboard()
-             + f'<p class="sec-label"><small>순환 분석</small>'
-               f'🗺️ 섹터 순위 타일 — 주도권이 어떻게 돌았나</p>'
-             + build_sector_map()
-             + f'<p class="sec-label"><small>순환 분석</small>🔮 돌아올 섹터 — 다음 순번은</p>'
-             + build_return_sector())
+             + hide("순위섹터맵", build_sector_map())
+             + hide("돌아올섹터", build_return_sector()))
 
     _종목 = (build_core_strong(data.get("강세레이더"))
              + build_core_accum(data.get("매집레이더"))
@@ -11041,7 +11057,681 @@ _FS_TL_SEQ = [0]
 #      ("가린 거 다 보여줘" → HIDDEN_CHAPTERS = set() 로 비우면 전부 복귀)
 #    · 왜 이렇게 하나: 지웠다가 몇 주 뒤 되살리려면 코드를 다시 쓰게 된다.
 #      가려두면 되돌리는 비용이 0이고, 그때까지 유지보수도 따라간다.
+
+# ══════════════════════════════════════════════════════════════
+# 🔴 v17 (2026-09-12) — 테마 탭 3코너
+#
+#   ① 📡 테마 레이더      지금 어디가 뜨나      (공간)
+#   ② 🛬 다가오는 테마     다음은 어디인가       (시간)
+#   ③ 🗺️ 섹터 × 테마      왜 그런가 / 오래갈까  (구조)
+#
+#   같은 테마가 셋에 다 나올 수 있다 — 중복이 아니라 «세 각도»다.
+#   계산 근거는 logic_v17.md 7장에 전부 있다. 여기서는 요약만 단다.
+#
+#   ⚠️ v16 코너(오늘 뜬 테마·관제 레이더·순위 타일·돌아올 섹터)는
+#      삭제가 아니라 HIDDEN_CHAPTERS로 가린다(원칙3).
+# ══════════════════════════════════════════════════════════════
+
+def _theme_hist_all():
+    """theme_history.json의 {날짜: [테마...]}. 없으면 {}."""
+    try:
+        d = load_json("theme_history.json") or {}
+        return d.get("일별") or {}
+    except Exception:
+        return {}
+
+
+# ── 상수 (환경변수로 조정 가능 — 전부 «유력» 수준이라 재측정 대상) ──
+THEME_CUM_DAYS = int(os.getenv("THEME_CUM_DAYS", "4"))   # 누적 창
+THEME_MOVE_TH  = int(os.getenv("THEME_MOVE_TH",  "3"))   # 색 판정 임계(칸)
+THEME_TOPN     = int(os.getenv("THEME_TOPN",     "20"))  # 순위 산출 상한
+RADAR_SHOW     = 8                                        # 레이더에 그릴 개수
+SEC_SPREAD_MIN = 50                                       # 섹터 «통째로» 판정 확산도
+
+# 테마 순위 → 색 (3단. 4단은 주황↔노랑 ΔE 28로 구별 안 됐다)
+def _tcol(rk):
+    return "#ff5a4e" if rk <= 5 else ("#ff9838" if rk <= 10 else "#3ecf9a")
+
+SEC_COLOR = "#7fa8d9"   # 섹터는 파스텔 단색 — 색에 의미 없음(장식)
+
+
+def _theme_cum_rank(win=None, topn=None):
+    """theme_history.json에서 «최근 win거래일 누적 점수» 순위를 낸다.
+
+    [왜 누적인가] 당일 점수로는 어제 상위10 중 오늘 남은 게 0개였다
+    (9거래일 90칸에 서로 다른 테마 62개). 4일 누적이면 생존율 78%.
+    5일은 오히려 72.5%로 떨어진다(주말 너머 잔열이 섞인다).
+
+    반환: {날짜: [(테마명, 누적점수), ...]}  — 날짜별 순위표
+    """
+    win  = win  or THEME_CUM_DAYS
+    topn = topn or THEME_TOPN
+    일별 = _theme_hist_all()
+    if not 일별:
+        return {}
+    days = sorted(일별)
+    out = {}
+    for i, d in enumerate(days):
+        sl = days[max(0, i + 1 - win): i + 1]
+        sc = {}
+        for dd in sl:
+            for x in (일별.get(dd) or []):
+                nm = x.get("테마명")
+                if nm:
+                    sc[nm] = sc.get(nm, 0) + (x.get("점수") or 0)
+        out[d] = sorted(sc.items(), key=lambda v: -v[1])[:topn]
+    return out
+
+
+def _theme_today_meta():
+    """오늘 테마의 부가 정보 {테마명: {구역, 등락, 확산도}}."""
+    일별 = _theme_hist_all()
+    if not 일별:
+        return {}
+    meta = {}
+    for dd in sorted(일별):          # 뒤 날짜가 덮어쓰도록 오름차순
+        for x in (일별.get(dd) or []):
+            nm = x.get("테마명")
+            if nm:
+                meta.setdefault(nm, {}).update({
+                    "구역": x.get("구역") or meta.get(nm, {}).get("구역"),
+                    "등락": x.get("등락"),
+                    "확산도": x.get("확산도"),
+                })
+    return meta
+
+
+def _theme_members(data):
+    """{테마명: [(종목명, 등락률문자열), ...]}
+
+    ⚠️ 기준은 «그 테마 구성종목 중 오늘 등락률 상위 4개»다
+       (collect_data.py 534행). «대표주»가 아니라 «오늘 가장 센 종목»이라
+       매일 얼굴이 바뀐다. 고정하려면 시총·거래대금 순으로 바꿔야 한다.
+    """
+    out = {}
+    for s in (data.get("주도섹터") or []):
+        nm = s.get("테마명")
+        items = [(x.get("종목명"), x.get("등락률"))
+                 for x in (s.get("종목") or []) if x.get("종목명")]
+        if nm and items:
+            out[nm] = items
+    # 격자에서 보강 — 주도섹터에 없는 테마용
+    격자 = data.get("계좌격자") or {}
+    for r in (격자.get("행") or []):
+        L = []
+        for 층 in ("대형", "중형", "소형"):
+            for x in (((r.get("칸") or {}).get(층) or {}).get("종목") or []):
+                if x.get("명"):
+                    등 = x.get("등")
+                    L.append((x["명"], (f"{등:+.2f}%" if 등 is not None else None)))
+        for nm in (r.get("네이버테마") or []):
+            if nm not in out and L:
+                out[nm] = L[:6]
+    return out
+
+
+def _stock_panel(title, items, pid):
+    """금색 ▾ + 펼침 패널. ZONE_ARROW·ztog()를 그대로 재사용한다."""
+    if not items:
+        return "", ""
+    chips = "".join(
+        f'<span class="tm-chip">{n}'
+        f'<i style="color:{"#ff5a4e" if (v or "").startswith("+") else "#5b9bff"}">'
+        f'{v or "–"}</i></span>'
+        for n, v in items[:8])
+    pan = (f'<div class="tm-pan" id="{pid}">'
+           f'<p class="tm-ph">{title} · 오늘 등락률 상위 종목 '
+           f'<span>· 다시 누르면 닫혀요</span></p><div>{chips}</div></div>')
+    return ZONE_ARROW, pan
+
+
+# ──────────────────────────────────────────────────────────────
+# ① 📡 테마 레이더
+# ──────────────────────────────────────────────────────────────
+_RADAR_ZONE = {
+    "반도체": 0, "IT·전자": 32, "2차전지·소재": 72, "전력·신재생·원전": 104,
+    "에너지·정유·화학": 136, "건설·부동산": 172, "금융": 200,
+    "바이오·헬스": 248, "통신·유틸리티": 288, "자동차·부품": 318, "소비·유통": 342,
+}
+_RADAR_ETC = 222          # 구역 미상 테마를 모으는 「기타」 방향
+_RADAR_LABEL = [("반도체", 0), ("2차전지", 72), ("에너지", 136),
+                ("건설", 172), ("기타", 222), ("통신", 288), ("자동차", 318)]
+_RC = {"new": "#ffc93c", "in": "#ff5a4e", "hold": "#3ecf9a", "out": "#5b9bff"}
+_RL = {"new": "오늘 첫 등장", "in": "올라오는 중",
+       "hold": "제자리", "out": "밀려나는 중"}
+
+
+def build_theme_radar(data):
+    """각도=업종 · 중심거리=순위 · 점 크기=머문 일수 · 꼬리=5일 전 자리.
+
+    [왜 각도를 업종으로 고정하나] 점이 한쪽에 쏠리면 「오늘 돈이 한 동네로
+    몰렸다」, 흩어지면 「주도 없는 날」. 위치 자체가 정보가 된다.
+
+    [⚠️ 색과 꼬리는 반드시 같은 창(5일)을 본다] 설계 중 색=1일·꼬리=5일이던
+    시안에서 「고체산화물」이 꼬리는 길게 뻗었는데 색은 녹색이었다
+    (5일 전 8위→오늘 3위인데 어제 3위→오늘 3위라서). 그림과 색이 딴소리를 했다.
+    """
+    import math
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if len(days) < 2:
+        return ('<div class="tm-none">테마 이력이 아직 부족합니다 '
+                '— 누적이 쌓이면 자동으로 켜집니다.</div>')
+
+    last = days[-1]
+    win = days[-5:]                      # 화면에 보여주는 기간(5거래일)
+    meta = _theme_today_meta()
+    mem = _theme_members(data)
+
+    rows = []
+    for i, (nm, sc) in enumerate(rk[last][:RADAR_SHOW], 1):
+        hist = []
+        for dd in win:
+            pos = next((j for j, (k, _) in enumerate(rk.get(dd) or [], 1)
+                        if k == nm), None)
+            hist.append(pos)
+        stay = sum(1 for x in hist if x and x <= 10)
+        rows.append({"r": i, "n": nm, "sc": sc, "h": hist, "stay": max(stay, 1),
+                     "zone": (meta.get(nm) or {}).get("구역")})
+    if not rows:
+        return '<div class="tm-none">오늘 테마 데이터가 없습니다.</div>'
+
+    # 각도 배정 — 「기타」는 부채꼴로 벌리고, 같은 구역은 ±14도씩 벌린다
+    etc = [r for r in rows if r["zone"] not in _RADAR_ZONE]
+    for i, r in enumerate(etc):
+        r["ang"] = _RADAR_ETC + (i - (len(etc) - 1) / 2) * 30
+    used = {}
+    for r in rows:
+        if "ang" in r:
+            continue
+        a = _RADAR_ZONE[r["zone"]]
+        k = round(a); c = used.get(k, 0); used[k] = c + 1
+        r["ang"] = a + (0 if c == 0 else (14 * c if c % 2 else -14 * c))
+
+    # 상태 판정 — 5일 전 대비 ±THEME_MOVE_TH 칸
+    for r in rows:
+        seq = [x for x in r["h"][:-1] if x and x <= THEME_TOPN]
+        r["from"] = seq[0] if seq else None
+        if r["from"] is None:
+            r["st"] = "new"
+        else:
+            d = r["from"] - r["h"][-1]
+            r["st"] = ("in" if d >= THEME_MOVE_TH
+                       else ("out" if d <= -THEME_MOVE_TH else "hold"))
+
+    CX, CY, RMAX = 190, 182, 120
+    def RR(rank):
+        return (min(rank, 10) - 1) / 9 * RMAX + 16
+    def POS(rank, a):
+        t = math.radians(a - 90); r = RR(rank)
+        return CX + r * math.cos(t), CY + r * math.sin(t)
+    def short(nm, mx=8):
+        return nm.split("(")[0].strip()[:mx]
+
+    sv, placed = [], []
+    for rank, lab in ((4, "4위"), (7, "7위"), (10, "10위")):
+        rr = RR(rank)
+        sv.append(f'<circle cx="{CX}" cy="{CY}" r="{rr:.1f}" fill="none" '
+                  f'stroke="#2b3648" stroke-width="1"/>')
+        sv.append(f'<text x="{CX+3}" y="{CY-rr+11:.1f}" fill="#55627a" '
+                  f'font-size="8.5">{lab}</text>')
+    for z, a in _RADAR_ZONE.items():
+        t = math.radians(a - 90)
+        sv.append(f'<line x1="{CX}" y1="{CY}" x2="{CX+RR(10)*math.cos(t):.1f}" '
+                  f'y2="{CY+RR(10)*math.sin(t):.1f}" stroke="#1e2634"/>')
+    t = math.radians(_RADAR_ETC - 90)
+    sv.append(f'<line x1="{CX}" y1="{CY}" x2="{CX+RR(10)*math.cos(t):.1f}" '
+              f'y2="{CY+RR(10)*math.sin(t):.1f}" stroke="#1e2634"/>')
+    # 섹터 글자를 «먼저» 배치하고 점유 목록에 등록 — 테마 글자가 이걸 피해간다
+    for z, a in _RADAR_LABEL:
+        t = math.radians(a - 90)
+        x, y = CX + 150 * math.cos(t), CY + 150 * math.sin(t)
+        sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#7d8ca3" font-size="9.5" '
+                  f'letter-spacing="1.5" text-anchor="middle" '
+                  f'dominant-baseline="central">{z}</text>')
+        placed.append((x - len(z) * 11 / 2 - 2, y - 6, len(z) * 11 + 4, 13))
+
+    for r in rows:
+        a = r["ang"]; x, y = POS(r["h"][-1], a)
+        c = _RC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
+        if r["from"]:
+            ox, oy = POS(r["from"], a)
+            d = math.hypot(x - ox, y - oy)
+            if d > 1:
+                ux, uy = (ox - x) / d, (oy - y) / d
+                sv.append(f'<line x1="{x+ux*(rad+2):.1f}" y1="{y+uy*(rad+2):.1f}" '
+                          f'x2="{ox:.1f}" y2="{oy:.1f}" stroke="{c}" stroke-width="1.5" '
+                          f'stroke-dasharray="3 3" opacity="0.65"/>')
+                sv.append(f'<circle cx="{ox:.1f}" cy="{oy:.1f}" r="2.6" fill="none" '
+                          f'stroke="{c}" stroke-width="1.2" opacity="0.7"/>')
+        sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad+4:.1f}" fill="{c}" opacity="0.16"/>')
+        sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad:.1f}" fill="{c}"/>')
+        sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#0a0d12" '
+                  f'font-size="{9.5 if rad < 8 else 10.5}" font-weight="800" '
+                  f'text-anchor="middle" dominant-baseline="central">{r["r"]}</text>')
+        r["_p"] = (x, y, rad, a)
+
+    # 라벨 — 8방향 후보 중 «겹치지 않는 첫 자리»를 고른다
+    for r in rows:
+        x, y, rad, a = r["_p"]
+        nm = short(r["n"]); w = len(nm) * 9.8 + 3; h = 12
+        cand = []
+        for sg in (1, -1):
+            for off in (0, 24, -24, 48, -48, 72, -72):
+                ta = math.radians(a - 90 + off)
+                for ext in (10, 20):
+                    cand.append((x + sg * (rad + ext) * math.cos(ta),
+                                 y + sg * (rad + ext) * math.sin(ta)))
+        ch = None
+        for lx, ly in cand:
+            dx = lx - x
+            anc = "start" if dx > 3 else ("end" if dx < -3 else "middle")
+            ly2 = ly + (4.0 if (anc == "middle" and ly > y)
+                        else (-2.6 if anc == "middle" else 3.6))
+            l = lx if anc == "start" else (lx - w if anc == "end" else lx - w / 2)
+            if l < 4 or l + w > 376:
+                continue
+            box = (l, ly2 - h + 2, w, h)
+            if not any(not (box[0]+box[2] < q[0] or q[0]+q[2] < box[0] or
+                            box[1]+box[3] < q[1] or q[1]+q[3] < box[1]) for q in placed):
+                ch = (lx, ly2, anc, box); break
+        if not ch:
+            lx, ly = cand[0]
+            ch = (lx, ly + 3.6, "middle", (lx - w/2, ly - h + 2, w, h))
+        lx, ly, anc, box = ch; placed.append(box)
+        sv.append(f'<text x="{lx:.1f}" y="{ly:.1f}" fill="#fff" font-size="10.5" '
+                  f'font-weight="700" text-anchor="{anc}">{nm}</text>')
+
+    # 아래 목록 — 원 안에는 축약만 넣었으므로 전체 이름은 여기서 푼다
+    lis = []
+    for r in rows:
+        c = _RC[r["st"]]
+        pid = f"tmr{r['r']}"
+        arw, pan = _stock_panel(r["n"], mem.get(r["n"]) or [], pid)
+        mv = ("5일 전엔 없었음" if r["from"] is None
+              else f"5일 전 {r['from']}위 → {r['h'][-1]}위")
+        click = f" onclick=\"ztog('{pid}')\"" if arw else ""
+        lis.append(
+            f'<div class="tm-lg"{click}><span class="tm-dot" style="background:{c}">{r["r"]}</span>'
+            f'<span class="tm-nm">{r["n"]}{arw}</span>'
+            f'<span class="tm-mv">{mv}<br><b style="color:{c}">{_RL[r["st"]]}</b>'
+            f' · 5일 중 {r["stay"]}일 10위권</span></div>{pan}')
+
+    prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
+    cur = {k for k, _ in rk[last][:10]}
+    out = sorted(prev - cur)
+    key = "".join(f'<span><i style="background:{_RC[s]}"></i>{_RL[s]}</span>'
+                  for s in ("new", "in", "hold", "out"))
+    return (f'<div class="tm-rd"><svg viewBox="0 0 380 350">{"".join(sv)}</svg></div>'
+            f'<div class="tm-key">{key}</div>{"".join(lis)}'
+            f'<div class="tm-foot">🌫 어제 있다 오늘 빠진 곳 · '
+            f'{" · ".join(out) if out else "없음"}</div>')
+
+
+# ──────────────────────────────────────────────────────────────
+# ② 🛬 다가오는 테마
+# ──────────────────────────────────────────────────────────────
+def build_coming_themes(data):
+    """11~20위 테마가 «10위권에 언제 진입하나».
+
+    [두 계산 병행] 주기 방식은 등판 4회 이상이 필요한데 테마는 0개다
+    (270개라 한 번 뜨고 안 돌아온다). 그래서 «속도 방식»을 쓰고,
+    주기 표본이 차면 그쪽을 쓴다. 화면에 어느 쪽인지 밝힌다.
+
+    [속도 km 환산] 5일간 순위 10칸 이동 = 100km (20km 단위).
+    ⚠️ 처음엔 「하루 5칸=100km」로 잡았다가, 하루 이동 중앙값이 0~1칸이라
+       대부분 0km로 뭉개져 실패했다. 5일 누적이어야 한다.
+    """
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if len(days) < 2:
+        return ('<div class="tm-none">아직 대기권(11~20위) 기록이 없습니다. '
+                '저장 20개가 며칠 쌓이면 자동으로 켜집니다.</div>')
+
+    last = days[-1]; win = days[-5:]
+    today = rk[last]
+    if len(today) <= 10:
+        return ('<div class="tm-none">11~20위 기록이 아직 없습니다 '
+                f'(오늘 {len(today)}개). 저장 20개가 쌓이는 중입니다.</div>')
+
+    mem = _theme_members(data)
+    top10_score = today[9][1] if len(today) >= 10 else 0
+    cards = []
+    for idx, (nm, sc) in enumerate(today[10:18]):
+        hist = []
+        for dd in win:
+            pos = next((j for j, (k, _) in enumerate(rk.get(dd) or [], 1)
+                        if k == nm), None)
+            hist.append(pos)
+        cur = hist[-1] or (idx + 11)
+        seq = [x for x in hist[:-1] if x]
+        old = seq[0] if seq else None
+
+        # 점수 기울기 → D-day (선형 외삽)
+        scs = []
+        for dd in win:
+            v = next((s for k, s in (rk.get(dd) or []) if k == nm), None)
+            if v is not None:
+                scs.append(v)
+        slope = ((scs[-1] - scs[0]) / max(len(scs) - 1, 1)) if len(scs) >= 2 else 0
+        need = top10_score - sc
+        eta = None
+        if need <= 0:
+            eta = 0
+        elif slope > 0.3:
+            eta = max(1, min(14, round(need / slope)))
+
+        km = 0 if old is None else max(-100, min(100, round((old - cur) / 10 * 100 / 20) * 20))
+        if km >= 80:   g, gc = "고속", "#ff5a4e"
+        elif km >= 40: g, gc = "가속", "#ffa63c"
+        elif km > 0:   g, gc = "서행", "#3ecf9a"
+        elif km == 0:  g, gc = "정지", "#8a93a2"
+        else:          g, gc = ("후진" if km > -60 else "급후진"), "#5b9bff"
+
+        c = ("#ff5a4e" if (eta is not None and eta <= 2)
+             else ("#ffa63c" if (eta is not None and eta <= 5)
+                   else ("#5b9bff" if slope < 0 else "#3ecf9a")))
+        lab = ("신호 없음" if eta is None
+               else ("오늘 진입권" if eta == 0 else f"D-{eta}"))
+        w = 0 if eta is None else max(5, 100 - min(eta, 14) / 14 * 100)
+
+        pid = f"tmc{idx}"
+        arw, pan = _stock_panel(nm, mem.get(nm) or [], pid)
+        click = f" onclick=\"ztog('{pid}')\"" if arw else ""
+        기준 = (f"{old}위 → {cur}위" if old else f"{cur}위 · 5일 전 기록 없음")
+        cards.append(
+            f'<div class="tm-crow"{click}><div class="tm-ctop">'
+            f'<span class="tm-cnm">{nm}{arw}</span>'
+            f'<span class="tm-crt">'
+            f'<span class="tm-cbg" style="background:{gc}22;color:{gc};border-color:{gc}55">'
+            f'{g} {km:+d}km</span>'
+            f'<span class="tm-cdd" style="color:{c}">{lab}</span></span></div>'
+            f'<div class="tm-cb"><div class="tm-cf" style="width:{w:.0f}%;'
+            f'background:linear-gradient(90deg,{c}33,{c})"></div></div>'
+            f'<div class="tm-csub">{기준} · 점수 {sc:.0f} · 하루 {slope:+.1f}</div>{pan}</div>')
+
+    if not cards:
+        return '<div class="tm-none">대기권 테마가 없습니다.</div>'
+    return ('<div class="tm-spd"><span class="tm-lf">← −100km</span>'
+            '<span class="tm-gd"></span><span class="tm-rg">+100km →</span></div>'
+            '<div class="tm-spdn">멀어지는 중 ← → 다가오는 중</div>'
+            + "".join(cards)
+            + '<div class="tm-foot">⚠️ 예측이 아니라 «지금 속도가 유지되면» 계산입니다. '
+              '하루만 흐름이 바뀌어도 D-day는 달라집니다.</div>')
+
+
+# ──────────────────────────────────────────────────────────────
+# ③ 🗺️ 섹터 × 테마
+# ──────────────────────────────────────────────────────────────
+def _sector_cycle():
+    """섹터별 등판 주기 — 그날 «중앙값» 상위 3위 이내를 등판으로 본다.
+
+    ⚠️ 평균이 아니라 중앙값이다. 섹터마다 종목 수가 6~382개로 60배 차이라
+       평균은 「통신·유틸리티(6종목) 1위」 같은 착시를 만든다(2026-08-25 원칙).
+    """
+    hist = {}
+    for _ymd, d in archive_days():
+        for r in (((d.get("계좌격자") or {}).get("행")) or []):
+            s_ = r.get("테마")
+            if not s_ or s_ in ZONE_EXCLUDE:
+                continue
+            hist.setdefault(s_, {})[_ymd] = r.get("전체")   # 중앙값
+    days = sorted({d for v in hist.values() for d in v})
+    out = {}
+    for s in hist:
+        idx = []
+        for i, dd in enumerate(days):
+            vals = [(k, hist[k][dd]) for k in hist
+                    if dd in hist[k] and hist[k][dd] is not None]
+            vals.sort(key=lambda x: -x[1])
+            if s in [k for k, _ in vals[:3]]:
+                idx.append(i)
+        구간 = []
+        if idx:
+            st = p = idx[0]
+            for i in idx[1:]:
+                if i == p + 1:
+                    p = i
+                else:
+                    구간.append((st, p)); st = p = i
+            구간.append((st, p))
+        간격 = [구간[i + 1][0] - 구간[i][0] for i in range(len(구간) - 1)]
+        주기 = round(sum(간격) / len(간격), 1) if 간격 else None
+        쉰날 = (len(days) - 1 - 구간[-1][1]) if 구간 else None
+        out[s] = {"주기": 주기, "쉰날": 쉰날, "표본": len(간격)}
+    return out
+
+
+def _sector_themes_by_score(data):
+    """{섹터명: [{n, rk, sc}, ...]} — «4일 누적 순위» 상위 3개.
+
+    ⚠️ collect_data의 네이버테마 목록은 «등락률 순»이다. 화면은 테마 레이더와
+       같은 기준을 써야 하므로 여기서 누적 순위로 다시 정렬한다.
+    """
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if not days:
+        return {}
+    today = {nm: (i + 1, sc) for i, (nm, sc) in enumerate(rk[days[-1]])}
+    out = {}
+    격자 = data.get("계좌격자") or {}
+    for r in (격자.get("행") or []):
+        s = r.get("테마")
+        if not s or s in ZONE_EXCLUDE:
+            continue
+        lst = []
+        for nm in (r.get("네이버테마") or []):
+            if nm in today:
+                pos, sc = today[nm]
+                lst.append({"n": nm, "rk": pos, "sc": sc})
+        lst.sort(key=lambda x: x["rk"])
+        if lst:
+            out[s] = lst[:3]
+    return out
+
+
+def build_sector_theme(data):
+    """섹터 순위(중앙값) × 그 안의 강한 테마 — 2축 분류.
+
+    [왜 2축인가] 섹터는 「고르게 오르나」, 테마는 「세게 오르나」에 답한다.
+    성격이 반대라 한 점수로 합치면 둘 다 흐려진다.
+
+    [왜 「섹터 1~3위 = 주도」가 아닌가] 에너지·정유·화학은 섹터 7위인데
+    3위 테마(97점)를 품는다. 순위로 자르면 정작 오늘 살 종목을 놓친다.
+    """
+    격자 = data.get("계좌격자") or {}
+    행들 = [r for r in (격자.get("행") or [])
+            if r.get("테마") and r.get("테마") not in ZONE_EXCLUDE
+            and r.get("전체") is not None]
+    if not 행들:
+        return '<div class="tm-none">섹터 데이터가 없습니다.</div>'
+
+    cyc = _sector_cycle()
+    bysec = _sector_themes_by_score(data)
+    mem = _theme_members(data)
+
+    secs = []
+    for r in 행들:
+        s = r["테마"]
+        secs.append({"sec": s, "mid": r["전체"], "sp": r.get("확산도") or 0,
+                     "n": r.get("종목수") or 0, "ts": bysec.get(s, []),
+                     **(cyc.get(s) or {"주기": None, "쉰날": None, "표본": 0})})
+    # 순위 = 중앙값 내림차순 → 동률이면 확산도
+    secs.sort(key=lambda x: (-x["mid"], -x["sp"]))
+    mx = max((abs(x["mid"]) for x in secs), default=1) or 1
+    for i, r in enumerate(secs, 1):
+        r["_i"] = i
+        r["score"] = round(max(0, r["mid"]) / mx * 60 + r["sp"] / 100 * 40, 1)
+
+    def 구역(r):
+        up = r["mid"] > 0 and r["sp"] >= SEC_SPREAD_MIN
+        base = r["mid"] <= 0 and r["sp"] >= SEC_SPREAD_MIN
+        strong = any(t["rk"] <= 10 for t in r["ts"])
+        if up and strong:  return "주도"
+        if up:             return "추격"
+        if strong:         return "단타"
+        if base:           return "추격"
+        주기, 쉰날 = r.get("주기"), r.get("쉰날")
+        if 주기 and 쉰날 is not None and 쉰날 >= 주기:
+            return "눌림"
+        return "대기"
+
+    G = {"주도": [], "단타": [], "추격": [], "눌림": [], "대기": []}
+    for r in secs:
+        G[구역(r)].append(r)
+
+    def 주기문(r):
+        p, g = r.get("주기"), r.get("쉰날")
+        if p is None or g is None:
+            return '<span class="tm-cy">등판 기록 부족</span>'
+        if g == 0:
+            return (f'<span class="tm-cy">보통 <b>{p:.0f}일</b>마다 뜸 · '
+                    f'<b style="color:#ff5a4e">오늘 뜸</b></span>')
+        if g >= p:
+            return (f'<span class="tm-cy">보통 <b>{p:.0f}일</b>마다 뜸 · '
+                    f'<b style="color:#e0c060">{g}일째 잠잠</b></span>')
+        return f'<span class="tm-cy">보통 <b>{p:.0f}일</b>마다 뜸 · <b>{g}일째 잠잠</b></span>'
+
+    cnt = [0]
+    def 테마줄(t):
+        cnt[0] += 1; pid = f"tms{cnt[0]}"
+        c = _tcol(t["rk"]); w = min(100, t["sc"] / 131 * 100)
+        arw, pan = _stock_panel(t["n"], mem.get(t["n"]) or [], pid)
+        click = f" onclick=\"ztog('{pid}')\"" if arw else ""
+        nm = t["n"].split("(")[0].strip()
+        return (f'<div class="tm-t1"{click}><span class="tm-tl">'
+                f'<em>테마</em><b>{t["rk"]}위</b> {nm}{arw}</span>'
+                f'<div class="tm-t2b"><div class="tm-t2f" style="width:{w:.0f}%;'
+                f'background:repeating-linear-gradient(90deg,{c} 0 4px,transparent 4px 7px)">'
+                f'</div></div><span class="tm-tsr" style="color:{c}">{t["sc"]:.0f}점</span>'
+                f'</div>{pan}')
+
+    def 섹터줄(r):
+        ts = "".join(테마줄(t) for t in r["ts"]) or \
+             '<div class="tm-tnone">상위 20위 내 소속 테마 없음</div>'
+        return (f'<div class="tm-row"><div class="tm-sh">'
+                f'<span class="tm-srk"><em>섹터</em>{r["_i"]}위</span>'
+                f'<span class="tm-snm">{r["sec"]}</span></div>'
+                f'<div class="tm-cyw">{주기문(r)}</div>'
+                f'<div class="tm-sline"><div class="tm-sb">'
+                f'<div class="tm-sf" style="width:{r["score"]:.0f}%"></div></div>'
+                f'<span class="tm-ssc">{r["score"]:.0f}점</span></div>'
+                f'<div class="tm-sv">중앙 {r["mid"]:+.2f}% · 확산 {r["sp"]:.0f} · {r["n"]}종목</div>'
+                f'<div class="tm-tw">{ts}</div></div>')
+
+    GM = [("주도", "🔥 주도 섹터", "#ff5a4e", "섹터가 통째로 오르고 10위권 테마 보유 — 스윙 가능"),
+          ("단타", "⚡ 단타 섹터", "#e0c060", "섹터는 약한데 테마만 강하다 — 짧게만"),
+          ("추격", "🌱 추격 섹터", "#3ecf9a", "섹터는 오르는데 테마가 아직 — 다음 후보"),
+          ("눌림", "🪨 눌림 섹터", "#c9a227", "뜰 때가 지났는데 잠잠하다"),
+          ("대기", "😴 대기 섹터", "#5f6b7d", "움직임 없음")]
+    out = []
+    for k, title, c, desc in GM:
+        v = G[k]
+        if not v:
+            continue
+        if k == "대기":
+            inner = ('<div class="tm-wg">' + "".join(
+                f'<span class="tm-wc"><b>{r["_i"]}위</b> {r["sec"][:9]}'
+                f' <i>{r["score"]:.0f}점</i></span>' for r in v) + '</div>')
+        else:
+            inner = "".join(섹터줄(r) for r in v)
+        out.append(f'<div class="tm-grp" style="border-color:{c}59">'
+                   f'<div class="tm-gh" style="color:{c};border-bottom-color:{c}33">'
+                   f'{title}<span>{desc}</span></div>{inner}</div>')
+    key = ('<div class="tm-key">'
+           '<span><i style="background:#ff5a4e"></i>테마 1~5위</span>'
+           '<span><i style="background:#ff9838"></i>6~10위</span>'
+           '<span><i style="background:#3ecf9a"></i>11~20위</span></div>')
+    return key + "".join(out)
+
+
+# ── v17 테마 3코너 전용 CSS ──
+THEME_V17_CSS = """
+.tm-none{font-size:12px;color:#6f7784;background:#10161f;border:1px solid #1d2634;
+  border-radius:9px;padding:11px 12px;line-height:1.6}
+.tm-rd{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:4px 0 0}
+.tm-rd svg{width:100%;display:block}
+.tm-key{display:flex;flex-wrap:wrap;gap:9px;font-size:10px;color:#9aa3b2;
+  justify-content:center;margin:8px 0}
+.tm-key i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}
+.tm-lg{display:flex;align-items:center;gap:8px;padding:8px 2px;
+  border-top:1px solid #1a212b;cursor:pointer}
+.tm-dot{width:18px;height:18px;border-radius:50%;color:#0a0d12;font-size:10px;
+  font-weight:800;display:flex;align-items:center;justify-content:center;flex:0 0 18px}
+.tm-nm{font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.tm-mv{font-size:10px;color:#7d8695;flex:none;text-align:right;line-height:1.45}
+.tm-foot{margin-top:9px;padding-top:8px;border-top:1px solid #1a212b;
+  font-size:10px;color:#5a6474;line-height:1.6}
+.tm-crow{padding:9px 0;border-top:1px solid #1a212b;cursor:pointer}
+.tm-ctop{display:flex;justify-content:space-between;align-items:center;gap:7px}
+.tm-cnm{font-size:12.5px;font-weight:600;flex:1;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.tm-crt{display:flex;align-items:center;gap:6px;flex:none}
+.tm-cbg{font-size:9.5px;font-weight:700;border:1px solid;border-radius:4px;
+  padding:1px 5px;white-space:nowrap}
+.tm-cdd{font-size:12px;font-weight:800}
+.tm-cb{height:7px;background:#151c26;border-radius:4px;margin-top:6px;overflow:hidden}
+.tm-cf{height:100%;border-radius:4px}
+.tm-csub{font-size:10px;color:#7d8695;margin-top:4px}
+.tm-spd{display:flex;align-items:center;gap:8px;background:#101820;
+  border:1px solid #1d2a38;border-radius:9px;padding:8px 10px;margin-bottom:4px}
+.tm-lf{font-size:10.5px;font-weight:800;color:#5b9bff;white-space:nowrap}
+.tm-rg{font-size:10.5px;font-weight:800;color:#ff5a4e;white-space:nowrap}
+.tm-gd{flex:1;height:6px;border-radius:3px;
+  background:linear-gradient(90deg,#5b9bff,#8a93a2 50%,#ff5a4e)}
+.tm-spdn{font-size:10px;color:#7d8695;text-align:center;margin-bottom:8px}
+.tm-grp{border:1px solid;border-radius:11px;padding:0 10px 10px;margin-bottom:14px}
+.tm-gh{font-size:13.5px;font-weight:800;padding:10px 0 8px;margin-bottom:4px;
+  border-bottom:1px solid}
+.tm-gh span{display:block;font-size:9.5px;color:#6f7784;font-weight:600;margin-top:3px}
+.tm-row{padding:9px 0}
+.tm-sh{display:flex;align-items:baseline;gap:5px}
+.tm-srk{font-size:10px;font-weight:800;flex:none;color:#7fa8d9}
+.tm-snm{font-size:15px;font-weight:800;letter-spacing:-0.3px}
+.tm-cyw{margin-top:3px}
+.tm-cy{font-size:9.5px;color:#7d8695;font-weight:600}
+.tm-cy b{color:#c3cad4;font-weight:800}
+.tm-sline{display:flex;align-items:center;gap:6px;margin:6px 0 0}
+.tm-sb{position:relative;flex:1;height:9px;background:#151c26;border-radius:5px}
+.tm-sf{height:100%;border-radius:5px;opacity:.85;background:#7fa8d9}
+.tm-ssc{font-size:11px;font-weight:800;flex:none;min-width:34px;text-align:right;
+  color:#7fa8d9}
+.tm-sv{font-size:8.5px;color:#6f7784;margin:5px 0 8px;font-weight:600}
+.tm-tw{padding-left:8px;border-left:2px solid #222c3c}
+.tm-t1{display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:pointer}
+.tm-tl{font-size:10px;width:156px;flex:none;white-space:nowrap;font-weight:600;
+  color:#c3cad4}
+.tm-tl b{font-weight:800;margin-right:2px}
+.tm-tl em{font-style:normal;font-size:8px;opacity:.72;margin-right:2px;font-weight:600}
+.tm-srk em{font-style:normal;font-size:8px;opacity:.72;margin-right:2px;font-weight:600}
+.tm-t2b{position:relative;flex:1;height:5px;background:#141a23;border-radius:2px;
+  overflow:hidden;min-width:24px}
+.tm-t2f{height:100%;border-radius:2px}
+.tm-tsr{font-size:9.5px;font-weight:800;flex:none;min-width:34px;text-align:right}
+.tm-tnone{font-size:9.5px;color:#4e5766;border:1px solid #232a36;border-radius:5px;
+  padding:3px 7px;display:inline-block}
+.tm-pan{display:none;margin:0 0 7px 8px;padding:7px 9px;background:#0f131a;
+  border-radius:6px}
+.tm-ph{margin:0 0 5px;font-size:10px;color:#e0c060;font-weight:700}
+.tm-ph span{color:#6f7784;font-weight:600}
+.tm-chip{display:inline-block;font-size:10px;color:#d5d9e0;background:#141922;
+  border:1px solid #232a36;border-radius:5px;padding:2px 6px;margin:0 4px 4px 0}
+.tm-chip i{font-style:normal;font-size:9px;font-weight:700;margin-left:3px}
+.tm-wg{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.tm-wc{font-size:9.5px;color:#7d8695;background:#101820;border:1px solid #1d2a38;
+  border-radius:5px;padding:3px 7px}
+.tm-wc b{color:#9aa3b2;font-weight:800;margin-right:3px}
+.tm-wc i{font-style:normal;color:#5f6b7d}
+"""
+
+
 HIDDEN_CHAPTERS = {
+    # 🔴 v17 (2026-09-12) — 테마 탭 3코너 재편으로 가린 코너들.
+    #    삭제가 아니라 가림이다(원칙3) — 한 줄만 지우면 되살아난다.
+    "오늘뜬테마요약",     # 「오늘의 주인공」(상세)과 같은 말 — 상세를 승격했다
+    "순위섹터맵",         # 「섹터 × 테마」와 중복
+    "돌아올섹터",         # 섹터 주기 문구(「보통 N일마다 뜸」)로 흡수
     "핵심편예보",         # 🆕 2026-08-25 HO 지시 — 근거 없는 판단이 많아 뺐다
     # 🆕 2026-08-25 HO 지시 — 「항로도」는 **기록이 더 쌓인 뒤** 핵심편에 켠다.
     #  ⚠️ 지금 표본이 26거래일뿐이라 "기록상 2번째"밖에 못 말한다.
@@ -14202,7 +14892,7 @@ html{{scroll-behavior:smooth}}
   .ft-bad{{grid-column:1 / -1;text-align:left;margin-top:2px}}
   .ft-avg{{white-space:normal}}
 }}
-</style>
+/* ── v17 테마 3코너 ── */{THEME_V17_CSS}</style>
 </head>
 <body>
 <div class="rp">
