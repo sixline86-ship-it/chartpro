@@ -10,7 +10,7 @@ import re
 import html
 from datetime import datetime, timedelta
 
-SCRIPT_VERSION = "v2026.09.12-v17"   # ⬅ 버전 표시
+SCRIPT_VERSION = "v2026.09.14-v18"   # ⬅ 버전 표시
 # 발행할 때마다 달라지는 값. 캐시된 페이지인지 아닌지를 눈으로 구분하는 표식이자,
 # 아래 자동 새로고침 스크립트가 "내가 보고 있는 게 최신인가"를 판별하는 기준이다.
 BUILD_STAMP = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -10441,7 +10441,15 @@ def build_core(핵심편, data, 해석):
     #    · 「관제 레이더」 = 섹터 기반 → 테마 레이더로 교체
     #    · 「순위 타일」·「돌아올 섹터」 = ③의 주기 문구로 흡수
     #    성적표·계좌격자는 «검증»과 «개인화»라 역할이 겹치지 않아 존치한다.
-    _테마 = (hide("오늘뜬테마요약", build_theme_spotlight())
+    # 🔴 v18 (2026-09-14) — 신선도 관문. 오늘 테마 수집이 실패한 날은
+    #    테마 3코너 + 「오늘 뜬 테마」를 안내 카드 하나로 덮는다.
+    #    낡은 순위를 오늘인 척 내보내지 않는다(원칙 7).
+    #    「섹터 성적표」는 아카이브 기반이라 덮지 않는다.
+    _fresh, _tlast, _tgap = _theme_is_fresh(data)
+    if not _fresh:
+        _테마앞 = _theme_stale_notice(_tlast, _tgap)
+    else:
+        _테마앞 = (hide("오늘뜬테마요약", build_theme_spotlight())
              + f'<p class="sec-label"><small>지금 어디가</small>'
                f'📡 테마 레이더'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
@@ -10458,7 +10466,9 @@ def build_core(핵심편, data, 해석):
              + f'<p class="sec-label"><small>오늘 뜬 테마</small>🏆 오늘 뜬 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 상승률 + 거래대금 + 확산도 기준</span></p>'
-             + build_sectors(data.get("주도섹터"))
+             + build_sectors(data.get("주도섹터")))
+
+    _테마 = (_테마앞
              + hide("관제레이더", build_sector_radar())
              + hide("핵심편섹터사다리", build_sector_ladder())
              + f'<p class="sec-label"><small>섹터 성적</small>📈 섹터 성적표</p>'
@@ -11155,6 +11165,59 @@ def _theme_hist_all():
         return {}
 
 
+# ══════════════════════════════════════════════════════════
+# 🔴 v18 (2026-09-14) — 테마 신선도 관문
+#
+# [무슨 일이 있었나] 9/12·9/14 네이버 테마 수집이 통째로 실패해
+#   data["주도섹터"] = [] · 계좌격자 = {} 로 비었다. 그런데 테마 레이더와
+#   다가오는 테마는 theme_history.json의 «마지막 날»(days[-1])을 그냥
+#   «오늘»로 삼는다. 그래서 9월 10일 순위가 9월 14일 리포트에
+#   날짜 표시 하나 없이 오늘 순위인 척 나갔다. 4거래일째였다.
+#
+# [왜 빈 화면보다 나쁜가] 빈 화면은 구독자가 «없구나» 하고 넘어간다.
+#   낡은 순위는 그대로 믿고 매매한다. 원칙 7 —
+#   「캐시를 쓴 날은 밝힌다. 어제 숫자를 오늘 숫자인 척하지 않는다」.
+#
+# [설계] 관문 하나로 막는다. 코너마다 배지를 달지 않는다(HO 지시
+#   2026-09-14 — 반복되면 눈이 무시한다). 테마 3코너만 덮고
+#   「섹터 성적표」는 그대로 둔다 — 아카이브 기반이라 실패일에도 멀쩡하다.
+# ══════════════════════════════════════════════════════════
+def _theme_is_fresh(data):
+    """오늘 테마 데이터가 실제로 수집됐는지. (신선?, 마지막수집일, 지난거래일수)"""
+    오늘 = str(data.get("날짜") or "")
+    일별 = _theme_hist_all()
+    days = sorted(일별)
+    last = days[-1] if days else None
+    if last == 오늘 and (data.get("주도섹터") or []):
+        return True, last, 0
+    # 지난 거래일 수 = 아카이브에 실제로 존재하는 날 기준(주말·휴장 제외)
+    try:
+        있는날 = sorted(re.findall(r"data_(\d{8})\.json",
+                                 " ".join(alist(r"data_\d{8}\.json"))))
+        지남 = len([d for d in 있는날 if last and d > last])
+    except Exception:
+        지남 = 0
+    return False, last, 지남
+
+
+def _theme_stale_notice(last, 지남):
+    """수집 실패일에 테마 3코너 자리를 덮는 안내 카드."""
+    if last:
+        ymd = f"{int(last[4:6])}월 {int(last[6:8])}일"
+        when = (f"마지막으로 받은 건 <b>{ymd}</b> 자료입니다"
+                + (f" (<b>{지남}거래일 전</b>)." if 지남 else "."))
+    else:
+        when = "아직 받아둔 테마 기록이 없습니다."
+    return (
+        '<div class="tm-stale">'
+        '<div class="ts-h">📡 오늘 테마 데이터를 받지 못했습니다</div>'
+        f'<p>{when} 낡은 순위를 오늘 순위인 것처럼 보여드리지 않기 위해 '
+        '테마 코너를 접어둡니다.</p>'
+        '<p class="ts-s">섹터 흐름은 아래 <b>「섹터 성적표」</b>에서 그대로 보실 수 있습니다 '
+        '— 이쪽은 오늘 자료로 정상 집계됐습니다.</p>'
+        '</div>')
+
+
 # ── 상수 (환경변수로 조정 가능 — 전부 «유력» 수준이라 재측정 대상) ──
 THEME_CUM_DAYS = int(os.getenv("THEME_CUM_DAYS", "4"))   # 누적 창
 THEME_MOVE_TH  = int(os.getenv("THEME_MOVE_TH",  "3"))   # 색 판정 임계(칸)
@@ -11284,6 +11347,72 @@ _RADAR_LABEL = [("반도체", 0), ("2차전지", 72), ("에너지", 136),
 _RC = {"new": TM_NEW, "in": TM_HOT, "hold": TM_COOL, "out": TM_DOWN}
 _RL = {"new": "오늘 첫 등장", "in": "올라오는 중",
        "hold": "제자리", "out": "밀려나는 중"}
+
+
+# 🔴 v18 (2026-09-14) — 테마 «나이».
+#
+# [왜 필요한가] 지금 목록은 「5일 중 4일 10위권」을 보여준다. 이건 «밀도»지
+#   «나이»가 아니다. 창이 5일로 고정이라 6일째든 12일째든 전부 「5일 중 5일」로
+#   뭉개진다 — 즉 오래 끌고 있는 테마를 구분할 방법이 지금은 없다.
+#   테마 레이더·다가오는 테마·섹터×테마 셋 다 «들어가라»만 말하고
+#   «나와라»를 말하지 않는다는 구멍이 여기서 생긴다.
+#
+# [세는 법] 상위 THEME_TOPN 안에 «연속으로» 머문 거래일 수.
+#   하루 빠졌다 돌아온 경우는 이어서 센다(HO 결정 2026-09-14 — 주말·이벤트로
+#   하루 밀리는 일이 흔한데 초기화하면 전부 「1일째」로 뭉개진다).
+#   이틀 이상 빠지면 끊는다.
+#
+# [기준선] 지금까지 기록된 모든 체류 구간의 «중앙값». 표본이 얇으면
+#   비교 문장을 아예 붙이지 않는다 — 표본 부족한 통계는 만들지 않는다.
+THEME_AGE_MIN_SAMPLE = 30      # 이만큼 안 쌓이면 「보통」 비교를 끄고 숫자만 낸다
+
+
+def _theme_age_map():
+    """{테마명: 연속 체류일수} + 지금까지 기록된 체류 구간의 중앙값·표본수."""
+    rk = _theme_cum_rank()          # {날짜: [(테마명, 누적점수), ...]}
+    days = sorted(rk)
+    if not days:
+        return {}, None, 0
+    안에 = {d: {nm for nm, _ in (rk.get(d) or [])[:THEME_TOPN]} for d in days}
+
+    구간 = []          # 끝난 체류 구간들의 길이 (기준선 재료)
+    나이 = {}
+    모든테마 = {nm for st in 안에.values() for nm in st}
+    for nm in 모든테마:
+        cur, gap = 0, 0
+        for d in days:
+            if nm in 안에[d]:
+                if gap >= 2 and cur:     # 이틀 이상 빠졌으면 구간이 끊긴다
+                    구간.append(cur)
+                    cur = 0
+                cur += 1                 # 하루 빠짐(gap==1)은 이어서 센다
+                gap = 0
+            else:
+                gap += 1
+        if cur and gap == 0:
+            나이[nm] = cur               # 마지막 날까지 이어진 것 = 현재 나이
+        elif cur:
+            구간.append(cur)             # 이미 끝난 구간 → 기준선 재료로만
+    구간정렬 = sorted(구간)
+    중앙 = (구간정렬[len(구간정렬) // 2] if 구간정렬 else None)
+    return 나이, 중앙, len(구간정렬)
+
+
+def _age_phrase(age, 중앙, 표본):
+    """「4일째 · 보통 여기까지」 같은 사실 문장. 판정 용어를 쓰지 않는 이유는
+    라벨(초입/한창/연장전)이 한 번 배워야 알아듣는 말이기 때문이다.
+    사실 문장은 기준선을 문장 안에 품고 있어 설명이 필요 없다."""
+    if not age:
+        return "", False
+    if age == 1:
+        return "<b>1일째</b> · 오늘 새로", False
+    if 중앙 is None or 표본 < THEME_AGE_MIN_SAMPLE:
+        return f"<b>{age}일째</b>", False          # 표본 부족 → 숫자만
+    if age > 중앙:
+        return f"<b>{age}일째</b> · 보통보다 {age - 중앙}일 더", True
+    if age == 중앙:
+        return f"<b>{age}일째</b> · 보통 여기까지", False
+    return f"<b>{age}일째</b>", False
 
 
 def build_theme_radar(data):
@@ -11429,8 +11558,12 @@ def build_theme_radar(data):
 
     # 아래 목록 — 원 안에는 축약만 넣었으므로 전체 이름은 여기서 푼다
     lis = []
+    _나이맵, _중앙, _표본 = _theme_age_map()
     for r in rows:
         c = _RC[r["st"]]
+        _ph, _over = _age_phrase(_나이맵.get(r["n"]), _중앙, _표본)
+        _age_html = (f'<br><span class="tm-age{" over" if _over else ""}">{_ph}</span>'
+                     if _ph else "")
         pid = f"tmr{r['r']}"
         arw, pan = _stock_panel(r["n"], mem.get(r["n"]) or [], pid)
         mv = ("5일 전엔 없었음" if r["from"] is None
@@ -11440,7 +11573,8 @@ def build_theme_radar(data):
             f'<div class="tm-lg"{click}><span class="tm-dot" style="background:{c}">{r["r"]}</span>'
             f'<span class="tm-nm">{r["n"]}{arw}</span>'
             f'<span class="tm-mv">{mv}<br><b style="color:{c}">{_RL[r["st"]]}</b>'
-            f' · 5일 중 {r["stay"]}일 10위권</span></div>{pan}')
+            f' · 5일 중 {r["stay"]}일 10위권'
+            f'{_age_html}</span></div>{pan}')
 
     prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
     cur = {k for k, _ in rk[last][:10]}
@@ -11737,11 +11871,27 @@ def build_sector_theme(data):
 THEME_V17_CSS = """
 .tm-none{font-size:12px;color:#6f7784;background:#10161f;border:1px solid #1d2634;
   border-radius:9px;padding:11px 12px;line-height:1.6}
+/* 🔴 v18 — 테마 수집 실패일 안내 카드. 회색(없음)이 아니라 호박색(주의)을
+   쓴다. 「데이터가 없다」가 아니라 「오늘 것이 아니라 접었다」는 뜻이라
+   구독자가 반드시 읽고 넘어가야 하는 문장이기 때문이다. */
+.tm-stale{background:#17130c;border:1px solid #3a3120;border-radius:10px;
+  padding:13px 14px;line-height:1.65}
+.tm-stale .ts-h{font-size:13.5px;font-weight:800;color:#e8c33a;margin-bottom:7px}
+.tm-stale p{margin:0 0 7px;font-size:12px;color:#c9a76a}
+.tm-stale p:last-child{margin-bottom:0}
+.tm-stale b{color:#e8c33a}
+.tm-stale .ts-s{color:#9aa2ae;font-size:11.5px}
+.tm-stale .ts-s b{color:#c3cad4}
 .tm-rd{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:4px 0 0}
 .tm-rd svg{width:100%;display:block}
 .tm-key{display:flex;flex-wrap:wrap;gap:9px;font-size:10px;color:#9aa3b2;
   justify-content:center;margin:8px 0}
 .tm-key i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}
+/* 🔴 v18 — 테마 나이. 기준선을 넘긴 테마만 호박색으로 튄다.
+   목록에서 이 색 하나만 눈에 띄어야 「오래됐다」가 즉시 읽힌다. */
+.tm-age{font-size:10.5px;font-weight:700;color:#8b93a0}
+.tm-age b{color:#e8ecf1;font-weight:800}
+.tm-age.over,.tm-age.over b{color:#e8c33a}
 .tm-lg{display:flex;align-items:center;gap:8px;padding:8px 2px;
   border-top:1px solid #1a212b;cursor:pointer}
 .tm-dot{width:18px;height:18px;border-radius:50%;color:#0a0d12;font-size:10px;
@@ -11987,6 +12137,11 @@ LEADER_CSS = """
 HIDDEN_CHAPTERS = {
     # 🔴 v17 (2026-09-12) — 테마 탭 3코너 재편으로 가린 코너들.
     #    삭제가 아니라 가림이다(원칙3) — 한 줄만 지우면 되살아난다.
+    # 🔴 v18 (2026-09-14) — v17에서 조립부는 hide()로 감쌌는데 여기에 키를
+    #    안 넣어 두 코너가 계속 화면에 나오고 있었다. hide()는 키가 없으면
+    #    그냥 통과시킨다. 테마 탭 코너가 7개로 불어난 원인이다.
+    "관제레이더",         # 「테마 레이더」와 같은 그림을 두 번 보여줌
+    "핵심편섹터사다리",   # 「섹터 × 테마」+「섹터 성적표」와 중복
     "성적표탭",           # 🔴 v17 — 탭 자체를 가린다(채점 로직은 계속 돈다)
     "오늘뜬테마요약",     # 「오늘의 주인공」(상세)과 같은 말 — 상세를 승격했다
     "순위섹터맵",         # 「섹터 × 테마」와 중복
