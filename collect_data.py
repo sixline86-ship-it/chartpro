@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.09.12-v17"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.09.14-v18"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -443,6 +443,198 @@ THEME_SUFFIX = {
 # ============================================================
 # ③+④ 테마 데이터 → 주도섹터 6개 선정 + 관제지수 재료(확산도)
 # ============================================================
+#
+# 🔴 2026-09-14 — 네이버가 「네이버페이 증권」으로 개편했다.
+#   옛 finance.naver.com/sise/theme.naver 는 서버가 HTML 표를 완성해 보냈지만,
+#   새 화면은 빈 껍데기를 받은 뒤 JS가 데이터를 따로 불러와 그린다.
+#   그래서 BeautifulSoup으로는 «영원히 0개»가 나온다 — 셀렉터 문제가 아니다.
+#   (9/12·9/14 로그: 「1차 후보 0개」. 같은 날 프로그램매매는 정상이었으므로
+#    IP 차단이 아니라 구조 변경이 맞다.)
+#
+#   👉 JS가 부르는 진짜 주소를 쓴다:
+#      /api/stockSecurity/rankings/v2/domestic/themes
+#        sortType=changeRate  등락률 순
+#        size=100             한 번에 100개
+#        period=daily         일간
+#        cursor=<base64>      다음 페이지(우리는 상위 20만 쓰므로 불필요)
+#
+#   [이득] 목록에 «상승/보합/하락 종목수»가 이미 들어있다 = 확산도를
+#   상세 페이지를 열지 않고 바로 계산할 수 있다. 요청 27회 → 1회.
+#
+#   ⚠️ 필드 이름을 실물로 확인하지 못했다(개발 환경에서 네이버 접속 차단).
+#      그래서 «이름을 추측하지 않고 찾는다» — 후보 이름들을 순서대로 훑고,
+#      첫 항목의 키 목록을 로그에 찍는다. 한 번만 돌려보면 확정된다.
+THEME_API = "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes"
+THEME_API_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://stock.naver.com/domestic/industry-theme/theme",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+}
+
+
+def _pick(d, *cands):
+    """딕셔너리에서 후보 키를 순서대로 찾는다. 대소문자·언더스코어 무시."""
+    if not isinstance(d, dict):
+        return None
+    norm = {str(k).lower().replace("_", ""): v for k, v in d.items()}
+    for c in cands:
+        v = norm.get(c.lower().replace("_", ""))
+        if v is not None:
+            return v
+    return None
+
+
+def _dig_list(obj, depth=0):
+    """응답 어디에 배열이 들어있든 찾아낸다 (result/items/data/list 등 감싸기 대응)."""
+    if depth > 4:
+        return None
+    if isinstance(obj, list):
+        return obj if obj and isinstance(obj[0], dict) else None
+    if isinstance(obj, dict):
+        for k in ("items", "list", "data", "result", "content", "ranks", "themes"):
+            if k in obj:
+                got = _dig_list(obj[k], depth + 1)
+                if got:
+                    return got
+        for v in obj.values():
+            got = _dig_list(v, depth + 1)
+            if got:
+                return got
+    return None
+
+
+# ── 테마 «안의 종목» 주소 자동 탐색 ────────────────────────────
+#   [왜 이렇게 하나] 개편된 화면에서 종목 목록 API 주소를 사람이 개발자도구로
+#   찾아 넘기는 건 품이 많이 든다. 주소 패턴은 목록 API에서 이미 드러났으므로
+#   후보를 코드가 직접 두드려보고, 되는 것 하나를 기억해 계속 쓴다.
+#   하루에 한 번, 첫 테마에서만 탐색한다(그 뒤 20번은 찾은 주소를 재사용).
+#   ⚠️ 옛 HTML 상세는 «아직 살아 있을 수 있다» — 후보 맨 끝에 남겨둔다.
+THEME_DETAIL_CANDIDATES = [
+    "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}/stocks",
+    "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}/items",
+    "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}",
+    "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/theme/{code}/stocks",
+    "https://stock.naver.com/api/stockSecurity/themes/{code}/stocks",
+    "https://m.stock.naver.com/api/theme/{code}/stocks",
+]
+_DETAIL_WINNER = {"url": None, "tried": False}
+
+
+def _theme_stocks_via_api(code):
+    """테마 구성종목을 새 API로 받는다. 실패하면 None(→ 옛 HTML 상세로 폴백)."""
+    params = {"sortType": "changeRate", "size": 100, "period": "daily"}
+
+    def _try(tpl):
+        try:
+            r = requests.get(tpl.format(code=code), headers=THEME_API_HEADERS,
+                             params=params, timeout=10)
+            if r.status_code != 200:
+                return None, f"HTTP {r.status_code}"
+            rows = _dig_list(r.json())
+            if not rows:
+                return None, "배열 없음"
+            if _pick(rows[0], "stockName", "itemName", "name", "hname") is None:
+                return None, f"종목명 없음 (키: {sorted(rows[0])[:8]})"
+            return rows, "ok"
+        except Exception as e:
+            return None, f"{type(e).__name__}"
+
+    if _DETAIL_WINNER["url"]:
+        rows, _ = _try(_DETAIL_WINNER["url"])
+        if rows:
+            return _norm_stocks(rows)
+        _DETAIL_WINNER["url"] = None          # 죽었으면 다시 탐색
+
+    if _DETAIL_WINNER["tried"] and not _DETAIL_WINNER["url"]:
+        return None                            # 오늘은 이미 다 두드려봤다
+
+    print("  🔎 [테마 종목 API] 주소 자동 탐색 시작...")
+    for tpl in THEME_DETAIL_CANDIDATES:
+        rows, why = _try(tpl)
+        짧은 = tpl.replace("https://", "").split("?")[0]
+        if rows:
+            _DETAIL_WINNER["url"] = tpl
+            _DETAIL_WINNER["tried"] = True
+            print(f"     ✅ 찾음 → {짧은}")
+            print(f"        첫 종목 키: {sorted(rows[0])}")
+            return _norm_stocks(rows)
+        print(f"     ✗ {짧은} — {why}")
+    _DETAIL_WINNER["tried"] = True
+    print("     ❌ 후보를 다 두드렸지만 못 찾음 → 옛 HTML 상세로 폴백합니다.")
+    return None
+
+
+def _norm_stocks(rows):
+    """API 종목 배열 → [{종목명, 현재가, 등락률, 거래대금}] 로 정규화."""
+    out = []
+    for it in rows:
+        nm = _pick(it, "stockName", "itemName", "name", "hname")
+        if not nm:
+            continue
+        out.append({
+            "종목명": clean_name(str(nm)),
+            "현재가": to_num(_pick(it, "closePrice", "currentPrice", "price", "nv")),
+            "등락률": to_num(_pick(it, "fluctuationsRatio", "changeRate", "rate", "cr")),
+            "거래대금": to_num(_pick(it, "accumulatedTradingValue", "tradingValue",
+                                 "accTradeValue", "amount")),
+        })
+    return out or None
+
+
+def _theme_list_via_api():
+    """새 API로 테마 목록을 받는다. 실패하면 None(→ 옛 HTML 방식으로 폴백)."""
+    try:
+        res = requests.get(THEME_API, headers=THEME_API_HEADERS, timeout=15,
+                           params={"sortType": "changeRate", "size": 100,
+                                   "period": "daily"})
+        if res.status_code != 200:
+            print(f"  ❌ [테마 API] HTTP {res.status_code} · 본문 {len(res.text)}자")
+            return None
+        js = res.json()
+    except Exception as e:
+        print(f"  ❌ [테마 API] 요청 실패: {type(e).__name__} {e}")
+        return None
+
+    rows = _dig_list(js)
+    if not rows:
+        print(f"  ❌ [테마 API] 배열을 못 찾음 · 최상위 키: "
+              f"{list(js)[:12] if isinstance(js, dict) else type(js).__name__}")
+        return None
+
+    # 🔍 첫 항목의 키를 통째로 찍는다 — 한 번만 돌면 스키마가 확정된다.
+    print(f"  🔍 [테마 API] {len(rows)}개 수신 · 첫 항목 키: {sorted(rows[0])}")
+
+    out = []
+    for it in rows:
+        이름 = _pick(it, "themeName", "name", "groupName", "title", "itemName")
+        번호 = _pick(it, "themeCode", "code", "groupCode", "no", "themeNo", "id")
+        등락 = _pick(it, "changeRate", "fluctuationsRatio", "rate", "changeRatio")
+        상승 = _pick(it, "riseCount", "upCount", "increaseCount", "risingCount")
+        보합 = _pick(it, "flatCount", "steadyCount", "unchangedCount")
+        하락 = _pick(it, "fallCount", "downCount", "decreaseCount", "fallingCount")
+        대금 = _pick(it, "accumulatedTradingValue", "tradingValue", "amount",
+                    "accTradeValue", "tradeValue")
+        if 이름 is None or 번호 is None:
+            continue
+        out.append({
+            "테마명": clean_name(str(이름)),
+            "번호": str(번호),
+            "등락": to_num(등락),
+            "상승": to_num(상승), "보합": to_num(보합), "하락": to_num(하락),
+            "거래대금": to_num(대금),
+        })
+    if not out:
+        print(f"  ❌ [테마 API] 이름·번호를 못 뽑음 — 위 «첫 항목 키»를 보고 "
+              f"_pick 후보를 고쳐야 한다.")
+        return None
+    쓸만 = sum(1 for r in out if r["등락"] is not None)
+    print(f"  ✅ [테마 API] 정규화 {len(out)}개 (등락률 확보 {쓸만}개) · "
+          f"확산도 재료 {'있음' if out[0]['상승'] is not None else '없음 — 상세 필요'}")
+    return out
+
+
+
 def collect_themes_and_gauge():
     """
     2단계 선별:
@@ -455,12 +647,46 @@ def collect_themes_and_gauge():
     후보 = []       # (테마명, 번호, 테마등락률)
     중복 = set()
 
-    for page in range(1, 8):
+    # 🔴 2026-09-14 — ① 새 API를 먼저 시도한다. 성공하면 HTML 루프는 건너뛴다.
+    #    실패해도 옛 방식이 그대로 돌아가도록 남겨둔다(원칙 5 — 지우지 않는다).
+    API목록 = _theme_list_via_api()
+    if API목록:
+        for r in API목록:
+            if r["등락"] is not None and r["번호"] not in 중복:
+                후보.append((r["테마명"], r["번호"], r["등락"]))
+                중복.add(r["번호"])
+        API맵 = {r["번호"]: r for r in API목록}
+        print(f"📊 [테마 API] 후보 {len(후보)}개 확보 — HTML 목록 수집 건너뜀")
+    else:
+        API맵 = {}
+        print("  ↩️ [테마] 옛 HTML 방식으로 폴백합니다.")
+
+    for page in range(1, 8) if not API목록 else []:
         res = requests.get(url_list, headers=HEADERS, params={"page": page}, timeout=12)
         res.encoding = "euc-kr"
         soup = BeautifulSoup(res.text, "html.parser")
         links = soup.select("table.type_1 a[href*='sise_group_detail']")
+        # 🔴 2026-09-14 — 셀렉터 폴백 + 진단 로그.
+        #  [무슨 일이 있었나] 9/12·9/14 로그에 「1차 후보 0개」만 찍히고
+        #   끝났다. res.status_code도, 본문 길이도, 왜 0인지도 남지 않아
+        #   «차단인지 개편인지»를 로그만 보고는 가릴 수 없었다.
+        #   (같은 날 programDealTrendDay는 정상 수집됐으므로 IP 차단은
+        #    아닐 가능성이 높지만, 근거가 로그에 없었다.)
+        #  [고친 것] ① table.type_1이 안 걸리면 넓은 셀렉터로 한 번 더 시도.
+        #            ② 그래도 0이면 상태코드·본문길이·핵심 문자열 존재 여부를
+        #               찍는다. 이 세 줄이면 다음 실패 때 원인이 바로 갈린다.
         if not links:
+            links = soup.select("a[href*='sise_group_detail']")
+            if links:
+                print(f"  ⚠️ [테마목록 p{page}] table.type_1 셀렉터 실패 → "
+                      f"넓은 셀렉터로 {len(links)}개 확보 (페이지 구조 변경 의심)")
+        if not links:
+            있나 = "sise_group_detail" in res.text
+            print(f"  ❌ [테마목록 p{page}] 링크 0개 · HTTP {res.status_code} · "
+                  f"본문 {len(res.text)}자 · 'sise_group_detail' 문자열 "
+                  f"{'있음 → 셀렉터 문제(개편)' if 있나 else '없음 → 차단이거나 페이지 전면 교체'}")
+            if page == 1:
+                print(f"     본문 앞 200자: {res.text[:200]!r}")
             break
 
         링크들 = []
@@ -502,6 +728,35 @@ def collect_themes_and_gauge():
     # ── 2차: 각 후보 상세에서 거래대금·확산도 계산 ──
     분석 = []
     for 테마명, 번호, 테마등락 in 후보20:
+        # 🔴 2026-09-14 — 새 API로 먼저 시도. 되면 아래 HTML 상세는 안 탄다.
+        if API목록:
+            _rows = _theme_stocks_via_api(번호)
+            if _rows:
+                _유효 = [x for x in _rows if x["등락률"] is not None]
+                총 = len(_유효)
+                오른 = sum(1 for x in _유효 if x["등락률"] > 0)
+                # 목록 API가 상승/하락 수를 이미 줬으면 그걸 우선한다(더 정확).
+                _meta = API맵.get(번호) or {}
+                if _meta.get("상승") is not None:
+                    _합 = (_meta.get("상승") or 0) + (_meta.get("보합") or 0) + (_meta.get("하락") or 0)
+                    확산도 = (_meta["상승"] / _합 * 100) if _합 else 0.0
+                else:
+                    확산도 = (오른 / 총 * 100) if 총 else 0.0
+                거래대금합 = float(sum(x["거래대금"] or 0 for x in _rows)) or \
+                             float(_meta.get("거래대금") or 0)
+                상위 = sorted(_유효, key=lambda x: -x["등락률"])[:4]
+                분석.append({
+                    "테마명": 테마명,
+                    "계좌구역": grid_slot_of(테마명),
+                    "테마등락": 테마등락,
+                    "거래대금합": 거래대금합,
+                    "확산도": float(확산도),
+                    "종목": [{"종목명": x["종목명"], "현재가": x["현재가"],
+                             "등락률": x["등락률"], "거래대금": x["거래대금"]}
+                            for x in 상위],
+                })
+                continue
+
         detail_url = "https://finance.naver.com/sise/sise_group_detail.naver"
         # 🆕 2026-08-25 — 이 호출은 테마 수만큼(최대 수십 번) 반복된다.
         #    timeout이 없으면 한 번의 지연이 전체 수집 시간을 몇 분씩 늘릴 수 있다.
