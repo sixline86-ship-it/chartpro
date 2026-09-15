@@ -682,6 +682,12 @@ def _theme_list_via_api():
 
     # 🔍 첫 항목의 키를 통째로 찍는다 — 한 번만 돌면 스키마가 확정된다.
     print(f"  🔍 [테마 API] {len(rows)}개 수신 · 첫 항목 키: {sorted(rows[0])}")
+    # 🔴 2026-09-15 — 「topByChangeRate」가 진짜 종목 객체라면(대장주 후보가
+    #   목록 한 번에 딸려온다는 뜻), 종목상세 없이도 대장주 카드를 채울 수
+    #   있다. 형태를 아직 실물로 못 봤으므로 원본 그대로 한 번 찍는다 —
+    #   다음 실행 로그에서 dict인지 bool인지 바로 갈린다.
+    print(f"  🔍 [테마 API] topByChangeRate 샘플: {rows[0].get('topByChangeRate')!r}")
+    print(f"  🔍 [테마 API] topByTradingValue 샘플: {rows[0].get('topByTradingValue')!r}")
 
     out = []
     for it in rows:
@@ -700,12 +706,30 @@ def _theme_list_via_api():
                     "tradingValue", "amount", "accTradeValue", "tradeValue")
         if 이름 is None or 번호 is None:
             continue
+        # 🔴 2026-09-15 — topByChangeRate가 종목 객체(dict)면 그 안에서
+        #   종목명·코드·등락률·거래대금을 뽑아 「목록만으로 얻은 대장주 후보」로
+        #   남긴다. 객체가 아니면(bool·str 등) None으로 남고 아무 영향 없다
+        #   — 기존 흐름을 깨지 않는 안전한 추가다.
+        _top = _pick(it, "topByChangeRate")
+        대장후보 = None
+        if isinstance(_top, dict):
+            _tnm = _pick(_top, "stockName", "itemName", "name", "hname")
+            _tcd = _pick(_top, "itemCode", "stockCode", "code")
+            _tch = _pick(_top, "changeRate", "fluctuationsRatio", "rate")
+            _tamt = _pick(_top, "totalTradingValue", "accumulatedTradingValue",
+                         "tradingValue", "amount")
+            if _tnm:
+                대장후보 = {"종목명": clean_name(str(_tnm)),
+                         "현재가": None,
+                         "등락률": to_num(_tch),
+                         "거래대금": to_num(_tamt)}
         out.append({
             "테마명": clean_name(str(이름)),
             "번호": str(번호),
             "등락": to_num(등락),
             "상승": to_num(상승), "보합": to_num(보합), "하락": to_num(하락),
             "거래대금": to_num(대금),
+            "대장후보": 대장후보,
         })
     if not out:
         print(f"  ❌ [테마 API] 이름·번호를 못 뽑음 — 위 «첫 항목 키»를 보고 "
@@ -949,17 +973,27 @@ def collect_themes_and_gauge():
         if not _appended and _meta.get("상승") is not None:
             _합 = (_meta.get("상승") or 0) + (_meta.get("보합") or 0) + (_meta.get("하락") or 0)
             확산도 = (_meta["상승"] / _합 * 100) if _합 else 0.0
+            # 🔴 2026-09-15 — 종목 4개 전체는 못 채워도, 목록 API가 준
+            #   「topByChangeRate」가 진짜 종목 객체였다면 그 하나만으로도
+            #   대장주 카드를 채울 수 있다. 있으면 종목=[그 1개],
+            #   없으면 이전처럼 종목=[]로 "받지 못함" 안내가 뜬다.
+            _leader = _meta.get("대장후보")
             분석.append({
                 "테마명": 테마명,
                 "계좌구역": grid_slot_of(테마명),
                 "테마등락": 테마등락,
                 "거래대금합": float(_meta.get("거래대금") or 0),
                 "확산도": float(확산도),
-                "종목": [],
-                "종목없음": True,   # 화면이 "대장주 없음"을 구분해 표시하도록
+                "종목": [_leader] if _leader else [],
+                "종목없음": _leader is None,
+                "종목부분": _leader is not None,  # 4개 중 1개(대장주)만 있다는 표시
             })
-            print(f"  ↩️ [{테마명}] 종목 상세 없이 목록 재료만으로 채움 "
-                  f"(확산도 {확산도:.0f}%)")
+            if _leader:
+                print(f"  ✅ [{테마명}] 목록만으로 대장주 확보 → {_leader['종목명']} "
+                      f"(확산도 {확산도:.0f}%)")
+            else:
+                print(f"  ↩️ [{테마명}] 종목 상세 없이 목록 재료만으로 채움 "
+                      f"(확산도 {확산도:.0f}%)")
 
     if not 분석:
         print("❌ 테마 상세를 하나도 못 가져옴")
