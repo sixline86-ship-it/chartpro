@@ -613,8 +613,13 @@ def _theme_list_via_api():
         상승 = _pick(it, "riseCount", "upCount", "increaseCount", "risingCount")
         보합 = _pick(it, "flatCount", "steadyCount", "unchangedCount")
         하락 = _pick(it, "fallCount", "downCount", "decreaseCount", "fallingCount")
-        대금 = _pick(it, "accumulatedTradingValue", "tradingValue", "amount",
-                    "accTradeValue", "tradeValue")
+        # 🔴 2026-09-15 — 9/15 첫 실행 로그로 실제 필드명 확정.
+        #   name / code / changeRate / risingCount / unchangedCount / fallingCount
+        #   는 후보 목록 그대로 맞았다. 거래대금만 후보에 없어 못 찾고 있었다
+        #   — 실제 키는 totalTradingValue (하나 더 있는 totalTradingVolume은
+        #   거래량이지 거래대금이 아니므로 혼동하지 않는다).
+        대금 = _pick(it, "totalTradingValue", "accumulatedTradingValue",
+                    "tradingValue", "amount", "accTradeValue", "tradeValue")
         if 이름 is None or 번호 is None:
             continue
         out.append({
@@ -719,15 +724,39 @@ def collect_themes_and_gauge():
                 후보.append((이름, 번호, 등락))
                 중복.add(번호)
 
-    # ── 1차 필터: 등락률 상위 20개 ──
+    # ── 1차 필터: 등락률 상위 N개 ──
+    # 🔴 2026-09-14 — 20 → 50 (HO 지시).
+    #   [왜 지금 가능해졌나] 개편 전에는 상세 페이지를 테마 수만큼 열어야 해서
+    #   50개면 요청이 50번이었다. 새 API는 목록 한 번에 «상승/보합/하락 수»를
+    #   같이 주므로 확산도를 상세 없이 계산할 수 있다 — 목록 요청은 여전히 1회다.
+    #   [무엇이 좋아지나] ① 「다가오는 테마」가 11~20위만 보던 걸 50위까지 본다.
+    #   ② 테마 채점판의 «20위권 포착» 관문이 비로소 표본을 쌓을 수 있다.
+    #   ③ 나이 계산의 체류 구간 표본이 늘어 기준선이 안정된다.
+    #   [⚠️ 소급 불가] 고친 날부터 쌓인다. 그 이전 기록은 영원히 10~20개다.
+    #   [폴백일 주의] 옛 HTML 방식으로 돌아가면 상세 요청이 50번이 된다.
+    #   그래서 API가 아닐 때는 20으로 되돌린다.
+    THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "50")) if API목록 else 20
     유효 = [c for c in 후보 if c[2] is not None and not math.isnan(c[2])]
     유효.sort(key=lambda x: x[2], reverse=True)
-    후보20 = 유효[:20]
+    후보20 = 유효[:THEME_CAND_MAX]
     print(f"📊 1차 후보(등락률 상위) {len(후보20)}개 → 상세 분석 중...")
 
     # ── 2차: 각 후보 상세에서 거래대금·확산도 계산 ──
+    # 🔴 2026-09-15 — 9/15 첫 실행 결과: 종목 상세는 새 API 후보 6개
+    #   (전부 404) · 옛 HTML(테이블 자체가 사라짐) 둘 다 실패했다. 그런데
+    #   테마 «목록» API는 상승/보합/하락 종목수를 이미 준다 — 확산도는
+    #   종목 하나하나를 안 열어도 계산된다. 예전 코드는 상세가 실패하면
+    #   그 테마를 통째로 건너뛰어서(continue) 목록에 있던 이 재료까지
+    #   같이 버렸다. 그 결과 종목 상세가 하나도 안 되던 9/15에는
+    #   「테마 상세를 하나도 못 가져옴」으로 주도섹터가 통째로 0개였다.
+    #   → 상세(종목 4개·대장주 후보)가 없어도 목록 재료만으로 «종목 없는»
+    #   레코드를 만든다. 대장주·종목 펼침은 비지만, 순위·확산도·거래대금은
+    #   살아서 테마 레이더·섹터×테마·채점판이 다시 채워진다.
     분석 = []
     for 테마명, 번호, 테마등락 in 후보20:
+        _meta = (API맵.get(번호) or {}) if API목록 else {}
+        _appended = False
+
         # 🔴 2026-09-14 — 새 API로 먼저 시도. 되면 아래 HTML 상세는 안 탄다.
         if API목록:
             _rows = _theme_stocks_via_api(번호)
@@ -755,6 +784,7 @@ def collect_themes_and_gauge():
                              "등락률": x["등락률"], "거래대금": x["거래대금"]}
                             for x in 상위],
                 })
+                _appended = True
                 continue
 
         detail_url = "https://finance.naver.com/sise/sise_group_detail.naver"
@@ -797,8 +827,29 @@ def collect_themes_and_gauge():
                 "확산도": float(확산도),
                 "종목": 상위종목[["종목명", "현재가", "등락률", "거래대금"]].to_dict(orient="records"),
             })
+            _appended = True
         except Exception as e:
             print(f"  ⚠️ [{테마명}] 상세 실패: {e}")
+
+        # 🔴 2026-09-15 — 상세(API·HTML) 둘 다 실패했을 때의 마지막 그물.
+        #   목록 API가 상승/보합/하락 수를 줬으면 그걸로 확산도를 계산해
+        #   «종목 없는» 레코드라도 남긴다. 종목=[]이면 대장주·종목 펼침은
+        #   빈 채로 나가지만(화면 쪽에서 그 경우를 다뤄야 한다), 순위·
+        #   등락률·확산도·거래대금은 살아서 주도섹터가 0개가 되지 않는다.
+        if not _appended and _meta.get("상승") is not None:
+            _합 = (_meta.get("상승") or 0) + (_meta.get("보합") or 0) + (_meta.get("하락") or 0)
+            확산도 = (_meta["상승"] / _합 * 100) if _합 else 0.0
+            분석.append({
+                "테마명": 테마명,
+                "계좌구역": grid_slot_of(테마명),
+                "테마등락": 테마등락,
+                "거래대금합": float(_meta.get("거래대금") or 0),
+                "확산도": float(확산도),
+                "종목": [],
+                "종목없음": True,   # 화면이 "대장주 없음"을 구분해 표시하도록
+            })
+            print(f"  ↩️ [{테마명}] 종목 상세 없이 목록 재료만으로 채움 "
+                  f"(확산도 {확산도:.0f}%)")
 
     if not 분석:
         print("❌ 테마 상세를 하나도 못 가져옴")
@@ -840,7 +891,8 @@ def collect_themes_and_gauge():
     #    [비용] 0 — 20개는 이미 2차 상세에서 전부 계산돼 있다. 담기만 한다.
     #    [⚠️ 소급 불가] 고친 날부터 쌓인다. 그 이전 기록은 영원히 10개다.
     #       그래서 이 값은 하루라도 빨리 올리는 게 이득이다.
-    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "20"))
+    # 🔴 2026-09-14 — 20 → 50 (HO 지시). 위 THEME_CAND_MAX와 짝이다.
+    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "50"))
     THEME_SHOW_MAX = 6
     주도N = []
     이미쓴종목 = set()
