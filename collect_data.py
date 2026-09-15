@@ -706,30 +706,57 @@ def _theme_list_via_api():
                     "tradingValue", "amount", "accTradeValue", "tradeValue")
         if 이름 is None or 번호 is None:
             continue
-        # 🔴 2026-09-15 — topByChangeRate가 종목 객체(dict)면 그 안에서
-        #   종목명·코드·등락률·거래대금을 뽑아 「목록만으로 얻은 대장주 후보」로
-        #   남긴다. 객체가 아니면(bool·str 등) None으로 남고 아무 영향 없다
-        #   — 기존 흐름을 깨지 않는 안전한 추가다.
-        _top = _pick(it, "topByChangeRate")
-        대장후보 = None
-        if isinstance(_top, dict):
-            _tnm = _pick(_top, "stockName", "itemName", "name", "hname")
-            _tcd = _pick(_top, "itemCode", "stockCode", "code")
-            _tch = _pick(_top, "changeRate", "fluctuationsRatio", "rate")
-            _tamt = _pick(_top, "totalTradingValue", "accumulatedTradingValue",
-                         "tradingValue", "amount")
-            if _tnm:
-                대장후보 = {"종목명": clean_name(str(_tnm)),
-                         "현재가": None,
-                         "등락률": to_num(_tch),
-                         "거래대금": to_num(_tamt)}
+        # 🔴 2026-09-15 (2차 수정) — 9/15 밤 실측으로 두 가지가 드러났다.
+        #   ① topByChangeRate는 dict 하나가 아니라 **배열**이었다
+        #      [{'code','name','value','itemLogoUrl'}, ...] — 등락률 상위 3종목.
+        #      topByTradingValue도 같은 모양으로 거래대금 상위 3종목을 준다.
+        #      즉 종목 1개가 아니라 최대 6개(중복 제거하면 보통 4~5개)를
+        #      새 요청 없이 이미 받고 있었다 — 「4종목 나열」에 더 가깝다.
+        #   ② 'value' 필드가 배열마다 다른 걸 담는다 — topByChangeRate에서는
+        #      «퍼센트»(예: '29.98'), topByTradingValue에서는 «원 단위 거래대금»
+        #      (예: '203442345000' = 2,034억원)이다. 우리 fmt_trade()는
+        #      «백만원» 단위를 가정하므로, 원 단위를 그대로 넣으면 표시가
+        #      100만 배 부풀려진다. /1_000_000으로 맞춘다.
+        def _norm_top(raw, is_pct):
+            out2 = []
+            if not isinstance(raw, list):
+                return out2
+            for x in raw:
+                if not isinstance(x, dict):
+                    continue
+                nm2 = x.get("name")
+                if not nm2:
+                    continue
+                val = to_num(x.get("value"))
+                out2.append({
+                    "종목명": clean_name(str(nm2)),
+                    "코드": str(x.get("code")) if x.get("code") else None,
+                    "등락률": val if is_pct else None,
+                    "거래대금": None if is_pct else (val / 1_000_000 if val is not None else None),
+                })
+            return out2
+
+        _merge = {}
+        for r in _norm_top(it.get("topByChangeRate"), True) + _norm_top(it.get("topByTradingValue"), False):
+            key = r["코드"] or r["종목명"]
+            slot = _merge.setdefault(key, {"종목명": r["종목명"], "현재가": None,
+                                          "등락률": None, "거래대금": None})
+            if slot["등락률"] is None and r["등락률"] is not None:
+                slot["등락률"] = r["등락률"]
+            if slot["거래대금"] is None and r["거래대금"] is not None:
+                slot["거래대금"] = r["거래대금"]
+        대장후보목록 = list(_merge.values())[:4]
+
+        # 🔴 같은 이유로 테마 전체 거래대금(totalTradingValue)도 원 단위로
+        #   보인다 — 동일하게 백만원으로 환산한다.
+        _대금원 = to_num(대금)
         out.append({
             "테마명": clean_name(str(이름)),
             "번호": str(번호),
             "등락": to_num(등락),
             "상승": to_num(상승), "보합": to_num(보합), "하락": to_num(하락),
-            "거래대금": to_num(대금),
-            "대장후보": 대장후보,
+            "거래대금": (_대금원 / 1_000_000) if _대금원 is not None else None,
+            "대장후보목록": 대장후보목록,
         })
     if not out:
         print(f"  ❌ [테마 API] 이름·번호를 못 뽑음 — 위 «첫 항목 키»를 보고 "
@@ -973,24 +1000,23 @@ def collect_themes_and_gauge():
         if not _appended and _meta.get("상승") is not None:
             _합 = (_meta.get("상승") or 0) + (_meta.get("보합") or 0) + (_meta.get("하락") or 0)
             확산도 = (_meta["상승"] / _합 * 100) if _합 else 0.0
-            # 🔴 2026-09-15 — 종목 4개 전체는 못 채워도, 목록 API가 준
-            #   「topByChangeRate」가 진짜 종목 객체였다면 그 하나만으로도
-            #   대장주 카드를 채울 수 있다. 있으면 종목=[그 1개],
-            #   없으면 이전처럼 종목=[]로 "받지 못함" 안내가 뜬다.
-            _leader = _meta.get("대장후보")
+            # 🔴 2026-09-15 (2차) — topByChangeRate·topByTradingValue를 합쳐
+            #   최대 4종목까지 채운다(9/15 밤 실측으로 단일 종목이 아니라
+            #   배열임을 확인 — 위 _theme_list_via_api 주석 참고).
+            _leaders = _meta.get("대장후보목록") or []
             분석.append({
                 "테마명": 테마명,
                 "계좌구역": grid_slot_of(테마명),
                 "테마등락": 테마등락,
                 "거래대금합": float(_meta.get("거래대금") or 0),
                 "확산도": float(확산도),
-                "종목": [_leader] if _leader else [],
-                "종목없음": _leader is None,
-                "종목부분": _leader is not None,  # 4개 중 1개(대장주)만 있다는 표시
+                "종목": _leaders,
+                "종목없음": len(_leaders) == 0,
+                "종목부분": 0 < len(_leaders) < 4,  # 4개를 다 못 채웠다는 표시
             })
-            if _leader:
-                print(f"  ✅ [{테마명}] 목록만으로 대장주 확보 → {_leader['종목명']} "
-                      f"(확산도 {확산도:.0f}%)")
+            if _leaders:
+                print(f"  ✅ [{테마명}] 목록만으로 종목 {len(_leaders)}개 확보 → "
+                      f"{', '.join(x['종목명'] for x in _leaders)} (확산도 {확산도:.0f}%)")
             else:
                 print(f"  ↩️ [{테마명}] 종목 상세 없이 목록 재료만으로 채움 "
                       f"(확산도 {확산도:.0f}%)")
