@@ -1338,7 +1338,9 @@ def one_sector_card(a):
       </div>
       <div class="sc-list">
         <div class="sc-cols"><span>종목명</span><span>등락률</span><span>거래대금</span></div>
-        {"".join(rows)}
+        {"".join(rows) if rows else
+         ('<p class="sc-nostock">⚠️ 오늘은 종목 상세를 받지 못했습니다 — '
+          '테마 순위·확산도만 집계됐습니다.</p>' if a.get("종목없음") else "")}
       </div>
     </div>'''
 
@@ -10466,7 +10468,12 @@ def build_core(핵심편, data, 해석):
              + f'<p class="sec-label"><small>오늘 뜬 테마</small>🏆 오늘 뜬 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 상승률 + 거래대금 + 확산도 기준</span></p>'
-             + build_sectors(data.get("주도섹터")))
+             + build_sectors(data.get("주도섹터"))
+             + f'<p class="sec-label"><small>맞았나</small>'
+               f'📊 테마 채점판'
+               f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
+               f' · 우리가 지목한 테마의 그 뒤</span></p>'
+             + build_theme_scorecard())
 
     _테마 = (_테마앞
              + hide("관제레이더", build_sector_radar())
@@ -11590,6 +11597,125 @@ def build_theme_radar(data):
 # ──────────────────────────────────────────────────────────────
 # ② 🛬 다가오는 테마
 # ──────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════
+# 📊 테마 채점판 — 「우리가 지목한 테마, 그 뒤 어떻게 됐나」
+#
+# [왜 만드나] 테마 레이더·다가오는 테마·섹터×테마는 셋 다 «순위»만 말하고
+#   «돈»을 말하지 않는다. 1위 테마를 샀으면 벌었는지 아무도 채점하지 않는다.
+#   우리 차별점이 「스스로 채점한다」인데 테마에는 그 장치가 없었다.
+#
+# [3관문] 같은 테마라도 «언제 지목했느냐»에 따라 결과가 갈린다.
+#   ① 20위권 신규 포착 — 「다가오는 테마」가 가리키는 시점 (가장 이르다)
+#   ② 10위권 신규 진입 — 「테마 레이더」에 처음 뜨는 시점
+#   ③ 1~3위 도달       — 레이더 한가운데, 보통 가장 늦다
+#   HO 지적 그대로다 — 「많이 오르고 난 뒤 3일이면 수익률이 나쁠 확률이
+#   높지 않냐」. 나쁘게 나오면 그건 실패가 아니라 «발견»이다. 그때 우리
+#   메시지는 "이 테마 떴습니다"에서 "이 테마는 이미 늦었습니다"로 바뀐다.
+#
+# [지금 단계] 틀과 카운터만 돌린다(HO 결정 2026-09-14).
+#   칸당 50건이 차기 전에는 숫자를 쓰지 않는다 — 표본 10건짜리 승률은 우연이다.
+#
+# ⚠️ [알려진 한계 — 생존 편향] 지금은 수익률 재료로 theme_history에 저장된
+#   «테마 당일 등락률»을 쓴다. 저장 범위 밖으로 떨어진 테마는 추적이 끊기는데,
+#   떨어지는 테마가 바로 «진 테마»다. 즉 지금 방식은 결과를 좋은 쪽으로
+#   부풀린다. 그래서 «추적 끊김» 건수를 화면에 같이 노출한다.
+#   근본 해결은 진입일 종목을 종목코드로 고정해 pykrx로 사후 추적하는 것이다
+#   (theme_history에 종목명은 있으나 코드가 없어 corp_stockcode 매핑이 필요).
+SCORE_MIN_SAMPLE = 50
+SCORE_HORIZONS = (1, 3)
+
+
+def _theme_scorecard():
+    """3관문 × 2보유기간 격자. 반환: {(관문,기간): {"n","끊김","수익들"}}"""
+    일별 = _theme_hist_all()
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    등락맵 = {d: {x.get("테마명"): x.get("등락") for x in (일별.get(d) or [])}
+             for d in days}
+    안 = {d: [nm for nm, _ in (rk.get(d) or [])] for d in days}
+
+    def 순위(d, nm):
+        try:
+            return 안[d].index(nm) + 1
+        except (ValueError, KeyError):
+            return None
+
+    격자 = {(g, h): {"n": 0, "끊김": 0, "수익들": []}
+           for g in ("g1", "g2", "g3") for h in SCORE_HORIZONS}
+
+    for i, d in enumerate(days):
+        if i == 0:
+            continue
+        전 = days[i - 1]
+        for nm in 안[d]:
+            r, r전 = 순위(d, nm), 순위(전, nm)
+            관문 = None
+            if r and 11 <= r <= 20 and (r전 is None or r전 > 20):
+                관문 = "g1"
+            elif r and r <= 10 and (r전 is None or r전 > 10):
+                관문 = "g2"
+            elif r and r <= 3 and (r전 is None or r전 > 3):
+                관문 = "g3"
+            if not 관문:
+                continue
+            for h in SCORE_HORIZONS:
+                if i + h >= len(days):
+                    continue            # 아직 미래가 안 왔다 — 표본 아님
+                칸 = 격자[(관문, h)]
+                칸["n"] += 1
+                수익 = [등락맵.get(days[i + k], {}).get(nm) for k in range(1, h + 1)]
+                if any(v is None for v in 수익):
+                    칸["끊김"] += 1     # 저장 범위 밖으로 떨어짐 = 추적 불가
+                else:
+                    칸["수익들"].append(sum(수익))
+    return 격자
+
+
+_GATE_LABEL = {
+    "g1": ("① 20위권 포착", "다가오는 테마"),
+    "g2": ("② 10위권 진입", "레이더 등장"),
+    "g3": ("③ 1~3위 도달", "레이더 중심"),
+}
+
+
+def build_theme_scorecard():
+    격자 = _theme_scorecard()
+    if not 격자:
+        return '<div class="tm-none">채점할 기록이 아직 없습니다.</div>'
+
+    hd = "".join(f"<th>+{h}거래일</th>" for h in SCORE_HORIZONS)
+    tr = []
+    for g in ("g1", "g2", "g3"):
+        나, 밑 = _GATE_LABEL[g]
+        tds = []
+        for h in SCORE_HORIZONS:
+            칸 = 격자[(g, h)]
+            유효 = 칸["수익들"]
+            if len(유효) >= SCORE_MIN_SAMPLE:
+                유효s = sorted(유효)
+                중앙 = 유효s[len(유효s) // 2]
+                승 = sum(1 for v in 유효 if v > 0)
+                c = "#ff6b4a" if 중앙 > 0 else "#5b9bff"
+                기호 = "▲" if 중앙 > 0 else "▼"
+                tds.append(f'<td><b style="color:{c}">{기호}{abs(중앙):.2f}%</b>'
+                           f'<span class="tsc-sub">승 {승}·패 {len(유효)-승}</span></td>')
+            else:
+                tds.append(f'<td><span class="tsc-wait">{len(유효)}/{SCORE_MIN_SAMPLE}</span></td>')
+        tr.append(f'<tr><td>{나}<span class="tsc-gate">{밑}</span></td>{"".join(tds)}</tr>')
+
+    총끊김 = sum(c["끊김"] for c in 격자.values())
+    총표본 = sum(c["n"] for c in 격자.values())
+    끊김문 = (f' · 추적 끊김 {총끊김}건'
+             f'<span class="tsc-why">(저장 범위 밖으로 떨어져 그 뒤를 못 봄 — '
+             f'떨어진 쪽이 대체로 «진» 테마라 지금 숫자는 좋은 쪽으로 기웁니다)</span>'
+             if 총끊김 else "")
+    return (f'<div class="tsc-box"><table class="tsc-tbl">'
+            f'<tr><th>지목 시점</th>{hd}</tr>{"".join(tr)}</table>'
+            f'<p class="tsc-foot">칸마다 <b>{SCORE_MIN_SAMPLE}건</b>이 쌓이기 전에는 '
+            f'숫자를 쓰지 않습니다 — 표본 10건짜리 승률은 우연입니다.<br>'
+            f'지금까지 모인 지목 {총표본}건{끊김문}</p></div>')
+
+
 def build_coming_themes(data):
     """11~20위 테마가 «10위권에 언제 진입하나».
 
@@ -11887,6 +12013,19 @@ THEME_V17_CSS = """
 .tm-key{display:flex;flex-wrap:wrap;gap:9px;font-size:10px;color:#9aa3b2;
   justify-content:center;margin:8px 0}
 .tm-key i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}
+/* 🔴 v18 — 테마 채점판 */
+.tsc-box{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:12px}
+.tsc-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
+.tsc-tbl th,.tsc-tbl td{padding:8px 3px;text-align:center;border-bottom:1px solid #1a212c}
+.tsc-tbl th{color:#8b93a0;font-size:10px;font-weight:700}
+.tsc-tbl tr:last-child td{border-bottom:0}
+.tsc-tbl td:first-child,.tsc-tbl th:first-child{text-align:left;color:#c3cad4;font-weight:700;font-size:11px}
+.tsc-gate{display:block;font-size:9.5px;color:#8b93a0;font-weight:600}
+.tsc-sub{display:block;font-size:9.5px;color:#8b93a0;font-weight:600;margin-top:1px}
+.tsc-wait{color:#59626f;font-size:10.5px;font-weight:700}
+.tsc-foot{margin:9px 1px 0;font-size:10.5px;color:#8b93a0;line-height:1.6}
+.tsc-foot b{color:#c3cad4}
+.tsc-why{display:block;color:#c9a76a;margin-top:3px}
 /* 🔴 v18 — 테마 나이. 기준선을 넘긴 테마만 호박색으로 튄다.
    목록에서 이 색 하나만 눈에 띄어야 「오래됐다」가 즉시 읽힌다. */
 .tm-age{font-size:10.5px;font-weight:700;color:#8b93a0}
@@ -14778,6 +14917,8 @@ html{{scroll-behavior:smooth}}
 .sc-why-m{{margin:4px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}}
 .sc-fin{{background:#141922;border-radius:8px;padding:8px 9px}}
 .sc-row{{display:flex;align-items:center;gap:7px;margin-top:5px;flex-wrap:wrap}}
+/* 🔴 v18 — 9/15 개편 이후 종목 상세가 안 될 때의 안내문 */
+.sc-nostock{{font-size:10.5px;color:#c9a76a;margin:6px 0 0;line-height:1.5}}
 .sc-k{{font-size:9.5px;color:#8b93a0;width:68px;flex:none}}
 .sc-v{{font-size:12px;font-weight:800;color:#e8eaee}}
 .sc-warn{{margin:6px 0 0;font-size:10.5px;color:#e0c060;line-height:1.55}}
