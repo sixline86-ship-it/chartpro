@@ -521,6 +521,84 @@ THEME_DETAIL_CANDIDATES = [
 _DETAIL_WINNER = {"url": None, "tried": False}
 
 
+# ── 🔴 2026-09-15 — 진짜 정답. 「종목 API」는 따로 없다.
+#   HO가 개발자도구로 잡아준 흐름을 보면 종목코드 목록 요청이 REST API가
+#   아니라 Next.js의 내부 프리페치(_rsc=...)였다 — 즉 이 사이트는
+#   서버가 페이지를 «미리 완성해서» 보내는 SSR이다. 주소창에 주소만
+#   쳐도 표가 바로 보였던 게 그 증거다(JS가 나중에 그린 게 아니다).
+#   그래서 API를 더 찾을 필요가 없다 — 페이지를 그냥 받아서 그 안에
+#   박힌 데이터를 읽으면 된다. 옛 finance.naver.com 상세 페이지를
+#   읽던 것과 같은 기술을, 새 주소에 다시 쓰는 것뿐이다.
+#
+#   경로의 숫자(.../theme/20?no=566)는 실측상 «정렬에서 몇 번째인지»로
+#   보인다(no=566 테마가 화면에서 20번째였을 때 주소가 .../theme/20).
+#   우리 후보20도 등락률 내림차순이라 같은 순번을 쓸 수 있다.
+#   ⚠️ 이 숫자가 틀려도 no=만 맞으면 될 가능성이 높지만 실측 전이라
+#   단정하지 않는다 — 안 맞으면 로그에 남기고 다음 방법으로 넘어간다.
+THEME_PAGE_HEADERS = {
+    "User-Agent": HEADERS["User-Agent"],
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+}
+
+
+def _theme_stocks_via_page(code, rank_hint=1):
+    """테마 상세 페이지를 그대로 받아 안에 박힌 데이터를 읽는다.
+    반환: (종목리스트 또는 None, 진단문구)"""
+    url = f"https://stock.naver.com/market/stock/kr/theme/{rank_hint}"
+    try:
+        r = requests.get(url, headers=THEME_PAGE_HEADERS, params={"no": code}, timeout=12)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}"
+    except Exception as e:
+        return None, f"{type(e).__name__}"
+
+    # 1차: __NEXT_DATA__ — Next.js가 서버에서 계산해둔 값을 그대로 담은 JSON.
+    #   있으면 이게 제일 깨끗하다(표 파싱보다 구조가 안정적).
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+    if m:
+        try:
+            rows = _dig_list(json.loads(m.group(1)))
+            if rows and _pick(rows[0], "stockName", "itemName", "name", "hname") is not None:
+                return _norm_stocks(rows), f"ok · __NEXT_DATA__ {len(rows)}건"
+        except Exception:
+            pass
+
+    # 2차: 그래도 안 되면 서버가 그린 <table>을 그냥 읽는다(옛 방식과 동일 기술).
+    try:
+        tables = read_html_safe(r.text)
+        for t in tables:
+            cols = [str(c) for c in t.columns]
+            if t.shape[0] < 2 or not any("종목" in c for c in cols):
+                continue
+            name_c = next((c for c in t.columns if "종목" in str(c)), None)
+            price_c = next((c for c in t.columns if "현재가" in str(c)), None)
+            chg_c = next((c for c in t.columns if "전일대비" in str(c) or "등락" in str(c)), None)
+            amt_c = next((c for c in t.columns if "거래대금" in str(c)), None)
+            out = []
+            for _, row in t.iterrows():
+                nm = clean_name(str(row[name_c]))
+                if not nm or nm == "nan":
+                    continue
+                # 🔴 2026-09-15 — 「전일대비」 칸이 "+260(+1.43%)"처럼 금액과
+                #   퍼센트가 한 칸에 같이 들어있는 경우가 실측에서 확인됐다
+                #   (금액만 있고 %가 없는 옛 표와 다르다). to_num을 그냥
+                #   쓰면 괄호 안 퍼센트를 못 읽고 None이 된다 — 괄호 안
+                #   퍼센트를 먼저 찾고, 없으면 to_num으로 그대로 처리한다.
+                _rawchg = str(row[chg_c]) if chg_c is not None else ""
+                _pm = re.search(r"\(([+\-−]?[0-9.]+)%\)", _rawchg)
+                등락률 = (to_num(_pm.group(1)) if _pm else to_num(_rawchg))
+                out.append({"종목명": nm,
+                            "현재가": to_num(row[price_c]) if price_c is not None else None,
+                            "등락률": 등락률,
+                            "거래대금": to_num(row[amt_c]) if amt_c is not None else None})
+            if out:
+                return out, f"ok · <table> {len(out)}건"
+    except Exception as e:
+        return None, f"table 파싱 실패 {type(e).__name__}"
+    return None, "__NEXT_DATA__·table 둘 다 없음"
+
+
 def _theme_stocks_via_api(code):
     """테마 구성종목을 새 API로 받는다. 실패하면 None(→ 옛 HTML 상세로 폴백)."""
     params = {"sortType": "changeRate", "size": 100, "period": "daily"}
@@ -753,12 +831,44 @@ def collect_themes_and_gauge():
     #   레코드를 만든다. 대장주·종목 펼침은 비지만, 순위·확산도·거래대금은
     #   살아서 테마 레이더·섹터×테마·채점판이 다시 채워진다.
     분석 = []
-    for 테마명, 번호, 테마등락 in 후보20:
+    for _rank_i, (테마명, 번호, 테마등락) in enumerate(후보20, 1):
         _meta = (API맵.get(번호) or {}) if API목록 else {}
         _appended = False
 
-        # 🔴 2026-09-14 — 새 API로 먼저 시도. 되면 아래 HTML 상세는 안 탄다.
-        if API목록:
+        # 🔴 2026-09-15 — 1순위: SSR 페이지 직접 읽기(진짜 정답, 위 함수 설명 참고).
+        _srows, _swhy = _theme_stocks_via_page(번호, rank_hint=_rank_i)
+        if _srows:
+            _유효 = [x for x in _srows if x["등락률"] is not None]
+            총 = len(_유효)
+            오른 = sum(1 for x in _유효 if x["등락률"] > 0)
+            _meta2 = _meta
+            if _meta2.get("상승") is not None:
+                _합 = (_meta2.get("상승") or 0) + (_meta2.get("보합") or 0) + (_meta2.get("하락") or 0)
+                확산도 = (_meta2["상승"] / _합 * 100) if _합 else 0.0
+            else:
+                확산도 = (오른 / 총 * 100) if 총 else 0.0
+            거래대금합 = float(sum(x["거래대금"] or 0 for x in _srows)) or \
+                         float(_meta2.get("거래대금") or 0)
+            상위 = sorted(_유효, key=lambda x: -x["등락률"])[:4]
+            분석.append({
+                "테마명": 테마명,
+                "계좌구역": grid_slot_of(테마명),
+                "테마등락": 테마등락,
+                "거래대금합": 거래대금합,
+                "확산도": float(확산도),
+                "종목": [{"종목명": x["종목명"], "현재가": x["현재가"],
+                         "등락률": x["등락률"], "거래대금": x["거래대금"]}
+                        for x in 상위],
+            })
+            _appended = True
+            if _rank_i == 1:
+                print(f"  ✅ [테마 페이지] {_swhy} — SSR 직접 읽기 성공")
+            continue
+        elif _rank_i == 1:
+            print(f"  ✗ [테마 페이지] {_swhy} — 다음 방법으로 폴백")
+
+        # 🔴 2026-09-14 — 2순위: 예전에 추측했던 REST 후보 6종(대부분 404 확인됨).
+        if API목록 and not _appended:
             _rows = _theme_stocks_via_api(번호)
             if _rows:
                 _유효 = [x for x in _rows if x["등락률"] is not None]
