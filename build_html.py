@@ -11794,10 +11794,18 @@ def build_coming_themes(data):
         elif km == 0:  g, gc = "정지", TM_FLAT
         else:          g, gc = ("후진" if km > -60 else "급후진"), TM_DOWN
 
+        # 🔴 2026-09-15 — 「신호 없음」이 두 가지 완전히 다른 상황을 한 문구로
+        #   뭉갰다. ① old(5일 전 순위)가 아예 없는 «갓 포착돼 기록이 안 쌓인»
+        #   테마와 ② 기록은 있는데 «오르는 속도가 미미한» 테마가 똑같이
+        #   "신호 없음"으로 나갔다. ①은 고장처럼 보이고, 실제로는 20위권
+        #   저장을 9/15부터 넓혀서(20→50) 5일치가 채워지는 9/19 전까지
+        #   당연히 비어 있는 것뿐이다 — 그 사실을 그대로 말해준다.
         c = (TM_HOT if (eta is not None and eta <= 2)
              else (TM_WARM if (eta is not None and eta <= 5)
-                   else (TM_DOWN if slope < 0 else TM_COOL)))
-        lab = ("신호 없음" if eta is None
+                   else (TM_FLAT if (eta is None and old is None)
+                         else (TM_DOWN if slope < 0 else TM_COOL))))
+        lab = ("기록 쌓는 중" if (eta is None and old is None)
+               else "신호 없음" if eta is None
                else ("오늘 진입권" if eta == 0 else f"D-{eta}"))
         w = 0 if eta is None else max(5, 100 - min(eta, 14) / 14 * 100)
 
@@ -11823,7 +11831,9 @@ def build_coming_themes(data):
             '<div class="tm-spdn">멀어지는 중 ← → 다가오는 중</div>'
             + "".join(cards)
             + '<div class="tm-foot">⚠️ 예측이 아니라 «지금 속도가 유지되면» 계산입니다. '
-              '하루만 흐름이 바뀌어도 D-day는 달라집니다.</div>')
+              '하루만 흐름이 바뀌어도 D-day는 달라집니다.<br>'
+              '⏳ <b>기록 쌓는 중</b> = 11~20위 저장을 9/15부터 넓혔습니다(20→50개). '
+              '5거래일치가 모여야 속도를 잴 수 있어 그때까지는 순위·점수만 보여드립니다.</div>')
 
 
 # ──────────────────────────────────────────────────────────────
