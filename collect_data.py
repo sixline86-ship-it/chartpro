@@ -5083,7 +5083,19 @@ def collect_marketcap_universe(pages=GRID_시총페이지):
 
 
 def _grid_theme_members(번호):
-    """네이버 테마 상세에서 구성 종목명만 뽑는다."""
+    """테마 구성 종목명만 뽑는다.
+
+    🔴 2026-09-15 — 옛 finance.naver.com 상세가 죽어 있어(9/12 개편) 격자가
+    계속 0행이었다. 대장주 쪽에 이미 만들어둔 SSR 페이지 읽기(위
+    _theme_stocks_via_page)를 그대로 재사용한다 — 새 코드를 안 만들고
+    검증된 걸 하나 더 쓰는 것뿐이다. 그래도 안 되면 옛 방식으로 폴백한다
+    (지우지 않는다 — 원칙 5).
+    """
+    _rows, _why = _theme_stocks_via_page(번호, rank_hint=1)
+    if _rows:
+        return list(dict.fromkeys(
+            x["종목명"] for x in _rows if x.get("종목명") and not _grid_is_excluded(x["종목명"])))
+
     이름들 = []
     try:
         dres = requests.get("https://finance.naver.com/sise/sise_group_detail.naver",
