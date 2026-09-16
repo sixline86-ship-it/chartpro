@@ -5060,12 +5060,21 @@ def _marketcap_via_api():
             본키 = True
         새로 = 0
         for it in rows:
-            이름 = _pick(it, "stockName", "itemName", "name", "hname")
+            # 🔴 2026-09-15 (2차) — 9/15 밤 실측 로그로 필드명 확정.
+            #   추측이 3개 틀렸다: 이름은 stockName이 아니라 itemname,
+            #   코드는 itemCode가 아니라 itemcode(둘 다 전부 소문자),
+            #   등락률은 fluctuationsRatio가 아니라 prevChangeRate였다.
+            #   (테마 API는 카멜케이스인데 이 API만 소문자다 — 같은 회사
+            #    같은 사이트인데 팀이 다른 듯하다. 추측하면 안 되는 이유.)
+            #   시장 구분은 sosok(0=코스피, 1=코스닥)으로 온다.
+            이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
             시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap",
                         "marketCap", "capitalization")
-            등락 = _pick(it, "fluctuationsRatio", "changeRate", "rate")
-            코드 = _pick(it, "itemCode", "stockCode", "code")
-            시장 = _pick(it, "marketType", "market", "stockExchangeType") or "KRX"
+            등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate", "rate")
+            코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
+            _sosok = _pick(it, "sosok")
+            시장 = ("코스피" if str(_sosok) in ("0", "KOSPI") else
+                  "코스닥" if str(_sosok) in ("1", "KOSDAQ") else "KRX")
             if not 이름:
                 continue
             nm = clean_name(str(이름))
@@ -5074,12 +5083,18 @@ def _marketcap_via_api():
             시총n, 등락n = to_num(시총), to_num(등락)
             if 시총n is None or 등락n is None:
                 continue
-            # 🔴 시총 단위 보정 — 이 API도 테마 거래대금처럼 «원» 단위로
-            #   보인다(삼성전자 ≈ 500조 = 5e14). 기존 코드는 네이버 표의
-            #   «억원» 단위를 전제로 대형/중형/소형을 나누므로 억으로 맞춘다.
-            #   1억 = 1e8. 값이 이미 억 단위(1e7 미만)면 그대로 둔다.
-            if 시총n >= 1e8:
+            # 🔴 시총 단위 보정 — 원 단위로 오면 억으로 맞춘다.
+            #   기존 코드는 네이버 표의 «억원» 단위를 전제로 대형/중형/소형을
+            #   나누므로, 원 단위(삼성전자 ≈ 5e14)를 그대로 넣으면 층 구분이
+            #   통째로 망가진다. 1억 = 1e8. 이미 억 단위면 그대로 둔다.
+            #   ⚠️ 어느 쪽인지 실물로 확인 못 했으므로 둘 다 안전하게 받고,
+            #      첫 종목의 판정 결과를 로그에 남겨 다음 실행에서 검증한다.
+            _원단위 = 시총n >= 1e8
+            if _원단위:
                 시총n = 시총n / 1e8
+            if not 종목들:
+                print(f"  🔍 [시총 API] 단위 판정 — {nm} {시총n:,.0f}억 "
+                      f"({'원→억 환산' if _원단위 else '이미 억 단위'})")
             종목들.append({"종목명": nm, "시장": str(시장),
                          "시총": 시총n, "등락률": 등락n})
             if 코드:
