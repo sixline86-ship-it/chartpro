@@ -12242,12 +12242,16 @@ def build_theme_leaders(data):
         #    (크기 13 · 색 강제 안 함 — 배경 밝기는 그 자리가 안다).
         이름, 칸 = sc_click(r["n"], None, 13)
         tails.append(칸)
+        # ⚠️ Actions는 Python 3.11 — f-string 안에 같은 따옴표 f-string을
+        #    또 넣으면(PEP 701, 3.12+ 전용) 문법 에러가 난다. 미리 문자열로
+        #    빼서 계산한다.
+        turn_txt = "—" if r.get("대금없음") else f'{r["turn"]:.0f}%'
         rows.append(
             f'<div class="ld-r">'
             f'<span class="ld-n">{이름}'
             f'<i><b style="color:{c}">{r["th"]}</b> · 테마 {r["thr"]}위</i></span>'
             f'<span class="ld-v" style="color:{chc}">{r["ch"]:+.1f}</span>'
-            f'<span class="ld-v" style="color:{tc}">{r["turn"]:.0f}%</span>'
+            f'<span class="ld-v" style="color:{tc}">{turn_txt}</span>'
             f'<span class="ld-v" style="color:{dc}">{r["days"]}일</span>'
             f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>')
     note = ('<div class="ld-f">📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
