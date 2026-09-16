@@ -5032,7 +5032,12 @@ def collect_stock_profiles(레이더종목들, 유니버스):
 #      그래서 테마 API 때와 같이 «이름을 추측하지 않고 찾는다» — _pick으로
 #      후보를 훑고, 첫 항목 키를 로그에 찍는다. 한 번 돌리면 확정된다.
 MARKETCAP_API = "https://stock.naver.com/api/domestic/market/stock/default"
-MARKETCAP_PAGE = 100     # 한 번에 받을 개수 (요청 수를 줄이려 크게 잡는다)
+# 🔴 2026-09-15 (3차) — 100 → 50.
+#   9/16 실측에서 pageSize=100을 요청했더니 97종목만 받고 멈췄다.
+#   실제 화면이 쓰는 값은 10이었다 — 서버가 큰 pageSize를 조용히 깎을 수
+#   있다(100 요청 → 97 반환처럼). 화면값보다는 크게, 상한보다는 작게
+#   50으로 잡아 요청 수(2,500종목 ÷ 50 = 50회)와 안전성을 맞춘다.
+MARKETCAP_PAGE = 50
 MARKETCAP_MAX = 3000     # 안전 상한 — 무한 루프 방지
 
 
@@ -5040,6 +5045,7 @@ def _marketcap_via_api():
     """새 API로 시총 순위 전 종목을 받는다. 실패하면 None(→ 옛 방식 폴백)."""
     종목들, 코드맵 = [], {}
     본키 = False
+    본이름 = set()          # 같은 종목이 다시 와도 두 번 세지 않는다
     for start in range(0, MARKETCAP_MAX, MARKETCAP_PAGE):
         try:
             r = requests.get(MARKETCAP_API, headers=THEME_API_HEADERS, timeout=15,
@@ -5054,6 +5060,7 @@ def _marketcap_via_api():
             print(f"  ❌ [시총 API] startIdx={start} 실패: {type(e).__name__} {e}")
             break
         if not rows:
+            print(f"  ⏹ [시총 API] startIdx={start} 응답 0건 — 여기까지")
             break
         if not 본키:
             print(f"  🔍 [시총 API] 첫 항목 키: {sorted(rows[0])}")
@@ -5095,16 +5102,36 @@ def _marketcap_via_api():
             if not 종목들:
                 print(f"  🔍 [시총 API] 단위 판정 — {nm} {시총n:,.0f}억 "
                       f"({'원→억 환산' if _원단위 else '이미 억 단위'})")
+            if nm in 본이름:
+                continue      # 페이지를 넘겨도 같은 종목이 오면 진전이 없다
+            본이름.add(nm)
             종목들.append({"종목명": nm, "시장": str(시장),
                          "시총": 시총n, "등락률": 등락n})
             if 코드:
                 코드맵.setdefault(nm, str(코드))
             새로 += 1
-        if 새로 == 0 or len(rows) < MARKETCAP_PAGE:
+        # 🔴 2026-09-15 (3차) — 페이지 넘김 진단.
+        #   9/16 16:39 실측: 97종목만 받고 멈췄다(전 종목이면 2,000개↑).
+        #   startIdx 방식이 내 추측과 다를 수 있어 진단이 필요하지만,
+        #   전 종목이면 50페이지라 매번 찍으면 로그가 묻힌다.
+        #   → 앞 3페이지와 «이상한 페이지»(응답이 줄거나 새 종목이 없을 때)만 찍는다.
+        if start < MARKETCAP_PAGE * 3 or 새로 < len(rows) or 새로 == 0:
+            print(f"     · startIdx={start}: 응답 {len(rows)}건 → 새 종목 {새로}개 "
+                  f"(누적 {len(종목들)})")
+        if 새로 == 0:
+            print(f"  ⏹ [시총 API] 새 종목이 없어 중단 (startIdx={start})")
             break
-    if len(종목들) < 100:
-        print(f"  ❌ [시총 API] {len(종목들)}종목뿐 — 폴백합니다")
+    # 🔴 2026-09-15 (3차) — 하한선 100은 내가 근거 없이 정한 숫자였고,
+    #   97종목이 와서 «3개 차이»로 통째로 버려졌다(9/16 실측).
+    #   게다가 폴백 대상인 옛 HTML은 이미 죽어 있어 버려도 갈 곳이 없다.
+    #   → 받은 건 일단 쓴다. 다만 전 종목(2,000개↑)에 한참 못 미치면
+    #     경고를 남겨 «반쪽짜리 격자»임을 우리가 알 수 있게 한다.
+    if not 종목들:
+        print("  ❌ [시총 API] 0종목 — 폴백합니다")
         return None
+    if len(종목들) < 500:
+        print(f"  ⚠️ [시총 API] {len(종목들)}종목뿐 — 전 종목이 아닙니다. "
+              f"격자가 상위 종목만으로 만들어집니다(페이지 넘김 확인 필요).")
     print(f"  ✅ [시총 API] {len(종목들)}종목 확보 (코드 {len(코드맵)}개)")
     return 종목들, 코드맵
 
