@@ -2945,7 +2945,32 @@ def collect_accumulation_radar():
       같은 종목 풀인데 순서가 완전히 달라진다 — 그 대비를 나란히 보여준다.
     """
     유니버스 = []
-    for 시장, sosok in (("코스피", "0"), ("코스닥", "1")):
+    # 🔴 2026-09-16 — 새 시총 API를 먼저 쓴다.
+    #   [왜] 아래 옛 finance.naver.com/sise/sise_market_sum.naver는 9/12
+    #   네이버페이 개편으로 죽었다(ValueError). 그래서 매집 레이더 스캔
+    #   대상이 0종목이 되어 «오늘 잡힌 매집 종목 없음»이 매일 나왔다.
+    #   격자용으로 이미 고쳐둔 _marketcap_via_api()를 그대로 재사용한다
+    #   — 새 코드를 만들지 않고 검증된 걸 한 번 더 쓰는 것뿐이다.
+    #   ⚠️ 시장별 상한(ACC_UNIVERSE)은 그대로 지킨다. 시총 내림차순으로
+    #      오므로 앞에서부터 채우면 «시총 상위»라는 원래 기준과 같다.
+    _api = _marketcap_via_api()
+    if _api:
+        _종목들, _코드맵 = _api
+        _남은 = dict(ACC_UNIVERSE)
+        for s in _종목들:
+            시장 = s.get("시장")
+            if 시장 not in _남은 or _남은[시장] <= 0:
+                continue
+            이름 = s.get("종목명")
+            코드 = _코드맵.get(이름)
+            if not 이름 or not 코드 or _str_excluded(이름):
+                continue
+            유니버스.append((이름, 코드, 시장, s.get("시총")))
+            _남은[시장] -= 1
+        print(f"  ✅ [매집] 새 시총 API로 유니버스 {len(유니버스)}종목 확보")
+    if not 유니버스:
+        print("  ↩️ [매집] 옛 HTML 방식으로 폴백합니다.")
+    for 시장, sosok in ((("코스피", "0"), ("코스닥", "1")) if not 유니버스 else ()):
         상한 = ACC_UNIVERSE[시장]
         모은수 = 0
         for page in range(1, 4):
@@ -3285,7 +3310,53 @@ def collect_strength_radar(지수종가=None):
 
     for 시장, sosok in 시장맵.items():
         종목들 = []
-        for page in range(1, 6):
+        # 🔴 2026-09-16 — 새 시총 API를 먼저 쓴다.
+        #   [왜] 아래 옛 sise_market_sum.naver는 9/12 개편으로 죽어
+        #   «수집 0 → 1차 필터 통과 0»이 되어 강세 레이더가 매일 빈칸이었다.
+        #   [무엇이 다른가] 격자/매집은 시총·등락률만 쓰지만 강세는 거래량·
+        #   현재가·거래대금까지 필요하다. 다행히 이 API 응답에 전부 있다
+        #   (9/15 실측 키 목록: nowPrice, tradeVolume, tradeAmount, marketSum...).
+        #   ⚠️ 단위 주의 — tradeAmount(거래대금)도 원 단위로 오므로 억으로
+        #      환산한다. 시총 기준(5,000억)·거래대금 기준(500억)이 «억» 단위라
+        #      환산을 빠뜨리면 모든 종목이 조건을 통과해버린다.
+        _mkt = "KOSPI" if 시장 == "코스피" else "KOSDAQ"
+        for _pg in range(0, 6):
+            _rows, _why = _mc_fetch({"tradeType": "KRX", "marketType": _mkt,
+                                     "orderType": "marketSum",
+                                     "startIdx": _pg, "pageSize": 100})
+            if not _rows:
+                break
+            for it in _rows:
+                이름 = clean_name(str(_pick(it, "itemname", "stockName", "name") or ""))
+                if not 이름:
+                    continue
+                시총 = to_num(_pick(it, "marketSum"))
+                등락률 = to_num(_pick(it, "prevChangeRate", "fluctuationsRatio"))
+                거래량 = to_num(_pick(it, "tradeVolume", "quantDiff", "totalBuyVolume"))
+                현재가num = to_num(_pick(it, "nowPrice", "closePrice"))
+                대금 = to_num(_pick(it, "tradeAmount", "totalTradingValue"))
+                if 시총 is not None and 시총 >= 1e8:
+                    시총 = 시총 / 1e8          # 원 → 억
+                if 대금 is not None and 대금 >= 1e8:
+                    대금 = 대금 / 1e8          # 원 → 억
+                if 대금 is None and 거래량 is not None and 현재가num is not None:
+                    대금 = 거래량 * 현재가num / 100_000_000
+                if 현재가num is not None:
+                    가격맵[이름] = {"현재가": 현재가num, "등락률": 등락률}
+                if 시총 is None or 대금 is None or 등락률 is None:
+                    continue
+                종목들.append({
+                    "종목명": 이름,
+                    "코드": (str(_pick(it, "itemcode", "itemCode", "code"))
+                           if _pick(it, "itemcode", "itemCode", "code") else None),
+                    "시장": 시장, "시총": 시총, "거래대금": 대금,
+                    "거래량": 거래량, "현재가": 현재가num, "등락률": 등락률,
+                })
+        if 종목들:
+            print(f"  ✅ [강세] {시장} 새 시총 API로 {len(종목들)}종목 확보")
+        else:
+            print(f"  ↩️ [강세] {시장} 옛 HTML 방식으로 폴백합니다.")
+        for page in (range(1, 6) if not 종목들 else ()):
             url = "https://finance.naver.com/sise/sise_market_sum.naver"
             try:
                 r = requests.get(url, headers=HEADERS,
