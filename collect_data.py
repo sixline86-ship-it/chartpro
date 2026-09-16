@@ -4102,6 +4102,11 @@ def collect_market_halts():
 #  ⚠️ 샌드박스에서 DART가 403이라 **실측 검증을 못 했다.**
 #     실패해도 아무 일도 안 일어나는 형태로만 만든다. 첫 실행 후 로그 확인.
 _유니버스_캐시 = {}          # collect_account_grid가 채운다(프로필이 참조)
+# 🔴 2026-09-16 — (대형끝, 중형끝) 순위 경계.
+#   전 종목(1,500개↑)을 받으면 (100, 300) 고정이지만, 네이버 개편으로
+#   유니버스가 100종목 수준으로 줄면 같은 비율로 좁혀 세 층이 살아나게 한다.
+#   collect_marketcap_universe()가 정하고 collect_account_grid()가 읽는다.
+_층경계 = (GRID_대형_끝, GRID_중형_끝)
 PROFILE_FILE = "stock_profile.json"
 CORPMAP_FILE = "corp_map.json"
 # 🆕 2026-08-26 HO 지적 — "재무는 아직 준비되지 않았어요"가 자주 뜬다.
@@ -5032,13 +5037,11 @@ def collect_stock_profiles(레이더종목들, 유니버스):
 #      그래서 테마 API 때와 같이 «이름을 추측하지 않고 찾는다» — _pick으로
 #      후보를 훑고, 첫 항목 키를 로그에 찍는다. 한 번 돌리면 확정된다.
 MARKETCAP_API = "https://stock.naver.com/api/domestic/market/stock/default"
-# 🔴 2026-09-15 (3차) — 100 → 50.
-#   9/16 실측에서 pageSize=100을 요청했더니 97종목만 받고 멈췄다.
-#   실제 화면이 쓰는 값은 10이었다 — 서버가 큰 pageSize를 조용히 깎을 수
-#   있다(100 요청 → 97 반환처럼). 화면값보다는 크게, 상한보다는 작게
-#   50으로 잡아 요청 수(2,500종목 ÷ 50 = 50회)와 안전성을 맞춘다.
-MARKETCAP_PAGE = 50
-MARKETCAP_MAX = 3000     # 안전 상한 — 무한 루프 방지
+# 🔴 2026-09-16 (확정) — 실제 화면의 「항목 더보기」가 쓰는 값이 pageSize=100이다.
+#   서버가 실제로 처리하는 값에 맞춘다(추측하지 않는다).
+#   전 종목 ≈ 2,500개 → 25페이지면 끝난다.
+MARKETCAP_PAGE = 100
+MARKETCAP_MAX = 4000     # 안전 상한 — 무한 루프 방지 (40페이지)
 
 
 def _mc_fetch(params):
@@ -5063,10 +5066,20 @@ def _mc_fetch(params):
 #   → 그러지 말고 «후보 4가지를 코드가 직접 두드려» 가장 많이 받아오는
 #     방식을 채택한다. 테마 종목 API 주소를 자동 탐색했던 것과 같은 방식이다.
 MC_PAGING = [
-    ("startIdx", lambda i, n: {"startIdx": i * n, "pageSize": n}),
-    ("page",     lambda i, n: {"page": i + 1, "pageSize": n}),
-    ("pageNo",   lambda i, n: {"pageNo": i + 1, "pageSize": n}),
-    ("offset",   lambda i, n: {"offset": i * n, "limit": n}),
+    # 🔴 2026-09-16 (확정) — startIdx는 «몇 번째 종목»이 아니라 «몇 번째 페이지»다.
+    #   [근거] HO가 실제 화면의 「항목 더보기」를 눌러 잡아준 요청:
+    #     ...&orderType=marketSum&startIdx=6&pageSize=100
+    #   pageSize=100인데 startIdx가 600이 아니라 6이었다 → 페이지 번호다.
+    #   [이걸로 9/16의 «97종목» 미스터리가 전부 설명된다]
+    #     pageSize=50으로 startIdx=0 → 0페이지(1~50위) = 50개
+    #     startIdx=50 → 50페이지(2501~2550위) = 시장 끝자락이라 47개
+    #     startIdx=100 → 100페이지(5001위~) = 아예 없음 → 0개
+    #     50 + 47 = 97. 서버가 100개만 주는 게 아니라, 내가 페이지 번호
+    #     자리에 종목 번호를 넣어 «시장 맨 끝»으로 건너뛰고 있었던 것이다.
+    ("startIdx=페이지", lambda i, n: {"startIdx": i, "pageSize": n}),
+    ("startIdx=오프셋", lambda i, n: {"startIdx": i * n, "pageSize": n}),
+    ("page",            lambda i, n: {"page": i + 1, "pageSize": n}),
+    ("offset",          lambda i, n: {"offset": i * n, "limit": n}),
 ]
 
 
@@ -5223,6 +5236,67 @@ def _marketcap_via_api():
             print(f"     · 역순 요청으로 {추가}종목 추가 확보")
             최고 = (list(더.values()), 더코드, f"{최고[2]}+역순")
 
+    # 🔴 2026-09-16 (5차) — 이 API는 «상위 100개»만 주는 랭킹 엔드포인트다.
+    #   [실측] 9/16 17:37 실행에서 6가지 페이지 방식이 전부 98종목에서 멈췄고,
+    #   저장된 기준을 보면 '대형 1~100위'에 98종목이 전부 몰려 중형·소형이
+    #   통째로 비었다. 즉 페이지를 넘기는 문제가 아니라 애초에 100개까지만
+    #   주는 API였다 — 방식을 더 바꿔봐야 소용이 없다.
+    #
+    #   [그래서] 한 번에 100개씩만 준다면, «다른 기준으로 줄 세운 100개»를
+    #   여러 번 받아 합친다. 거래대금 상위 100, 상승률 상위 100, 거래량 상위
+    #   100 … 은 시총 상위 100과 겹치지 않는 종목을 많이 포함한다. 코스피·
+    #   코스닥까지 갈라 요청하면 묶음이 배로 늘어난다.
+    #   ⚠️ 이렇게 모으면 «시총 순위»는 우리가 가진 표본 안에서의 상대 순위라
+    #      정확한 전체 순위가 아니다. 다만 층(대형/중형/소형)을 나누는 데는
+    #      전부 대형으로 뭉개지는 지금보다 비교할 수 없이 낫다.
+    if len(최고[0]) < 1500:
+        더 = dict((s["종목명"], s) for s in 최고[0])
+        더코드 = dict(최고[1])
+        시작수 = len(더)
+        방식이름 = 최고[2].split("+")[0]
+        만들기 = dict(MC_PAGING)[방식이름]
+        조합 = [(ot, mt)
+                for ot in ("marketSum", "tradeAmount", "tradeVolume",
+                           "prevChangeRate", "per", "pbr")
+                for mt in ("ALL", "KOSPI", "KOSDAQ")]
+        for ot, mt in 조합:
+            if len(더) >= 2000:
+                break
+            for i in range(0, 4):          # 묶음당 최대 4페이지면 충분
+                p = {"tradeType": "KRX", "marketType": mt, "orderType": ot}
+                p.update(만들기(i, MARKETCAP_PAGE))
+                rows, _why = _mc_fetch(p)
+                if not rows:
+                    break
+                새로 = 0
+                for it in rows:
+                    이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
+                    시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap")
+                    등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate")
+                    코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
+                    _so = _pick(it, "sosok")
+                    if not 이름:
+                        continue
+                    nm = clean_name(str(이름))
+                    if _grid_is_excluded(nm) or nm in 더:
+                        continue
+                    시총n, 등락n = to_num(시총), to_num(등락)
+                    if 시총n is None or 등락n is None or 시총n <= 0:
+                        continue
+                    if 시총n >= 1e8:
+                        시총n = 시총n / 1e8
+                    더[nm] = {"종목명": nm,
+                             "시장": ("코스닥" if str(_so) in ("1", "KOSDAQ") else "코스피"),
+                             "시총": 시총n, "등락률": 등락n}
+                    if 코드:
+                        더코드.setdefault(nm, str(코드))
+                    새로 += 1
+                if 새로 == 0:
+                    break
+        if len(더) > 시작수:
+            print(f"     · 정렬 기준 바꿔 수집 → {시작수}종목 → {len(더)}종목")
+            최고 = (list(더.values()), 더코드, f"{최고[2]}+다중정렬")
+
     종목들, 코드맵, 방식 = 최고
     if 종목들:
         print(f"  🔍 [시총 API] 단위 확인 — {종목들[0]['종목명']} "
@@ -5299,13 +5373,35 @@ def collect_marketcap_universe(pages=GRID_시총페이지):
 
     # 코스피·코스닥 통합 순위 (테마는 시장을 가리지 않으므로 합쳐서 줄 세운다)
     종목들.sort(key=lambda x: x["시총"], reverse=True)
+    # 🔴 2026-09-16 — 층 경계를 표본 크기에 맞춘다.
+    #   [왜] 경계가 100위·300위로 고정이라, 네이버 개편으로 유니버스가
+    #   98종목으로 줄자 «전부 대형»이 되고 중형·소형이 통째로 비었다
+    #   (9/16 실측). 전 종목(2,500개↑)을 받을 때는 고정 경계가 맞지만,
+    #   표본이 작을 때는 같은 비율(상위 4% / 12%)로 나눠야 세 층이 산다.
+    #   ⚠️ 이때의 «대형»은 시장 전체 기준이 아니라 표본 안에서의 상대 위치다.
+    _N = len(종목들)
+    if _N >= 1500:
+        대형끝, 중형끝 = GRID_대형_끝, GRID_중형_끝
+        층기준 = "전체"
+    else:
+        대형끝 = max(3, round(_N * GRID_대형_끝 / 2500))
+        중형끝 = max(대형끝 + 3, round(_N * GRID_중형_끝 / 2500))
+        층기준 = "표본상대"
+        print(f"   ⚠️ 유니버스 {_N}종목 — 층 경계를 표본에 맞춰 조정 "
+              f"(대형 1~{대형끝}위 · 중형 ~{중형끝}위)")
     유니버스 = {}
     for i, s in enumerate(종목들, start=1):
-        층 = "대형" if i <= GRID_대형_끝 else ("중형" if i <= GRID_중형_끝 else "소형")
+        층 = "대형" if i <= 대형끝 else ("중형" if i <= 중형끝 else "소형")
         s["순위"] = i
         s["층"] = 층
         s["코드"] = 코드맵.get(s["종목명"])
         유니버스[s["종목명"]] = s
+    # 🔴 2026-09-16 — 층 경계를 전역에 남긴다.
+    #   collect_account_grid()가 저장하는 「기준」 문구(대형 1~N위)와
+    #   경계 시총을 여기서 정한 값과 일치시켜야 한다. 다른 함수라
+    #   변수로는 못 넘기므로, 기존 _유니버스_캐시와 같은 방식으로 둔다.
+    global _층경계
+    _층경계 = (대형끝, 중형끝)
     print(f"📐 시총 유니버스 {len(유니버스)}종목 "
           f"(대형 {sum(1 for v in 유니버스.values() if v['층']=='대형')} / "
           f"중형 {sum(1 for v in 유니버스.values() if v['층']=='중형')} / "
@@ -5521,8 +5617,9 @@ def collect_account_grid(테마후보):
         조 = 억 / 10000
         return f"{조:.0f}" if 조 >= 10 else f"{조:.1f}"
 
-    대형선 = _조표기(_시총경계(GRID_대형_끝))
-    중형선 = _조표기(_시총경계(GRID_중형_끝))
+    대형끝, 중형끝 = _층경계      # 🔴 2026-09-16 — 유니버스가 정한 실제 경계
+    대형선 = _조표기(_시총경계(대형끝))
+    중형선 = _조표기(_시총경계(중형끝))
 
     for 층 in ("대형", "중형", "소형"):
         값들 = [v["등락률"] for v in 유니버스.values() if v["층"] == 층]
@@ -5536,8 +5633,8 @@ def collect_account_grid(테마후보):
         "행": 행들,
         "크기전체": 크기전체,
         "크기프리미엄": 격차,          # 대형 − 소형. 양수면 대형 쏠림
-        "기준": {"대형": f"1~{GRID_대형_끝}위", "중형": f"{GRID_대형_끝+1}~{GRID_중형_끝}위",
-                "소형": f"{GRID_중형_끝+1}위 이하", "최소종목": GRID_최소종목,
+        "기준": {"대형": f"1~{대형끝}위", "중형": f"{대형끝+1}~{중형끝}위",
+                "소형": f"{중형끝+1}위 이하", "최소종목": GRID_최소종목,
                 # 순위와 함께 '그 순위의 실제 시총'을 담는다 — 독자가 자기 종목을 대입할 수 있게.
                 # 조 단위로 통일하고 기호로 줄인다 — 세 칸을 나란히 놓고 읽을 수 있게.
                 "대형시총": f"{대형선}조↑" if 대형선 else None,
