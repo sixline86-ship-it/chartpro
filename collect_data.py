@@ -2767,6 +2767,72 @@ def _acc_long_cache_save(장기목록):
         print(f"   ⚠️ 60일 매집 캐시 저장 실패: {type(e).__name__}")
 
 
+# 🔴 2026-09-16 — 종목별 투자자 수급도 새 API로 이사한다.
+#   [무슨 일이 있었나] 9/12 개편으로 finance.naver.com/item/frgn.naver가
+#   죽어 _fetch_investor_flow()가 매번 None을 돌려줬다. 유니버스는 새 API로
+#   복구했는데도 매집 레이더가 계속 0종목이었던 이유가 이것이다
+#   (유니버스=어떤 종목을 볼지, 이 함수=누가 샀는지 — 둘 다 필요하다).
+#   [새 주소] HO가 개발자도구로 확보(2026-09-16):
+#     /api/domestic/detail/{종목코드}/trend?tradeType=KRX&startIdx=0&pageSize=50
+#   시총 API와 같은 구조다 — startIdx는 «페이지 번호», pageSize는 개수.
+#   ⚠️ 응답 필드를 실물로 확인하지 못했다. 그래서 _pick으로 후보를 훑고
+#      첫 항목 키를 로그에 찍는다. 한 번 돌리면 확정된다.
+TREND_API = "https://stock.naver.com/api/domestic/detail/{code}/trend"
+_TREND_KEY_LOGGED = {"done": False}
+
+
+def _fetch_investor_flow_api(code, days):
+    """새 API로 종목별 외국인·기관 일별 순매매를 받는다.
+    반환: {"외국인": [억원...], "기관": [...], "종가": 최근종가} 또는 None"""
+    rows = []
+    페이지 = max(1, -(-int(days) // 50))
+    for _pg in range(페이지):
+        try:
+            r = requests.get(TREND_API.format(code=code), headers=THEME_API_HEADERS,
+                             timeout=10,
+                             params={"tradeType": "KRX", "startIdx": _pg, "pageSize": 50})
+            if r.status_code != 200:
+                return None
+            부분 = _dig_list(r.json())
+        except Exception:
+            return None
+        if not 부분:
+            break
+        rows.extend(부분)
+        if len(부분) < 50:
+            break
+    if not rows:
+        return None
+    if not _TREND_KEY_LOGGED["done"]:
+        print(f"  🔍 [수급 API] 첫 항목 키: {sorted(rows[0])}")
+        _TREND_KEY_LOGGED["done"] = True
+
+    외, 기, 종가들 = [], [], []
+    for it in rows[:days]:
+        종가 = to_num(_pick(it, "closePrice", "nowPrice", "price", "endPrice"))
+        외량 = to_num(_pick(it, "foreignerPureBuyQuant", "foreignPureBuyQuant",
+                          "foreignerNetBuy", "foreignNetBuy", "frgnQuant",
+                          "foreignerQuant", "foreign"))
+        기량 = to_num(_pick(it, "organPureBuyQuant", "institutionPureBuyQuant",
+                          "organNetBuy", "organQuant", "institutionQuant",
+                          "organ", "institution"))
+        if 종가 is None or (외량 is None and 기량 is None):
+            continue
+        종가들.append(종가)
+        # ⚠️ 이 API가 «주식 수»를 주면 종가를 곱해 억원으로, 이미 «금액»이면
+        #    그대로 억으로 환산한다. 순매매량은 보통 수만~수백만 주 단위라
+        #    절대값이 1e9를 넘으면 금액(원)으로 본다.
+        def _억(v):
+            if v is None:
+                return 0.0
+            return v / 100_000_000 if abs(v) >= 1e9 else v * 종가 / 100_000_000
+        외.append(_억(외량))
+        기.append(_억(기량))
+    if not 외 or len(종가들) < ACC_DAYS:
+        return None
+    return {"외국인": 외, "기관": 기, "종가": 종가들[0]}
+
+
 def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
     """종목별 외국인·기관 일별 순매매를 가져온다.
     네이버 '외국인·기관' 탭 표에는 순매매'량'(주식 수)이 있으므로
@@ -2774,6 +2840,10 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
     반환: {"외국인": [일별 억원...], "기관": [...], "종가": 최근종가}
     """
     url = "https://finance.naver.com/item/frgn.naver"
+    # 🔴 2026-09-16 — ① 새 API 먼저. 실패하면 아래 옛 HTML로 폴백한다.
+    _api = _fetch_investor_flow_api(code, days)
+    if _api:
+        return _api
     # 🆕 2026-08-22 — 60일을 위해 페이지를 여러 장 받아 이어 붙인다.
     #    ⚠️ 필요한 만큼만 받는다. days<=20이면 예전과 똑같이 1장만 받아
     #       요청 수가 늘지 않는다(20일 이하 호출은 성능 영향 0).
