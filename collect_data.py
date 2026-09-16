@@ -5041,98 +5041,197 @@ MARKETCAP_PAGE = 50
 MARKETCAP_MAX = 3000     # 안전 상한 — 무한 루프 방지
 
 
+def _mc_fetch(params):
+    """시총 API 한 번 호출 → (행 리스트 or None, 진단문구)"""
+    try:
+        r = requests.get(MARKETCAP_API, headers=THEME_API_HEADERS, timeout=15,
+                         params=params)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}"
+        rows = _dig_list(r.json())
+        return (rows or []), "ok"
+    except Exception as e:
+        return None, f"{type(e).__name__}"
+
+
+# 🔴 2026-09-15 (4차) — 페이지 넘김 방식을 «찾아서» 쓴다.
+#   [실측] 9/16 17:22 실행에서 startIdx 방식으로 97종목에서 끊겼다
+#   (startIdx=100부터 0건). 전 종목이면 2,500개↑라 층(대형/중형/소형)
+#   구분이 통째로 무너졌다 — 전부 대형으로만 들어갔다.
+#   [왜 추측이 반복되나] 이 API의 페이지 규칙을 실물로 확인할 수 없어
+#   (개발 환경 네이버 차단) 매번 한 가지를 찍고 실패하면 다시 물어봤다.
+#   → 그러지 말고 «후보 4가지를 코드가 직접 두드려» 가장 많이 받아오는
+#     방식을 채택한다. 테마 종목 API 주소를 자동 탐색했던 것과 같은 방식이다.
+MC_PAGING = [
+    ("startIdx", lambda i, n: {"startIdx": i * n, "pageSize": n}),
+    ("page",     lambda i, n: {"page": i + 1, "pageSize": n}),
+    ("pageNo",   lambda i, n: {"pageNo": i + 1, "pageSize": n}),
+    ("offset",   lambda i, n: {"offset": i * n, "limit": n}),
+]
+
+
 def _marketcap_via_api():
     """새 API로 시총 순위 전 종목을 받는다. 실패하면 None(→ 옛 방식 폴백)."""
-    종목들, 코드맵 = [], {}
-    본키 = False
-    본이름 = set()          # 같은 종목이 다시 와도 두 번 세지 않는다
-    for start in range(0, MARKETCAP_MAX, MARKETCAP_PAGE):
-        try:
-            r = requests.get(MARKETCAP_API, headers=THEME_API_HEADERS, timeout=15,
-                             params={"tradeType": "KRX", "marketType": "ALL",
-                                     "orderType": "marketSum",
-                                     "startIdx": start, "pageSize": MARKETCAP_PAGE})
-            if r.status_code != 200:
-                print(f"  ❌ [시총 API] startIdx={start} HTTP {r.status_code}")
+    기본 = {"tradeType": "KRX", "marketType": "ALL", "orderType": "marketSum"}
+    최고 = None      # (종목들, 코드맵, 방식이름)
+
+    for 방식, 만들기 in MC_PAGING:
+        종목들, 코드맵, 본이름 = [], {}, set()
+        본키 = False
+        끊긴이유 = "상한 도달"
+        for i in range(0, MARKETCAP_MAX // MARKETCAP_PAGE + 1):
+            p = dict(기본); p.update(만들기(i, MARKETCAP_PAGE))
+            rows, why = _mc_fetch(p)
+            if rows is None:
+                끊긴이유 = why
                 break
-            rows = _dig_list(r.json())
-        except Exception as e:
-            print(f"  ❌ [시총 API] startIdx={start} 실패: {type(e).__name__} {e}")
+            if not rows:
+                끊긴이유 = "응답 0건"
+                break
+            if not 본키 and 최고 is None:
+                print(f"  🔍 [시총 API] 첫 항목 키: {sorted(rows[0])}")
+                본키 = True
+            새로 = 0
+            for it in rows:
+                # 🔴 필드명은 9/15 실측으로 확정 — 이 API만 전부 소문자다.
+                이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
+                시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap",
+                            "marketCap", "capitalization")
+                등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate", "rate")
+                코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
+                _sosok = _pick(it, "sosok")
+                시장 = ("코스피" if str(_sosok) in ("0", "KOSPI") else
+                      "코스닥" if str(_sosok) in ("1", "KOSDAQ") else "KRX")
+                if not 이름:
+                    continue
+                nm = clean_name(str(이름))
+                if _grid_is_excluded(nm) or nm in 본이름:
+                    continue
+                시총n, 등락n = to_num(시총), to_num(등락)
+                if 시총n is None or 등락n is None or 시총n <= 0:
+                    continue
+                # 원 단위로 오면 억으로 환산(1억=1e8). 이미 억이면 그대로.
+                if 시총n >= 1e8:
+                    시총n = 시총n / 1e8
+                본이름.add(nm)
+                종목들.append({"종목명": nm, "시장": 시장,
+                             "시총": 시총n, "등락률": 등락n})
+                if 코드:
+                    코드맵.setdefault(nm, str(코드))
+                새로 += 1
+            if 새로 == 0:
+                끊긴이유 = "새 종목 없음"
+                break
+        print(f"     · 방식 [{방식}] → {len(종목들)}종목 ({끊긴이유})")
+        if 최고 is None or len(종목들) > len(최고[0]):
+            최고 = (종목들, 코드맵, 방식)
+        if len(종목들) >= 2000:      # 전 종목을 받았으면 더 볼 필요 없다
             break
-        if not rows:
-            print(f"  ⏹ [시총 API] startIdx={start} 응답 0건 — 여기까지")
-            break
-        if not 본키:
-            print(f"  🔍 [시총 API] 첫 항목 키: {sorted(rows[0])}")
-            본키 = True
-        새로 = 0
-        for it in rows:
-            # 🔴 2026-09-15 (2차) — 9/15 밤 실측 로그로 필드명 확정.
-            #   추측이 3개 틀렸다: 이름은 stockName이 아니라 itemname,
-            #   코드는 itemCode가 아니라 itemcode(둘 다 전부 소문자),
-            #   등락률은 fluctuationsRatio가 아니라 prevChangeRate였다.
-            #   (테마 API는 카멜케이스인데 이 API만 소문자다 — 같은 회사
-            #    같은 사이트인데 팀이 다른 듯하다. 추측하면 안 되는 이유.)
-            #   시장 구분은 sosok(0=코스피, 1=코스닥)으로 온다.
-            이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
-            시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap",
-                        "marketCap", "capitalization")
-            등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate", "rate")
-            코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
-            _sosok = _pick(it, "sosok")
-            시장 = ("코스피" if str(_sosok) in ("0", "KOSPI") else
-                  "코스닥" if str(_sosok) in ("1", "KOSDAQ") else "KRX")
-            if not 이름:
-                continue
-            nm = clean_name(str(이름))
-            if _grid_is_excluded(nm):
-                continue
-            시총n, 등락n = to_num(시총), to_num(등락)
-            if 시총n is None or 등락n is None:
-                continue
-            # 🔴 시총 단위 보정 — 원 단위로 오면 억으로 맞춘다.
-            #   기존 코드는 네이버 표의 «억원» 단위를 전제로 대형/중형/소형을
-            #   나누므로, 원 단위(삼성전자 ≈ 5e14)를 그대로 넣으면 층 구분이
-            #   통째로 망가진다. 1억 = 1e8. 이미 억 단위면 그대로 둔다.
-            #   ⚠️ 어느 쪽인지 실물로 확인 못 했으므로 둘 다 안전하게 받고,
-            #      첫 종목의 판정 결과를 로그에 남겨 다음 실행에서 검증한다.
-            _원단위 = 시총n >= 1e8
-            if _원단위:
-                시총n = 시총n / 1e8
-            if not 종목들:
-                print(f"  🔍 [시총 API] 단위 판정 — {nm} {시총n:,.0f}억 "
-                      f"({'원→억 환산' if _원단위 else '이미 억 단위'})")
-            if nm in 본이름:
-                continue      # 페이지를 넘겨도 같은 종목이 오면 진전이 없다
-            본이름.add(nm)
-            종목들.append({"종목명": nm, "시장": str(시장),
-                         "시총": 시총n, "등락률": 등락n})
-            if 코드:
-                코드맵.setdefault(nm, str(코드))
-            새로 += 1
-        # 🔴 2026-09-15 (3차) — 페이지 넘김 진단.
-        #   9/16 16:39 실측: 97종목만 받고 멈췄다(전 종목이면 2,000개↑).
-        #   startIdx 방식이 내 추측과 다를 수 있어 진단이 필요하지만,
-        #   전 종목이면 50페이지라 매번 찍으면 로그가 묻힌다.
-        #   → 앞 3페이지와 «이상한 페이지»(응답이 줄거나 새 종목이 없을 때)만 찍는다.
-        if start < MARKETCAP_PAGE * 3 or 새로 < len(rows) or 새로 == 0:
-            print(f"     · startIdx={start}: 응답 {len(rows)}건 → 새 종목 {새로}개 "
-                  f"(누적 {len(종목들)})")
-        if 새로 == 0:
-            print(f"  ⏹ [시총 API] 새 종목이 없어 중단 (startIdx={start})")
-            break
-    # 🔴 2026-09-15 (3차) — 하한선 100은 내가 근거 없이 정한 숫자였고,
-    #   97종목이 와서 «3개 차이»로 통째로 버려졌다(9/16 실측).
-    #   게다가 폴백 대상인 옛 HTML은 이미 죽어 있어 버려도 갈 곳이 없다.
-    #   → 받은 건 일단 쓴다. 다만 전 종목(2,000개↑)에 한참 못 미치면
-    #     경고를 남겨 «반쪽짜리 격자»임을 우리가 알 수 있게 한다.
-    if not 종목들:
-        print("  ❌ [시총 API] 0종목 — 폴백합니다")
+
+    if not 최고 or not 최고[0]:
+        print("  ❌ [시총 API] 어느 방식으로도 못 받음 — 폴백합니다")
         return None
+
+    # 🔴 마지막 안전망 — 위 4가지가 전부 상위 몇백 개에서 끊겼다면,
+    #   서버가 «한 요청당 상한»을 두고 있을 수 있다. 그럴 땐 marketType을
+    #   KOSPI / KOSDAQ로 갈라 각각 받아 합치면 두 배를 얻는다.
+    #   (합쳐도 더 적으면 버리고 원래 결과를 쓴다 — 손해 볼 일이 없다.)
+    if len(최고[0]) < 2000:
+        방식이름 = 최고[2]
+        만들기 = dict(MC_PAGING)[방식이름]
+        합침, 합코드, 합이름 = [], {}, set()
+        for mt in ("KOSPI", "KOSDAQ"):
+            for i in range(0, MARKETCAP_MAX // MARKETCAP_PAGE + 1):
+                p = {"tradeType": "KRX", "marketType": mt, "orderType": "marketSum"}
+                p.update(만들기(i, MARKETCAP_PAGE))
+                rows, _why = _mc_fetch(p)
+                if not rows:
+                    break
+                새로 = 0
+                for it in rows:
+                    이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
+                    시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap")
+                    등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate")
+                    코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
+                    if not 이름:
+                        continue
+                    nm = clean_name(str(이름))
+                    if _grid_is_excluded(nm) or nm in 합이름:
+                        continue
+                    시총n, 등락n = to_num(시총), to_num(등락)
+                    if 시총n is None or 등락n is None or 시총n <= 0:
+                        continue
+                    if 시총n >= 1e8:
+                        시총n = 시총n / 1e8
+                    합이름.add(nm)
+                    합침.append({"종목명": nm, "시장": ("코스피" if mt == "KOSPI" else "코스닥"),
+                               "시총": 시총n, "등락률": 등락n})
+                    if 코드:
+                        합코드.setdefault(nm, str(코드))
+                    새로 += 1
+                if 새로 == 0:
+                    break
+        print(f"     · 시장별 분리 요청 → {len(합침)}종목")
+        if len(합침) > len(최고[0]):
+            최고 = (합침, 합코드, f"{방식이름}+시장분리")
+
+    # 🔴 마지막 수단 — 그래도 적으면 «정렬을 뒤집어» 반대쪽 끝에서 받는다.
+    #   서버가 «앞에서 N개까지만» 준다면, 시총 오름차순으로 요청하면
+    #   가장 작은 종목부터 N개를 준다. 위(대형)와 아래(소형)를 합치면
+    #   중형은 비더라도 최소한 «소형 칸»이 살아난다 — 층 구분의 절반이라도
+    #   되살리는 것이 전부 대형으로 뭉개지는 것보다 훨씬 낫다.
+    if len(최고[0]) < 1000:
+        방식이름 = 최고[2].split("+")[0]
+        만들기 = dict(MC_PAGING)[방식이름]
+        더 = dict((s["종목명"], s) for s in 최고[0])
+        더코드 = dict(최고[1])
+        추가 = 0
+        for i in range(0, MARKETCAP_MAX // MARKETCAP_PAGE + 1):
+            p = {"tradeType": "KRX", "marketType": "ALL",
+                 "orderType": "marketSum", "sortType": "asc", "order": "asc"}
+            p.update(만들기(i, MARKETCAP_PAGE))
+            rows, _why = _mc_fetch(p)
+            if not rows:
+                break
+            새로 = 0
+            for it in rows:
+                이름 = _pick(it, "itemname", "stockName", "itemName", "name", "hname")
+                시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap")
+                등락 = _pick(it, "prevChangeRate", "fluctuationsRatio", "changeRate")
+                코드 = _pick(it, "itemcode", "itemCode", "stockCode", "code")
+                _sosok = _pick(it, "sosok")
+                if not 이름:
+                    continue
+                nm = clean_name(str(이름))
+                if _grid_is_excluded(nm) or nm in 더:
+                    continue
+                시총n, 등락n = to_num(시총), to_num(등락)
+                if 시총n is None or 등락n is None or 시총n <= 0:
+                    continue
+                if 시총n >= 1e8:
+                    시총n = 시총n / 1e8
+                더[nm] = {"종목명": nm,
+                         "시장": ("코스닥" if str(_sosok) in ("1", "KOSDAQ") else "코스피"),
+                         "시총": 시총n, "등락률": 등락n}
+                if 코드:
+                    더코드.setdefault(nm, str(코드))
+                새로 += 1
+                추가 += 1
+            if 새로 == 0:
+                break
+        if 추가:
+            print(f"     · 역순 요청으로 {추가}종목 추가 확보")
+            최고 = (list(더.values()), 더코드, f"{최고[2]}+역순")
+
+    종목들, 코드맵, 방식 = 최고
+    if 종목들:
+        print(f"  🔍 [시총 API] 단위 확인 — {종목들[0]['종목명']} "
+              f"{종목들[0]['시총']:,.0f}억")
     if len(종목들) < 500:
         print(f"  ⚠️ [시총 API] {len(종목들)}종목뿐 — 전 종목이 아닙니다. "
-              f"격자가 상위 종목만으로 만들어집니다(페이지 넘김 확인 필요).")
-    print(f"  ✅ [시총 API] {len(종목들)}종목 확보 (코드 {len(코드맵)}개)")
+              f"중형·소형 칸이 비게 됩니다.")
+    print(f"  ✅ [시총 API] {len(종목들)}종목 확보 · 방식 [{방식}] "
+          f"(코드 {len(코드맵)}개)")
     return 종목들, 코드맵
 
 
