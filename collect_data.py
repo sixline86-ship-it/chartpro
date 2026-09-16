@@ -5011,6 +5011,89 @@ def collect_stock_profiles(레이더종목들, 유니버스):
     return 캐시
 
 
+# ── 🔴 2026-09-15 — 시가총액 유니버스도 새 API로 이사한다.
+#
+#   [무슨 일이 있었나] 9/12 네이버페이 증권 개편으로 테마만 죽은 게 아니라
+#   finance.naver.com/sise/sise_market_sum.naver(시총 순위 표)도 같이 죽었다.
+#   로그의 "시총 코스피 p1 요청 실패: ValueError"가 그것이다.
+#   그 결과 collect_marketcap_universe()가 {}를 돌려주고,
+#   collect_account_grid()는 맨 앞에서 `if not 유니버스: return {}`로
+#   통째로 빠져나갔다 → 계좌격자 0행 → 「섹터 × 테마」가 매일 빈 화면.
+#   ⚠️ _grid_theme_members()를 SSR 읽기로 고쳐도 소용없었던 이유가 이것이다
+#      — 그 함수에 도달하기도 전에 길이 막혀 있었다.
+#
+#   [새 주소] HO가 개발자도구로 확보(2026-09-15):
+#     /api/domestic/market/stock/default
+#       tradeType=KRX  marketType=ALL  orderType=marketSum
+#       startIdx=<시작>  pageSize=<개수>
+#   시가총액 내림차순이라 받은 순서가 곧 순위다.
+#
+#   ⚠️ 응답 필드를 실물로 확인하지 못했다(개발 환경에서 네이버 접속 차단).
+#      그래서 테마 API 때와 같이 «이름을 추측하지 않고 찾는다» — _pick으로
+#      후보를 훑고, 첫 항목 키를 로그에 찍는다. 한 번 돌리면 확정된다.
+MARKETCAP_API = "https://stock.naver.com/api/domestic/market/stock/default"
+MARKETCAP_PAGE = 100     # 한 번에 받을 개수 (요청 수를 줄이려 크게 잡는다)
+MARKETCAP_MAX = 3000     # 안전 상한 — 무한 루프 방지
+
+
+def _marketcap_via_api():
+    """새 API로 시총 순위 전 종목을 받는다. 실패하면 None(→ 옛 방식 폴백)."""
+    종목들, 코드맵 = [], {}
+    본키 = False
+    for start in range(0, MARKETCAP_MAX, MARKETCAP_PAGE):
+        try:
+            r = requests.get(MARKETCAP_API, headers=THEME_API_HEADERS, timeout=15,
+                             params={"tradeType": "KRX", "marketType": "ALL",
+                                     "orderType": "marketSum",
+                                     "startIdx": start, "pageSize": MARKETCAP_PAGE})
+            if r.status_code != 200:
+                print(f"  ❌ [시총 API] startIdx={start} HTTP {r.status_code}")
+                break
+            rows = _dig_list(r.json())
+        except Exception as e:
+            print(f"  ❌ [시총 API] startIdx={start} 실패: {type(e).__name__} {e}")
+            break
+        if not rows:
+            break
+        if not 본키:
+            print(f"  🔍 [시총 API] 첫 항목 키: {sorted(rows[0])}")
+            본키 = True
+        새로 = 0
+        for it in rows:
+            이름 = _pick(it, "stockName", "itemName", "name", "hname")
+            시총 = _pick(it, "marketSum", "marketValue", "totalMarketCap",
+                        "marketCap", "capitalization")
+            등락 = _pick(it, "fluctuationsRatio", "changeRate", "rate")
+            코드 = _pick(it, "itemCode", "stockCode", "code")
+            시장 = _pick(it, "marketType", "market", "stockExchangeType") or "KRX"
+            if not 이름:
+                continue
+            nm = clean_name(str(이름))
+            if _grid_is_excluded(nm):
+                continue
+            시총n, 등락n = to_num(시총), to_num(등락)
+            if 시총n is None or 등락n is None:
+                continue
+            # 🔴 시총 단위 보정 — 이 API도 테마 거래대금처럼 «원» 단위로
+            #   보인다(삼성전자 ≈ 500조 = 5e14). 기존 코드는 네이버 표의
+            #   «억원» 단위를 전제로 대형/중형/소형을 나누므로 억으로 맞춘다.
+            #   1억 = 1e8. 값이 이미 억 단위(1e7 미만)면 그대로 둔다.
+            if 시총n >= 1e8:
+                시총n = 시총n / 1e8
+            종목들.append({"종목명": nm, "시장": str(시장),
+                         "시총": 시총n, "등락률": 등락n})
+            if 코드:
+                코드맵.setdefault(nm, str(코드))
+            새로 += 1
+        if 새로 == 0 or len(rows) < MARKETCAP_PAGE:
+            break
+    if len(종목들) < 100:
+        print(f"  ❌ [시총 API] {len(종목들)}종목뿐 — 폴백합니다")
+        return None
+    print(f"  ✅ [시총 API] {len(종목들)}종목 확보 (코드 {len(코드맵)}개)")
+    return 종목들, 코드맵
+
+
 def collect_marketcap_universe(pages=GRID_시총페이지):
     """코스피·코스닥 전 종목의 (종목명 → 시총·등락률)을 모아 시총 순위를 매긴다.
 
@@ -5018,7 +5101,14 @@ def collect_marketcap_universe(pages=GRID_시총페이지):
     """
     종목들 = []
     코드맵 = {}
-    for 시장, sosok in (("코스피", "0"), ("코스닥", "1")):
+    # 🔴 2026-09-15 — ① 새 API 먼저. 성공하면 아래 옛 HTML 크롤은 건너뛴다.
+    _api = _marketcap_via_api()
+    if _api:
+        종목들, 코드맵 = _api
+    else:
+        print("  ↩️ [시총] 옛 HTML 방식으로 폴백합니다.")
+
+    for 시장, sosok in ((("코스피", "0"), ("코스닥", "1")) if not 종목들 else ()):
         for page in range(1, pages + 1):
             try:
                 r = requests.get("https://finance.naver.com/sise/sise_market_sum.naver",
