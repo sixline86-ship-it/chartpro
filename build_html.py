@@ -1717,8 +1717,11 @@ def build_radar(강세레이더, 설정=None):
 
     # ── 1단: 오늘 새로 포착 ──
     def 시장블록(시장, 목록):
+        # 🔴 HO 지시 2026-09-17 — 비어도 «📡 코스피» 머리표는 남긴다.
+        #   전엔 문장 한 줄만 덜렁 남아 어느 시장 얘긴지 틀이 사라졌다.
         if not 목록:
-            return f'<p class="rd-empty">{시장} — 오늘 새로 포착된 종목이 없습니다.</p>'
+            return (f'<div class="rd-market"><p class="rd-mkt-name">📡 {시장}</p>'
+                    f'<p class="rd-empty">오늘 새로 포착된 종목이 없습니다.</p></div>')
 
         def 행(rank, s):
             등락 = s.get("등락률") or 0
@@ -2898,8 +2901,33 @@ def build_core_strong(강세레이더):
                 s = dict(s)
                 s.setdefault("시장", 시장)
                 후보.append(s)
+    # 🔴 HO 지시 2026-09-17 — «없어도 틀은 나와야지».
+    #   [무엇이 문제였나] 후보가 0이면 빈 문자열을 돌려줘 카드가 «통째로»
+    #   사라졌다. 그러면 독자는 「오늘 강세가 없었다」가 아니라
+    #   「이 코너가 없어졌다 / 고장났다」로 읽는다.
+    #   매일 같은 자리에 같은 틀이 있어야 «오늘은 비었다»가 정보가 된다.
+    #   ⚠️ 0은 고장이 아니다 — 조건(코스피 4%↑·코스닥 5%↑ + 거래량 급증)이
+    #      빡빡해서 하루 종일 안 걸리는 날이 실제로 있다.
     if not 후보:
-        return ""
+        _추적수 = len((강세레이더 or {}).get("추적") or [])
+        return ('<div style="background:linear-gradient(160deg,#2b1a16,#241713);'
+                'border:1.5px solid #5a3229;border-radius:14px;'
+                'padding:15px 15px 14px;margin:12px 0 0">'
+                '<p style="margin:0 0 3px;font-size:11.5px;color:#ff6b4a;'
+                'font-weight:700">강세 레이더</p>'
+                '<p style="margin:0 0 8px;font-size:17.5px;font-weight:800;'
+                'color:#f2f4f7"><span class="cp-flame">🔥</span> 오늘 강한 종목</p>'
+                '<p style="margin:0;font-size:12.5px;color:#c9ced6;line-height:1.7">'
+                '오늘은 <b style="color:#e8eaee">조건을 통과한 종목이 없습니다.</b><br>'
+                '조건이 <b>코스피 4%↑ / 코스닥 5%↑ + 거래량 급증</b>으로 빡빡해서 '
+                '안 걸리는 날이 있어요 — 고장이 아니라 <b>오늘 그런 자리가 '
+                '없었다</b>는 기록입니다.</p>'
+                + (f'<p style="margin:8px 0 0;padding-top:8px;'
+                   f'border-top:.5px solid rgba(255,255,255,.08);'
+                   f'font-size:10.5px;color:#7d848f;line-height:1.6">'
+                   f'📡 앞서 포착한 <b style="color:#c9ced6">{_추적수}종목</b>은 '
+                   f'계속 추적 중입니다.</p>' if _추적수 else "")
+                + '</div>')
     # 🆕 2026-08-22 HO 지시 — 핵심편은 **최대 2종목**까지만.
     #    ⚠️ 무료 사용자는 핵심편만 본다. 전부 보여주면 유료로 갈 이유가 없어진다.
     #    규칙: 「돈이 몰린 종목」1개 + 「V자 반등 종목」1개.
@@ -3123,8 +3151,20 @@ def build_core_accum(매집):
             뽑기.append(_찾음)
             _쓴이름.add(_찾음[0].get("종목명"))
     _core_accum_save(_쓴이름)
+    # 🔴 HO 지시 2026-09-17 — 강세와 같은 이유로, 비어도 틀은 남긴다.
     if not 뽑기:
-        return ""
+        return ('<div style="background:linear-gradient(160deg,#16232b,#131a24);'
+                'border:1.5px solid #2b4a52;border-radius:14px;'
+                'padding:15px 15px 14px;margin:12px 0 0">'
+                '<p style="margin:0 0 3px;font-size:11.5px;color:#74f0d4;'
+                'font-weight:700">매집 레이더</p>'
+                '<p style="margin:0 0 8px;font-size:17.5px;font-weight:800;'
+                'color:#f2f4f7"><span class="cp-turtle">🐢</span> '
+                '외국인, 기관이 조용히 매집하는 종목</p>'
+                '<p style="margin:0;font-size:12.5px;color:#c9ced6;line-height:1.7">'
+                '오늘은 <b style="color:#e8eaee">조건을 통과한 종목이 없습니다.</b><br>'
+                '외인·기관이 <b>며칠 연속</b>으로, 그것도 <b>시총 대비 크게</b> '
+                '담은 종목만 올라오기 때문에 비는 날이 있어요.</p></div>')
 
     색맵 = {"코스피": "#f0c65a", "코스닥": "#74f0d4"}
     행들 = []
@@ -3197,7 +3237,12 @@ def build_core_accum(매집):
             #    종목마다 붙이면 시끄러우니(1차 시도의 실패) 규칙은 여기
             #    한 곳에서만, 대신 줄을 바꿔 눈에 띄게 적는다.
             f'<b style="color:#74f0d4">📉 주가가 하락한 종목일수록 점수가 높습니다</b> '
-            f'— 이미 오른 걸 쫓아 산 게 아니라는 뜻이라서예요.</p></div>')
+            f'— 이미 오른 걸 쫓아 산 게 아니라는 뜻이라서예요.</p>'
+            # ⚠️ 2026-09-17 — 여기에 «아래 상세표와 왜 다른지» 안내를 한 번
+            #   넣었다가 HO 지시로 뺐다. 설명이 길어지면 카드가 무거워진다.
+            #   (차이 자체는 설계대로다: 이 카드는 최근 소개분을 피해 새 얼굴을
+            #    뽑고, 상세표는 기간별 전체 순위를 그대로 보여준다.)
+            f'</p></div>')
 
 
 def build_closing(해석, 날짜표기=""):
@@ -5695,7 +5740,16 @@ def build_my_stocks(data):
               ① 자리(섹터) 대비 ② 크기(시총 층) 대비 ③ 종목 수급 ④ 레이더 이력
        ⚠️ 없는 건 만들지 않는다. 각 블록은 재료가 있을 때만 나온다.
        ══════════════════════════════════════════════════ */
+    /* 🔴 HO 지시 2026-09-17 — «오늘 분석이 너무 번잡하다».
+       [진단] 블록이 최대 8종류까지 «조건이 맞는 대로 전부» 붙는다.
+              각 블록은 다 맞는 말이라 뺄 근거가 없었고, 그래서 다 붙었다.
+       [해법] 지우는 게 아니라 «고르게» 한다. 각 블록에 «오늘 이 종목에서
+              얼마나 튀는 값인가»(w)를 같이 실어, 큰 것 2개만 위에 세운다.
+       ⚠️ 나머지는 버리지 않고 아래에 그대로 둔다 — HO가 며칠 보고
+          뺄지 정하기로 했다(2026-09-17). 판단할 재료를 없애지 않는다.
+       ⚠️ w는 «절대 크기»다. 부호(좋다/나쁘다)가 아니라 «눈에 띄는 정도». */
     var _add=[], _자리말함=false;
+    function _ad(w, t){ _add.push({w:(w||0), t:t}); }
 
     /* ① 자리 대비 — "내 종목이 못 간 게 종목 탓인가 자리 탓인가" */
     var _z=null;
@@ -5745,13 +5799,13 @@ def build_my_stocks(data):
         _why=' 섹터를 움직인 재료가 이 종목까지는 오지 않았어요.';
        }
       }
-      _add.push('🗺️ 같은 섹터(<b>'+_z.z+'</b>)는 '+fmt(_z.v)+'%였는데 이 종목은 '+
+      _ad(Math.abs(_gap), '🗺️ 같은 섹터(<b>'+_z.z+'</b>)는 '+fmt(_z.v)+'%였는데 이 종목은 '+
        fmt(_ret)+'%예요 — '+(_gap<0
          ? '<b style="color:#ff9a3c">섹터는 올랐는데 이 종목만 못 따라갔어요.</b>'+_why
          : '<b style="color:#74f0d4">섹터보다 더 갔어요 — 종목 자체의 힘이에요</b>'));
       _자리말함=true;
      }else{
-      _add.push('🗺️ 같은 섹터(<b>'+_z.z+'</b>) '+fmt(_z.v)+'% · 이 종목 '+fmt(_ret)+
+      _ad(0.5, '🗺️ 같은 섹터(<b>'+_z.z+'</b>) '+fmt(_z.v)+'% · 이 종목 '+fmt(_ret)+
        '% — <b>섹터 흐름을 그대로 따라갔어요</b>');
       _자리말함=true;
      }
@@ -5782,11 +5836,11 @@ def build_my_stocks(data):
      var _풀이={'대형':'시총이 큰 종목','중형':'시총이 중간인 종목',
               '소형':'시총이 작은 종목'};
      if(_best&&_best!==_my층&&(_쓸층[_best]-_쓸층[_my층])>=0.8){
-      _add.push('📏 오늘은 '+_범위+'<b>'+_풀이[_best]+'</b>들이 '+fmt(_쓸층[_best])+'% 갔는데, '+
+      _ad(Math.abs(_쓸층[_best]-_쓸층[_my층]), '📏 오늘은 '+_범위+'<b>'+_풀이[_best]+'</b>들이 '+fmt(_쓸층[_best])+'% 갔는데, '+
        '이 종목이 속한 <b>'+_풀이[_my층]+'</b>들은 '+fmt(_쓸층[_my층])+'%였어요 — '+
        '<b style="color:#ff9a3c">같은 섹터를 골랐어도 시총 크기 때문에 밀릴 수 있는 날</b>이었어요');
      }else if(_best===_my층){
-      _add.push('📏 오늘은 '+_범위+'<b>'+_풀이[_my층]+'</b>들이 '+fmt(_쓸층[_my층])+
+      _ad(0.6, '📏 오늘은 '+_범위+'<b>'+_풀이[_my층]+'</b>들이 '+fmt(_쓸층[_my층])+
        '%로 가장 잘 갔어요 — 이 종목이 <b>그 무리에 속해 유리한 날</b>이었어요');
      }
     }
@@ -5820,7 +5874,7 @@ def build_my_stocks(data):
       else break;
      }
      if(_이탈연속>=3){
-      _add.push('⚠️ 최근 <b>'+_이탈연속+'거래일 연속</b> <b>'+_z.z+'</b> 섹터보다 '+
+      _ad(_이탈연속*1.5, '⚠️ 최근 <b>'+_이탈연속+'거래일 연속</b> <b>'+_z.z+'</b> 섹터보다 '+
        '뒤처지고 있어요 (평균 <b style="color:#5b9bff">'+
        (_이탈합/_이탈연속).toFixed(1)+'%p</b>) — 종목 자체에 원인이 있는지 '+
        '살펴볼 때예요');
@@ -5838,7 +5892,7 @@ def build_my_stocks(data):
       var _평균=_누적/_diffs.length;
       if(Math.abs(_평균)>=0.3){
        var _이김=_평균>0;
-       _add.push('📈 최근 <b>'+_diffs.length+'거래일</b> 동안 <b>'+_z.z+'</b> 섹터보다 '+
+       _ad(Math.abs(_평균)*2, '📈 최근 <b>'+_diffs.length+'거래일</b> 동안 <b>'+_z.z+'</b> 섹터보다 '+
         '하루 평균 <b style="color:'+(_이김?'#74f0d4':'#ff9a3c')+'">'+
         (_평균>=0?'+':'')+_평균.toFixed(1)+'%p</b> '+(_이김?'앞섰어요':'뒤졌어요')+
         ' (<b>'+_이긴날+'/'+_diffs.length+'일</b> 섹터 상회) — '+
@@ -5913,7 +5967,7 @@ def build_my_stocks(data):
      var _꼬리=(_일수>=2)?'':
       ' <span style="color:#6f7784">(기록 1일차 — 쌓이는 대로 흐름을 붙입니다)</span>';
      var _문='💰 최근 '+_일수+'거래일 합계 외국인 '+_f문+' · 기관 '+_g문+_꼬리;
-     if(Math.abs(_합)>=50||_일수>=2) _add.push(_문);
+     if(Math.abs(_합)>=50||_일수>=2) _ad(Math.min(4, Math.abs(_합)/50), _문);
     }
 
     /* ④ 레이더 이력 — 「이번이 3번째」는 우리 기록만 아는 정보다. */
@@ -5939,13 +5993,31 @@ def build_my_stocks(data):
        ') · 최고 <span style="color:'+_hc+'">'+
        (_cs.최고>=0?'+':'')+_cs.최고+'%</span>';
      }
-     _add.push(_문4);
+     _ad(1.2, _문4);
     }
 
+    /* 🔴 HO 지시 2026-09-17 — 위에 «핵심 2개», 아래에 «나머지 전부».
+       [왜 두 벌인가] 지금 바로 8개를 2개로 줄여버리면, 빠진 6개가
+       정말 없어도 되는 것인지 판단할 재료가 사라진다. HO가 며칠 보고
+       정하기로 했으므로 «둘 다» 보여준다(2026-09-17).
+       ⚠️ 정리되면 아래 «전체» 블록만 지우면 된다 — 위 블록은 그대로 둔다.
+       ⚠️ 두 벌이라 같은 말이 두 번 나온다. 그 사실을 아래 블록 머리에
+          적어 둔다 — 안 적으면 그냥 중복 버그로 보인다(원칙10). */
     if(_add.length){
-     분석+='<span style="display:block;margin-top:6px;padding:8px 10px;'+
-      'background:#141922;border-radius:8px;font-size:12px;color:#a8b0ba;'+
-      'line-height:1.75">'+_add.join('<br>')+'</span>';
+     var _srt=_add.slice().sort(function(a,b){ return b.w-a.w; });
+     var _top=_srt.slice(0,2);
+     분석+='<span style="display:block;margin-top:6px;padding:9px 11px;'+
+      'background:#141922;border-radius:8px;border-left:3px solid #e0c060;'+
+      'font-size:12.5px;color:#c3cad4;line-height:1.8">'+
+      _top.map(function(x){return x.t;}).join('<br>')+'</span>';
+     if(_add.length>2){
+      분석+='<span style="display:block;margin-top:5px;padding:8px 10px;'+
+       'background:#0f131a;border-radius:8px;font-size:11px;color:#8b93a0;'+
+       'line-height:1.7">'+
+       '<b style="display:block;font-size:9.5px;color:#6f7784;'+
+       'letter-spacing:.04em;margin-bottom:4px">나머지 항목 (정리 검토 중)</b>'+
+       _add.map(function(x){return x.t;}).join('<br>')+'</span>';
+     }
     }
     // ⚠️ 20일 하나만 보면 "그래서 뭐"가 남는다(2026-08-20).
     //    당일·5일·20일·60일을 다 계산해 **가장 인상적인 창**을 골라 덧붙인다.
@@ -10524,17 +10596,19 @@ def build_core(핵심편, data, 해석):
                f'<small>1단계 · 오늘 테마들이 어디에 모였나</small>'
                f'📡 테마 레이더'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
-               f' · 4일 누적 점수 순위</span></p>'
+               f' · {THEME_CUM_DAYS}일 누적 <b>1~10위</b></span></p>'
              + build_theme_radar(data)
              + f'<p class="sec-label">'
                f'<small>2단계 · 아직 10위 밖, 올라오는 중인 테마</small>'
-               f'🛬 다가오는 테마 — 10위권 진입까지</p>'
+               f'🛬 다가오는 테마'
+               f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
+               f' · 같은 {THEME_CUM_DAYS}일 누적 <b>11~20위</b></span></p>'
              + build_coming_themes(data)
              + f'<p class="sec-label">'
                f'<small>3단계 · 그 테마들이 어느 섹터 소속인가</small>'
                f'🗺️ 섹터 × 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
-               f' · 섹터는 중앙값 기준</span></p>'
+               f' · 같은 순위를 섹터별로 · 섹터는 중앙값</span></p>'
              + build_sector_theme(data)
              + f'<p class="sec-label">'
                f'<small>4단계 · 누적 말고, 오늘 하루만 센 테마</small>'
@@ -11485,6 +11559,69 @@ _RADAR_ZONE = {
 _RADAR_ETC = 222          # 구역 미상 테마를 모으는 「기타」 방향
 _RADAR_LABEL = [("반도체", 0), ("2차전지", 72), ("에너지", 136),
                 ("건설", 172), ("기타", 222), ("통신", 288), ("자동차", 318)]
+# ══════════════════════════════════════════════════════════════
+# 🔴 HO 지시 2026-09-17 — 테마 세 코너의 «색을 하나로» 묶는다.
+#
+#   [무엇이 문제였나] 같은 빨강(#ff5a4e)이 코너마다 다른 뜻이었다.
+#     · 테마 레이더   → "올라오는 중"   (상태)
+#     · 다가오는 테마 → "고속"          (속도)
+#     · 섹터 × 테마   → "1~5위"         (순위)
+#   셋 다 «센 것»이긴 한데 «재는 축»이 달랐다. 독자는 색을 세 번 배워야 했고,
+#   그래서 색이 정보가 아니라 소음이 됐다.
+#
+#   [고른 축 — «순위»가 아니라 «움직임»] 이유 두 가지.
+#     ① 「다가오는 테마」는 전부 11~20위라 순위로는 색을 나눌 수가 없다.
+#        순위를 축으로 삼으면 그 코너 하나를 통째로 포기해야 한다.
+#     ② 섹터×테마는 이미 «테마 1위»라고 «글자»로 순위를 적고 있다.
+#        색까지 순위를 말하면 같은 말을 두 번 하는 셈이다(원칙5).
+#   → 색은 «다가오나 멀어지나»만 말한다. 순위는 글자가 말한다.
+#
+#   [읽는 법 — 이 여섯 색이 리포트 테마 코너 전체의 문법이다]
+#     🟡 노랑  오늘 첫 등장
+#     🔴 빨강  빠르게 올라오는 중 (5칸 이상)
+#     🟠 주황  올라오는 중       (2~4칸)
+#     🟢 초록  제자리
+#     ⚪ 회색  판단할 기록 없음
+#     🔵 파랑  밀려나는 중       (2칸 이상 하락)
+#   ⚠️ 파랑=하락은 리포트 전체 규칙과 같다. 여기서만 뒤집지 않는다.
+# 🔴 2026-09-17 실측 조정 — 처음 5칸/2칸으로 잡았더니 레이더 8개 중 5개가
+#   전부 «빠르게»로 나왔다(14→1, 15→3, 13→5, 13→6…). 4일 누적 순위는
+#   원래 변동이 커서, 5칸은 «빠름»의 기준으로 너무 낮다.
+#   8칸/3칸으로 올리니 빠름3 · 올라옴3 · 제자리1 · 밀림1로 갈렸다.
+#   ⚠️ 색은 «구분»이 목적이다. 다 같은 색이면 색이 없는 것과 같다.
+MOVE_FAST, MOVE_SLOW = 8, 3      # 칸 수 기준 (빠름 / 느림)
+_MC = {"new": TM_NEW, "hot": TM_HOT, "warm": TM_WARM,
+       "hold": TM_COOL, "flat": TM_FLAT, "down": TM_DOWN}
+_ML = {"new": "오늘 첫 등장", "hot": "빠르게 올라오는 중", "warm": "올라오는 중",
+       "hold": "제자리", "flat": "기록 없음", "down": "밀려나는 중"}
+
+
+def move_tier(이전, 현재):
+    """순위 이동 → 공통 색 등급. 이전이 None이면 «오늘 첫 등장»."""
+    if 현재 is None:
+        return "flat"
+    if 이전 is None:
+        return "new"
+    d = 이전 - 현재                  # 양수 = 순위가 올라왔다
+    if d >= MOVE_FAST:
+        return "hot"
+    if d >= MOVE_SLOW:
+        return "warm"
+    if d <= -MOVE_SLOW:
+        return "down"
+    return "hold"
+
+
+def move_key(작게=False):
+    """세 코너가 같이 쓰는 색 범례. 한 번만 보면 되도록 문장을 짧게."""
+    항목 = [("new", "첫 등장"), ("hot", "빠르게 ↑"), ("warm", "↑"),
+           ("hold", "제자리"), ("down", "↓")]
+    return ('<div class="tm-key' + (' tm-key-s' if 작게 else '') + '">'
+            + "".join(f'<span><i style="background:{_MC[k]}"></i>{t}</span>'
+                      for k, t in 항목) + '</div>')
+
+
+# ⚠️ 옛 이름(_RC·_RL)은 테마 레이더가 쓰던 것이다. 새 체계로 이어 붙인다.
 _RC = {"new": TM_NEW, "in": TM_HOT, "hold": TM_COOL, "out": TM_DOWN}
 _RL = {"new": "오늘 첫 등장", "in": "올라오는 중",
        "hold": "제자리", "out": "밀려나는 중"}
@@ -11586,8 +11723,28 @@ def _flow_lead():
     단계 = ["어디에 모였나", "올라오는 중", "어느 섹터인가",
            "오늘 하루만", "맞았나", "더 크게, 더 길게"]
     칩 = "".join(f'<span><b>{i}</b>{t}</span>' for i, t in enumerate(단계, 1))
+    # 🔴 HO 지시 2026-09-17 — «세 코너가 같은 순위표의 다른 구간»임을
+    #   화면에도 적는다.
+    #   [왜 중요한가] 1~3단계는 전부 _theme_cum_rank() «하나»를 쓴다.
+    #     · 1단계 테마 레이더   = 4일 누적 1~10위
+    #     · 2단계 다가오는 테마 = 같은 표의 11~20위
+    #     · 3단계 섹터 × 테마   = 같은 표를 섹터별로 묶은 것
+    #   이걸 모르면 «세 코너가 서로 다른 계산을 한다»고 오해한다. 실제로는
+    #   11위였던 테마가 9위로 올라오면 2단계에서 1단계로 «자리를 옮기는»
+    #   것뿐이다. 그 사실을 알아야 세 코너가 하나의 이야기로 읽힌다.
+    #   ⚠️ 4일인 이유도 같이 적는다 — 임의로 고른 숫자가 아니라 실측이다
+    #     (당일 점수만 쓰면 어제 상위10 중 오늘 남는 게 0개, 4일이면 78%,
+    #      5일은 오히려 72.5%로 떨어진다 — 주말 너머 잔열이 섞여서).
     return (f'<div class="sec-map"><p class="sm-h">🧭 테마 탭은 이 순서로 읽습니다</p>'
-            f'<div class="sm-c">{칩}</div></div>')
+            f'<div class="sm-c">{칩}</div>'
+            f'<p class="sm-n">1~3단계는 <b>같은 순위표</b>를 나눠 봅니다 — '
+            f'<b>최근 {THEME_CUM_DAYS}거래일 누적 점수</b> 기준으로 '
+            f'<b>①은 1~10위</b>, <b>②는 11~20위</b>, '
+            f'<b>③은 그 순위를 섹터별로</b> 묶은 것이에요. '
+            f'그래서 11위였던 테마가 올라오면 ②에서 ①로 자리를 옮깁니다.<br>'
+            f'<span class="sm-s">하루치가 아니라 {THEME_CUM_DAYS}일을 더하는 이유는, '
+            f'당일 점수만 쓰면 어제 10위권이 오늘 거의 다 바뀌어 흐름이 안 보이기 '
+            f'때문이에요.</span></p></div>')
 
 
 def build_theme_radar(data):
@@ -11637,16 +11794,15 @@ def build_theme_radar(data):
         k = round(a); c = used.get(k, 0); used[k] = c + 1
         r["ang"] = a + (0 if c == 0 else (14 * c if c % 2 else -14 * c))
 
-    # 상태 판정 — 5일 전 대비 ±THEME_MOVE_TH 칸
+    # 상태 판정 — 5일 전 대비 몇 칸 움직였나
+    # 🔴 2026-09-17 — 4단계(new/in/hold/out) → «세 코너 공통» 6단계.
+    #   [왜] 예전엔 «올라오는 중» 하나로 3칸이든 15칸이든 같은 빨강이었다.
+    #   다가오는 테마는 이미 고속·가속을 나누고 있어 축이 안 맞았다.
+    #   이제 move_tier() 하나가 세 코너를 다 판정한다.
     for r in rows:
         seq = [x for x in r["h"][:-1] if x and x <= THEME_TOPN]
         r["from"] = seq[0] if seq else None
-        if r["from"] is None:
-            r["st"] = "new"
-        else:
-            d = r["from"] - r["h"][-1]
-            r["st"] = ("in" if d >= THEME_MOVE_TH
-                       else ("out" if d <= -THEME_MOVE_TH else "hold"))
+        r["st"] = move_tier(r["from"], r["h"][-1])
 
     CX, CY, RMAX = 190, 182, 120
     def RR(rank):
@@ -11686,7 +11842,7 @@ def build_theme_radar(data):
 
     for r in rows:
         a = r["ang"]; x, y = POS(r["h"][-1], a)
-        c = _RC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
+        c = _MC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
         if r["from"]:
             ox, oy = POS(r["from"], a)
             d = math.hypot(x - ox, y - oy)
@@ -11771,7 +11927,7 @@ def build_theme_radar(data):
     lis = []
     _나이맵, _중앙, _표본 = _theme_age_map()
     for r in rows:
-        c = _RC[r["st"]]
+        c = _MC[r["st"]]
         _ph, _over = _age_phrase(_나이맵.get(r["n"]), _중앙, _표본)
         # ⚠️ 여기에 이모지(⏱)를 쓰면 일부 안드로이드 폰트에서 네모로 깨진다.
         #    색(호박색)만으로도 「오래됐다」는 충분히 읽힌다.
@@ -11799,7 +11955,7 @@ def build_theme_radar(data):
             f'<span class="tm-nm">{r["n"]}</span>{arw}</div>'
             f'<div class="tm-l2">'
             f'<span class="tm-st" style="color:{c};border-color:{c}55;'
-            f'background:{c}18">{_RL[r["st"]]}</span>'
+            f'background:{c}18">{_ML[r["st"]]}</span>'
             f'<span class="tm-mv">{mv}</span>'
             # 🆕 2026-09-17 — «5일 중 2일 10위권»(11글자)이 길어서 행마다
             #   이 조각만 아랫줄로 떨어졌다. 줄 수가 들쭉날쭉하면 목록이
@@ -11810,12 +11966,10 @@ def build_theme_radar(data):
     prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
     cur = {k for k, _ in rk[last][:10]}
     out = sorted(prev - cur)
-    key = "".join(f'<span><i style="background:{_RC[s]}"></i>{_RL[s]}</span>'
-                  for s in ("new", "in", "hold", "out"))
     # 🆕 2026-09-17 — 높이를 350 → 372로. 라벨을 아래쪽으로 내보내려면
     #   내려갈 자리가 있어야 한다(원 바깥 아래가 32px뿐이었다).
     return (f'<div class="tm-rd"><svg viewBox="0 0 380 372">{"".join(sv)}</svg></div>'
-            f'<div class="tm-key">{key}</div>{"".join(lis)}'
+            f'{move_key()}{"".join(lis)}'
             f'<div class="tm-foot">🌫 어제 있다 오늘 빠진 곳 · '
             f'{" · ".join(out) if out else "없음"}</div>')
 
@@ -11993,11 +12147,24 @@ def build_coming_themes(data):
             eta = max(1, min(14, round(need / slope)))
 
         km = 0 if old is None else max(-100, min(100, round((old - cur) / 10 * 100 / 20) * 20))
-        if km >= 80:   g, gc = "고속", TM_HOT
-        elif km >= 40: g, gc = "가속", TM_WARM
-        elif km > 0:   g, gc = "서행", TM_COOL
-        elif km == 0:  g, gc = "정지", TM_FLAT
-        else:          g, gc = ("후진" if km > -60 else "급후진"), TM_DOWN
+        # 🔴 2026-09-17 — 색을 세 코너 공통 체계(move_tier)로 맞춘다.
+        #   [무엇이 달라지나] 등급 «이름»(고속·가속·서행…)은 그대로 둔다.
+        #   여기선 이름이 곧 속도라 값어치가 있다. 바뀌는 건 «색»뿐이다.
+        #   [왜 이름은 그대로] 레이더의 «빠르게 올라오는 중»과 여기의 «고속»은
+        #   같은 것을 다른 말로 부르는 게 아니라, 같은 색 아래 놓인 같은 뜻이다.
+        #   색이 통일되면 이름이 달라도 독자는 바로 잇는다.
+        _tier = move_tier(old, cur)
+        gc = _MC[_tier]
+        if km >= 80:   g = "고속"
+        elif km >= 40: g = "가속"
+        elif km > 0:   g = "서행"
+        elif old is None:
+            # ⚠️ old가 없으면 km이 0으로 계산돼 «정지»가 된다. 그런데 색은
+            #    move_tier가 «첫 등장»(노랑)을 준다 — 색과 말이 어긋난다.
+            #    기록이 없는 것과 안 움직인 것은 다르다. 말을 색에 맞춘다.
+            g = "신규"
+        elif km == 0:  g = "정지"
+        else:          g = ("후진" if km > -60 else "급후진")
 
         # 🔴 2026-09-15 — 「신호 없음」이 두 가지 완전히 다른 상황을 한 문구로
         #   뭉갰다. ① old(5일 전 순위)가 아예 없는 «갓 포착돼 기록이 안 쌓인»
@@ -12041,19 +12208,25 @@ def build_coming_themes(data):
     #     그러면 그림이 곧 «배지 읽는 법»이 되어 값어치가 생긴다.
     #   ⚠️ 색은 카드 배지와 «똑같은 값»을 쓴다. 여기서만 다른 색을 쓰면
     #      눈금표 구실을 못 한다.
-    _단계 = [("급후진", TM_DOWN), ("후진", TM_DOWN), ("정지", TM_FLAT),
-            ("서행", TM_COOL), ("가속", TM_WARM), ("고속", TM_HOT)]
+    # ⚠️ 눈금표 색은 «카드 배지와 똑같은 값»이어야 눈금 구실을 한다.
+    #    배지가 move_tier() 색을 쓰므로 여기도 그 색을 그대로 쓴다.
+    _단계 = [("급후진", _MC["down"]), ("후진", _MC["down"]), ("정지", _MC["flat"]),
+            ("서행", _MC["hold"]), ("가속", _MC["warm"]), ("고속", _MC["hot"])]
     _칸 = "".join(
         f'<span style="color:{c};background:{c}1f;border-color:{c}4d">{t}</span>'
         for t, c in _단계)
-    return ('<div class="tm-spd">'
+    return (move_key(작게=True) + '<div class="tm-spd">'
             f'<div class="tm-spd-sc">{_칸}</div>'
             '<div class="tm-spd-ax"><span>−100km</span>'
             '<span class="mid">0</span><span>+100km</span></div>'
             '<p class="tm-spd-n"><b>속도</b> = 최근 <b>5거래일</b> 동안 순위가 '
-            '움직인 칸수 (<b>10칸 = 100km</b>) · '
+            # 🔴 HO 지시 2026-09-17 — «+면/−면»은 줄을 바꾼다.
+            #   [왜] 앞은 «단위 정의», 뒤는 «부호 읽는 법»이라 말의 결이 다르다.
+            #   한 줄에 붙이면 가운뎃점 뒤가 앞 문장의 꼬리처럼 읽힌다.
+            '움직인 칸수 (<b>10칸 = 100km</b>)'
+            '<span class="tm-spd-sign">'
             '<b class="up">+면 다가오는 중</b>, <b class="dn">−면 멀어지는 중</b>'
-            '</p></div>'
+            '</span></p></div>'
             + "".join(cards)
             + '<div class="tm-foot">⚠️ 예측이 아니라 «지금 속도가 유지되면» 계산입니다. '
               '하루만 흐름이 바뀌어도 D-day는 달라집니다.<br>'
@@ -12104,16 +12277,25 @@ def _sector_cycle():
 
 
 def _sector_themes_by_score(data):
-    """{섹터명: [{n, rk, sc}, ...]} — «4일 누적 순위» 상위 3개.
+    """{섹터명: [{n, rk, sc, st, from}, ...]} — «4일 누적 순위» 상위 3개.
 
     ⚠️ collect_data의 네이버테마 목록은 «등락률 순»이다. 화면은 테마 레이더와
        같은 기준을 써야 하므로 여기서 누적 순위로 다시 정렬한다.
+    🔴 2026-09-17 — 5일 전 순위(from)와 움직임 등급(st)을 같이 실어 보낸다.
+       테마 레이더가 쓰는 것과 «똑같은» move_tier()를 써서, 두 코너에서
+       같은 테마가 같은 색으로 나오게 한다.
     """
     rk = _theme_cum_rank()
     days = sorted(rk)
     if not days:
         return {}
     today = {nm: (i + 1, sc) for i, (nm, sc) in enumerate(rk[days[-1]])}
+    # 5일 전 자리 — 레이더와 같은 창(최근 5거래일 중 가장 오래된 기록)
+    _win = days[-5:]
+    _past = {}
+    for dd in _win[:-1]:
+        for i, (nm, _sc) in enumerate(rk.get(dd) or []):
+            _past.setdefault(nm, i + 1)
     out = {}
     격자 = data.get("계좌격자") or {}
     for r in (격자.get("행") or []):
@@ -12124,7 +12306,9 @@ def _sector_themes_by_score(data):
         for nm in (r.get("네이버테마") or []):
             if nm in today:
                 pos, sc = today[nm]
-                lst.append({"n": nm, "rk": pos, "sc": sc})
+                _from = _past.get(nm)
+                lst.append({"n": nm, "rk": pos, "sc": sc, "from": _from,
+                            "st": move_tier(_from, pos)})
         lst.sort(key=lambda x: x["rk"])
         if lst:
             out[s] = lst[:3]
@@ -12196,7 +12380,20 @@ def build_sector_theme(data):
     cnt = [0]
     def 테마줄(t):
         cnt[0] += 1; pid = f"tms{cnt[0]}"
-        c = _tcol(t["rk"]); w = min(100, t["sc"] / 131 * 100)
+        # 🔴 HO 지시 2026-09-17 — 색을 «순위»가 아니라 «움직임»으로.
+        #   [전] _tcol(rk) — 1~5위 빨강 / 6~10위 주황 / 11~20위 초록.
+        #        그런데 순위는 바로 옆에 «테마 1위»라고 글자로 이미 적혀 있다.
+        #        색이 같은 말을 두 번 하고 있었다(원칙5).
+        #   [후] 테마 레이더와 «똑같은» move_tier() 색. 같은 테마가 두 코너에서
+        #        같은 색으로 나온다 — 색 하나만 익히면 리포트 어디서든 통한다.
+        c = _MC[t.get("st") or "flat"]; w = min(100, t["sc"] / 131 * 100)
+        # 몇 칸 움직였는지 — 색이 말하는 것의 «근거»를 숫자로 붙인다.
+        _f = t.get("from"); _mv = ""
+        if _f:
+            _d = _f - t["rk"]
+            if _d:
+                _mv = (f'<i class="tm-tmv" style="color:{c}">'
+                       f'{"▲" if _d > 0 else "▼"}{abs(_d)}</i>')
         arw, pan = _stock_panel(t["n"], mem.get(t["n"]) or [], pid)
         click = f" onclick=\"ztog('{pid}')\"" if arw else ""
         nm = t["n"].split("(")[0].strip()
@@ -12207,7 +12404,7 @@ def build_sector_theme(data):
         #   색을 더 쓰지 않고도 이름이 먼저 잡힌다.
         return (f'<div class="tm-t1"{click}><span class="tm-tl">'
                 f'<em>테마</em><b>{t["rk"]}위</b>'
-                f'<span class="tm-tnm">{nm}</span>{arw}</span>'
+                f'<span class="tm-tnm">{nm}</span>{_mv}{arw}</span>'
                 f'<div class="tm-t2b"><div class="tm-t2f" style="width:{w:.0f}%;'
                 f'background:repeating-linear-gradient(90deg,{c} 0 4px,transparent 4px 7px)">'
                 f'</div></div><span class="tm-tsr" style="color:{c}">{t["sc"]:.0f}점</span>'
@@ -12234,10 +12431,27 @@ def build_sector_theme(data):
           ("추격", "🌱 추격 섹터", TM_COOL, "섹터는 오르는데 테마가 아직 — 다음 후보"),
           ("눌림", "⏸️ 눌림 섹터", "#c9a227", "뜰 때가 지났는데 잠잠하다"),
           ("대기", "😴 대기 섹터", "#5f6b7d", "움직임 없음")]
+    # 🔴 HO 지적 2026-09-17 — "단타 섹터는 어디갔어?"
+    #   [진단] 버그가 아니다. 오늘은 단타 조건(섹터는 눌렸는데 그 안
+    #   테마만 10위권)에 걸린 섹터가 «실제로 없었다».
+    #   [그런데] 빈 구역을 통째로 지워버리니 «없어졌다 / 고장났다»로 읽힌다.
+    #   다섯 구역은 시장을 나누는 «지도»다. 지도에서 동네가 사라지면
+    #   독자는 길을 잃는다 — 비었으면 «비었다»고 말해야 한다(원칙4).
+    #   ⚠️ 빈 구역은 한 줄로 접는다. 자리는 지키되 폭은 안 먹게.
+    빈문구 = {
+        "주도": "오늘은 섹터와 테마가 같이 뜬 곳이 없습니다",
+        "단타": "오늘은 섹터는 눌렸는데 테마만 뜬 곳이 없습니다",
+        "추격": "오늘은 섹터만 오르고 테마는 아직인 곳이 없습니다",
+        "눌림": "오늘은 주기가 지났는데 잠잠한 곳이 없습니다",
+        "대기": "오늘은 조용한 섹터가 없습니다",
+    }
     out = []
     for k, title, c, desc in GM:
         v = G[k]
         if not v:
+            out.append(f'<div class="tm-grp tm-grp-off" style="border-color:{c}2e">'
+                       f'<div class="tm-gh tm-gh-off" style="color:{c}99">'
+                       f'{title}<span>{빈문구.get(k, "해당 섹터 없음")}</span></div></div>')
             continue
         if k == "대기":
             inner = ('<div class="tm-wg">' + "".join(
@@ -12248,11 +12462,9 @@ def build_sector_theme(data):
         out.append(f'<div class="tm-grp" style="border-color:{c}59">'
                    f'<div class="tm-gh" style="color:{c};border-bottom-color:{c}33">'
                    f'{title}<span>{desc}</span></div>{inner}</div>')
-    key = ('<div class="tm-key">'
-           '<span><i style="background:#ff5a4e"></i>테마 1~5위</span>'
-           '<span><i style="background:' + TM_WARM + '"></i>6~10위</span>'
-           '<span><i style="background:#3ecf9a"></i>11~20위</span></div>')
-    return key + "".join(out)
+    # ⚠️ 옛 범례(테마 1~5위/6~10위/11~20위)는 지운다 — 색의 «뜻»이 바뀌었다.
+    #    범례를 안 고치면 색은 새것인데 설명은 옛것이 되어, 없느니만 못하다.
+    return move_key(작게=True) + "".join(out)
 
 
 # ── v17 테마 3코너 전용 CSS ──
@@ -12280,6 +12492,10 @@ THEME_V17_CSS = """
   border:1px solid #243140;border-radius:999px;padding:3px 8px}
 .sec-map .sm-c b{font-size:9px;color:#0b0e13;background:#7f90a8;
   border-radius:999px;padding:0 4px;font-weight:800}
+.sec-map .sm-n{margin:9px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:10.5px;color:#7d8695;line-height:1.75}
+.sec-map .sm-n b{color:#b6bfcb;font-weight:700}
+.sec-map .sm-s{display:block;margin-top:4px;color:#626b79}
 .tm-rd{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:4px 0 0}
 .tm-rd svg{width:100%;display:block}
 .tm-key{display:flex;flex-wrap:wrap;gap:9px;font-size:10px;color:#9aa3b2;
@@ -12352,7 +12568,11 @@ THEME_V17_CSS = """
 .tm-spd-n b{color:#b6bfcb;font-weight:800}
 .tm-spd-n b.up{color:#ff5a4e}
 .tm-spd-n b.dn{color:#5b9bff}
+.tm-spd-sign{display:block;margin-top:2px}
 .tm-grp{border:1px solid;border-radius:11px;padding:0 10px 10px;margin-bottom:14px}
+/* 비어 있는 구역 — 자리는 지키되 소리는 줄인다 */
+.tm-grp-off{padding:0 10px;margin-bottom:8px;opacity:.7}
+.tm-gh-off{font-size:11.5px;padding:7px 0 6px;margin-bottom:0;border-bottom:none}
 .tm-gh{font-size:13.5px;font-weight:800;padding:10px 0 8px;margin-bottom:4px;
   border-bottom:1px solid}
 .tm-gh span{display:block;font-size:9.5px;color:#6f7784;font-weight:600;margin-top:3px}
@@ -12380,6 +12600,11 @@ THEME_V17_CSS = """
    [왜 얇게] 굵게 두르면 이번엔 테두리가 주인공이 된다. 1px에 낮은
    불투명도면 «경계는 보이되 소리는 안 나는» 선이 된다.
    ⚠️ 폭이 156px로 고정된 칸이라, 이름이 길면 테두리 안에서 말줄임.  */
+/* 순위 이동 표시 — 색이 말하는 것의 «근거»를 숫자로 보인다 */
+.tm-tmv{font-style:normal;font-size:9px;font-weight:800;margin-left:4px;
+  letter-spacing:-.04em}
+/* 작은 범례 — 두 번째부터는 «상기»만 시키면 되므로 한 단계 줄인다 */
+.tm-key-s{font-size:9px;gap:7px;margin:4px 0 9px;opacity:.85}
 .tm-tnm{display:inline-block;max-width:96px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;vertical-align:-3px;
   border:1px solid rgba(180,196,220,.34);border-radius:5px;
