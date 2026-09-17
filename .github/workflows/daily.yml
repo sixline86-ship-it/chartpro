@@ -341,6 +341,22 @@ jobs:
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: python notify_admin.py holiday "${{ steps.holiday.outputs.reason }}"
 
+      # 🆕 2026-09-17 — 수급만 못 읽은 날. 휴장과 «다른» 알림을 보낸다.
+      #   ⚠️ 발행은 막지 않는다 (if 조건에 closed != 'yes' 를 두어
+      #      휴장인 날에는 이 알림이 겹쳐 오지 않게 한다).
+      - name: 수급 수집 실패 알림 (운영자 전용)
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: |
+          if [ -f "FLOW_FAIL_FLAG" ]; then
+            python notify_admin.py flow_fail "$(cat FLOW_FAIL_FLAG)" || true
+          else
+            echo "✅ 수급 정상 수집 — 알림 없음"
+          fi
+
       # ── ② 해석글 생성 (실패해도 다음 단계로) ──
       # 💰 유일하게 돈이 드는 단계.
       #    수동 실행에서 '재사용'을 고르면 통째로 건너뛰고 기존 해석글을 그대로 쓴다.
