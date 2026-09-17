@@ -22,7 +22,7 @@ import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.09.14-v18"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
+SCRIPT_VERSION = "v2026.09.17-v19"   # ⬅ 버전 표시 (로그·리포트에서 확인용)
                              #    5개 파일(build_html/generate_report/collect_data/
                              #    make_thumb/notify_telegram)이 **항상 같은 번호**여야 한다.
                              #    번호가 다르면 일부 파일만 올라간 것이다.
@@ -349,6 +349,68 @@ def _dart_unzip_text(content):
 # ============================================================
 # ② 지수 + 수급
 # ============================================================
+# 🆕 2026-09-17 — 장 상태를 «네이버에게 직접 물어본다».
+#
+#   [왜 만드나] 지금까지 휴장 여부를 «거래대금이 작다» 같은 정황으로
+#     «추론»했다. 정황은 수집이 깨지면 같이 깨진다 — 실제로 9/17에
+#     수급 경로가 폐지되자 멀쩡한 거래일이 휴장으로 판정됐다.
+#   [해법] HO가 F12로 찾아낸 공식 API가 «isTradingDay»를 그대로 준다.
+#     추론할 필요가 없어진다.
+#
+#   GET https://stock.naver.com/api/stockSecurity/exchanges/market-status
+#       ?exchanges=krx
+#   응답: {"exchanges":[{"exchange":"krx","statuses":[
+#           {"marketType":"KOSPI","stockType":"stock",
+#            "today":{"date":"2026-09-17","isTradingDay":true,
+#                     "isWeekdayHoliday":false,"holidayDescription":null}, ...}]}]}
+#
+#   ⚠️ statuses에는 KOSPI·KOSDAQ·KONEX가 있고 stockType도 stock·etf·etn으로
+#      갈린다. 우리가 볼 것은 «KOSPI + stock» 하나다.
+#   ⚠️ exchanges는 krx만 묻는다. NXT는 거래소가 달라 휴장일이 같다는 보장이
+#      없고, 우리 데이터는 전부 KRX 기준이다.
+#   ⚠️ 못 구하면 None을 준다 — 그러면 예전처럼 거래대금으로 «추론»한다.
+#      이 API가 죽었다고 발행이 멈추면 안 된다(9/17 교훈).
+def collect_market_status():
+    """오늘이 거래일인가? (True / False / None=모름)"""
+    url = "https://stock.naver.com/api/stockSecurity/exchanges/market-status"
+    try:
+        res = requests.get(url, headers=HEADERS,
+                           params={"exchanges": "krx"}, timeout=10)
+        j = res.json()
+    except Exception as e:
+        print(f"  ⚠️ 장 상태 조회 실패 — {type(e).__name__}: {e} (거래대금으로 추론합니다)")
+        return None, {}
+
+    for ex in (j.get("exchanges") or []):
+        if str(ex.get("exchange") or "").lower() != "krx":
+            continue
+        for st in (ex.get("statuses") or []):
+            if st.get("marketType") != "KOSPI" or st.get("stockType") != "stock":
+                continue
+            t = st.get("today") or {}
+            거래일 = t.get("isTradingDay")
+            if not isinstance(거래일, bool):
+                continue
+            정보 = {"날짜": t.get("date"), "거래일": 거래일,
+                   "평일휴장": t.get("isWeekdayHoliday"),
+                   "휴장사유": t.get("holidayDescription"),
+                   "세션": ((st.get("latest") or {}).get("session") or {})
+                          .get("displayLabel")}
+            # ⚠️ API가 말하는 날짜가 우리가 아는 오늘과 다르면 믿지 않는다.
+            #    (예약이 밀려 새벽에 돌 때 날짜가 어긋난다 — 2026-08-27 사고)
+            _api날짜 = str(정보["날짜"] or "").replace("-", "")
+            if _api날짜 and _api날짜 != DATE:
+                print(f"  ⚠️ 장 상태 API 날짜({_api날짜})가 오늘({DATE})과 다릅니다 "
+                      f"— 판정에 쓰지 않습니다.")
+                return None, 정보
+            print(f"  📅 장 상태 — {정보['날짜']} 거래일={거래일}"
+                  + (f" · {정보['휴장사유']}" if 정보.get("휴장사유") else "")
+                  + (f" · {정보['세션']}" if 정보.get("세션") else ""))
+            return 거래일, 정보
+    print("  ⚠️ 장 상태 응답에서 KOSPI 항목을 못 찾았습니다 (거래대금으로 추론합니다)")
+    return None, {}
+
+
 def collect_index_and_flow():
     def 지수():
         url = "https://polling.finance.naver.com/api/realtime/domestic/index/KOSPI,KOSDAQ"
@@ -384,29 +446,97 @@ def collect_index_and_flow():
                 print(f"  ℹ️ 지수 API 필드 목록(거래대금 탐색용): {list(item.keys())}")
         return out
 
-    def 수급(sosok):
-        url = "https://finance.naver.com/sise/investorDealTrendDay.naver"
-        res = requests.get(url, headers=HEADERS,
-                            params={"bizdate": DATE, "sosok": sosok, "page": "1"}, timeout=12)
-        res.encoding = "euc-kr"
-        tables = read_html_safe(res.text)
-        표 = tables[0]
-        표.columns = ["날짜", "개인", "외국인", "기관계"] + list(표.columns[4:])
-        오늘행 = 표[표["날짜"].astype(str).str.replace(".", "", regex=False) == DATE[2:]]
-        if len(오늘행) == 0:
-            # ⚠️ 오늘 자료가 아직 안 올라온 경우 (2026-08-18 발견)
-            #    예전에는 표의 첫 줄(= 직전 거래일)을 조용히 가져다 오늘 값으로 저장했다.
-            #    그러면 **다른 날 수급이 오늘 숫자로 리포트에 실린다.**
-            #    → 남의 날짜를 오늘로 둔갑시키지 않는다. 못 구했으면 못 구했다고 한다.
-            실 = 표[표["날짜"].astype(str).str.contains(r"\d{2}\.\d{2}\.\d{2}", na=False, regex=True)]
-            찾음 = str(실.iloc[0]["날짜"]) if len(실) else "없음"
-            print(f"  ⚠️ 수급({sosok}) — {DATE} 자료가 아직 없습니다 "
-                  f"(표의 최신 날짜: {찾음}). 오늘 수급은 '미확보'로 둡니다.")
-            return None
-        r = 오늘행.iloc[0]
-        return {"개인": str(r["개인"]), "외국인": str(r["외국인"]), "기관계": str(r["기관계"])}
+    # 🔴🔴 2026-09-17 전면 교체 — 옛 경로가 «폐지»됐다.
+    #
+    #   [무슨 일] 네이버가 finance.naver.com/sise/investorDealTrendDay.naver 를
+    #     없앴다. 화면에 "이 페이지는 더 이상 제공되지 않습니다"가 뜬다.
+    #     표 머리글만 남고 데이터 행이 0개라 수급이 계속 None이 됐고,
+    #     그 탓에 멀쩡한 거래일(9/17, 거래대금 23조)이 「휴장」으로 판정됐다.
+    #
+    #   [새 경로] HO가 F12로 잡아준 주소 (2026-09-17).
+    #     GET https://stock.naver.com/api/domestic/market/trend/daily
+    #         ?tradeType=KRX&marketType=KOSPI&bizdate=YYYYMMDD
+    #         &startIdx=0&pageSize=N
+    #
+    #   ⚠️ tradeType은 «반드시 KRX». 넥스트레이드(NXT)가 생겨 거래가 둘로
+    #      갈렸는데, 지금까지 쌓인 수급 이력은 전부 KRX 기준이다.
+    #      여기서 NXT를 섞으면 어제까지의 기록과 비교가 통째로 깨진다.
+    #   ⚠️ marketType은 KOSPI / KOSDAQ (옛 sosok=01 / 02 를 대신한다).
+    #
+    #   [응답 생김새]
+    #     {"content":[{"bizdate":"20260917","netAmounts":[
+    #        {"investorGubun":"8000","diffValue":"-1206134000000", ...}, ...]}, ...]}
+    #     · 하루가 «한 덩어리», 그 안에 투자자 주체별 줄이 12개.
+    #     · diffValue = 순매수 «원» 단위 (우리 저장 단위는 억원 → ÷1e8).
+    #
+    #   [투자자 코드 — 추측이 아니라 실측 교차검증]
+    #     새 API의 9/16 값을 이미 저장해 둔 archive/data_20260916.json 과 맞춰본 결과
+    #       개인   8000                              → -12,061.3억 (저장 -12,061.0)
+    #       외국인 9000 + 9001(기타외국인)            → -16,725.8억 (저장 -16,726.0)
+    #       기관계 1000·2000·3000·3100·4000·5000·6000 → +12,251.1억 (저장 +12,251.0)
+    #     세 항목 모두 일치했고, 전체 순매수 합이 정확히 0이 나왔다
+    #     (순매수 총합은 정의상 0이어야 한다 — 이게 매핑이 맞다는 가장 강한 증거다).
+    #   ⚠️ 7000·7100은 기타법인 쪽이다. 우리가 안 쓰므로 합에 넣지 않는다.
+    #      단, 모르는 코드가 새로 나오면 로그에 남겨 조용히 새지 않게 한다.
+    _INV_개인 = {"8000"}
+    _INV_외국인 = {"9000", "9001"}
+    _INV_기관 = {"1000", "2000", "3000", "3100", "4000", "5000", "6000"}
+    _INV_기타 = {"7000", "7100"}
 
-    out = {"지수": 지수(), "코스피_수급": 수급("01"), "코스닥_수급": 수급("02")}
+    def 수급(marketType):
+        url = "https://stock.naver.com/api/domestic/market/trend/daily"
+        try:
+            res = requests.get(
+                url, headers=HEADERS,
+                params={"tradeType": "KRX", "marketType": marketType,
+                        "bizdate": DATE, "startIdx": "0", "pageSize": "5"},
+                timeout=12)
+            j = res.json()
+        except Exception as e:
+            print(f"  ⚠️ 수급({marketType}) 호출 실패 — {type(e).__name__}: {e}")
+            return None
+
+        # ⚠️ 오늘 날짜 덩어리만 고른다. 없으면 «없다»고 한다 —
+        #    옛 코드가 첫 줄(직전 거래일)을 오늘로 둔갑시켰던 사고(2026-08-18)
+        #    를 되풀이하지 않는다.
+        오늘 = next((c for c in (j.get("content") or [])
+                    if str(c.get("bizdate") or "") == DATE), None)
+        if 오늘 is None:
+            있는날 = [str(c.get("bizdate")) for c in (j.get("content") or [])][:3]
+            print(f"  ⚠️ 수급({marketType}) — {DATE} 자료가 아직 없습니다 "
+                  f"(응답의 날짜: {있는날 or '없음'}). 오늘 수급은 '미확보'로 둡니다.")
+            return None
+
+        합 = {"개인": 0.0, "외국인": 0.0, "기관계": 0.0}
+        본코드, 모르는코드 = set(), set()
+        for row in (오늘.get("netAmounts") or []):
+            코드 = str(row.get("investorGubun") or "")
+            try:
+                v = float(row.get("diffValue"))
+            except (TypeError, ValueError):
+                continue
+            본코드.add(코드)
+            if 코드 in _INV_개인:
+                합["개인"] += v
+            elif 코드 in _INV_외국인:
+                합["외국인"] += v
+            elif 코드 in _INV_기관:
+                합["기관계"] += v
+            elif 코드 not in _INV_기타:
+                모르는코드.add(코드)
+        if not 본코드:
+            print(f"  ⚠️ 수급({marketType}) — 투자자별 줄이 비어 있습니다.")
+            return None
+        if 모르는코드:
+            # ⚠️ 네이버가 주체를 새로 쪼개면 «기관계»가 조용히 작아진다.
+            #    에러가 안 나는 종류의 고장이라 반드시 눈에 띄게 찍는다.
+            print(f"  ⚠️ 수급({marketType}) — 모르는 투자자 코드 {sorted(모르는코드)} "
+                  f"(합산에서 빠졌습니다. 코드표를 갱신하세요)")
+        # 원 → 억원. 저장 형식은 옛 경로와 똑같이 «문자열»로 맞춘다
+        # (build_html·collect_data 여러 곳이 to_num()으로 읽는다).
+        return {k: f"{v / 1e8:.1f}" for k, v in 합.items()}
+
+    out = {"지수": 지수(), "코스피_수급": 수급("KOSPI"), "코스닥_수급": 수급("KOSDAQ")}
     print("✅ 지수/수급")
     return out
 
@@ -2512,6 +2642,17 @@ def collect_program_and_futures():
     결과["프로그램매매"] = collect_program_trading()
 
     # ── 선물 투자자별 수급 ──
+    # 🔴🔴 2026-09-17 경고 — 아래 경로는 «이미 폐지된 페이지»다.
+    #   지수 수급(위 collect_index_and_flow)이 쓰던 것과 같은 주소로,
+    #   9/17에 네이버가 "이 페이지는 더 이상 제공되지 않습니다"로 바꿨다.
+    #   → 선물수급은 오늘부터 계속 None이 될 것이다.
+    #
+    #   ⚠️ 발행은 막히지 않는다(선물수급은 보조 데이터라 None이어도 진행).
+    #      그래서 «조용히» 비어 갈 위험이 있다 — 반드시 로그에 남긴다.
+    #   👉 할 일: 지수 수급처럼 새 API(stock.naver.com/api/domestic/market/trend/daily)
+    #      로 옮겨야 한다. 다만 «선물»의 marketType 값을 모른다.
+    #      HO에게 F12로 선물 수급 화면의 요청 주소를 부탁할 것.
+    #      ⚠️ 추측해서 넣지 않는다 — 2026-09-15 startIdx 사고와 같은 자리다.
     for sosok in ("03", "04"):
         if 결과["선물수급"]:
             break
@@ -2536,6 +2677,9 @@ def collect_program_and_futures():
             print(f"✅ 선물수급 수집 (sosok={sosok})")
         except Exception as e:
             print(f"  ⚠️ 선물수급 sosok={sosok} 실패: {type(e).__name__}")
+    if not 결과["선물수급"]:
+        print("  🔴 선물수급 미확보 — 위 경로가 2026-09-17에 폐지됐습니다. "
+              "새 주소로 교체가 필요합니다(리포트의 파생 코너가 비어 나갑니다).")
 
     미확보 = [k for k in ("프로그램매매", "선물수급") if not 결과[k]]
     if 미확보:
@@ -6020,24 +6164,82 @@ if __name__ == "__main__":
         if isinstance(_m, dict):
             _종목수 += sum(v for v in _m.values() if isinstance(v, (int, float)))
 
+    # 🔴🔴 2026-09-17 재설계 — **실제 사고로 판정이 뒤집혔다.**
+    #
+    #   [무슨 일] 9/17(목)은 멀쩡한 거래일이었다(방산·우주항공 테마가 폭발했고
+    #     상한가만 7종목 이상). 그런데 「휴장」으로 판정돼 발행이 통째로 멈췄다.
+    #
+    #   [원인] 네이버가 수급 페이지(finance.naver.com/sise/investorDealTrendDay)를
+    #     «영구 폐지»했다 — 화면에 "이 페이지는 더 이상 제공되지 않습니다"가 뜬다.
+    #     표 머리글만 남고 데이터 행이 없어서 수급이 둘 다 None이 됐다.
+    #
+    #   [설계 결함] 옛 코드는 «수급이 둘 다 None이면 그 자체로 휴장 확정»이었고,
+    #     심지어 1순위가 걸리면 거래대금은 **보지도 않고** 넘어갔다.
+    #     그 전제는 「수급 수집은 안 깨진다」였는데, 그 전제가 무너진 것이다.
+    #     수집원 하나가 죽으면 정상 거래일이 전부 휴장이 된다 — 조용한 전면 정지.
+    #
+    #   [새 원칙] **휴장의 증거는 «돈이 안 돌았다»이지 «우리가 못 읽었다»가 아니다.**
+    #     · 거래대금이 0이거나 비정상적으로 작다 → 휴장 (돈이 안 돌았다)
+    #     · 거래대금은 정상인데 수급만 없다   → 휴장이 아니라 «수집 실패»
+    #       (우리 쪽 고장이다. 발행을 멈출 게 아니라 고쳐야 한다)
+    #     · 둘 다 못 읽었다                  → 판단 보류(휴장으로 본다, 안전 우선)
+    #
+    #   ⚠️ 수급 미확보를 «휴장»과 한 통에 넣지 않는다. 두 상황은 조치가
+    #      완전히 다르다 — 휴장은 아무것도 안 하면 되고, 수집 실패는
+    #      사람이 손을 대야 한다. 같은 메시지로 나가면 원인을 못 찾는다.
+    _수급실패 = (_코수 is None and _닥수 is None)
+    _대금정상 = (_총대금 is not None and _총대금 >= 1_000_000)
+
+    # ── 0순위: 거래소에게 직접 묻는다 (2026-09-17 신설) ──
+    #   ⚠️ 이게 있으면 아래 «추론»은 아예 안 한다. 정황보다 공식 답이 세다.
+    _거래일, _장상태 = collect_market_status()
+    전체["장상태"] = _장상태
+
     _사유 = []
-    # ── 1순위: 날짜 검증된 신호 ──
-    if _코수 is None and _닥수 is None:
-        _사유.append("오늘 날짜의 수급 자료가 없음(코스피·코스닥 둘 다)")
-    # ── 2순위: 보조 신호(거래대금 크기) — 1순위가 못 잡는 경우의 대비용 ──
-    if not _사유:
+    if _거래일 is False:
+        _사유.append("거래소가 오늘을 휴장일로 알려줌"
+                   + (f" — {_장상태.get('휴장사유')}" if _장상태.get("휴장사유") else ""))
+    elif _거래일 is True:
+        # ⚠️ 거래일이 확실하면 «절대» 휴장으로 넘기지 않는다.
+        #    수집이 아무리 깨져도 그건 우리 고장이지 휴장이 아니다(9/17 교훈).
+        pass
+    else:
+        # ── 장 상태를 못 구했을 때만 예전처럼 거래대금으로 추론한다 ──
         if _총대금 is None:
-            _사유.append("거래대금을 읽지 못함")
+            if _수급실패:
+                _사유.append("거래대금·수급 자료를 둘 다 읽지 못함")
         elif _총대금 <= 0:
             _사유.append("거래대금 0")
-        elif _총대금 < 1_000_000:  # 정상일은 코스피만 28조 수준. 5% 미만이면 의심
+        elif _총대금 < 1_000_000:   # 정상일은 코스피만 28조 수준. 5% 미만이면 의심
             _사유.append(f"거래대금이 비정상적으로 작음({_총대금:,.0f}백만)")
-    # (등락종목수 조건 삭제 — 위 주석 참조. 판정은 수급·거래대금 둘로만 한다.)
+    # ⚠️ 여기서 «수급 없음»은 사유에 넣지 않는다 — 그건 아래 «수급수집실패»다.
 
     전체["휴장의심"] = {"판정": bool(_사유), "사유": _사유,
+                    "근거": ("거래소 공식" if _거래일 is not None else "거래대금 추론"),
+                    "거래일여부": _거래일,
                     "총거래대금_백만": _총대금,
                     "등락종목수합": _종목수, "등락종목수_판정에사용": False,
                     "코스피수급확보": _코수 is not None, "코스닥수급확보": _닥수 is not None}
+
+    # 🆕 2026-09-17 — «수집 실패»를 휴장과 분리해 따로 기록한다.
+    #   판정=True 면 daily.yml이 휴장과 «다른» 관리자 알림을 보낸다.
+    #   ⚠️ 발행 자체는 막지 않는다 — 수급 칸만 «미확보»로 비우고 나머지
+    #      (지수·테마·섹터·레이더·공시)는 전부 정상이기 때문이다.
+    #      하루를 통째로 버리는 것보다 한 칸을 비우고 밝히는 쪽이 낫다(원칙4).
+    #   ⚠️ 거래소가 «거래일»이라고 답한 날은, 거래대금을 못 읽었더라도
+    #      수급 실패로 본다. 장은 열렸는데 우리가 못 읽은 것이기 때문이다.
+    전체["수급수집실패"] = {
+        "판정": bool(_수급실패 and (_대금정상 or _거래일 is True)),
+        "코스피수급확보": _코수 is not None,
+        "코스닥수급확보": _닥수 is not None,
+        "총거래대금_백만": _총대금,
+        "사유": (["거래대금은 정상인데 오늘 수급(외국인·기관)만 못 읽음 "
+                "— 수집원 장애 또는 경로 폐지 의심"]
+               if (_수급실패 and _대금정상) else []),
+    }
+    if _수급실패 and _대금정상:
+        print(f"  🔴 수급 수집 실패 — 거래대금 {_총대금:,.0f}백만은 정상인데 "
+              f"수급만 비었습니다. 휴장이 아니라 «수집원 고장»입니다.")
 
     # ══════════════════════════════════════════════════════════
     # 🆕 2026-08-26 — 데이터 완전성 판정 (HO 지시)
@@ -6095,7 +6297,19 @@ if __name__ == "__main__":
         with open("HOLIDAY_FLAG", "w", encoding="utf-8") as f:
             f.write(" · ".join(_사유))
     else:
-        print(f"✅ 정상 거래일 확인 — 수급 확보(코스피 {_코수 is not None}·"
-              f"코스닥 {_닥수 is not None}) · 거래대금 {_총대금:,.0f}백만 · {_종목수:,}종목")
+        _대금문 = (f"{_총대금:,.0f}백만" if _총대금 is not None else "미확보")
+        print(f"✅ 정상 거래일 확인 — 거래대금 {_대금문} · {_종목수:,}종목 · "
+              f"수급(코스피 {_코수 is not None}·코스닥 {_닥수 is not None})")
         if os.path.exists("HOLIDAY_FLAG"):
             os.remove("HOLIDAY_FLAG")
+
+    # 🆕 2026-09-17 — 수집 실패는 «휴장»과 다른 깃발을 세운다.
+    #   ⚠️ 이 깃발은 발행을 막지 않는다. daily.yml은 이걸 보고
+    #      «다른 문구»의 관리자 알림만 보낸다.
+    #   [왜 파일로 남기나] 워크플로 단계 사이에는 변수를 못 넘긴다.
+    #      기존 HOLIDAY_FLAG·INCOMPLETE_FLAG와 같은 방식이다.
+    if 전체["수급수집실패"]["판정"]:
+        with open("FLOW_FAIL_FLAG", "w", encoding="utf-8") as f:
+            f.write(" · ".join(전체["수급수집실패"]["사유"]))
+    elif os.path.exists("FLOW_FAIL_FLAG"):
+        os.remove("FLOW_FAIL_FLAG")
