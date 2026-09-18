@@ -570,10 +570,15 @@ jobs:
           #    report_20260911.html·index.html·archive가 통째로 커밋되지 않았다.
           #    (커밋은 1 file changed로 성공한 척했고, 텔레그램은 404 링크를 발송)
           #    격일/조건부 파일은 예외 없이 이 루프로 내린다.
+          #    🆕 2026-09-17 — judge_log.json(테마 순환표 판정 기록).
+          #      build_html이 매일 쓰지만 «첫날에는 파일이 없다» —
+          #      조건부 취급이 맞다. 이 기록이 쌓여야 한 달 뒤
+          #      「4/5 켜진 자리는 그 뒤 어땠나」를 말할 수 있다.
+          #      오늘 안 쌓으면 되돌릴 방법이 없는 종류의 파일이다.
           for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
                    biz_report_fail.json stock_news_fail.json \
-                   stock_capture_log.json \
+                   stock_capture_log.json judge_log.json \
                    accum_long_cache.json; do
             git add "$f" 2>/dev/null || true
           done
