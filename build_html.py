@@ -11743,6 +11743,26 @@ JUDGE_JS = ('<script>'
             '    +"</span><span style=\'color:"+mc+"\'>"+m+"</span><span class=\'jd-z\'>"'
             '    +(r.z.length>4?r.z.slice(0,4)+"…":r.z)+"</span></div>";});'
             ' var b=document.getElementById("jdBody"); if(b)b.innerHTML=h;}'
+            # 🔴 2026-09-17 — 순환표 칸을 누르면 그 단계만 남긴다.
+            #   [왜] 열 줄을 통째로 늘어놓으니 «테마명이 쭉»(HO 지적)
+            #   보였다. 기본은 다 보이되, 한 단계만 보고 싶을 때
+            #   칸 하나로 좁힐 수 있게 한다. 다시 누르면 전체로 돌아온다.
+            'var SP_F=null;'
+            'function spFilter(k,el){'
+            ' SP_F=(SP_F===k?null:k);'
+            ' var sts=document.querySelectorAll(".cy-st");'
+            ' for(var i=0;i<sts.length;i++){'
+            '  sts[i].classList.toggle("sel",SP_F&&sts[i].dataset.k===SP_F);}'
+            ' var rows=document.querySelectorAll(".sp-row"),shown=0;'
+            ' for(var j=0;j<rows.length;j++){'
+            '  var ok=(!SP_F||rows[j].dataset.k===SP_F);'
+            '  rows[j].style.display=ok?"":"none";'
+            '  var d=document.getElementById(rows[j].getAttribute("onclick")'
+            '        .match(/\'([^\']+)\'/)[1]);'
+            '  if(d&&!ok)d.style.display="none";'
+            '  if(ok)shown++;}'
+            ' var nn=document.getElementById("spNone");'
+            ' if(nn)nn.style.display=shown?"none":"block";}'
             'document.addEventListener("click",function(e){'
             ' var t=e.target.closest?e.target.closest(".jd-hd span"):null;'
             ' if(t&&t.dataset.k)jdDraw(t.dataset.k);});'
@@ -11835,7 +11855,7 @@ def _judge_conflicts(rows, 메타):
 
 
 # ══════════════════════════════════════════════════════════════
-# 🔒🔒 2026-09-17 HO 지시 — 「자리 점검표」.
+# 🔒🔒 2026-09-17 HO 지시 — 「테마 순환표」(옛 이름: 자리 점검표).
 #
 #   [무엇이 달라지나] 앞 코너들은 전부 «사실 나열»이었다. 여기서 처음으로
 #   «그 사실들이 어떤 자리를 뜻하는가»를 말한다.
@@ -11849,17 +11869,34 @@ def _judge_conflicts(rows, 메타):
 #     뭐가 부족한지가 사라진다.
 #   ⚠️ 유형 이름에 동사를 쓰지 않는다. 「지금 들어갈 자리」는 추천이고
 #     「막 문을 연 자리」는 서술이다. 이 차이가 결정적이다.
+# 🔴🔴 2026-09-17 재설계 — HO 지적 "대부분 저 순서를 거쳐?"
+#
+#   [무엇이 틀렸나] 앞 판은 «유형 분류»를 순서인 척 줄 위에 늘어놨다.
+#     실측: 스페이스X는 「💰 돈이 먼저」로 2번째 칸에 있었는데 실제로는
+#     «5일째»였다. 1일째인 전력반도체보다 «이른 자리»처럼 보였다.
+#     거짓말이다.
+#
+#   [진짜 시간 축은 하나뿐] «10위권에 들어온 뒤 며칠째인가».
+#     나이는 모든 테마가 반드시 갖는 값이라, 예외 없이 네 칸 중 하나에
+#     들어간다. HO의 "해당 안 되는 테마도 있지 않아?"에 대한 답이기도 하다
+#     — 나이가 있는 한 «반드시» 어딘가에 속한다.
+#
+#   [💰 와 ♻️ 는 단계가 아니라 «꼬리표»] 어느 단계에든 붙을 수 있다.
+#     5일째인데 돈이 늘 수도 있고, 1일째인데 재등판일 수도 있다.
+#     그래서 줄 위 칸이 아니라 «배지»로 옆에 붙인다.
+#
+#   ⚠️ 식물 비유로 이름을 잇는다(싹 → 자람 → 여묾 → 짐). 순서가 있는
+#     것들은 이름에서도 순서가 느껴져야 외우지 않고 읽힌다.
 SPOT_TYPES = [
-    ("new",  "🌱", "막 문을 연 자리",  "어제는 20위 밖이었는데 오늘 10위권",
-     TM_NEW),
-    ("back", "♻️", "다시 올라오는 자리", "예전에 10위권이던 테마가 되돌아옴",
-     TM_WARM),
-    ("cash", "💰", "돈이 먼저 온 자리", "순위보다 거래대금이 먼저 늘어남",
-     TM_COOL),
-    ("early", "🏃", "아직 이른 자리",  "절반이 빠지는 지점 전",
-     TM_HOT),
-    ("ripe", "⏳", "익은 자리",       "절반이 빠지는 지점을 넘김",
-     TM_FLAT),
+    ("new",   "🌱", "첫 진입",     "오늘 막 10위권에 들어옴", TM_NEW),
+    ("early", "🌿", "자리잡기",   "절반이 빠지는 지점 전",   TM_HOT),
+    ("ripe",  "⏳", "익은 자리",   "절반이 빠지는 지점을 넘김", TM_WARM),
+    ("cold",  "🍂", "지나간 자리", "순위가 밀렸거나 돈이 빠짐", TM_DOWN),
+]
+# 단계와 «겹쳐» 붙는 꼬리표 — 어느 단계에서든 나타날 수 있다
+SPOT_TAGS = [
+    ("cash", "💰", "돈이 먼저", "순위보다 거래대금이 먼저 늘었어요", TM_COOL),
+    ("back", "♻️", "재등판",   "예전에 10위권이던 테마가 되돌아왔어요", TM_NEW),
 ]
 SPOT_LOG = "judge_log.json"
 
@@ -11922,31 +11959,44 @@ def theme_spots(data=None):
         ]
         켜짐 = sum(1 for ok, _a, _bb in chk if ok)
 
-        # ── 자리 유형 (우선순위 순) ──
+        # ── 단계 판정 ────────────────────────────────────────
+        #   [축은 «시간» 하나] 10위권에 들어온 뒤 며칠째인가.
+        #   ⚠️ 여기에 돈·재등판을 섞으면 순서가 뒤엉킨다(2026-09-17 사고).
+        #      실제로 5일째인 테마가 「돈이 먼저」로 분류돼 1일째보다
+        #      «이른 자리»처럼 보였다. 그 둘은 «꼬리표»로 따로 뺐다.
+        #
+        #   🔴 2026-09-17 HO 결정 — 「첫 진입」은 «어제 20위 밖»에서
+        #     들어온 것«만» 센다. (나이 ≤ 1일 조건은 뺀다)
+        #     [왜] 전에는 «나이 1일»도 첫 진입으로 보냈다. 그러면
+        #       어제 15위였다가 오늘 8위로 올라온 테마까지 「첫 진입」이
+        #       된다 — 밖에서 새로 들어온 게 아니라 «안에서 올라온» 것인데도.
+        #     [부작용도 고쳤다] 1일째를 첫 진입이 가져가고 3일째부터는
+        #       익은 자리가 가져가서, 「자리잡기」에 «2일째 하나»만 남았다.
+        #       이제 자리잡기가 1~2일째를 모두 맡는다.
+        #     ⚠️ 어제 순위는 20위까지만 매긴다. 그래서 «어제 없음»은
+        #       «처음 생긴 테마»가 아니라 «어제는 20위 밖»이라는 뜻이다.
         if 식음:
             typ = "cold"
-        elif (등판.get(t["n"], 0) >= 2 and 올라옴
-              and t["age"] is not None and t["age"] <= 2):
-            typ = "back"
-        elif 새로:
+        elif 새로:                              # 어제 20위 밖 → 오늘 10위권
             typ = "new"
-        elif t["돈"] is not None and t["돈"] >= 40 and t["rk"] >= 4:
-            typ = "cash"
-        elif 이름 and 올라옴:
-            typ = "early"
         elif 중앙 is not None and t["age"] is not None and t["age"] >= 중앙:
             typ = "ripe"
         else:
-            typ = "early" if 올라옴 else "ripe"
+            typ = "early"          # 나이를 모르면 «이른 쪽»으로 둔다
+
+        # ── 꼬리표 — 단계와 «겹쳐» 붙는다 ──
+        tags = []
+        if t["돈"] is not None and t["돈"] >= 40:
+            tags.append("cash")
+        if 등판.get(t["n"], 0) >= 2:
+            tags.append("back")
 
         # ── 내일 확인할 것 ──
         #    ⚠️ 예측이 아니다. «무엇이 보이면 판단이 바뀌는가»만 적는다.
-        if typ in ("new", "back"):
+        if typ == "new":
             내일 = (f'10위권에 남아 있나 — 남으면 '
                   f'{(t["age"] or 1) + 1}일째로 여유가 하루 더, '
                   f'빠지면 하루짜리였던 것')
-        elif typ == "cash":
-            내일 = '순위가 따라 올라오나 — 안 오면 돈만 스쳐 간 것'
         elif typ == "early":
             _남 = (중앙 - t["age"]) if (중앙 and t["age"]) else None
             내일 = (f'절반이 빠지는 지점({중앙}일)까지 {_남}일 남음'
@@ -11957,7 +12007,7 @@ def theme_spots(data=None):
             내일 = '돈이 다시 들어오나'
 
         # ── 볼 종목 ──
-        if typ in ("new", "back", "cash"):
+        if typ == "new":
             볼 = "대장 — 테마가 진짜인지 대장으로 확인해요"
         elif typ == "early":
             볼 = "대장·후발 — 아직 여유가 있는 자리예요"
@@ -11965,7 +12015,7 @@ def theme_spots(data=None):
             볼 = "소외 — 갭 메우기 자리지만 시간이 늦은 건 같아요"
         else:
             볼 = ""
-        out.append({**t, "typ": typ, "chk": chk, "켜짐": 켜짐,
+        out.append({**t, "typ": typ, "tags": tags, "chk": chk, "켜짐": 켜짐,
                     "내일": 내일, "볼": 볼, "등판": 등판.get(t["n"], 1),
                     "몰림": (zm.get(t["n"]) == 몰린곳)})
     return out, {"중앙": 중앙, "몰린곳": 몰린곳, "몰린수": 몰린수,
@@ -11996,75 +12046,187 @@ def _spot_log_save(spots):
         print(f"   ⚠️ 자리 판정 기록 실패 — {type(e).__name__}: {e}")
 
 
+def build_spot_cycle(spots):
+    """🔄 테마 순환표 — 네 단계 + 두 꼬리표.
+
+    🔴 2026-09-17 재설계 — 앞 판은 «유형»을 순서인 척 늘어놨다가
+      «5일째 테마가 1일째보다 이른 자리»로 보이는 거짓말을 만들었다.
+      시간 축은 «나이» 하나뿐이다. 그 하나로만 줄을 세운다.
+    ⚠️ 칸을 누르면 아래 목록이 그 단계만 남는다. 열 줄을 통째로
+      늘어놓지 않기 위한 장치다(HO 지적 2026-09-17).
+    """
+    # 🔴 HO 지시 2026-09-17 — 꼬리표를 «각 단계 칸 안, 숫자 옆»으로.
+    #   [왜 이게 나은가] 아래에 따로 두면 «오늘 돈이 먼저 온 게 1개»까지만
+    #   안다. 칸 안에 넣으면 «어느 단계에서» 그랬는지까지 보인다.
+    #   「익은 자리 7개 중 1개는 재등판」은 완전히 다른 정보다.
+    n = {k: 0 for k, *_r in SPOT_TYPES}
+    tg = {k: 0 for k, *_r in SPOT_TAGS}
+    단계별 = {k: {} for k, *_r in SPOT_TYPES}     # 단계 → {꼬리표: 개수}
+    for x in spots:
+        n[x["typ"]] = n.get(x["typ"], 0) + 1
+        for t in x.get("tags") or []:
+            tg[t] = tg.get(t, 0) + 1
+            단계별.setdefault(x["typ"], {})
+            단계별[x["typ"]][t] = 단계별[x["typ"]].get(t, 0) + 1
+    _TGI = {k: (icon, c) for k, icon, _l, _d, c in SPOT_TAGS}
+
+    칸 = []
+    for i, (k, icon, 라벨, _설명, c) in enumerate(SPOT_TYPES):
+        cnt = n.get(k, 0)
+        칸.append(
+            f'<div class="cy-st{" zero" if not cnt else ""}" '
+            f'onclick="spFilter(\'{k}\',this)" data-k="{k}">'
+            f'<span class="cy-ic">{icon}</span>'
+            f'<span class="cy-lb">{라벨}</span>'
+            # ⚠️ 꼬리표는 숫자 «아래»에 세로로 쌓는다. 옆에 붙이면
+            #    「7 ♻️1 💰1」처럼 숫자 셋이 한 줄에 서서 어느 게 본 수인지
+            #    헷갈린다. 본 수는 크게 위, 꼬리표는 작게 아래.
+            f'<span class="cy-n" style="{f"color:{c}" if cnt else ""}">'
+            f'{cnt}</span>'
+            + ('<span class="cy-tgm">'
+               + "".join(
+                   f'<i style="color:{_TGI[tk][1]}">{_TGI[tk][0]}{tv}</i>'
+                   for tk, tv in sorted((단계별.get(k) or {}).items())
+                   if tk in _TGI)
+               + '</span>' if (단계별.get(k) or {}) else "")
+            + '</div>')
+        if i < len(SPOT_TYPES) - 1:
+            칸.append('<span class="cy-ar">›</span>')
+
+    # ⚠️ 꼬리표는 «줄 위»에 놓지 않는다. 단계가 아니라 어느 칸에든
+    #    겹쳐 붙는 표시라, 줄에 끼우면 순서가 있는 것처럼 보인다.
+    # ⚠️ 개수는 «칸 안»으로 옮겼다. 여기엔 «뜻 풀이»만 남긴다 —
+    #    같은 숫자를 두 곳에 쓰면 어느 쪽이 맞는지 헷갈린다(원칙5).
+    꼬 = "".join(
+        f'<span class="cy-tg{" on" if tg.get(k) else ""}" '
+        f'style="{f"--c:{c}" if tg.get(k) else ""}">'
+        f'{icon} <b>{라벨}</b><i>{설명}</i></span>'
+        for k, icon, 라벨, 설명, c in SPOT_TAGS)
+
+    앞 = n.get("new", 0) + n.get("early", 0)
+    뒤 = n.get("ripe", 0) + n.get("cold", 0)
+    if 앞 > 뒤:
+        해석 = ('오늘은 <b>앞쪽이 더 많습니다</b> — 이제 막 올라오는 테마가 '
+               '많은 자리예요.')
+    elif 뒤 > 앞:
+        해석 = (f'오늘은 <b>뒤쪽이 더 많습니다</b>({뒤}개) — 상위권이 대부분 '
+               f'이미 익은 자리라는 뜻이에요.')
+    else:
+        해석 = '오늘은 앞뒤가 비슷합니다.'
+
+    return (f'<div class="cy-box">'
+            f'<p class="cy-h">🔄 테마는 이 순서로 자랍니다'
+            f'<span>칸을 눌러 그 단계만 보기</span></p>'
+            f'<div class="cy-row">{"".join(칸)}</div>'
+            f'<div class="cy-axis">'
+            f'<div><b>확인된 정도</b><i class="a1">낮음 ————→ 높음</i></div>'
+            f'<div><b>남은 시간</b><i class="a2">많음 ←———— 적음</i></div>'
+            f'</div>'
+            # ⚠️ 배치를 «아래»로 바꿨으면 안내문도 같이 바꾼다.
+            #    설명이 화면과 어긋나면 그 자체가 버그다(원칙10).
+            f'<p class="cy-th">🏷 칸 안 숫자 <b>아래</b>의 작은 표시는 '
+            f'<b>그 단계에 몇 개가 겹쳐 있는지</b>예요.</p>'
+            f'<div class="cy-tgs">{꼬}</div>'
+            f'<p class="cy-note">{해석}</p></div>')
+
+
 def build_spot_table(data=None):
-    """🎯 자리 점검표 — 유형별 카드 + 체크 5칸."""
+    """🔄 테마 순환표 — «세로로 쌓지 않고 격자로».
+
+    🔴 HO 지적 2026-09-17 — "나열하는 게 최선인가? 피로도가 높다."
+      [진단] 카드를 세로로 9개 쌓았더니 세 가지가 겹쳤다.
+        ① 4/5든 2/5든 «똑같이 펼쳐» 놨다. 자세히 볼 건 상위 두셋뿐인데.
+        ② 「반도체 7개 — 가장 몰린 곳」이 7번 반복됐다.
+        ③ 켜진 칸까지 다 풀어 썼다. 켜진 칸은 정보가 적다 —
+           «꺼진 칸»만이 정보다.
+      [더 큰 문제] 3층 「한눈 격자」와 자리가 겹쳤다. 같은 테마 10개를
+        두 번 훑게 만들고 있었다. 그게 피로의 절반이다.
+
+    [해법] 수치(3층)와 판정(점검표)을 «한 격자»로 합친다.
+      · 한 화면에 10개가 다 들어간다 — 스크롤이 1/5로 준다.
+      · «세로로 읽기»라는 새 정보가 생긴다. 「돈 칸이 거의 다 비었다」는
+        격자에서만 보인다. 카드를 쌓으면 영원히 안 보인다.
+      · 자세한 건 누를 때만 — 읽는 것이 «선택»이 된다.
+    """
     spots, m = theme_spots(data)
     if not spots:
         return ""
     _spot_log_save(spots)
     mem = _theme_members(data) if data else {}
-    pc = [0]
+    _TI = {k: (icon, 라벨, c) for k, icon, 라벨, 설명, c in SPOT_TYPES}
+    _TG = {k: (icon, 라벨, c) for k, icon, 라벨, 설명, c in SPOT_TAGS}
 
-    def 카드(x, icon, c):
-        pc[0] += 1
-        _sp, _span = _stock_panel(x["n"], mem.get(x["n"]) or [], f"sp{pc[0]}")
+    # 유형 순서대로, 같은 유형 안에서는 많이 켜진 순
+    _ord = {k: n for n, (k, *_r) in enumerate(SPOT_TYPES)}
+
+    spots.sort(key=lambda x: (_ord.get(x["typ"], 50), -x["켜짐"], x["rk"]))
+
+    행 = []
+    for i, x in enumerate(spots):
+        icon, 라벨, c = _TI.get(x["typ"], ("·", "", TM_FLAT))
         점 = "".join(
-            f'<i class="{"on" if ok else ""}" style="background:'
-            f'{c if ok else "#242e3b"}"></i>' for ok, _a, _bb in x["chk"])
-        줄 = "".join(
+            f'<i style="background:{c if ok else "#28323f"}"></i>'
+            for ok, _a, _b in x["chk"])
+        돈 = ("–" if x["돈"] is None
+              else f'{x["돈"]:+.0f}%')
+        돈c = ("#5f6875" if x["돈"] is None
+               else ("#74f0d4" if x["돈"] >= 15
+                     else ("#e8c33a" if x["돈"] <= -15 else "#7d8695")))
+        어제 = ("밖" if x["y"] is None else f'{x["y"]}위')
+        _sp, _span = _stock_panel(x["n"], mem.get(x["n"]) or [], f"spS{i}")
+        상세 = "".join(
             f'<div class="sp-ck{"" if ok else " off"}">'
             f'<span class="sp-cm">{"✓" if ok else "·"}</span>'
             f'<span class="sp-cl">{a}</span>'
             f'<span class="sp-cv">{v}</span></div>'
             for ok, a, v in x["chk"])
-        몰 = (f'<span class="sp-zone on">{m["몰린곳"]} {m["몰린수"]}개 — '
-              f'오늘 가장 몰린 곳</span>' if x["몰림"] else
-              f'<span class="sp-zone">{x["zone"]}</span>')
         btn = (f'<span class="jd-sb" '
-               f"onclick=\"ztog('sp{pc[0]}')\">종목보기</span>" if _span else "")
-        return (f'<div class="sp-card" style="border-color:{c}3d">'
-                f'<div class="sp-hd"><span class="sp-rk" '
-                f'style="color:{c}">{x["rk"]}위</span>'
-                f'<b>{x["n"]}</b>{btn}</div>'
-                f'<div class="sp-mt"><span class="sp-dots">{점}</span>'
-                f'<span class="sp-cnt" style="color:{c}">'
-                f'{x["켜짐"]}/5 켜짐</span></div>'
-                f'<div class="sp-cks">{줄}</div>'
-                f'<div class="sp-ft">{몰}'
-                + (f'<p class="sp-see">🎯 {x["볼"]}</p>' if x["볼"] else "")
-                + f'<p class="sp-tm">📅 내일 확인: {x["내일"]}</p></div>'
-                f'{_span}</div>')
+               f"onclick=\"event.stopPropagation();ztog('spS{i}')\">"
+               f'종목보기</span>' if _span else "")
+        행.append(
+            f'<div class="sp-row" data-k="{x["typ"]}" '
+            f'onclick="ztog(\'spD{i}\')">'
+            f'<span class="sp-ty" title="{라벨}">{icon}</span>'
+            f'<span class="sp-nm">{x["n"]}'
+            + "".join(f'<em style="color:{_TG[t][2]}">{_TG[t][0]}</em>'
+                      for t in (x.get("tags") or []) if t in _TG)
+            + f'</span>'
+            f'<span>{x["rk"]}위</span><span>{어제}</span>'
+            f'<span>{x["age"] or "–"}{"일" if x["age"] else ""}</span>'
+            f'<span style="color:{돈c}">{돈}</span>'
+            f'<span class="sp-pd">{점}</span></div>'
+            f'<div class="sp-det" id="spD{i}">'
+            f'<p class="sp-dh">{icon} {라벨}<span>{x["켜짐"]}/5 켜짐</span>{btn}</p>'
+            f'{상세}'
+            + (f'<p class="sp-see">🎯 {x["볼"]}</p>' if x["볼"] else "")
+            + f'<p class="sp-tm">📅 내일 확인: {x["내일"]}</p>'
+            + (f'<p class="sp-zn">📍 {m["몰린곳"]} {m["몰린수"]}개 — '
+               f'오늘 가장 몰린 곳</p>' if x["몰림"] else
+               f'<p class="sp-zn">📍 {x["zone"]}</p>')
+            + f'{_span}</div>')
 
-    묶 = []
-    for key, icon, 라벨, 설명, c in SPOT_TYPES:
-        v = [x for x in spots if x["typ"] == key]
-        if not v:
-            continue
-        v.sort(key=lambda x: (-x["켜짐"], x["rk"]))
-        묶.append(f'<div class="sp-grp"><p class="sp-gh" style="color:{c}">'
-                  f'{icon} {라벨}<b>{len(v)}</b>'
-                  f'<span>{설명}</span></p>'
-                  + "".join(카드(x, icon, c) for x in v) + '</div>')
-    식 = [x for x in spots if x["typ"] == "cold"]
-    if 식:
-        묶.append('<div class="sp-cold"><b>🧊 볼 자리 아님</b>'
-                  + "".join(f'<span>{x["n"]} ({x["rk"]}위)</span>' for x in 식)
-                  + '<p>순위가 밀렸거나 돈이 빠지고 있어요. 지웠다기보다 '
-                    '따로 모아 둡니다.</p></div>')
+    # ⚠️ 2026-09-17 — 아이콘 범례를 «사이클 그림»으로 바꿨다.
+    #   한 줄 범례는 뜻만 알려줄 뿐, 다섯 유형이 «어떤 관계»인지는
+    #   말하지 못했다. 순서로 그리면 관계까지 같이 말한다.
 
-    return (f'<div class="sp-wrap"><p class="jd-h">🎯 자리 점검표'
-            f'<span>5칸 중 몇 개가 켜졌나</span></p>'
-            f'<p class="sp-lead">오늘 10위권 테마가 <b>어떤 종류의 자리</b>인지 '
-            f'나눠 두고, 우리가 보는 <b>5가지가 각각 켜졌는지</b> 그대로 '
-            f'보여줍니다.</p>'
-            + "".join(묶)
-            + f'<p class="jd-warn">⚠️ <b>점수가 아닙니다.</b> 「4/5 켜짐」은 '
-            f'우리가 보는 다섯 가지 중 넷이 사실이라는 뜻일 뿐, '
-            f'「80점짜리」라는 말이 아니에요. <b>항목마다 중요도가 다른데 '
-            f'그 무게를 정할 근거가 아직 없습니다</b>'
+
+    return (f'<div class="sp-wrap"><p class="jd-h">🔄 테마 순환표'
+            f'<span>줄을 눌러 자세히</span></p>'
+            + build_spot_cycle(spots) +
+            f'<div class="sp-hd"><span></span><span>테마</span>'
+            f'<span>순위</span><span>어제</span><span>나이</span>'
+            f'<span>돈</span><span>조건</span></div>'
+            f'{"".join(행)}'
+            f'<p class="sp-none" id="spNone" style="display:none">'
+            f'이 단계에 해당하는 테마가 오늘은 없습니다.</p>'
+            f'<p class="sp-tip">세로로도 읽어 보세요 — 「돈」 칸이 거의 비어 '
+            f'있으면 오늘은 거래대금 기록이 부실한 날, 「나이」가 대부분 크면 '
+            f'오늘 상위권이 전부 익은 자리라는 뜻이에요.</p>'
+            f'<p class="jd-warn">⚠️ <b>점수가 아닙니다.</b> 「4/5」는 다섯 가지 중 '
+            f'넷이 사실이라는 뜻일 뿐, 「80점」이 아니에요. <b>항목마다 중요도가 '
+            f'다른데 그 무게를 정할 근거가 아직 없습니다</b>'
             + (f'(성적 표본 {m["생존표본"]}건).' if m.get("생존표본") else '.')
-            + f'<br>⚠️ <b>추천이 아닙니다.</b> 켜지지 않은 칸이 곧 '
-            f'리스크예요 — 그것까지 같이 보시라고 남겨 뒀습니다.</p></div>')
+            + f' <b>추천이 아니며</b>, 꺼진 칸이 곧 리스크예요.</p></div>')
 
 
 def build_judge_tab(data=None):
@@ -12209,8 +12371,14 @@ def build_judge_tab(data=None):
     #   둘 다 «테마 상태 분류»라 같은 일을 두 번 하는 셈이었고,
     #   점검표가 더 정교하다(유형 5종 + 체크 5칸 + 내일 볼 것).
     #   신호등 코드는 지우지 않고 남겨 둔다 — 되살릴 수 있게(원칙3).
+    # ⚠️ 2026-09-17 — 3층 「한눈 격자」는 점검표가 «흡수»했다.
+    #   같은 테마 10개를 수치로 한 번, 판정으로 또 한 번 훑게 만들고
+    #   있었다 — 그게 피로의 절반이었다. 한 격자로 합친다.
+    #   ⚠️ 코드는 남겨 둔다(층3). 되살릴 때 아래 한 줄만 고치면 된다.
     _점검 = build_spot_table(data)
-    return f'<div class="jd-wrap">{층1}{_점검 or 층2}{층3}{층4}</div>'
+    return (f'<div class="jd-wrap">{층1}'
+            + (_점검 if _점검 else (층2 + 층3))
+            + f'{층4}</div>')
 
 
 def build_breadth_line():
@@ -13622,55 +13790,117 @@ THEME_V17_CSS = """
 .jd-leg i{width:8px;height:8px;border-radius:2px;flex:none}
 .jd-leg b{color:#dfe4ea;font-weight:800}
 .jd-dot{width:7px;height:7px;border-radius:50%;flex:none}
-/* ══ 🎯 자리 점검표 ══ */
+/* ══ 🎯 자리 점검표 — 격자형 ══ */
 .sp-wrap{background:#101720;border:1px solid #1e2937;border-radius:12px;
-  padding:12px 13px 11px;margin-bottom:11px}
-.sp-lead{margin:0 0 11px;font-size:11.5px;color:#9aa3b1;line-height:1.7}
-.sp-lead b{color:#dfe4ea}
-.sp-grp{margin-bottom:12px}
-/* ⚠️ 설명을 같은 줄에 두면 «막 문을 연 자리»가 두 줄로 접힌다.
-   제목은 한 줄로 두고 설명은 아래로 내린다 — 제목이 접히면 유형이
-   무엇인지부터 읽기 어려워진다. */
-.sp-gh{margin:0 0 7px;font-size:12px;font-weight:800;line-height:1.5}
-.sp-gh b{font-size:10px;background:rgba(255,255,255,.09);border-radius:999px;
-  padding:1px 6px;margin-left:5px}
-.sp-gh span{display:block;font-size:9.5px;font-weight:600;color:#6f7784;
-  margin-top:2px}
-.sp-card{background:#0d141c;border:1px solid;border-radius:10px;
-  padding:10px 11px;margin-bottom:6px}
-.sp-hd{display:flex;align-items:center;gap:7px;margin-bottom:7px}
-.sp-rk{font-size:10px;font-weight:800;flex:none}
-.sp-hd b{font-size:13px;font-weight:800;color:#e8ecf1;overflow:hidden;
-  text-overflow:ellipsis;white-space:nowrap}
-.sp-hd .jd-sb{margin-left:auto}
-/* 점 5개 — 글을 읽기 전에 «몇 개 켜졌나»가 먼저 보이게 */
-.sp-mt{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.sp-dots{display:flex;gap:4px}
-.sp-dots i{width:16px;height:5px;border-radius:3px;display:block}
-.sp-cnt{margin-left:auto;font-size:10.5px;font-weight:800}
-.sp-cks{display:flex;flex-direction:column;gap:3px;
-  padding:7px 0;border-top:1px solid #16202b;border-bottom:1px solid #16202b}
-.sp-ck{display:flex;align-items:baseline;gap:6px;font-size:10.5px;color:#c3cad4}
+  padding:12px 12px 11px;margin-bottom:11px}
+/* 유형 범례 — 아이콘 뜻은 «한 번만» 말한다 */
+/* ══ 🔄 자리 사이클 — 다섯 유형을 «순서»로 ══ */
+.cy-box{background:#0d141c;border:1px solid #1d2734;border-radius:10px;
+  padding:11px 11px 10px;margin:0 0 11px}
+.cy-h{margin:0 0 9px;font-size:11.5px;font-weight:800;color:#c3cad4;
+  display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.cy-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784;
+  white-space:nowrap}
+.cy-row{display:flex;align-items:stretch;gap:1px}
+.cy-st{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:6px 1px;border-radius:7px;background:#111a24;min-width:0}
+.cy-st.zero{opacity:.45}
+.cy-ic{font-size:14px;line-height:1}
+/* ⚠️ 라벨은 두 줄까지 허용하고 «높이를 고정»한다. 글자를 줄이면 뜻이
+   안 오고, 높이를 안 잡으면 칸마다 들쭉날쭉해진다. 둘 다 피한다. */
+.cy-lb{font-size:8.5px;font-weight:700;color:#8b93a0;text-align:center;
+  line-height:1.3;letter-spacing:-.05em;min-height:22px;
+  display:flex;align-items:center;justify-content:center;word-break:keep-all}
+.cy-n{font-size:13px;font-weight:800;color:#5f6875;
+  font-variant-numeric:tabular-nums;line-height:1.1}
+/* 칸 안 꼬리표 — 본 수 «아래 줄»에, 그 줄 안에서는 «가로로» 나란히.
+   [층은 나누되 줄은 합친다] 본 수와 같은 줄에 두면 숫자 셋이 한 줄에
+   서서 어느 게 본 수인지 헷갈리고, 세로로 쌓으면 칸만 길어진다.
+   아래 한 줄에 나란히 두는 게 둘 다 피한다(HO 지시 2026-09-17). */
+.cy-tgm{display:flex;flex-direction:row;align-items:center;gap:5px;
+  justify-content:center;flex-wrap:wrap;margin-top:3px}
+.cy-tgm i{font-style:normal;font-size:8.5px;font-weight:800;
+  letter-spacing:-.05em;white-space:nowrap;line-height:1.2}
+.cy-ar{align-self:center;font-size:12px;color:#3a4553;flex:none;font-weight:800}
+/* 두 축 — 이 그림의 «진짜 메시지». 오른쪽으로 갈수록 확인은 높아지고
+   시간은 줄어든다. 이 반비례가 투자의 본질적 맞바꿈이다. */
+.cy-axis{margin:8px 0 0;padding-top:8px;border-top:1px solid #16202b;
+  display:flex;flex-direction:column;gap:3px}
+.cy-axis div{display:flex;align-items:baseline;gap:7px;font-size:9px}
+.cy-axis b{color:#7d8695;font-weight:700;flex:none;width:58px}
+.cy-axis i{font-style:normal;flex:1;letter-spacing:-.02em}
+.cy-axis .a1{color:#74f0d4}
+.cy-axis .a2{color:#e8c33a}
+/* 🏷 꼬리표 — 단계와 «겹쳐» 붙는 표시. 줄 위에 칸으로 두면 순서가
+   있는 것처럼 보이므로 아래에 따로 둔다(2026-09-17 사고 교훈). */
+.cy-th{margin:9px 0 5px;padding-top:8px;border-top:1px solid #16202b;
+  font-size:9.5px;color:#6f7784;line-height:1.5}
+.cy-th b{color:#8b93a0}
+.cy-tgs{display:flex;flex-direction:column;gap:4px}
+.cy-tg{display:flex;align-items:center;gap:6px;padding:5px 8px;
+  border-radius:7px;background:#111a24;border:1px dashed #2a3646;
+  font-size:10px;font-weight:700;color:#6f7784;opacity:.6}
+.cy-tg.on{opacity:1;border-style:solid;border-color:color-mix(in srgb,var(--c) 40%,#1c2430);
+  background:color-mix(in srgb,var(--c) 8%,#111a24);color:#c3cad4}
+.cy-tg b{font-size:10px;font-weight:800;color:#8b93a0}
+.cy-tg.on b{color:var(--c)}
+.cy-tg i{font-style:normal;margin-left:auto;font-size:9px;font-weight:600;
+  color:#5f6875;text-align:right;line-height:1.35}
+/* 선택된 단계 */
+.cy-st{cursor:pointer;transition:none}
+.cy-st.sel{outline:1.5px solid #8fd0e8;outline-offset:-1px;background:#16222e}
+/* 꼬리표 배지 — 테마명 옆 */
+.sp-nm em{font-style:normal;font-size:10px;margin-left:4px}
+.sp-none{margin:9px 0 0;font-size:11px;color:#7d8695;text-align:center}
+.cy-note{margin:8px 0 0;font-size:10.5px;color:#9aa3b1;line-height:1.65}
+.cy-note b{color:#dfe4ea}
+.cy-zero{margin:5px 0 0;font-size:9.5px;color:#6f7784;line-height:1.6}
+.cy-zero b{color:#8b93a0}
+.sp-leg{display:flex;flex-wrap:wrap;gap:3px 10px;margin:0 0 10px;
+  font-size:9.5px;font-weight:700;color:#8b93a0}
+/* 격자 — 한 화면에 10개가 다 들어가야 «비교»가 된다 */
+.sp-hd,.sp-row{display:grid;
+  grid-template-columns:14px minmax(0,1fr) 28px 28px 26px 38px 46px;
+  gap:4px;align-items:center}
+.sp-hd{padding:0 0 5px;border-bottom:1px solid #223041;font-size:9px;
+  font-weight:800;color:#6f7784}
+.sp-hd span{text-align:right}
+.sp-hd span:nth-child(2){text-align:left}
+.sp-row{padding:8px 0;border-bottom:1px solid #161d26;cursor:pointer;
+  font-size:10.5px}
+.sp-row span{text-align:right;font-weight:700;color:#9aa3b1;
+  font-variant-numeric:tabular-nums}
+.sp-ty{text-align:center !important;font-size:11px}
+.sp-nm{text-align:left !important;font-size:11.5px;font-weight:700;
+  color:#e2e7ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 조건 점 5개 — 글을 읽기 전에 «몇 개 켜졌나»가 먼저 */
+.sp-pd{display:flex;gap:2px;justify-content:flex-end}
+.sp-pd i{width:6px;height:6px;border-radius:2px;display:block}
+/* 펼침 — 읽는 것이 «선택»이 되게 */
+.sp-det{display:none;padding:9px 10px 10px;margin:0 0 6px;
+  background:#0d141c;border-radius:9px}
+.sp-dh{display:flex;align-items:center;gap:7px;margin:0 0 7px;
+  font-size:11.5px;font-weight:800;color:#dfe4ea}
+.sp-dh span{font-size:10px;color:#8b93a0;font-weight:700}
+.sp-dh .jd-sb{margin-left:auto}
+.sp-ck{display:flex;align-items:baseline;gap:6px;font-size:10.5px;
+  color:#c3cad4;padding:2px 0}
 .sp-ck.off{color:#5f6875}
 .sp-cm{width:10px;flex:none;font-weight:800;color:#3ecf9a}
 .sp-ck.off .sp-cm{color:#3a4553}
 .sp-cl{flex:none}
 .sp-cv{margin-left:auto;font-weight:700;color:#8b93a0}
 .sp-ck.off .sp-cv{color:#4e5765}
-.sp-ft{padding-top:7px}
-.sp-zone{display:inline-block;font-size:9.5px;font-weight:700;color:#7d8695;
-  background:#141d27;border:1px solid #22303d;border-radius:999px;
-  padding:2px 7px}
-.sp-zone.on{color:#ffc93c;border-color:rgba(255,201,60,.35);
-  background:rgba(255,201,60,.08)}
-.sp-see{margin:6px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}
+.sp-see{margin:7px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}
 .sp-tm{margin:4px 0 0;font-size:10.5px;color:#7d8695;line-height:1.6}
-.sp-cold{background:#0d131a;border:1px dashed #263141;border-radius:9px;
-  padding:9px 11px;margin-bottom:10px}
-.sp-cold b{font-size:11px;color:#8b93a0;margin-right:7px}
-.sp-cold span{display:inline-block;font-size:10.5px;color:#6f7784;
-  margin-right:8px}
-.sp-cold p{margin:5px 0 0;font-size:10px;color:#5f6875;line-height:1.6}
+.sp-zn{margin:4px 0 0;font-size:10px;color:#6f7784}
+.sp-tip{margin:9px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:10px;color:#6f7784;line-height:1.7}
+/* ⚠️ 2026-09-17 — 옛 «카드형» 점검표 CSS는 지웠다.
+   .sp-hd 를 거기서도 쓰고 있어서(display:flex) 새 격자의 grid를
+   덮어썼다 — 헤더만 왼쪽으로 뭉쳐 보이던 원인이다.
+   같은 이름을 두 곳에서 쓰면 «나중에 쓴 쪽»이 조용히 이긴다.
+   되살릴 일이 생기면 이름을 .spc- 로 바꿔서 새로 쓴다. */
 /* 신호등 줄의 «종목보기» — 판단하는 자리에서 바로 종목까지 */
 .jd-sb{font-size:9px;font-weight:800;color:#0b0e13;background:#8fd0e8;
   border-radius:4px;padding:2px 6px;margin-left:6px;white-space:nowrap;
