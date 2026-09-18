@@ -10605,14 +10605,18 @@ def build_core(핵심편, data, 해석):
         #   [순서] 판단(시장의 폭) → 길 안내 → 근거(코너들)
         #   나머지 코너는 전부 «관찰»이라, 독자가 여섯 개를 다 읽고
         #   스스로 종합해야 했다. 종합은 리포트가 할 일이다.
+        # 🔴 HO 지시 2026-09-17 — 시장의 폭은 «레이더 바로 위»에 한 줄로.
+        #   [왜 옮기나] 탭 맨 위 큰 카드는 읽을 게 많아 «관문»이 됐다.
+        #   이 값은 레이더를 «어떻게 읽을지» 정해 주는 것이라, 레이더
+        #   바로 앞에 짧게 있는 게 맞다. 자세한 판은 「판단」 탭에 있다.
         _테마앞 = (hide("오늘뜬테마요약", build_theme_spotlight())
-             + build_market_breadth()
              + _flow_lead()
              + f'<p class="sec-label">'
                f'<small>1단계 · 오늘 테마들이 어디에 모였나</small>'
                f'📡 테마 레이더'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · {THEME_CUM_DAYS}일 누적 <b>1~10위</b></span></p>'
+             + build_breadth_line()
              + build_theme_radar(data)
              + f'<p class="sec-label">'
                f'<small>2단계 · 아직 10위 밖, 올라오는 중인 테마</small>'
@@ -10659,7 +10663,7 @@ def build_core(핵심편, data, 해석):
     #   ⚠️ 판단 탭은 요약본이 아니다. 요약이면 일곱 번째 코너일 뿐이다.
     #   ⚠️ 서브탭은 «페이지 이동»이 아니라 같은 자리에서 갈아 끼우는
     #      것이다 — 스크롤 위치를 잃으면 오히려 불편해진다.
-    _판단 = build_judge_tab()
+    _판단 = build_judge_tab(data)
     if _판단:
         _테마 = (
             '<div class="jd-tabs">'
@@ -11552,56 +11556,58 @@ def market_breadth():
     return 오늘
 
 
-def theme_survival():
-    """⏳ 테마 «생존곡선» — 10위권에 들어온 뒤 며칠이나 버티나.
+def theme_survival(대상=None):
+    """⏳ 테마가 10위권에서 며칠 버티나 — «전체 기준선 + 개별 이력».
 
-    🔴 2026-09-17 HO 요청. 원래 제안은 «진입 후 N일째 평균 등락»이었는데,
-       계산해 보니 못 쓸 숫자가 나왔다 — N일째마다 «플러스 비율 100%».
-       [왜] theme_history.json은 «그날 상위 테마»만 저장한다. 테마가 내려간
-       날은 기록 자체가 없다. 즉 오른 날만 모아 평균을 낸 셈이다(생존편향).
-       그대로 올리면 독자에게 "아무 때나 들어가도 +4%"라고 말하게 된다.
-    → 편향이 훨씬 덜한 «체류 일수»로 바꾼다. 들어오고 나가는 «사건»을
-       세는 것이라, 나간 날에 기록이 없어도 «나갔다»는 사실은 남는다.
+    🔴 2026-09-17 HO 지적 — "전체 평균이 의미가 있나? 개별 테마가 실제로
+       며칠 버티는지가 중요한 거 아니야?" 맞는 지적이다. 그래서 둘 다 낸다.
+       다만 실측해 보니 오늘 10위권 10개 중 «9개가 이번이 첫 등판»이었다.
+       개별 이력이 없으면 개별로는 할 말이 없다 — 그럴 땐 전체 기준선이
+       유일하게 가진 자다. 그리고 «대부분이 첫 등판»이라는 사실 자체도
+       정보다(지금 뜬 게 전부 새 얼굴이라는 뜻).
 
-    ⚠️ 관측창이 짧으면 «아직 안 끝난» 체류가 꼬리를 자른다. 그래서
-       «끝까지 본 것(완결)»만 센다. 지금 진행 중인 테마는 제외한다.
-    반환 {완결수, 중앙값, 곡선[(N, 생존율%)], 관측일수} 또는 None
+    ⚠️ 원래 제안이던 «진입 후 N일째 평균 등락»은 못 쓴다. theme_history는
+       그날 상위 테마만 저장해서, 내려간 날은 기록이 아예 없다. 오른 날만
+       모아 평균 내면 «플러스 비율 100%»가 나온다(실측). 생존편향이다.
     """
     rk = _theme_cum_rank()
     days = sorted(rk)
     if len(days) < 5:
         return None
     top = [{n for n, _ in (rk.get(d) or [])[:10]} for d in days]
-    이름 = {n for s in top for n in s}
-    런 = []
-    for nm in 이름:
+    이력 = {}
+    for nm in {n for st in top for n in st}:
         i = 0
         while i < len(top):
             if nm in top[i] and (i == 0 or nm not in top[i - 1]):
                 j = i
                 while j < len(top) and nm in top[j]:
                     j += 1
-                런.append({"일수": j - i, "끝남": j < len(top)})
+                이력.setdefault(nm, []).append({"일수": j - i, "끝남": j < len(top)})
                 i = j
             else:
                 i += 1
-    완결 = [r["일수"] for r in 런 if r["끝남"]]
-    if len(완결) < 10:          # ⚠️ 10건 미만이면 곡선이라 부를 수 없다
+    완결 = sorted(r["일수"] for v in 이력.values() for r in v if r["끝남"])
+    if len(완결) < 10:
         return None
-    완결.sort()
     곡선 = []
     for n in range(1, 9):
         남 = sum(1 for x in 완결 if x >= n)
         곡선.append((n, round(남 / len(완결) * 100)))
         if 남 == 0:
             break
-    mid = 완결[len(완결) // 2]
-    return {"완결수": len(완결), "중앙값": mid, "곡선": 곡선,
-            "관측일수": len(days), "진행중": len(런) - len(완결)}
+    # ── 오늘 10위권 각 테마의 «자기 이력» ──
+    개별 = []
+    for nm in (대상 or [n for n, _ in (rk.get(days[-1]) or [])[:10]]):
+        과거 = [r["일수"] for r in (이력.get(nm) or []) if r["끝남"]]
+        개별.append({"n": nm, "과거": 과거})
+    첫등판 = sum(1 for x in 개별 if not x["과거"])
+    return {"완결수": len(완결), "중앙값": 완결[len(완결) // 2], "곡선": 곡선,
+            "관측일수": len(days), "개별": 개별, "첫등판": 첫등판}
 
 
 def build_theme_survival(오늘나이=None):
-    """⏳ 생존곡선 카드 — «지금 며칠째»가 어디쯤인지 보여준다."""
+    """⏳ 생존 기준선 — «전체 곡선»과 «이 테마들의 자기 이력»을 같이."""
     s = theme_survival()
     if not s:
         return ""
@@ -11609,25 +11615,39 @@ def build_theme_survival(오늘나이=None):
     막대 = "".join(
         f'<div class="sv-r{" me" if (오늘나이 and n == 오늘나이) else ""}">'
         f'<span class="sv-n">{n}일째</span>'
-        f'<span class="sv-b"><i style="width:{max(2, round(v / mx * 100))}%'
-        f'"></i></span>'
-        f'<span class="sv-v">{v}%</span></div>'
+        f'<span class="sv-b"><i style="width:{max(2, round(v / mx * 100))}%"></i>'
+        f'</span><span class="sv-v">{v}%</span></div>'
         for n, v in s["곡선"])
-    # ⚠️ 표본 수를 «반드시» 같이 적는다. 33건짜리 곡선을 1,000건짜리처럼
-    #    읽으면 안 된다. 관측일수도 함께 — 창이 짧으면 긴 체류가 잘린다.
+
+    # 개별 이력이 있는 테마만 따로 — 없으면 «첫 등판»이라고 말한다.
+    있음 = [x for x in s["개별"] if x["과거"]]
+    if 있음:
+        개별줄 = "".join(
+            f'<div class="sv-i"><b>{x["n"]}</b>'
+            f'<span>예전 등판 {len(x["과거"])}회 · '
+            f'{"·".join(str(d) + "일" for d in x["과거"])} 버팀</span></div>'
+            for x in 있음[:5])
+        개별블록 = (f'<p class="sv-ih">이 중 «자기 이력»이 있는 테마</p>'
+                 f'{개별줄}')
+    else:
+        개별블록 = ""
+
     return (f'<div class="sv-card">'
-            f'<p class="sv-h">⏳ 테마는 보통 며칠 버티나'
+            f'<p class="sv-h">⏳ 10위권에서 며칠 버티나'
             f'<span>표본 {s["완결수"]}건</span></p>'
-            f'<p class="sv-lead">10위권에 들어온 테마가 <b>N일째까지 '
-            f'남아 있던 비율</b>이에요. 절반이 빠지는 지점은 '
-            f'<b>{s["중앙값"]}일째</b>입니다.</p>'
+            f'<p class="sv-lead">지금까지 들어왔다 나간 테마 <b>{s["완결수"]}건</b>을 '
+            f'세어 보니, 절반이 빠지는 지점은 <b>{s["중앙값"]}일째</b>였어요.</p>'
             f'<div class="sv-rows">{막대}</div>'
-            f'<p class="sv-note">⚠️ 관측 <b>{s["관측일수"]}거래일</b>짜리 '
-            f'표본입니다 — 창이 짧아 <b>오래 버틴 테마가 덜 잡힙니다</b>. '
-            f'뒤쪽 숫자일수록 덜 믿으세요.<br>'
-            f'⚠️ «며칠 버티나»만 말합니다. <b>얼마나 오르나는 여기서 '
-            f'말하지 않습니다</b> — 오른 날만 기록에 남아 평균이 부풀기 '
-            f'때문이에요.</p></div>')
+            f'<p class="sv-now">오늘 10위권 <b>10개 중 {s["첫등판"]}개</b>가 '
+            f'<b>이번이 첫 등판</b>입니다'
+            + ('— 그래서 개별 이력으로는 아직 말할 게 거의 없고, 위 기준선이 '
+               '유일하게 가진 자예요.' if s["첫등판"] >= 8 else '.') + '</p>'
+            + 개별블록
+            + f'<p class="sv-note">⚠️ 관측 <b>{s["관측일수"]}거래일</b>짜리라 '
+            f'<b>오래 버틴 테마가 덜 잡힙니다</b> — 뒤쪽 숫자일수록 덜 믿으세요. '
+            f'쌓일수록 정확해집니다.<br>'
+            f'⚠️ «며칠 버티나»만 말합니다. <b>얼마나 오르나는 말하지 않습니다</b> '
+            f'— 오른 날만 기록에 남아 평균이 부풀기 때문이에요.</p></div>')
 
 
 def theme_board():
@@ -11644,7 +11664,7 @@ def theme_board():
     셋을 겹쳐야 비로소 «1위지만 이미 늦었다»가 나온다. 이 문장은
     여섯 코너 어디에도 없다.
 
-    반환: [{n, rk, y, from5, st, age, 돈, zone, stay}, ...] 순위 오름차순
+    반환: ([{n, rk, y, from5, st, age, 돈, zone}, ...], 메타)
     """
     rk = _theme_cum_rank()
     days = sorted(rk)
@@ -11680,24 +11700,6 @@ def theme_board():
     return out, 메타
 
 
-# ══════════════════════════════════════════════════════════════
-# 🔒 2026-09-17 HO 지시 — 테마탭 안 «판단» 서브탭 (유료 전용 후보).
-#
-#   [의도] 6코너는 «읽는» 화면이다. 데이터 종류로 나뉘어 있어서
-#     (레이더·다가오는·섹터·오늘·채점판) 독자가 여섯 번 읽고 «직접»
-#     합쳐야 했다. 이 탭은 그 합치는 일을 대신한다.
-#
-#   ⚠️ 요약본이 되면 실패다. 6코너를 줄여 다시 쓰면 «일곱 번째 코너»가
-#     될 뿐이고, 읽을 거리만 늘어난다.
-#     → 이 탭이 만드는 것은 «교차했을 때만 나오는 문장»이다.
-#       예) 순위 1위(레이더) × 4일째(나이) × 중앙값 3일(생존곡선)
-#           = "1위지만 이미 절반이 빠지는 지점을 넘겼다"
-#       이 문장은 여섯 코너 어디에도 없다.
-#
-#   ⚠️⚠️ 추천으로 읽히지 않게 «말»을 고른다. 🟢을 「매수 후보」라 쓰면
-#     리포트 전체가 지켜 온 «포착은 추천이 아니다»가 여기서 무너진다.
-#     조건을 통과했다는 사실만 말한다. 그리고 그 분류가 맞는지는
-#     아직 검증 전이라는 것도 화면에 적는다(원칙4).
 # 🔒 판단 탭 전용 스크립트 — 서브탭 전환 + 격자 정렬.
 #   ⚠️ 이 상수는 «판단 탭이 실제로 만들어질 때만» 페이지에 들어간다.
 #     ztog 사고(2026-09-17)처럼 «남의 코너에 얹혀 사라지는» 일이 없도록,
@@ -11777,8 +11779,16 @@ def _judge_light(t, 메타):
 
     if t["st"] in ("hot", "warm", "new"):
         근거.append(f'5일 전 {t["from5"]}위 → {t["rk"]}위로 올라오는 중')
-        근거.append(f'{t["age"]}일째 — 중앙값({생존중앙}일)보다 이른 자리'
-                    if 생존중앙 else f'{t["age"]}일째')
+        # ⚠️ 2026-09-17 HO 지적 — 3일째인데 중앙값도 3일이면 «이른 자리»가
+        #    아니라 «같은 자리»다. 같은 값에 «보다»를 쓰면 틀린 말이 된다.
+        if 생존중앙 is None:
+            근거.append(f'{t["age"]}일째')
+        elif t["age"] == 생존중앙:
+            근거.append(f'{t["age"]}일째 — 절반이 빠지는 지점({생존중앙}일) '
+                        f'딱 그 자리예요')
+        else:
+            근거.append(f'{t["age"]}일째 — 절반이 빠지는 지점({생존중앙}일)보다 '
+                        f'{생존중앙 - t["age"]}일 이른 자리')
         if 돈늘음:
             근거.append(f'거래대금도 어제보다 {t["돈"]:+.0f}% 늘었어요')
         return ("green", "조건 통과", 근거)
@@ -11824,8 +11834,245 @@ def _judge_conflicts(rows, 메타):
     return out
 
 
-def build_judge_tab():
-    """🔒 판단 탭 — 1층 한 줄 · 2층 신호등 · 3층 격자 · 4층 모순."""
+# ══════════════════════════════════════════════════════════════
+# 🔒🔒 2026-09-17 HO 지시 — 「자리 점검표」.
+#
+#   [무엇이 달라지나] 앞 코너들은 전부 «사실 나열»이었다. 여기서 처음으로
+#   «그 사실들이 어떤 자리를 뜻하는가»를 말한다.
+#
+#   ⚠️⚠️ 그래도 «사라»고는 말하지 않는다. 우리에겐 아직 성적표가 없다
+#     (생존 33건 · 채점판 50건 미달). 검증 안 된 결정판은 가장 위험한
+#     물건이다 — 틀리는 순간 지금까지 쌓은 신뢰가 통째로 무너진다.
+#   → 점수를 매기지 않고 «체크리스트»를 보인다. 「5개 중 4개 켜짐」은
+#     사실이고, 「80점」은 우리가 만든 주장이다. 주장할 근거가 아직 없다.
+#   → 켜지지 '않은' 칸도 그대로 보인다. 그게 리스크다. 점수로 뭉개면
+#     뭐가 부족한지가 사라진다.
+#   ⚠️ 유형 이름에 동사를 쓰지 않는다. 「지금 들어갈 자리」는 추천이고
+#     「막 문을 연 자리」는 서술이다. 이 차이가 결정적이다.
+SPOT_TYPES = [
+    ("new",  "🌱", "막 문을 연 자리",  "어제는 20위 밖이었는데 오늘 10위권",
+     TM_NEW),
+    ("back", "♻️", "다시 올라오는 자리", "예전에 10위권이던 테마가 되돌아옴",
+     TM_WARM),
+    ("cash", "💰", "돈이 먼저 온 자리", "순위보다 거래대금이 먼저 늘어남",
+     TM_COOL),
+    ("early", "🏃", "아직 이른 자리",  "절반이 빠지는 지점 전",
+     TM_HOT),
+    ("ripe", "⏳", "익은 자리",       "절반이 빠지는 지점을 넘김",
+     TM_FLAT),
+]
+SPOT_LOG = "judge_log.json"
+
+
+def _spot_history():
+    """테마별 «과거 10위권 등판 횟수» — 재등판 판정에 쓴다."""
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    top = [{n for n, _ in (rk.get(d) or [])[:10]} for d in days]
+    cnt = {}
+    for nm in {n for st in top for n in st}:
+        i, c = 0, 0
+        while i < len(top):
+            if nm in top[i] and (i == 0 or nm not in top[i - 1]):
+                c += 1
+                while i < len(top) and nm in top[i]:
+                    i += 1
+            else:
+                i += 1
+        cnt[nm] = c
+    return cnt
+
+
+def theme_spots(data=None):
+    """자리 유형 + 체크리스트 + 내일 확인할 것."""
+    rows, 메타 = theme_board()
+    if not rows:
+        return [], {}
+    중앙 = 메타.get("생존중앙")
+    등판 = _spot_history()
+    zm = _theme_zone_map()
+    b = market_breadth() or {}
+    몰린곳, 몰린수 = b.get("최대섹터"), b.get("최대개수")
+    out = []
+    for t in rows:
+        # ── 피할 자리는 분류에서 뺀다(HO 지시 2026-09-17) ──
+        #    ⚠️ 목록에서 «지우는» 게 아니라 «따로 모은다». 없는 것과
+        #       안 보이는 것은 다르다.
+        식음 = (t["st"] == "down") or (t["돈"] is not None and t["돈"] <= -15)
+
+        # ── 체크리스트 5칸 ──
+        올라옴 = t["st"] in ("hot", "warm", "new")
+        이름 = (중앙 is not None and t["age"] is not None and t["age"] < 중앙)
+        새로 = (t["y"] is None)
+        어제상승 = (t["y"] is not None and t["y"] > t["rk"])
+        돈늘 = (t["돈"] is not None and t["돈"] >= 15)
+        돈모름 = (t["돈"] is None)
+        chk = [
+            (True, "10위권 안", f'{t["rk"]}위'),
+            (올라옴, "올라오는 중",
+             move_label(t["from5"], t["rk"]) if t["from5"] else "기록 부족"),
+            (이름, "아직 이른 자리",
+             (f'{t["age"]}일째 (절반 {중앙}일)' if t["age"] and 중앙
+              else "기록 부족")),
+            (새로 or 어제상승, "어제보다 앞",
+             ("어제는 20위 밖" if 새로
+              else (f'어제 {t["y"]}위 → {t["rk"]}위' if t["y"] else "—"))),
+            (돈늘, "돈도 늘었나",
+             ("확인 안 됨" if 돈모름 else f'{t["돈"]:+.0f}%')),
+        ]
+        켜짐 = sum(1 for ok, _a, _bb in chk if ok)
+
+        # ── 자리 유형 (우선순위 순) ──
+        if 식음:
+            typ = "cold"
+        elif (등판.get(t["n"], 0) >= 2 and 올라옴
+              and t["age"] is not None and t["age"] <= 2):
+            typ = "back"
+        elif 새로:
+            typ = "new"
+        elif t["돈"] is not None and t["돈"] >= 40 and t["rk"] >= 4:
+            typ = "cash"
+        elif 이름 and 올라옴:
+            typ = "early"
+        elif 중앙 is not None and t["age"] is not None and t["age"] >= 중앙:
+            typ = "ripe"
+        else:
+            typ = "early" if 올라옴 else "ripe"
+
+        # ── 내일 확인할 것 ──
+        #    ⚠️ 예측이 아니다. «무엇이 보이면 판단이 바뀌는가»만 적는다.
+        if typ in ("new", "back"):
+            내일 = (f'10위권에 남아 있나 — 남으면 '
+                  f'{(t["age"] or 1) + 1}일째로 여유가 하루 더, '
+                  f'빠지면 하루짜리였던 것')
+        elif typ == "cash":
+            내일 = '순위가 따라 올라오나 — 안 오면 돈만 스쳐 간 것'
+        elif typ == "early":
+            _남 = (중앙 - t["age"]) if (중앙 and t["age"]) else None
+            내일 = (f'절반이 빠지는 지점({중앙}일)까지 {_남}일 남음'
+                  if _남 and _남 > 0 else '절반이 빠지는 지점에 닿음')
+        elif typ == "ripe":
+            내일 = '순위가 밀리나 — 밀리면 늦은 자리 + 하락이 겹침'
+        else:
+            내일 = '돈이 다시 들어오나'
+
+        # ── 볼 종목 ──
+        if typ in ("new", "back", "cash"):
+            볼 = "대장 — 테마가 진짜인지 대장으로 확인해요"
+        elif typ == "early":
+            볼 = "대장·후발 — 아직 여유가 있는 자리예요"
+        elif typ == "ripe":
+            볼 = "소외 — 갭 메우기 자리지만 시간이 늦은 건 같아요"
+        else:
+            볼 = ""
+        out.append({**t, "typ": typ, "chk": chk, "켜짐": 켜짐,
+                    "내일": 내일, "볼": 볼, "등판": 등판.get(t["n"], 1),
+                    "몰림": (zm.get(t["n"]) == 몰린곳)})
+    return out, {"중앙": 중앙, "몰린곳": 몰린곳, "몰린수": 몰린수,
+                 "생존표본": 메타.get("생존표본")}
+
+
+def _spot_log_save(spots):
+    """🔴 오늘의 판정을 남긴다 — 화면엔 안 나와도 «가장 중요한 한 줄».
+
+    [왜] 오늘 「🌱 4/5 켜짐」이라 한 테마가 그 뒤 어땠는지를 쌓아야,
+      한 달 뒤 «4/5 켜진 자리는 그 뒤 며칠 더 갔다»를 말할 수 있다.
+      그게 진짜 결정판이고, 지금 만드는 건 그리로 가는 «기록 장치»다.
+    ⚠️ 오늘 안 쌓으면 한 달을 잃는다. 되돌릴 방법이 없다.
+    ⚠️ 실패해도 발행은 막지 않는다 — 기록은 덤이지 본체가 아니다.
+    """
+    try:
+        기록 = load_json(SPOT_LOG) or {}
+        기록[DATE] = [{"n": x["n"], "typ": x["typ"], "켜짐": x["켜짐"],
+                     "rk": x["rk"], "age": x["age"], "돈": x["돈"]}
+                    for x in spots]
+        # 최근 180일만 — 무한정 불리지 않는다
+        for d in sorted(기록)[:-180]:
+            기록.pop(d, None)
+        with open(SPOT_LOG, "w", encoding="utf-8") as f:
+            json.dump(기록, f, ensure_ascii=False, indent=1)
+        print(f"   🗂 자리 판정 기록 저장 — {len(spots)}건 ({DATE})")
+    except Exception as e:
+        print(f"   ⚠️ 자리 판정 기록 실패 — {type(e).__name__}: {e}")
+
+
+def build_spot_table(data=None):
+    """🎯 자리 점검표 — 유형별 카드 + 체크 5칸."""
+    spots, m = theme_spots(data)
+    if not spots:
+        return ""
+    _spot_log_save(spots)
+    mem = _theme_members(data) if data else {}
+    pc = [0]
+
+    def 카드(x, icon, c):
+        pc[0] += 1
+        _sp, _span = _stock_panel(x["n"], mem.get(x["n"]) or [], f"sp{pc[0]}")
+        점 = "".join(
+            f'<i class="{"on" if ok else ""}" style="background:'
+            f'{c if ok else "#242e3b"}"></i>' for ok, _a, _bb in x["chk"])
+        줄 = "".join(
+            f'<div class="sp-ck{"" if ok else " off"}">'
+            f'<span class="sp-cm">{"✓" if ok else "·"}</span>'
+            f'<span class="sp-cl">{a}</span>'
+            f'<span class="sp-cv">{v}</span></div>'
+            for ok, a, v in x["chk"])
+        몰 = (f'<span class="sp-zone on">{m["몰린곳"]} {m["몰린수"]}개 — '
+              f'오늘 가장 몰린 곳</span>' if x["몰림"] else
+              f'<span class="sp-zone">{x["zone"]}</span>')
+        btn = (f'<span class="jd-sb" '
+               f"onclick=\"ztog('sp{pc[0]}')\">종목보기</span>" if _span else "")
+        return (f'<div class="sp-card" style="border-color:{c}3d">'
+                f'<div class="sp-hd"><span class="sp-rk" '
+                f'style="color:{c}">{x["rk"]}위</span>'
+                f'<b>{x["n"]}</b>{btn}</div>'
+                f'<div class="sp-mt"><span class="sp-dots">{점}</span>'
+                f'<span class="sp-cnt" style="color:{c}">'
+                f'{x["켜짐"]}/5 켜짐</span></div>'
+                f'<div class="sp-cks">{줄}</div>'
+                f'<div class="sp-ft">{몰}'
+                + (f'<p class="sp-see">🎯 {x["볼"]}</p>' if x["볼"] else "")
+                + f'<p class="sp-tm">📅 내일 확인: {x["내일"]}</p></div>'
+                f'{_span}</div>')
+
+    묶 = []
+    for key, icon, 라벨, 설명, c in SPOT_TYPES:
+        v = [x for x in spots if x["typ"] == key]
+        if not v:
+            continue
+        v.sort(key=lambda x: (-x["켜짐"], x["rk"]))
+        묶.append(f'<div class="sp-grp"><p class="sp-gh" style="color:{c}">'
+                  f'{icon} {라벨}<b>{len(v)}</b>'
+                  f'<span>{설명}</span></p>'
+                  + "".join(카드(x, icon, c) for x in v) + '</div>')
+    식 = [x for x in spots if x["typ"] == "cold"]
+    if 식:
+        묶.append('<div class="sp-cold"><b>🧊 볼 자리 아님</b>'
+                  + "".join(f'<span>{x["n"]} ({x["rk"]}위)</span>' for x in 식)
+                  + '<p>순위가 밀렸거나 돈이 빠지고 있어요. 지웠다기보다 '
+                    '따로 모아 둡니다.</p></div>')
+
+    return (f'<div class="sp-wrap"><p class="jd-h">🎯 자리 점검표'
+            f'<span>5칸 중 몇 개가 켜졌나</span></p>'
+            f'<p class="sp-lead">오늘 10위권 테마가 <b>어떤 종류의 자리</b>인지 '
+            f'나눠 두고, 우리가 보는 <b>5가지가 각각 켜졌는지</b> 그대로 '
+            f'보여줍니다.</p>'
+            + "".join(묶)
+            + f'<p class="jd-warn">⚠️ <b>점수가 아닙니다.</b> 「4/5 켜짐」은 '
+            f'우리가 보는 다섯 가지 중 넷이 사실이라는 뜻일 뿐, '
+            f'「80점짜리」라는 말이 아니에요. <b>항목마다 중요도가 다른데 '
+            f'그 무게를 정할 근거가 아직 없습니다</b>'
+            + (f'(성적 표본 {m["생존표본"]}건).' if m.get("생존표본") else '.')
+            + f'<br>⚠️ <b>추천이 아닙니다.</b> 켜지지 않은 칸이 곧 '
+            f'리스크예요 — 그것까지 같이 보시라고 남겨 뒀습니다.</p></div>')
+
+
+def build_judge_tab(data=None):
+    """🔒 판단 탭 — 1층 한 줄 · 2층 신호등 · 3층 격자 · 4층 모순.
+
+    🆕 2026-09-17 — data를 받는다. 신호등에서 «종목보기»를 열려면
+       테마별 구성종목이 필요한데, 그건 data에서만 나온다.
+    """
     rows, 메타 = theme_board()
     if not rows:
         return ""
@@ -11851,6 +12098,12 @@ def build_judge_tab():
         층1 = ""
 
     # ── 2층: 신호등 ─────────────────────────────────
+    # 🔴 HO 지시 2026-09-17 — 신호등에서 바로 종목을 볼 수 있게.
+    #   [왜] 「조건 통과」까지 읽고 나면 다음 질문은 반드시 «그래서 뭘?»이다.
+    #   여기서 「읽기」 탭으로 되돌아가 테마를 다시 찾게 만들면 흐름이 끊긴다.
+    #   판단하는 자리에 종목이 같이 있어야 판단이 끝난다.
+    _mem = _theme_members(data) if data else {}
+    _pc = [0]
     통 = {"green": [], "yellow": [], "red": [], "gray": []}
     for t in rows:
         c, 이름, 근거 = _judge_light(t, 메타)
@@ -11859,23 +12112,48 @@ def build_judge_tab():
            "yellow": ("🟡", "조건은 맞는데 늦음", TM_WARM),
            "red": ("🔴", "식는 중", TM_HOT),
            "gray": ("⬜", "판단 보류", TM_FLAT)}
+    # 🔴 HO 지시 2026-09-17 — 신호등을 «직관적으로» 시각화한다.
+    #   [무엇이 안 보였나] 목록이 네 덩이로 나열만 돼 있어서, «오늘 시장이
+    #   어느 쪽으로 기울었나»가 세어 봐야 알 수 있었다. 숫자를 세게 만들면
+    #   진 것이다 — 한눈에 비율이 보여야 한다.
+    #   [해법] 맨 위에 «띠 하나». 네 색이 개수만큼 폭을 차지한다.
+    #   이 띠 하나가 "오늘은 늦은 자리가 절반"을 말 없이 말한다.
+    # ⚠️ 2026-09-17 HO 지시 — 가로 띠는 뺀다. 아래 범례에 개수가 이미
+    #    적혀 있어 같은 말을 두 번 하고 있었다(원칙5).
+    범 = "".join(
+        f'<span><i style="background:{_LM[k][2]}"></i>{_LM[k][1]}'
+        f'<b>{len(통[k])}</b></span>'
+        for k in ("green", "yellow", "red", "gray") if 통[k])
+
     묶 = []
     for k in ("green", "yellow", "red", "gray"):
         if not 통[k]:
             continue
         icon, 라벨, c = _LM[k]
-        줄 = "".join(
-            f'<div class="jd-it" onclick="ztog(\'jd{k}{i}\')">'
-            f'<span class="jd-rk" style="color:{c}">{t["rk"]}위</span>'
-            f'<b>{t["n"]}</b>{ZONE_ARROW}</div>'
-            f'<div class="jd-why" id="jd{k}{i}">'
-            + "".join(f'<p>· {g}</p>' for g in 근거) + '</div>'
-            for i, (t, _nm, 근거) in enumerate(통[k]))
+        _조각 = []
+        for i, (t, _nm, 근거) in enumerate(통[k]):
+            _pc[0] += 1
+            _sp, _span = _stock_panel(t["n"], _mem.get(t["n"]) or [],
+                                      f"jdst{_pc[0]}")
+            _btn = (f'<span class="jd-sb" '
+                    f"onclick=\"event.stopPropagation();ztog('jdst{_pc[0]}')\">"
+                    f'종목보기</span>' if _span else "")
+            _조각.append(
+                f'<div class="jd-it" onclick="ztog(\'jd{k}{i}\')">'
+                f'<span class="jd-dot" style="background:{c}"></span>'
+                f'<span class="jd-rk" style="color:{c}">{t["rk"]}위</span>'
+                f'<b>{t["n"]}</b>{_btn}<i class="jd-ar">{ZONE_ARROW}</i></div>'
+                f'{_span}'
+                f'<div class="jd-why" id="jd{k}{i}">'
+                + "".join(f'<p>· {g}</p>' for g in 근거) + '</div>')
+        줄 = "".join(_조각)
         묶.append(f'<div class="jd-grp"><p class="jd-gh" style="color:{c};'
                   f'border-color:{c}44">{icon} {라벨}<span>{len(통[k])}</span></p>'
                   f'{줄}</div>')
     층2 = (f'<div class="jd-2"><p class="jd-h">🚦 오늘 테마 상태'
-           f'<span>눌러서 근거 보기</span></p>{"".join(묶)}'
+           f'<span>눌러서 근거 보기</span></p>'
+           f'<div class="jd-leg">{범}</div>'
+           f'{"".join(묶)}'
            f'<p class="jd-warn">⚠️ <b>추천이 아닙니다.</b> 우리가 정한 조건에 '
            f'걸렸는지만 대조한 결과예요. <b>이 분류가 실제로 맞는지는 '
            f'아직 성적을 모으는 중</b>입니다'
@@ -11891,6 +12169,9 @@ def build_judge_tab():
     층3 = (f'<div class="jd-3"><p class="jd-h">📋 한눈 격자'
            f'<span>제목을 눌러 정렬</span></p>'
            f'<div class="jd-tb"><div class="jd-hd">'
+           # ⚠️ 2026-09-17 — 헤더가 5칸인데 행은 6칸(테마명 포함)이라
+           #    숫자가 한 칸씩 밀려 있었다. 테마 열을 넣어 칸을 맞춘다.
+           f'<span data-k="n">테마</span>'
            f'<span data-k="rk">순위</span><span data-k="y">어제</span>'
            f'<span data-k="age">나이</span><span data-k="m">돈</span>'
            f'<span data-k="z">섹터</span></div>'
@@ -11903,11 +12184,19 @@ def build_judge_tab():
     # ── 4층: 엇갈리는 신호 ───────────────────────────
     cf = _judge_conflicts(rows, 메타)
     if cf:
-        층4 = ('<div class="jd-4"><p class="jd-h">⚡ 엇갈리는 신호</p>'
+        # 🔴 HO 지시 2026-09-17 — «엇갈린다»를 글로 쓰지 말고 «보이게».
+        #   [해법] 두 값을 좌우로 갈라 놓고 가운데 ↔ 를 둔다. 왼쪽은
+        #   «좋게 읽히는 쪽», 오른쪽은 «나쁘게 읽히는 쪽»으로 색을 준다.
+        #   글을 읽기 전에 «둘이 반대다»가 먼저 눈에 들어와야 한다.
+        층4 = ('<div class="jd-4"><p class="jd-h">⚡ 엇갈리는 신호'
+               '<span>둘이 반대로 말해요</span></p>'
                + "".join(
                    f'<div class="jd-cf"><p class="jd-cn">{nm}</p>'
-                   f'<p class="jd-cv">{a} <i>↔</i> {bb}</p>'
-                   f'<p class="jd-cs">→ {말}</p></div>'
+                   f'<div class="jd-sc">'
+                   f'<span class="jd-sl">{a}</span>'
+                   f'<i class="jd-sx">↔</i>'
+                   f'<span class="jd-sr">{bb}</span></div>'
+                   f'<p class="jd-cs">{말}</p></div>'
                    for nm, a, bb, 말 in cf)
                + '<p class="jd-note">두 값이 <b>서로 다른 말</b>을 하는 자리만 '
                  '모았어요. <b>어느 쪽이 맞는지는 말하지 않습니다</b> — '
@@ -11916,7 +12205,50 @@ def build_judge_tab():
         층4 = ('<div class="jd-4"><p class="jd-h">⚡ 엇갈리는 신호</p>'
                '<p class="jd-none">오늘은 지표끼리 부딪치는 자리가 없습니다.</p></div>')
 
-    return f'<div class="jd-wrap">{층1}{층2}{층3}{층4}</div>'
+    # ⚠️ 2026-09-17 — 신호등(층2)은 «자리 점검표»가 대신한다.
+    #   둘 다 «테마 상태 분류»라 같은 일을 두 번 하는 셈이었고,
+    #   점검표가 더 정교하다(유형 5종 + 체크 5칸 + 내일 볼 것).
+    #   신호등 코드는 지우지 않고 남겨 둔다 — 되살릴 수 있게(원칙3).
+    _점검 = build_spot_table(data)
+    return f'<div class="jd-wrap">{층1}{_점검 or 층2}{층3}{층4}</div>'
+
+
+def build_breadth_line():
+    """📐 시장의 폭 — 레이더 바로 위 «한 줄» 판.
+
+    🔴 HO 지시 2026-09-17 — 탭 맨 위 큰 카드를 여기로 옮기고 줄인다.
+      [왜] 이 값은 레이더를 «어떻게 읽을지» 정해 주는 안내다. 레이더보다
+      먼저, 그러나 짧게 있어야 한다. 앞에서 길게 붙잡으면 관문이 된다.
+      [무엇만 남기나] ① 좁은가 넓은가 ② 어디에 몰렸나 ③ 추세.
+      «그래서 뭘 해야 하나»는 「판단」 탭이 맡는다 — 두 번 말하지 않는다.
+    """
+    b = market_breadth()
+    if not b:
+        return ""
+    섹터수, 최대, 개수 = b["섹터수"], b["최대섹터"], b["최대개수"]
+    if 섹터수 <= 3:
+        등급, 색 = "매우 좁음", TM_HOT
+    elif 섹터수 <= 4:
+        등급, 색 = "좁음", TM_WARM
+    elif 섹터수 <= 6:
+        등급, 색 = "보통", TM_COOL
+    else:
+        등급, 색 = "넓음", TM_DOWN
+    w = max(6, min(100, round(섹터수 / 8 * 100)))
+    추 = b.get("추이") or []
+    꼬리 = ""
+    if len(추) >= 3:
+        최근 = [x[1] for x in 추[-3:]]
+        if 최근[0] > 최근[1] > 최근[2]:
+            꼬리 = " · 3일 연속 좁아지는 중"
+        elif 최근[0] < 최근[1] < 최근[2]:
+            꼬리 = " · 3일 연속 넓어지는 중"
+    return (f'<div class="bl-line">'
+            f'<div class="bl-top"><span class="bl-t">📐 시장의 폭</span>'
+            f'<span class="bl-g" style="color:{색}">{등급}</span></div>'
+            f'<div class="bl-bar"><i style="width:{w}%;background:{색}"></i></div>'
+            f'<p class="bl-s">10위권이 <b>{섹터수}개 섹터</b>에 나뉨 · '
+            f'가장 많은 곳 <b style="color:{색}">{최대} {개수}개</b>{꼬리}</p></div>')
 
 
 def build_market_breadth():
@@ -12190,6 +12522,28 @@ _MC = {"new": TM_NEW, "hot": TM_HOT, "warm": TM_WARM,
        "hold": TM_COOL, "flat": TM_FLAT, "down": TM_DOWN}
 _ML = {"new": "오늘 첫 등장", "hot": "빠르게 올라오는 중", "warm": "올라오는 중",
        "hold": "제자리", "flat": "기록 없음", "down": "밀려나는 중"}
+
+
+def move_label(이전, 현재):
+    """🔴 HO 지시 2026-09-17 — «빠르게 올라오는 중»을 «13단계 상승»으로.
+    [왜] «빠르게»는 느낌이고 «13단계»는 사실이다. 같은 빨강이라도
+    3단계 오른 것과 13단계 오른 것은 전혀 다른 일인데, 말로는 구분이
+    안 됐다. 숫자를 그대로 말하면 독자가 스스로 크기를 잰다.
+    ⚠️ 색은 그대로 둔다 — 색은 «묶어 보는 눈», 숫자는 «따져 보는 눈»이다.
+    """
+    if 현재 is None:
+        return "기록 없음"
+    if 이전 is None:
+        return "오늘 첫 등장"
+    d = 이전 - 현재
+    # ⚠️ 2026-09-17 HO 지시 — 부호를 앞에 붙인다.
+    #    «13단계 상승»보다 «+13단계»가 먼저 읽힌다. 숫자 앞의 기호는
+    #    글자를 읽기 전에 방향을 알려준다 — 목록을 훑을 때 그게 빠르다.
+    if d > 0:
+        return f"+{d}단계 상승"
+    if d < 0:
+        return f"−{abs(d)}단계 하락"
+    return "제자리"
 
 
 def move_tier(이전, 현재):
@@ -12599,7 +12953,7 @@ def build_theme_radar(data):
             f'<span class="tm-nm">{r["n"]}</span>{arw}</div>'
             f'<div class="tm-l2">'
             f'<span class="tm-st" style="color:{c};border-color:{c}55;'
-            f'background:{c}18">{_ML[r["st"]]}</span>'
+            f'background:{c}18">{move_label(r["from"], r["h"][-1])}</span>'
             f'<span class="tm-mv">{mv}</span>{_ydy}'
             # 🆕 2026-09-17 — «5일 중 2일 10위권»(11글자)이 길어서 행마다
             #   이 조각만 아랫줄로 떨어졌다. 줄 수가 들쭉날쭉하면 목록이
@@ -13136,7 +13490,23 @@ def build_sector_theme(data):
                 f'<span class="tm-wc"><b>{r["_i"]}위</b> {r["sec"][:9]}'
                 f' <i>{r["score"]:.0f}점</i></span>' for r in v) + '</div>')
         else:
-            inner = "".join(섹터줄(r) for r in v)
+            # 🔴 HO 지시 2026-09-17 — 소속 테마가 없는 섹터는 «더보기»로 접는다.
+            #   [왜] 추격 섹터는 「섹터는 오르는데 테마가 아직」인 자리다.
+            #   그런데 그중 상당수는 20위권 테마가 «아예 없는» 섹터라 볼 게
+            #   없다. 그것들이 목록을 채우면 정작 볼 섹터가 묻힌다.
+            #   ⚠️ 지우지 않고 접는다 — 없는 것과 안 보이는 것은 다르다(원칙3).
+            _있 = [r for r in v if (r.get("ts") or [])]
+            _없 = [r for r in v if not (r.get("ts") or [])]
+            inner = "".join(섹터줄(r) for r in _있)
+            if _없:
+                _bid = "secNo" + k
+                inner += (
+                    f'<button class="more-btn" '
+                    f"onclick=\"toggleMore('{_bid}',this,"
+                    f"'▾ 소속 테마 없는 섹터 {len(_없)}개 더보기')\">"
+                    f'▾ 소속 테마 없는 섹터 {len(_없)}개 더보기</button>'
+                    f'<div id="{_bid}" style="display:none">'
+                    + "".join(섹터줄(r) for r in _없) + '</div>')
         out.append(f'<div class="tm-grp" style="border-color:{c}59">'
                    f'<div class="tm-gh" style="color:{c};border-bottom-color:{c}33">'
                    f'{title}<span>{desc}</span></div>{inner}</div>')
@@ -13223,7 +13593,101 @@ THEME_V17_CSS = """
 .r-out{color:#7d8695;border:1px solid rgba(125,134,149,.4)}
 .tm-pr{margin:8px 0 0;padding-top:7px;border-top:1px solid rgba(255,255,255,.07);
   font-size:9.5px;color:#6f7784;line-height:1.8}
+/* 📐 시장의 폭 — 레이더 위 한 줄 */
+.bl-line{background:#101720;border:1px solid #1e2937;border-radius:10px;
+  padding:9px 11px 10px;margin:0 0 9px}
+.bl-top{display:flex;align-items:baseline;gap:7px;margin-bottom:6px}
+.bl-t{font-size:11.5px;font-weight:800;color:#c3cad4}
+.bl-g{margin-left:auto;font-size:11.5px;font-weight:800}
+.bl-bar{height:6px;border-radius:3px;background:#1a2330;overflow:hidden}
+.bl-bar i{display:block;height:100%;border-radius:3px}
+.bl-s{margin:6px 0 0;font-size:10.5px;color:#7d8695;line-height:1.6}
+.bl-s b{color:#b6bfcb}
+/* 생존곡선 — 개별 이력 줄 */
+.sv-now{margin:9px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:11px;color:#9aa3b1;line-height:1.7}
+.sv-now b{color:#e2e7ee}
+.sv-ih{margin:9px 0 5px;font-size:10px;font-weight:800;color:#6f7784}
+.sv-i{display:flex;align-items:baseline;gap:7px;padding:4px 0;font-size:11px}
+.sv-i b{color:#dfe4ea;font-weight:700}
+.sv-i span{margin-left:auto;color:#7d8695;font-size:10px}
 /* ══════ 🔒 판단 탭 ══════ */
+/* 신호등 띠 — «세어 보게 만들면 진 것»이라, 비율을 폭으로 보인다 */
+.jd-band{display:flex;height:10px;border-radius:5px;overflow:hidden;
+  margin:0 0 6px;background:#161d26}
+.jd-band i{display:block;height:100%}
+.jd-leg{display:flex;flex-wrap:wrap;gap:4px 9px;margin:0 0 11px}
+.jd-leg span{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;
+  font-weight:700;color:#8b93a0}
+.jd-leg i{width:8px;height:8px;border-radius:2px;flex:none}
+.jd-leg b{color:#dfe4ea;font-weight:800}
+.jd-dot{width:7px;height:7px;border-radius:50%;flex:none}
+/* ══ 🎯 자리 점검표 ══ */
+.sp-wrap{background:#101720;border:1px solid #1e2937;border-radius:12px;
+  padding:12px 13px 11px;margin-bottom:11px}
+.sp-lead{margin:0 0 11px;font-size:11.5px;color:#9aa3b1;line-height:1.7}
+.sp-lead b{color:#dfe4ea}
+.sp-grp{margin-bottom:12px}
+/* ⚠️ 설명을 같은 줄에 두면 «막 문을 연 자리»가 두 줄로 접힌다.
+   제목은 한 줄로 두고 설명은 아래로 내린다 — 제목이 접히면 유형이
+   무엇인지부터 읽기 어려워진다. */
+.sp-gh{margin:0 0 7px;font-size:12px;font-weight:800;line-height:1.5}
+.sp-gh b{font-size:10px;background:rgba(255,255,255,.09);border-radius:999px;
+  padding:1px 6px;margin-left:5px}
+.sp-gh span{display:block;font-size:9.5px;font-weight:600;color:#6f7784;
+  margin-top:2px}
+.sp-card{background:#0d141c;border:1px solid;border-radius:10px;
+  padding:10px 11px;margin-bottom:6px}
+.sp-hd{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+.sp-rk{font-size:10px;font-weight:800;flex:none}
+.sp-hd b{font-size:13px;font-weight:800;color:#e8ecf1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.sp-hd .jd-sb{margin-left:auto}
+/* 점 5개 — 글을 읽기 전에 «몇 개 켜졌나»가 먼저 보이게 */
+.sp-mt{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.sp-dots{display:flex;gap:4px}
+.sp-dots i{width:16px;height:5px;border-radius:3px;display:block}
+.sp-cnt{margin-left:auto;font-size:10.5px;font-weight:800}
+.sp-cks{display:flex;flex-direction:column;gap:3px;
+  padding:7px 0;border-top:1px solid #16202b;border-bottom:1px solid #16202b}
+.sp-ck{display:flex;align-items:baseline;gap:6px;font-size:10.5px;color:#c3cad4}
+.sp-ck.off{color:#5f6875}
+.sp-cm{width:10px;flex:none;font-weight:800;color:#3ecf9a}
+.sp-ck.off .sp-cm{color:#3a4553}
+.sp-cl{flex:none}
+.sp-cv{margin-left:auto;font-weight:700;color:#8b93a0}
+.sp-ck.off .sp-cv{color:#4e5765}
+.sp-ft{padding-top:7px}
+.sp-zone{display:inline-block;font-size:9.5px;font-weight:700;color:#7d8695;
+  background:#141d27;border:1px solid #22303d;border-radius:999px;
+  padding:2px 7px}
+.sp-zone.on{color:#ffc93c;border-color:rgba(255,201,60,.35);
+  background:rgba(255,201,60,.08)}
+.sp-see{margin:6px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}
+.sp-tm{margin:4px 0 0;font-size:10.5px;color:#7d8695;line-height:1.6}
+.sp-cold{background:#0d131a;border:1px dashed #263141;border-radius:9px;
+  padding:9px 11px;margin-bottom:10px}
+.sp-cold b{font-size:11px;color:#8b93a0;margin-right:7px}
+.sp-cold span{display:inline-block;font-size:10.5px;color:#6f7784;
+  margin-right:8px}
+.sp-cold p{margin:5px 0 0;font-size:10px;color:#5f6875;line-height:1.6}
+/* 신호등 줄의 «종목보기» — 판단하는 자리에서 바로 종목까지 */
+.jd-sb{font-size:9px;font-weight:800;color:#0b0e13;background:#8fd0e8;
+  border-radius:4px;padding:2px 6px;margin-left:6px;white-space:nowrap;
+  cursor:pointer}
+.jd-ar{margin-left:auto;font-style:normal}
+/* 엇갈림 저울 — 글을 읽기 전에 «둘이 반대»가 먼저 보이게 */
+.jd-sc{display:flex;align-items:center;gap:6px;margin:5px 0 6px}
+.jd-sl,.jd-sr{flex:1;font-size:10.5px;padding:5px 8px;border-radius:7px;
+  line-height:1.5}
+.jd-sl{color:#9aa3b1;background:rgba(116,240,212,.08);
+  border:1px solid rgba(116,240,212,.2)}
+.jd-sr{color:#9aa3b1;background:rgba(232,195,58,.08);
+  border:1px solid rgba(232,195,58,.22);text-align:right}
+.jd-sl b,.jd-sr b{color:#e2e7ee}
+.jd-sx{flex:none;font-style:normal;font-size:13px;color:#e0c060;font-weight:800}
+.jd-cs{margin:0;padding:6px 8px;font-size:11px;color:#8fd0e8;line-height:1.6;
+  background:rgba(143,208,232,.07);border-radius:7px}
 .jd-tabs{display:flex;gap:6px;margin:0 0 12px}
 .jd-tb-b{flex:1;padding:9px 0;font-size:12.5px;font-weight:800;
   color:#7d8695;background:#111823;border:1px solid #1e2937;
