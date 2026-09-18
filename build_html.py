@@ -1463,6 +1463,31 @@ def build_disclosures(disc, 공시해설=None):
     공시해설 = 공시해설 or {}
     if not disc:
         return '<p class="disc-note" style="color:#8a909a">오늘 수집된 관심 유형 공시가 없습니다.</p>'
+    # 🔴 HO 지적 2026-09-18 — 「더코디」가 3줄을 차지했다.
+    #   [확인] 중복이 아니라 «실제로 서로 다른 공시»였다.
+    #     · 유상증자결정 정정 (접수 …455)
+    #     · 유상증자결정 정정 (접수 …453)   ← 제목이 같고 접수번호만 다름
+    #     · 자기전환사채매도결정 정정 (…463)
+    #   [그래도 문제인 이유] 화면엔 앞 3줄만 펼쳐 보이는데, 한 회사가
+    #     그 3줄을 다 먹으면 「오늘의 중요 공시」가 한 종목 얘기가 된다.
+    #   [고침 두 가지]
+    #     ① 회사 + 공시명이 «똑같은» 건 하나로 친다(455·453).
+    #        같은 사안을 하루에 두 번 정정한 것이라 독자에겐 한 건이다.
+    #     ② 그래도 남는 «다른» 공시는 회사당 2건까지만 앞에 둔다.
+    #        지우는 게 아니라 «뒤로 미룬다» — 더보기에서 볼 수 있다.
+    _본, _밀림, _본수, _seen = [], [], {}, set()
+    for _it in disc:
+        _회, _명 = _it.get("회사명"), _it.get("공시명")
+        if (_회, _명) in _seen:
+            continue
+        _seen.add((_회, _명))
+        if _본수.get(_회, 0) < 2:
+            _본수[_회] = _본수.get(_회, 0) + 1
+            _본.append(_it)
+        else:
+            _밀림.append(_it)
+    disc = _본 + _밀림
+
 
     def 한줄(item):
         회사 = item['회사명']
@@ -10683,7 +10708,7 @@ def build_core(핵심편, data, 해석):
     _종목 = (build_core_strong(data.get("강세레이더"))
              + build_core_accum(data.get("매집레이더"))
              + f'<p class="sec-label"><small>테마를 가로질러</small>'
-               f'👑 오늘의 대장주'
+               f'👑 오늘의 테마 대장주'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 테마별 1종목</span></p>'
              + build_theme_leaders(data)
@@ -12187,10 +12212,17 @@ def build_spot_table(data=None):
             f'<div class="sp-row" data-k="{x["typ"]}" '
             f'onclick="ztog(\'spD{i}\')">'
             f'<span class="sp-ty" title="{라벨}">{icon}</span>'
-            f'<span class="sp-nm">{x["n"]}'
+            # 🔴 HO 지시 2026-09-18 — 테마명 옆에 «펼쳐진다»는 표시.
+            #   [왜] 줄을 누르면 열리는데, 눌러도 된다는 신호가 없었다.
+            #   리포트의 다른 코너는 전부 금색 ▾를 쓴다 — 같은 모양이어야
+            #   «아, 이거 누르는 거구나»를 한 번만 배우고 전부에 적용한다.
+            # ⚠️ 이름만 «잘리게» 하고 배지·화살표는 잘리지 않게 한다.
+            #    한 span에 다 넣고 ellipsis를 걸면 이름이 길 때
+            #    화살표까지 같이 잘려 «누를 수 있다»는 신호가 사라진다.
+            f'<span class="sp-nm"><b class="sp-nt">{x["n"]}</b>'
             + "".join(f'<em style="color:{_TG[t][2]}">{_TG[t][0]}</em>'
                       for t in (x.get("tags") or []) if t in _TG)
-            + f'</span>'
+            + f'<em class="sp-ar">▾</em></span>'
             f'<span>{x["rk"]}위</span><span>{어제}</span>'
             f'<span>{x["age"] or "–"}{"일" if x["age"] else ""}</span>'
             f'<span style="color:{돈c}">{돈}</span>'
@@ -12219,6 +12251,13 @@ def build_spot_table(data=None):
             f'{"".join(행)}'
             f'<p class="sp-none" id="spNone" style="display:none">'
             f'이 단계에 해당하는 테마가 오늘은 없습니다.</p>'
+            # 🔴 HO 지적 2026-09-18 — 「조건」 점 5개가 뭔지 화면에 없었다.
+            #   점만 보고는 무슨 뜻인지 알 수 없다. 범례를 붙인다.
+            #   ⚠️ 순서가 곧 점의 순서다 — 왼쪽부터 1·2·3·4·5.
+            f'<p class="sp-ck5"><b>조건 5칸</b>은 왼쪽부터 '
+            f'<i>①10위권</i> <i>②올라오는 중</i> <i>③시간 남음</i> '
+            f'<i>④어제보다 앞</i> <i>⑤돈도 늘었나</i> — '
+            f'불이 켜진 게 «사실인 것»이에요.</p>'
             f'<p class="sp-tip">세로로도 읽어 보세요 — 「돈」 칸이 거의 비어 '
             f'있으면 오늘은 거래대금 기록이 부실한 날, 「나이」가 대부분 크면 '
             f'오늘 상위권이 전부 익은 자리라는 뜻이에요.</p>'
@@ -12529,9 +12568,18 @@ def _theme_members(data):
         except (TypeError, ValueError):
             return None
 
+    # 🔴🔴 2026-09-18 HO 지적 — "포착에서 종목도 거래대금 조건이 다 들어가는데?"
+    #   맞는 지적이었다. collect_data가 주도섹터 종목에 «거래대금»을 이미
+    #   같이 저장하고 있었는데(1098행), 여기서 그걸 «버리고» 있었다.
+    #   그 탓에 대장 판정을 등락률로만 해야 했다.
+    #   [왜 중요한가] 시총 500억이 +20% 가는 것과 3조가 +8% 가는 것은
+    #   테마에서 무게가 전혀 다르다. 테마를 «끌고 가는» 종목은 돈이
+    #   가장 많이 붙은 쪽이지, 가장 많이 오른 쪽이 아니다.
+    #   ⚠️ 거래대금이 없는 종목도 있다(수집 실패). None은 None으로 둔다 —
+    #      0으로 채우면 «거래가 없었다»는 거짓말이 된다.
     for s in (data.get("주도섹터") or []):
         nm = s.get("테마명")
-        items = [(x.get("종목명"), _등락문자(x.get("등락률")))
+        items = [(x.get("종목명"), _등락문자(x.get("등락률")), x.get("거래대금"))
                  for x in (s.get("종목") or []) if x.get("종목명")]
         if nm and items:
             out[nm] = items
@@ -12581,7 +12629,9 @@ def _theme_members(data):
         # ⚠️ 모르는 종목(사전 밖 = 시총 하위)은 뒤로 보내되 버리지 않는다 —
         #    테마 구성종목이라는 사실 자체가 정보다.
         cand.sort(key=lambda x: (x[1] is None, -(x[1] if x[1] is not None else 0)))
-        out[nm] = [(n, (f"{d:+.2f}%" if d is not None else None))
+        # ⚠️ 이 경로(theme_index)는 거래대금이 없다. 자리만 None으로 맞춘다 —
+        #    튜플 길이가 다르면 아래 _stock_panel이 깨진다.
+        out[nm] = [(n, (f"{d:+.2f}%" if d is not None else None), None)
                    for n, d in cand[:8]]
     return out
 
@@ -12609,15 +12659,34 @@ def _stock_panel(title, items, pid):
         except (TypeError, ValueError):
             return None
 
-    _vals = [_num(v) for _n, v in items[:8]]
+    # 🔴🔴 2026-09-18 — 대장 판정을 «거래대금»으로 바꾼다.
+    #   [전] 등락률 최고 = 대장. 그러면 시총 500억짜리가 +20% 간 날
+    #        3조짜리 +8%를 제치고 대장이 된다. 테마를 «끌고 간» 건
+    #        분명 뒤쪽인데도.
+    #   [후] 돈이 가장 많이 붙은 종목이 대장. 테마가 살았나 죽었나를
+    #        확인할 때 봐야 하는 건 «가장 많이 오른 것»이 아니라
+    #        «가장 많이 거래된 것»이다.
+    #   ⚠️ 거래대금을 못 구한 날(옛 데이터·수집 실패)에는 예전처럼
+    #      등락률로 되돌아간다. 새 기준 하나 때문에 배지가 통째로
+    #      사라지면 안 된다.
+    _norm = [(n, v, a) if len(t) == 3 else (t[0], t[1], None)
+             for t in items[:8] for n, v, a in [(t + (None,))[:3]]]
+    _amts = [a for _n, _v, a in _norm if a is not None]
+    _대금기준 = len(_amts) >= 2          # 두 개 이상 있어야 «비교»가 된다
+    _vals = [_num(v) for _n, v, _a in _norm]
     _알수있는 = [x for x in _vals if x is not None]
     _top = max(_알수있는) if _알수있는 else None
+    _atop = max(_amts) if _amts else None
 
-    def _role(x):
-        """대장 / 후발 / 소외 — 대장 대비 어디쯤인가."""
+    def _role(x, a):
+        """대장 / 후발 / 소외.
+        대장은 «돈»으로, 후발·소외는 «등락률»로 가른다 —
+        따라가는 정도는 오른 폭으로 보는 게 맞기 때문이다."""
+        if _대금기준 and a is not None and _atop and a >= _atop - 0.5:
+            return '<em class="r-lead">대장</em>'
         if x is None or _top is None or _top <= 0:
             return ""
-        if x >= _top - 0.01:
+        if not _대금기준 and x >= _top - 0.01:
             return '<em class="r-lead">대장</em>'
         if x >= _top * 0.4:
             return '<em class="r-mid">후발</em>'
@@ -12626,10 +12695,10 @@ def _stock_panel(title, items, pid):
         return ""
 
     chips = "".join(
-        f'<span class="tm-chip">{n}{_role(_vals[i])}'
+        f'<span class="tm-chip">{n}{_role(_vals[i], a)}'
         f'<i style="color:{"#ff5a4e" if (v or "").startswith("+") else "#5b9bff"}">'
         f'{v or "–"}</i></span>'
-        for i, (n, v) in enumerate(items[:8]))
+        for i, (n, v, a) in enumerate(_norm))
     # ⚠️ 2026-09-17 — 예전엔 무조건 「오늘 등락률 상위 종목」이라 적었는데,
     #   보강 경로로 온 목록은 등락률 순이 아니었다(원칙10 위반 — 화면 설명문이
     #   실제 코드 조건과 달랐다). 이제 두 경로 다 «그 테마의 구성종목»을
@@ -12638,8 +12707,10 @@ def _stock_panel(title, items, pid):
     pan = (f'<div class="tm-pan" id="{pid}">'
            f'<p class="tm-ph">{title} · 구성종목을 오늘 등락률 순으로 '
            f'<span>· 다시 누르면 닫혀요</span></p><div>{chips}</div>'
-           f'<p class="tm-pr"><em class="r-lead">대장</em> 오늘 이 테마를 끌었어요 '
-           f'· <em class="r-mid">후발</em> 대장을 따라가는 중 '
+           f'<p class="tm-pr"><em class="r-lead">대장</em> '
+           + ('오늘 <b>돈이 가장 많이 붙은</b> 종목' if _대금기준
+              else '오늘 가장 많이 오른 종목')
+           + f' · <em class="r-mid">후발</em> 대장을 따라가는 중 '
            f'· <em class="r-out">소외</em> 아직 안 왔거나 테마와 무관</p></div>')
     return ZONE_ARROW, pan
 
@@ -13850,7 +13921,10 @@ THEME_V17_CSS = """
 .cy-st{cursor:pointer;transition:none}
 .cy-st.sel{outline:1.5px solid #8fd0e8;outline-offset:-1px;background:#16222e}
 /* 꼬리표 배지 — 테마명 옆 */
-.sp-nm em{font-style:normal;font-size:10px;margin-left:4px}
+.sp-nm em{font-style:normal;font-size:10px;margin-left:4px;flex:none}
+/* 펼침 표시 — 리포트의 다른 코너와 «같은 금색 ▾» */
+.sp-ar{color:#e0c060;font-size:11px;font-weight:900;margin-left:5px}
+.sp-row.open .sp-ar{transform:none}
 .sp-none{margin:9px 0 0;font-size:11px;color:#7d8695;text-align:center}
 .cy-note{margin:8px 0 0;font-size:10.5px;color:#9aa3b1;line-height:1.65}
 .cy-note b{color:#dfe4ea}
@@ -13872,7 +13946,9 @@ THEME_V17_CSS = """
   font-variant-numeric:tabular-nums}
 .sp-ty{text-align:center !important;font-size:11px}
 .sp-nm{text-align:left !important;font-size:11.5px;font-weight:700;
-  color:#e2e7ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  color:#e2e7ee;display:flex;align-items:center;min-width:0;gap:0}
+.sp-nt{font-weight:700;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0}
 /* 조건 점 5개 — 글을 읽기 전에 «몇 개 켜졌나»가 먼저 */
 .sp-pd{display:flex;gap:2px;justify-content:flex-end}
 .sp-pd i{width:6px;height:6px;border-radius:2px;display:block}
@@ -13894,7 +13970,12 @@ THEME_V17_CSS = """
 .sp-see{margin:7px 0 0;font-size:10.5px;color:#8fd0e8;line-height:1.6}
 .sp-tm{margin:4px 0 0;font-size:10.5px;color:#7d8695;line-height:1.6}
 .sp-zn{margin:4px 0 0;font-size:10px;color:#6f7784}
-.sp-tip{margin:9px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+.sp-ck5{margin:9px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:10px;color:#7d8695;line-height:1.75}
+.sp-ck5 b{color:#b6bfcb}
+.sp-ck5 i{font-style:normal;color:#9aa3b1;font-weight:700;white-space:nowrap;
+  margin-right:2px}
+.sp-tip{margin:6px 0 0;
   font-size:10px;color:#6f7784;line-height:1.7}
 /* ⚠️ 2026-09-17 — 옛 «카드형» 점검표 CSS는 지웠다.
    .sp-hd 를 거기서도 쓰고 있어서(display:flex) 새 격자의 grid를
@@ -14273,8 +14354,13 @@ def build_theme_leaders(data):
         #    [왜] 같은 리포트 안에서 같은 동작(누르면 기업분석)인데 모양이 다르면
         #    구독자가 두 번 배워야 한다. sc_click의 기본형을 그대로 쓴다
         #    (크기 13 · 색 강제 안 함 — 배경 밝기는 그 자리가 안다).
+        # 🔴 HO 지적 2026-09-18 — 기업분석이 «목록 맨 밑»에 몰려 나왔다.
+        #   [원인] 여기만 패널을 tails에 따로 모아 표 끝에 한꺼번에 붙였다.
+        #     강세·매집은 각 행 «안»에 넣고 있었는데(rd-row·ac-row) 대장주만
+        #     달랐다. 6번째 종목을 눌렀는데 화면 저 밑에서 펼쳐지니
+        #     «어느 종목 설명인지» 알 수 없었다.
+        #   [고침] 행 바로 뒤에 붙인다 — 누른 자리에서 열려야 한다.
         이름, 칸 = sc_click(r["n"], None, 13, 코드=r.get("code"))
-        tails.append(칸)
         # ⚠️ Actions는 Python 3.11 — f-string 안에 같은 따옴표 f-string을
         #    또 넣으면(PEP 701, 3.12+ 전용) 문법 에러가 난다. 미리 문자열로
         #    빼서 계산한다.
@@ -14286,10 +14372,14 @@ def build_theme_leaders(data):
             f'<span class="ld-v" style="color:{chc}">{r["ch"]:+.1f}</span>'
             f'<span class="ld-v" style="color:{tc}">{turn_txt}</span>'
             f'<span class="ld-v" style="color:{dc}">{r["days"]}일</span>'
-            f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>')
+            f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>'
+            + 칸)
     note = ('<div class="ld-f">📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
             '📌 연속 = 최근 3거래일 중 테마 상위4에 이름 올린 횟수<br>'
             '⚠️ 시가총액은 현재 순위 기반 근사값입니다 — 회전율에 오차가 있습니다.</div>')
+    # ⚠️ tails는 비었다 — 패널을 각 행 뒤로 옮겼다(2026-09-18).
+    #    변수는 남겨 둔다: 지우면 위 rows 루프 밖 어딘가에서 참조해
+    #    NameError가 날 위험이 있고, 빈 문자열을 붙이는 건 무해하다.
     return ('<div class="ld-wrap">' + "".join(rows) + "</div>"
             + "".join(tails) + note)
 
