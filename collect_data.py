@@ -994,7 +994,17 @@ def collect_themes_and_gauge():
     #   [⚠️ 소급 불가] 고친 날부터 쌓인다. 그 이전 기록은 영원히 10~20개다.
     #   [폴백일 주의] 옛 HTML 방식으로 돌아가면 상세 요청이 50번이 된다.
     #   그래서 API가 아닐 때는 20으로 되돌린다.
-    THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "50")) if API목록 else 20
+    # 🔴 2026-09-19 HO 지시 — 50 → 80.
+    #   [왜] 「거꾸로 보기」(순위 밖인데 돈이 붙는 테마)를 만들려면
+    #     20위 밖 기록이 있어야 한다. 지금은 후보 자체가 50개라
+    #     실제 저장은 30~34개뿐이고, 20위 밖은 사실상 비어 있었다.
+    #   [진짜 이른 자리는 순위 밖이다] 돈이 순위보다 먼저 온다 —
+    #     실측(9/18): HBM이 거래대금 +58%인데 순위는 3위로 이미 늦었다.
+    #     순위에 나타나기 «전»을 보려면 넓게 담아야 한다.
+    #   ⚠️⚠️ 소급 불가. 오늘 안 넓히면 한 달 뒤에도 20위 밖을 못 본다.
+    #     지나간 날의 거래대금은 되돌려 받을 수 없다.
+    #   [비용] 0에 가깝다 — 2차 상세는 이미 계산돼 있고 담기만 한다.
+    THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "80")) if API목록 else 20
     유효 = [c for c in 후보 if c[2] is not None and not math.isnan(c[2])]
     유효.sort(key=lambda x: x[2], reverse=True)
     후보20 = 유효[:THEME_CAND_MAX]
@@ -1192,7 +1202,10 @@ def collect_themes_and_gauge():
     #    [⚠️ 소급 불가] 고친 날부터 쌓인다. 그 이전 기록은 영원히 10개다.
     #       그래서 이 값은 하루라도 빨리 올리는 게 이득이다.
     # 🔴 2026-09-14 — 20 → 50 (HO 지시). 위 THEME_CAND_MAX와 짝이다.
-    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "50"))
+    # 🔴 2026-09-19 — 50 → 80. 「거꾸로 보기」용. 위 THEME_CAND_MAX와 같은 값.
+    #   ⚠️ 둘 중 하나만 올리면 소용없다 — 후보가 좁으면 담을 게 없고,
+    #      저장이 좁으면 담아도 안 남는다. 항상 «짝»으로 움직인다.
+    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "80"))
     THEME_SHOW_MAX = 6
     주도N = []
     이미쓴종목 = set()
