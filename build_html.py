@@ -10652,12 +10652,18 @@ def build_core(핵심편, data, 해석):
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 같은 {THEME_CUM_DAYS}일 누적 <b>11~20위</b></span></p>'
              + build_coming_themes(data)
+             # 🔎 2026-09-19 — 「다가오는 테마」가 11~20위를 본 직후에
+             #   «그 밖»을 잇는다. 순위로 못 본 자리를 돈으로 본다.
+             + build_reverse_look()
              + f'<p class="sec-label">'
                f'<small>3단계 · 그 테마들이 어느 섹터 소속인가</small>'
                f'🗺️ 섹터 × 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 같은 순위를 섹터별로 · 섹터는 중앙값</span></p>'
              + build_sector_theme(data)
+             # 🔗 2026-09-19 — 섹터로 묶은 직후에 «데이터로 묶은 것»을 잇는다.
+             #   섹터가 달라도 같이 움직이는 짝은 여기서만 보인다.
+             + build_theme_pairs()
              + f'<p class="sec-label">'
                f'<small>4단계 · 누적 말고, 오늘 하루만 센 테마</small>'
                f'🏆 오늘 뜬 테마'
@@ -12681,7 +12687,246 @@ def build_judge_tab(data=None):
     return (f'<div class="jd-wrap">{층1}'
             + (_점검 if _점검 else (층2 + 층3))
             + build_spot_perf()
-            + f'{층4}</div>')
+            + build_my_themes(data)
+            + f'{층4}'
+            # ⏱ 시장 나이는 «맨 밑»(HO 지시 2026-09-19).
+            #   오늘 자리를 다 본 뒤에 「그래서 지금 장이 어떤 국면인가」로
+            #   닫는다 — 먼저 나오면 개별 자리를 보기 전에 판단이 굳는다.
+            + build_market_age()
+            + '</div>')
+
+
+def build_reverse_look(n=6):
+    """🔎 거꾸로 보기 — 순위 밖인데 «돈만» 늘고 있는 테마.
+
+    🔴 2026-09-19 — 진짜 이른 자리는 «순위 밖»이다. 돈이 순위보다
+      먼저 온다(실측 9/18: HBM 거래대금 +58%인데 순위는 이미 3위).
+      「다가오는 테마」는 11~20위만 본다 — 그 밖은 아무도 안 본다.
+    ⚠️ 2026-09-19 이전은 저장이 30~50개뿐이라 20위 밖이 거의 비어 있다.
+      80개로 넓힌 다음 날부터 채워진다. 그때까지는 «왜 비었나»를 말한다.
+    """
+    rk = _theme_cum_rank(topn=200)
+    days = sorted(rk)
+    if len(days) < 2:
+        return ""
+    오늘d, 어제d = days[-1], days[-2]
+    오늘 = {nm: i + 1 for i, (nm, _s) in enumerate(rk.get(오늘d) or [])}
+    어제 = {nm: i + 1 for i, (nm, _s) in enumerate(rk.get(어제d) or [])}
+    am = _theme_amt_map()
+    후보 = []
+    for nm, pos in 오늘.items():
+        if pos <= 20:                      # 순위 «밖»만 본다
+            continue
+        a = (am.get(nm) or {}).get(어제d)
+        b = (am.get(nm) or {}).get(오늘d)
+        if not a or not b:
+            continue
+        ch = (b / a - 1) * 100
+        if ch < 30:                        # 돈이 «뚜렷이» 는 것만
+            continue
+        후보.append({"n": nm, "rk": pos, "y": 어제.get(nm), "ch": ch, "amt": b})
+    후보.sort(key=lambda x: -x["ch"])
+    후보 = 후보[:n]
+
+    if not 후보:
+        _밖 = sum(1 for _nm, p in 오늘.items() if p > 20)
+        return (f'<div class="rv2"><p class="rv2-h">🔎 거꾸로 보기'
+                f'<span>순위 밖인데 돈이 붙는 곳</span></p>'
+                f'<p class="rv2-wait">오늘은 <b>해당하는 테마가 없습니다.</b><br>'
+                f'조건은 «21위 밖 + 거래대금 어제보다 <b>30% 이상</b> 증가»예요.'
+                + (f'<br><span>지금 21위 밖으로 기록된 테마는 <b>{_밖}개</b>입니다 — '
+                   f'2026-09-19부터 저장을 <b>80개</b>로 넓혔으니 '
+                   f'내일부터 후보가 늘어납니다.</span>' if _밖 < 20 else "")
+                + '</p></div>')
+
+    줄 = "".join(
+        f'<div class="rv2-r"><span class="rv2-n">{x["n"]}</span>'
+        f'<span class="rv2-k">{x["rk"]}위</span>'
+        + (f'<span class="rv2-s" style="color:'
+           f'{TM_HOT if (x["y"] - x["rk"]) >= 10 else TM_WARM}">'
+           f'▲{x["y"] - x["rk"]}</span>' if x["y"] and x["y"] > x["rk"]
+           else '<span class="rv2-s">—</span>')
+        + f'<span class="rv2-m" style="color:{TM_COOL}">+{x["ch"]:.0f}%</span>'
+        f'</div>' for x in 후보)
+    return (f'<div class="rv2"><p class="rv2-h">🔎 거꾸로 보기'
+            f'<span>순위 밖인데 돈이 붙는 곳</span></p>'
+            f'<div class="rv2-r rv2-hd"><span class="rv2-n">테마</span>'
+            f'<span class="rv2-k">오늘</span><span class="rv2-s">어제 대비</span>'
+            f'<span class="rv2-m">거래대금</span></div>{줄}'
+            f'<p class="rv2-f">📌 순위엔 아직 안 나타났는데 <b>돈이 먼저 온</b> '
+            f'자리예요. 순위에 나타날 때쯤이면 이미 늦습니다.<br>'
+            f'📌 <b>어제 대비 계단</b>을 같이 보세요 — 크게 올라오면서 돈까지 '
+            f'붙으면 <b>순위 진입 직전</b>이에요.<br>'
+            f'⚠️ 순위 밖이라 <b>확인된 게 거의 없습니다.</b> 가장 이른 만큼 '
+            f'가장 안 검증된 자리예요.</p></div>')
+
+
+def build_theme_pairs(need=30, n=6):
+    """🔗 테마 짝꿍 — 같은 날 함께 10위권에 든 횟수.
+
+    🔴 2026-09-19 — 자주 같이 뜨면 «사실상 한 덩어리»다.
+      실측: SOFC(에너지)와 반도체 대표주가 13일 중 8일 같이 떴다 —
+      «섹터가 다른데 같이 움직인다». 섹터 분류로는 절대 안 잡히는 연결.
+    ⚠️ 표본이 얇으면 우연이 섞인다(「낙태/피임 + 폴더블폰」 같은 것).
+      30거래일 전에는 «참고»로만 보이고, 그 사실을 화면에 적는다.
+    """
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if len(days) < 5:
+        return ""
+    top = [[nm for nm, _s in (rk.get(d) or [])[:10]] for d in days]
+    zm = _theme_zone_map()
+    cnt = {}
+    for t in top:
+        for i in range(len(t)):
+            for j in range(i + 1, len(t)):
+                k2 = tuple(sorted((t[i], t[j])))
+                cnt[k2] = cnt.get(k2, 0) + 1
+    쌍 = sorted(cnt.items(), key=lambda x: -x[1])[:n]
+    if not 쌍:
+        return ""
+    얇음 = len(days) < need
+    줄 = "".join(
+        f'<div class="pp-r"><span class="pp-c">{v}회</span>'
+        f'<span class="pp-t">{a}</span><i>+</i><span class="pp-t">{b}</span>'
+        + ('<em class="pp-x">섹터 다름</em>'
+           if zm.get(a) and zm.get(b) and zm.get(a) != zm.get(b) else "")
+        + '</div>' for (a, b), v in 쌍)
+    return (f'<div class="pp"><p class="pp-h">🔗 테마 짝꿍'
+            f'<span>같은 날 함께 10위권</span></p>{줄}'
+            + (f'<p class="pp-w">⚠️ 지금 <b>{len(days)}거래일</b> 표본이라 '
+               f'<b>우연이 섞입니다</b>. {need}거래일'
+               f'(<b>{need - len(days)}일 더</b>)은 쌓여야 믿을 수 있어요 — '
+               f'그때까지는 «참고»로만 보세요.</p>' if 얇음 else "")
+            + f'<p class="pp-f">📌 자주 같이 뜨는 둘은 <b>사실상 한 덩어리</b>예요. '
+            f'둘 다 사면 분산이 아니라 <b>집중</b>입니다.<br>'
+            f'📌 <b>「섹터 다름」</b> 표시를 눈여겨보세요 — 섹터 분류로는 '
+            f'안 잡히는 연결이라, 여기서만 보이는 정보예요.</p></div>')
+
+
+def build_market_age():
+    """⏱ 시장 나이 — 10위권 테마들의 «평균 체류 일수».
+
+    🔴 2026-09-19 — 지금은 테마 «하나하나»의 나이만 있다.
+      「오늘 시장 전체가 몇 살인가」는 «살지 말지»를 먼저 가른다.
+      [읽는 법] 나이 낮고 신규 많으면 빠른 순환매(갈아타기 장),
+        나이 높고 신규 적으면 고인 장(새로 사기보다 정리할 때).
+    ⚠️ 둘을 «같이» 봐야 한다. 나이만 높은 건 「오래 버틴다」는 뜻도
+      되고 「새 판이 안 깔린다」는 뜻도 된다 — 신규 수가 그걸 가른다.
+    """
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if len(days) < 4:
+        return ""
+    top = [{n for n, _s in (rk.get(d) or [])[:10]} for d in days]
+    행 = []
+    for i in range(max(0, len(days) - 10), len(days)):
+        나이 = []
+        for n in top[i]:
+            a = 0
+            for j in range(i, -1, -1):
+                if n in top[j]:
+                    a += 1
+                else:
+                    break
+            나이.append(a)
+        if not 나이:
+            continue
+        신규 = sum(1 for n in top[i] if i == 0 or n not in top[i - 1])
+        행.append({"d": days[i], "age": sum(나이) / len(나이), "new": 신규})
+    if len(행) < 3:
+        return ""
+    mx = max(x["age"] for x in 행) or 1
+    막 = "".join(
+        f'<span class="ma-b{" on" if i == len(행) - 1 else ""}">'
+        f'<i style="height:{x["age"] / mx * 100:.0f}%;background:'
+        f'{TM_HOT if x["age"] >= 3.4 else (TM_WARM if x["age"] >= 2.8 else TM_COOL)}'
+        f'"></i><em>{x["d"][4:6]}/{x["d"][6:8]}</em>'
+        f'<b>{x["age"]:.1f}</b></span>' for i, x in enumerate(행))
+    신 = "".join(f'<span class="ma-n">{x["new"]}</span>' for x in 행)
+    o = 행[-1]
+    if o["age"] >= 3.4 and o["new"] <= 2:
+        국면, 색, 말 = ("고인 장", TM_HOT,
+                     "새 판이 안 깔리고 있어요 — 새로 사기보다 정리할 때에 가깝습니다.")
+    elif o["age"] < 2.8 and o["new"] >= 3:
+        국면, 색, 말 = ("빠른 순환매", TM_COOL,
+                     "테마가 빨리 바뀌고 있어요 — 한 곳에 오래 머물기보다 갈아타기가 맞습니다.")
+    else:
+        국면, 색, 말 = ("보통", TM_WARM, "특별히 빠르지도 고이지도 않은 자리예요.")
+    return (f'<div class="ma-box"><p class="ma-h">⏱ 시장 나이'
+            f'<span>10위권 테마의 평균 체류 일수</span></p>'
+            f'<div class="ma-row">{막}</div>'
+            f'<div class="ma-nr"><span class="ma-nl">신규</span>{신}</div>'
+            f'<div class="ma-sum"><span>오늘</span>'
+            f'<b style="color:{색}">{국면}</b>'
+            f'<i>평균 {o["age"]:.1f}일 · 신규 {o["new"]}개</i></div>'
+            f'<p class="ma-f">{말}<br>'
+            f'📌 나이 <b>낮고</b> 신규 <b>많으면</b> 빠른 순환매 · '
+            f'나이 <b>높고</b> 신규 <b>적으면</b> 고인 장이에요.</p></div>')
+
+
+def build_my_themes(data):
+    """🧭 내 종목은 어느 테마인가 — «내 종목»에 등록한 게 자동으로 뜬다.
+
+    🔴 2026-09-19 — 지금은 «테마 → 종목»만 된다. 거꾸로 만들면
+      회원이 든 종목이 «오늘 순환표 어디에 있는지» 바로 보인다.
+    ⚠️ 새로 입력받지 않는다. 브라우저에 이미 저장된 관심종목
+      (chartpro_mystocks)을 화면에서 읽어 쓴다 — 서버가 알 필요가 없다.
+    """
+    import json as _j
+    ti = load_json("theme_index.json") or {}
+    그룹 = ti.get("그룹") or {}
+    if not 그룹:
+        return ""
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if not days:
+        return ""
+    # ⚠️ _theme_cum_rank는 20위까지 준다. 켜는 건 «10위권»만이다 —
+    #    13위를 켜면 「오늘 순위권」이라고 거짓말하게 된다.
+    오늘 = {n: i + 1 for i, (n, _s) in enumerate(rk.get(days[-1]) or [])
+           if i < 10}
+    spots, _m = theme_spots(data)
+    자리 = {x["n"]: x["typ"] for x in spots}
+    _ICON = {k: icon for k, icon, _l, _d, _c in SPOT_TYPES}
+    # 종목 → [(테마, 순위, 자리아이콘)] — 오늘 10위권 테마를 앞에
+    inv = {}
+    for t, 멤 in 그룹.items():
+        for m in (멤 or []):
+            inv.setdefault(m, []).append(t)
+    _dat = {}
+    for 종, ts in inv.items():
+        v = []
+        for t in ts:
+            p = 오늘.get(t)
+            v.append({"t": t, "rk": p, "s": _ICON.get(자리.get(t), "")})
+        v.sort(key=lambda x: (x["rk"] is None, x["rk"] or 99))
+        _dat[종] = v[:4]
+    return (f'<div class="my-box"><p class="my-h">🧭 내 종목은 어느 테마인가'
+            f'<span>등록만 해두면 자동</span></p>'
+            f'<div id="myBody"><p class="my-empty">「내 종목」에 등록하시면 '
+            f'여기에 <b>그 종목이 속한 테마</b>와 <b>오늘 순환표 자리</b>가 '
+            f'자동으로 떠요.</p></div>'
+            f'<p class="my-f">🟡 색이 켜진 건 <b>오늘 10위권 테마</b>, '
+            f'앞 아이콘이 <b>순환표 자리</b>예요. '
+            f'꺼진 건 오늘 순위권 밖입니다.</p></div>'
+            f'<script>window.MY_THEMES={_j.dumps(_dat, ensure_ascii=False)};'
+            f'(function(){{try{{'
+            f'var K="chartpro_mystocks";'
+            f'var v=JSON.parse(localStorage.getItem(K)||"[]");'
+            f'if(!Array.isArray(v)||!v.length)return;'
+            f'var h="";'
+            f'v.slice(0,12).forEach(function(nm){{'
+            f' var ts=(window.MY_THEMES||{{}})[nm];'
+            f' h+="<div class=\'my-r\'><span class=\'my-s\'>"+nm+"</span>'
+            f'<span class=\'my-t\'>";'
+            f' if(!ts||!ts.length){{h+="<em class=\'none\'>소속 테마 정보 없음</em>";}}'
+            f' else{{ts.forEach(function(x){{'
+            f'  h+="<em class=\'"+(x.rk?"on":"")+"\'>"+(x.rk?x.s:"")+x.t'
+            f'    +(x.rk?" "+x.rk+"위":"")+"</em>";}});}}'
+            f' h+="</span></div>";}});'
+            f'var b=document.getElementById("myBody"); if(b&&h)b.innerHTML=h;'
+            f'}}catch(e){{}}}})();</script>')
 
 
 def build_money_flow(win=10):
@@ -14358,6 +14603,101 @@ THEME_V17_CSS = """
 .jd-leg i{width:8px;height:8px;border-radius:2px;flex:none}
 .jd-leg b{color:#dfe4ea;font-weight:800}
 .jd-dot{width:7px;height:7px;border-radius:50%;flex:none}
+/* ══ 🔎 거꾸로 보기 ══ */
+.rv2{background:#0d141c;border:1px solid #1d2734;border-radius:11px;
+  padding:11px 12px 10px;margin:10px 0 0}
+.rv2-h{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;
+  font-size:12px;font-weight:800;color:#c3cad4}
+.rv2-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784}
+.rv2-r{display:grid;grid-template-columns:minmax(0,1fr) 34px 44px 50px;
+  gap:5px;align-items:center;padding:6px 0;border-bottom:1px solid #161d26;
+  font-size:10.5px}
+.rv2-hd{font-size:8.5px;font-weight:800;color:#6f7784;
+  border-bottom:1px solid #223041;padding-bottom:4px}
+.rv2-r span{text-align:right;font-weight:700}
+.rv2-n{text-align:left !important;color:#dfe4ea;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.rv2-k{color:#7d8695}
+.rv2-s{font-weight:800;color:#5f6875}
+.rv2-m{font-weight:800}
+.rv2-wait{margin:0;padding:12px 10px;border-radius:8px;background:#111a24;
+  border:1px dashed #2a3646;font-size:10.5px;color:#8b93a0;line-height:1.85;
+  text-align:center}
+.rv2-wait b{color:#c3cad4}
+.rv2-wait span{display:block;margin-top:5px;font-size:9.5px;color:#6f7784}
+.rv2-f{margin:8px 0 0;padding-top:8px;border-top:1px solid #16202b;
+  font-size:9.5px;color:#6f7784;line-height:1.85}
+.rv2-f b{color:#9aa3b1}
+/* ══ 🔗 테마 짝꿍 ══ */
+.pp{background:#0d141c;border:1px solid #1d2734;border-radius:11px;
+  padding:11px 12px 10px;margin:10px 0 0}
+.pp-h{display:flex;align-items:baseline;gap:6px;margin:0 0 7px;
+  font-size:12px;font-weight:800;color:#c3cad4}
+.pp-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784}
+.pp-r{display:flex;align-items:center;gap:5px;padding:6px 0;flex-wrap:wrap;
+  border-bottom:1px solid #161d26;font-size:10px}
+.pp-c{flex:none;font-size:9px;font-weight:800;color:#0b0e13;background:#8fd0e8;
+  border-radius:999px;padding:1px 6px}
+.pp-t{color:#dfe4ea;font-weight:700}
+.pp-r i{font-style:normal;color:#5f6875}
+.pp-x{font-style:normal;font-size:8.5px;font-weight:800;color:#e8c33a;
+  border:1px solid rgba(232,195,58,.4);border-radius:4px;padding:1px 5px;
+  margin-left:auto}
+.pp-w{margin:8px 0 0;padding:8px 10px;border-radius:8px;
+  background:rgba(232,195,58,.07);border:1px solid rgba(232,195,58,.22);
+  font-size:10px;color:#9aa3b1;line-height:1.75}
+.pp-w b{color:#e8c33a}
+.pp-f{margin:8px 0 0;padding-top:8px;border-top:1px solid #16202b;
+  font-size:9.5px;color:#6f7784;line-height:1.85}
+.pp-f b{color:#9aa3b1}
+/* ══ ⏱ 시장 나이 ══ */
+.ma-box{background:#101720;border:1px solid #1e2937;border-radius:12px;
+  padding:12px 13px 11px;margin-bottom:11px}
+.ma-h{display:flex;align-items:baseline;gap:6px;margin:0 0 9px;
+  font-size:12.5px;font-weight:800;color:#e2e7ee}
+.ma-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784}
+.ma-row{display:flex;align-items:flex-end;gap:3px;height:50px}
+.ma-b{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:flex-end;height:100%;gap:2px;min-width:0}
+.ma-b i{display:block;width:100%;max-width:24px;border-radius:2px;opacity:.5}
+.ma-b.on i{opacity:1}
+.ma-b em{font-style:normal;font-size:7px;color:#5f6875}
+.ma-b b{font-size:8px;font-weight:800;color:#6f7784}
+.ma-b.on b{color:#e2e7ee}
+.ma-nr{display:flex;align-items:center;gap:3px;margin-top:5px}
+.ma-nl{font-size:8px;color:#5f6875;flex:none;width:26px}
+.ma-n{flex:1;text-align:center;font-size:8.5px;font-weight:700;color:#7d8695}
+.ma-sum{display:flex;align-items:center;gap:8px;margin-top:9px;padding:8px 10px;
+  background:#141d27;border-radius:8px}
+.ma-sum span{font-size:10px;color:#6f7784}
+.ma-sum b{font-size:13px;font-weight:800}
+.ma-sum i{margin-left:auto;font-style:normal;font-size:10px;color:#8b93a0}
+.ma-f{margin:8px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:10px;color:#7d8695;line-height:1.8}
+.ma-f b{color:#b6bfcb}
+/* ══ 🧭 내 종목 → 테마 ══ */
+.my-box{background:#101720;border:1px solid #1e2937;border-radius:12px;
+  padding:12px 13px 11px;margin-bottom:11px}
+.my-h{display:flex;align-items:baseline;gap:6px;margin:0 0 9px;
+  font-size:12.5px;font-weight:800;color:#e2e7ee}
+.my-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784}
+.my-empty{margin:0;padding:12px 10px;border-radius:8px;background:#0d141c;
+  border:1px dashed #2a3646;font-size:10.5px;color:#7d8695;line-height:1.8;
+  text-align:center}
+.my-empty b{color:#b6bfcb}
+.my-r{display:grid;grid-template-columns:74px 1fr;gap:6px;padding:7px 0;
+  border-bottom:1px solid #161d26;align-items:center}
+.my-s{font-size:11px;font-weight:800;color:#dfe4ea;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.my-t{display:flex;flex-wrap:wrap;gap:3px}
+.my-t em{font-style:normal;font-size:9px;font-weight:700;color:#6f7784;
+  background:#141d27;border:1px solid #223041;border-radius:999px;padding:2px 7px}
+.my-t em.on{color:#ffc93c;border-color:rgba(255,201,60,.4);
+  background:rgba(255,201,60,.08)}
+.my-t em.none{color:#5f6875;border-style:dashed}
+.my-f{margin:8px 0 0;padding-top:8px;border-top:1px solid #1b2530;
+  font-size:10px;color:#6f7784;line-height:1.75}
+.my-f b{color:#9aa3b1}
 /* ══ 🌊 돈의 이동 경로 ══ */
 .mf-box{background:#0d141c;border:1px solid #1d2734;border-radius:11px;
   padding:11px 12px 10px;margin:10px 0 0}
@@ -15063,10 +15403,11 @@ HIDDEN_CHAPTERS = {
     # 🔴 v18 (2026-09-14) — v17에서 조립부는 hide()로 감쌌는데 여기에 키를
     #    안 넣어 두 코너가 계속 화면에 나오고 있었다. hide()는 키가 없으면
     #    그냥 통과시킨다. 테마 탭 코너가 7개로 불어난 원인이다.
-    # 🔴 2026-09-17 HO 지시 — 섹터 성적표를 테마탭에서 내린다.
-    #    테마가 아니라 «섹터» 이야기라 탭 흐름 밖이었다. 계산은 그대로
-    #    돌고 값도 쌓인다 — 이 한 줄만 지우면 되살아난다.
-    "섹터성적표",
+    # 🔴 2026-09-17 숨김 → 2026-09-19 «되살림» (HO 지시: 다 넣어라).
+    #    지금은 «어느 챕터가 쓸모 있나»를 HO가 직접 보고 고르는 단계다.
+    #    무료 배포 때 줄이면 된다 — 지금은 다 보이는 게 맞다.
+    #    (되숨기려면 아래 줄의 주석을 풀면 된다)
+    # "섹터성적표",
     "관제레이더",         # 「테마 레이더」와 같은 그림을 두 번 보여줌
     "핵심편섹터사다리",   # 「섹터 × 테마」+「섹터 성적표」와 중복
     "성적표탭",           # 🔴 v17 — 탭 자체를 가린다(채점 로직은 계속 돈다)
