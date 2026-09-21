@@ -1447,51 +1447,129 @@ def _rss_items(xml):
 
 
 def collect_credit_balance():
-    """💳 신용융자 잔고 — 빚내서 산 돈이 얼마나 쌓였나.
+    """💳 신용융자 잔고 + 🏦 고객예탁금 — 네이버 새 API (2026-09-21).
 
-    왜 보나: 신용잔고가 쌓일수록 **반대매매 위험**이 커진다.
-      지수가 빠질 때 빚으로 산 물량이 강제로 나오면서 낙폭이 증폭된다.
-      군중 나침반이 이 숫자를 '개인의 조바심'으로 읽는다.
+    [사고] 옛 경로 finance.naver.com/sise/sise_deposit.naver 가 폐지돼
+      2026-09-14부터 None이었다(수급·선물·프로그램과 같은 뿌리).
+    [새 경로 — HO F12 확보]
+      GET https://stock.naver.com/api/domestic/market/trendDeposit
+          ?startIdx=0&pageSize=20
+    ⚠️ 응답 «모양»은 아직 눈으로 확인 못 했다. 그래서 키 이름을 박지 않고
+       «이름에 credit / deposit / date가 든 키»를 찾아 쓴다. 매 실행마다
+       첫 행의 키 목록을 로그에 찍는다 — 첫 발행 로그로 반드시 확인할 것.
+    ⚠️ 신용잔고는 금융투자협회가 «2거래일 늦게» 발표한다. 그래서 기준일을
+       같이 돌려준다. 화면은 이 날짜를 반드시 붙여야 한다 — 안 그러면
+       「오늘 신용이 늘었다」로 잘못 읽힌다.
+    ⚠️ 20일치를 한 번에 주므로 «이력»도 같이 돌려준다. 폐지로 끊겼던
+       구간을 소급해서 채울 수 있다.
 
-    ⚠️ 못 구해도 절대 죽지 않는다. None을 돌려주면 코너만 안 나온다.
-       (샌드박스에서 페이지 구조를 확인할 수 없었다 — 첫 실행 로그를 보고 조정할 것)
-
-    반환: {"잔고": 억원, "증감": 억원} 또는 None
+    반환: {"잔고", "증감", "기준일", "예탁금", "예탁금증감", "이력":[...]} 또는 None
     """
-    후보 = [
-        ("네이버 신용융자", "https://finance.naver.com/sise/sise_deposit.naver"),
-    ]
-    for 이름, url in 후보:
+    url = ("https://stock.naver.com/api/domestic/market/trendDeposit"
+           "?startIdx=0&pageSize=20")
+    try:
+        _h = dict(HEADERS)
+        _h["Referer"] = "https://stock.naver.com/market/stock/kr/deposit"
+        res = requests.get(url, headers=_h, timeout=12)
+        js = res.json()
+    except Exception as e:
+        print(f"  ⚠️ 신용잔고(새 API) 수집 실패: {type(e).__name__}: {e}")
+        return None
+
+    # ── 레코드 목록 찾기: 최상위 리스트이거나, 값이 «딕셔너리 리스트»인 첫 키
+    rows = None
+    if isinstance(js, list):
+        rows = js
+    elif isinstance(js, dict):
+        for _k, _v in js.items():
+            if isinstance(_v, list) and _v and isinstance(_v[0], dict):
+                rows = _v
+                break
+        if rows is None:                      # 한 단계 더 안쪽
+            for _v in js.values():
+                if isinstance(_v, dict):
+                    for _v2 in _v.values():
+                        if isinstance(_v2, list) and _v2 and isinstance(_v2[0], dict):
+                            rows = _v2
+                            break
+                if rows:
+                    break
+    if not rows:
+        print(f"  ⚠️ 신용잔고 — 응답에서 목록을 못 찾음. 최상위 키: "
+              f"{list(js)[:10] if isinstance(js, dict) else type(js).__name__}")
+        return None
+
+    keys = list(rows[0].keys())
+    print(f"  🔎 신용잔고 API 첫 행 키: {keys}")          # ⚠️ 첫 발행 때 확인용
+    print(f"  🔎 첫 행 값: {json.dumps(rows[0], ensure_ascii=False)[:300]}")
+
+    _bad = ("change", "diff", "ratio", "rate", "percent", "increase",
+            "compare", "fluct", "updown", "증감", "대비")
+
+    def _pick(*words):
+        c = [k for k in keys
+             if any(w in k.lower() for w in words)
+             and not any(b in k.lower() for b in _bad)]
+        return c[0] if c else None
+
+    def _pick_chg(*words):
+        c = [k for k in keys
+             if any(w in k.lower() for w in words)
+             and any(b in k.lower() for b in _bad)]
+        return c[0] if c else None
+
+    k_date = _pick("date", "day", "일자", "날짜")
+    k_cr = _pick("credit", "신용")
+    k_dp = _pick("deposit", "예탁")
+    if not (k_date and k_cr):
+        print(f"  ⚠️ 신용잔고 — 날짜/신용 키를 못 찾음 (date={k_date}, credit={k_cr})")
+        return None
+
+    def _num(v):
         try:
-            res = requests.get(url, headers=HEADERS, timeout=12)
-            res.encoding = "euc-kr"
-            표들 = pd.read_html(io.StringIO(res.text))
-        except Exception as e:
-            print(f"  ⚠️ 신용잔고({이름}) 수집 실패: {type(e).__name__}")
-            continue
+            return float(str(v).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return None
 
-        for 표 in 표들:
-            try:
-                문자 = 표.to_string()
-                if "신용" not in 문자:
-                    continue
-                # 숫자만 뽑아 가장 큰 값을 잔고로 본다(단위: 억원 가정)
-                수 = []
-                for _, row in 표.iterrows():
-                    for v in row.tolist():
-                        t = str(v).replace(",", "").strip()
-                        if re.fullmatch(r"-?\d+(\.\d+)?", t):
-                            수.append(float(t))
-                수 = [x for x in 수 if abs(x) > 10000]      # 신용잔고는 조 단위(억원 기준 1만↑)
-                if len(수) >= 2:
-                    잔고, 직전 = 수[0], 수[1]
-                    print(f"  ✅ 신용잔고 {잔고:,.0f}억 (전일 대비 {잔고-직전:+,.0f}억) — {이름}")
-                    return {"잔고": round(잔고), "증감": round(잔고 - 직전)}
-            except Exception:
-                continue
-    print("  ⚠️ 신용잔고 미확보 — 코너는 표시되지 않습니다(페이지 구조 확인 필요).")
-    return None
+    def _eok(v):
+        """단위를 «억원»으로. 신용잔고·예탁금은 수십~수백 조 = 1e5~5e6 억."""
+        if v is None:
+            return None
+        a = abs(v)
+        if a >= 1e11:   return v / 1e8     # 원
+        if a >= 1e7:    return v / 100     # 백만원
+        return v                            # 이미 억원
 
+    def _ymd(v):
+        t = re.sub(r"[^0-9]", "", str(v or ""))
+        return t[:8] if len(t) >= 8 else None
+
+    이력 = []
+    for r in rows:
+        d = _ymd(r.get(k_date))
+        c = _eok(_num(r.get(k_cr)))
+        p = _eok(_num(r.get(k_dp))) if k_dp else None
+        if d and c:
+            이력.append({"날짜": d, "잔고": round(c), "예탁금": (round(p) if p else None)})
+    이력.sort(key=lambda x: x["날짜"])
+    if len(이력) < 2:
+        print(f"  ⚠️ 신용잔고 — 유효 행 {len(이력)}개뿐")
+        return None
+
+    last, prev = 이력[-1], 이력[-2]
+    # ⚠️ 상식 검사 — 신용잔고는 대략 5조~100조(5만~100만 억). 벗어나면 단위 오판.
+    if not (50_000 <= last["잔고"] <= 1_000_000):
+        print(f"  ⚠️ 신용잔고 {last['잔고']:,}억 — 상식 범위 밖. 단위 확인 필요 "
+              f"(키 {k_cr}, 원값 {rows[0].get(k_cr)})")
+    out = {"잔고": last["잔고"], "증감": last["잔고"] - prev["잔고"],
+           "기준일": last["날짜"], "이력": 이력}
+    if last.get("예탁금") and prev.get("예탁금"):
+        out["예탁금"] = last["예탁금"]
+        out["예탁금증감"] = last["예탁금"] - prev["예탁금"]
+    print(f"  ✅ 신용잔고 {out['잔고']:,}억 ({out['증감']:+,}억) · 기준 {out['기준일']}"
+          + (f" · 예탁금 {out['예탁금']:,}억" if out.get("예탁금") else "")
+          + f" · 이력 {len(이력)}일")
+    return out
 
 
 def collect_news():
@@ -1830,6 +1908,18 @@ def update_flow_history(지수수급, 파생):
     이력.append(오늘)
     이력 = backfill_flow_history(이력)                    # 빈 과거 날짜 메우기
     이력 = prune_flow_history(이력)                       # 휴장일에 들어온 줄 제거
+    # 🔴 2026-09-21 — 선물(외선) «소급 채우기».
+    #   옛 경로 폐지로 2026-09-17부터 외선이 None이었다. 새 API가 30일치를
+    #   한 번에 주므로, None인 과거 날짜만 채운다. 이미 값이 있는 날은
+    #   건드리지 않는다(그날 그 시각에 본 값이 기록의 원본이다).
+    _선이력 = ((파생 or {}).get("선물수급") or {}).get("이력") or {}
+    _채움 = 0
+    for x in 이력:
+        if x.get("외선") is None and x.get("날짜") in _선이력:
+            x["외선"] = _선이력[x["날짜"]]
+            _채움 += 1
+    if _채움:
+        print(f"  ♻️ 선물(외선) 소급 {_채움}일 채움")
     이력 = 이력[-60:]
 
     with open(파일, "w", encoding="utf-8") as f:
@@ -2640,6 +2730,220 @@ def collect_program_trading():
     return 기본
 
 
+# 🔴 2026-09-21 — 프로그램 매매 새 경로 (HO F12 확보).
+#   GET https://stock.naver.com/api/domestic/market/trendProgram
+#       ?tradeType=KRX&krxMarketType=KOSPI&bizdate=YYYYMMDD
+#       &startIdx=0&pageSize=30&periodType=TIME
+#   ⚠️ 확인된 periodType은 «TIME»(장중 시간대별) 하나뿐이다. DAY 같은 값을
+#      추측해 넣지 않는다 — 선물에서 marketType=FUTURES가 «다른 시장 숫자»를
+#      조용히 돌려준 사고를 봤다. TIME의 «오늘 마지막 시각» 행을 하루 누적으로 쓴다.
+#   ⚠️ 응답 모양은 아직 눈으로 못 봤다. 키 이름에 arbitrage / nonArbitrage /
+#      net / buy / sell 이 든 필드를 찾아 쓰고, 첫 행·마지막 행을 로그에 찍는다.
+#      첫 발행 로그로 «정말 누적인지, 키가 맞는지» 반드시 확인할 것.
+def collect_program_trading_v2():
+    def _flat(d, pre=""):
+        out = {}
+        if isinstance(d, dict):
+            for k, v in d.items():
+                out.update(_flat(v, f"{pre}{k}."))
+        elif isinstance(d, list):
+            pass
+        else:
+            out[pre[:-1]] = d
+        return out
+
+    def _num(v):
+        try:
+            return float(str(v).replace(",", "").strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _eok(v):
+        if v is None:
+            return None
+        a = abs(v)
+        if a >= 1e9:   return v / 1e8      # 원
+        if a >= 1e5:   return v / 100      # 백만원
+        return v                            # 억원
+
+    def _find(flat, *need, avoid=()):
+        c = [k for k in flat
+             if all(n in k.lower() for n in need)
+             and not any(a in k.lower() for a in avoid)
+             and _num(flat[k]) is not None]
+        return c[0] if c else None
+
+    def _one(mkt):
+        try:
+            j = requests.get(
+                "https://stock.naver.com/api/domestic/market/trendProgram",
+                headers=HEADERS,
+                params={"tradeType": "KRX", "krxMarketType": mkt, "bizdate": DATE,
+                        "startIdx": "0", "pageSize": "30", "periodType": "TIME"},
+                timeout=12).json()
+        except Exception as e:
+            print(f"  ⚠️ 프로그램({mkt}) 새 API 실패 — {type(e).__name__}: {e}")
+            return None
+        rows = None
+        if isinstance(j, list):
+            rows = j
+        elif isinstance(j, dict):
+            for v in j.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    rows = v
+                    break
+        if not rows:
+            print(f"  ⚠️ 프로그램({mkt}) — 목록 없음. 최상위 키: "
+                  f"{list(j)[:10] if isinstance(j, dict) else type(j).__name__}")
+            return None
+        # 오늘 행만 — 날짜 필드가 있으면 DATE와 맞춘다
+        def _d(r):
+            f = _flat(r)
+            for kk, vv in f.items():
+                if any(t in kk.lower() for t in ("bizdate", "date")):
+                    return re.sub(r"[^0-9]", "", str(vv))[:8]
+            return None
+        오늘 = [r for r in rows if _d(r) in (DATE, None)]
+        if not 오늘:
+            print(f"  ⚠️ 프로그램({mkt}) — {DATE} 행 없음 (첫 행 날짜 {_d(rows[0])})")
+            return None
+        # 가장 늦은 시각 = 하루 누적(추정). 시각 필드로 정렬한다.
+        def _t(r):
+            f = _flat(r)
+            for kk, vv in f.items():
+                if "time" in kk.lower():
+                    return str(vv)
+            return ""
+        오늘.sort(key=_t)
+        last = _flat(오늘[-1])
+        print(f"  🔎 프로그램({mkt}) 키: {list(last.keys())[:20]}")
+        print(f"  🔎 첫 시각 {_t(오늘[0])!r} · 마지막 시각 {_t(오늘[-1])!r} · 행 {len(오늘)}개")
+
+        def _net(*kind):
+            k = _find(last, *kind, "net") or _find(last, *kind, "diff")
+            if k:
+                return _eok(_num(last[k])), k
+            kb, ks = _find(last, *kind, "buy"), _find(last, *kind, "sell")
+            if kb and ks:
+                return _eok(_num(last[kb]) - _num(last[ks])), f"{kb}-{ks}"
+            return None, None
+        비, kb = _net("nonarb")
+        if 비 is None:
+            비, kb = _net("non")
+        차, ka = None, None
+        for cand in (("arb",),):
+            k1 = [k for k in last if "arb" in k.lower() and "non" not in k.lower()]
+            if k1:
+                sub = {k: last[k] for k in k1}
+                kk = _find(sub, "net") or _find(sub, "diff")
+                if kk:
+                    차, ka = _eok(_num(last[kk])), kk
+                else:
+                    _b, _s = _find(sub, "buy"), _find(sub, "sell")
+                    if _b and _s:
+                        차, ka = _eok(_num(last[_b]) - _num(last[_s])), f"{_b}-{_s}"
+        if 비 is None:
+            print(f"  ⚠️ 프로그램({mkt}) — 비차익 키를 못 찾음. 위 키 목록 확인 필요.")
+            return None
+        print(f"  ✅ 프로그램({mkt}) 비차익 {비:+,.0f}억 [{kb}]"
+              + (f" · 차익 {차:+,.0f}억 [{ka}]" if 차 is not None else ""))
+        out = {"기준": DATE, "비차익거래_순매수": round(비, 1)}
+        if 차 is not None:
+            out["차익거래_순매수"] = round(차, 1)
+            out["전체_순매수"] = round(차 + 비, 1)
+        return out
+
+    피 = _one("KOSPI")
+    if not 피:
+        return None
+    피["시장"] = "코스피"
+    닥 = _one("KOSDAQ")
+    if 닥:
+        피["코스닥"] = 닥
+    return 피
+
+
+# 🔴 2026-09-21 — 선물 수급 새 경로 «준비만» 해 둔다.
+#   HO 확인: 선물 화면(stock.naver.com/market/stock/kr/trend/trader → 「선물」 탭)도
+#     같은 /market/trend/daily 를 부른다. 다만 marketType 값을 아직 모른다.
+#   ⚠️⚠️ marketType=FUTURES 는 «쓰면 안 된다». 숫자가 나오긴 하는데 선물이 아니다.
+#     실측(9/21): 선물 화면은 외국인 «+4,251계약»(순매수)인데, FUTURES 응답은
+#     외국인 «−878억»(순매도)이었다. 부호부터 반대다. 개인·기관 값은 코스피
+#     현물과 비슷했다 — 모르는 값을 넣으면 다른 시장으로 «조용히» 떨어지는 듯하다.
+#     에러 없이 틀린 숫자가 나오는 가장 위험한 종류다.
+#   👉 HO가 선물 탭의 daily 요청 Request URL을 주면 아래 한 줄만 채운다.
+FUT_MARKET_TYPE = "FUT"     # ✅ 2026-09-21 HO F12 확인 (선물 탭의 daily 요청)
+
+
+def collect_futures_flow_v2():
+    """선물 투자자별 순매수(억원) + 최근 30일 이력(소급용).
+
+    ⚠️ 검증 장치 — «주식 숫자가 섞여 들어오는» 사고를 막는다.
+      선물은 수량이 «계약»이라 하루 수만~수십만 단위다. 주식은 «주»라 수억 단위다.
+      (실측: 잘못 넣은 FUTURES 응답은 외국인 매도수량 1억 9천만 — 주식이었다)
+      수량 합이 5천만을 넘으면 선물이 아니라고 보고 버린다.
+    """
+    if not FUT_MARKET_TYPE:
+        print("  ⏸ 선물수급(새 API) — marketType 미확정.")
+        return None
+    try:
+        j = requests.get(
+            "https://stock.naver.com/api/domestic/market/trend/daily",
+            headers=HEADERS,
+            params={"tradeType": "KRX", "marketType": FUT_MARKET_TYPE,
+                    "bizdate": DATE, "startIdx": "0", "pageSize": "30"},
+            timeout=12).json()
+    except Exception as e:
+        print(f"  ⚠️ 선물수급(새 API) 실패 — {type(e).__name__}: {e}")
+        return None
+
+    def _sum(day):
+        합 = {"개인": 0.0, "외국인": 0.0, "기관계": 0.0}
+        계약외, 수량합 = 0.0, 0.0
+        for row in (day.get("netAmounts") or []):
+            c = str(row.get("investorGubun") or "")
+            try:
+                v = float(row.get("diffValue"))
+            except (TypeError, ValueError):
+                continue
+            try:
+                bq, sq = float(row.get("buyQuant") or 0), float(row.get("sellQuant") or 0)
+            except (TypeError, ValueError):
+                bq = sq = 0.0
+            수량합 += bq + sq
+            if c == "8000":
+                합["개인"] += v
+            elif c in ("9000", "9001"):
+                합["외국인"] += v
+                계약외 += bq - sq
+            elif c in ("1000", "2000", "3000", "3100", "4000", "5000", "6000"):
+                합["기관계"] += v
+        return 합, 계약외, 수량합
+
+    이력 = {}
+    오늘값 = None
+    for day in (j.get("content") or []):
+        d = str(day.get("bizdate") or "")
+        합, 계약, 수량 = _sum(day)
+        if 수량 > 50_000_000:
+            print(f"  🔴 선물수급 — {d} 수량 합 {수량:,.0f}: «계약»이 아니라 «주» 단위로 보임. "
+                  f"선물이 아닌 숫자라 버립니다(marketType={FUT_MARKET_TYPE} 재확인 필요).")
+            return None
+        이력[d] = round(합["외국인"] / 1e8, 1)
+        if d == DATE:
+            오늘값 = (합, 계약)
+    if not 오늘값:
+        print(f"  ⚠️ 선물수급 — {DATE} 자료 없음 (응답 날짜: {list(이력)[:3]})")
+        return None
+    합, 계약 = 오늘값
+    # 👉 네이버 선물 화면의 «외국인 N계약»과 이 숫자가 같아야 한다(9/21: +4,251).
+    print(f"  ✅ 선물수급(새 API) 외국인 {합['외국인']/1e8:+,.0f}억 · {계약:+,.0f}계약 "
+          f"· 개인 {합['개인']/1e8:+,.0f}억 · 기관 {합['기관계']/1e8:+,.0f}억 · 이력 {len(이력)}일")
+    out = {k: f"{v / 1e8:.1f}" for k, v in 합.items()}
+    out.update({"sosok": "api", "외국인계약": round(계약), "이력": 이력})
+    return out
+
+
 def collect_program_and_futures():
     """프로그램매매 + 선물 수급.
 
@@ -2653,6 +2957,9 @@ def collect_program_and_futures():
     """
     결과 = {"프로그램매매": None, "선물수급": None, "옵션수급": None}
     결과["프로그램매매"] = collect_program_trading()
+    if not 결과["프로그램매매"]:
+        # 🔴 2026-09-21 — 옛 경로(finance.naver.com) 폐지 → 새 API로
+        결과["프로그램매매"] = collect_program_trading_v2()
 
     # ── 선물 투자자별 수급 ──
     # 🔴🔴 2026-09-17 경고 — 아래 경로는 «이미 폐지된 페이지»다.
@@ -2690,6 +2997,8 @@ def collect_program_and_futures():
             print(f"✅ 선물수급 수집 (sosok={sosok})")
         except Exception as e:
             print(f"  ⚠️ 선물수급 sosok={sosok} 실패: {type(e).__name__}")
+    if not 결과["선물수급"]:
+        결과["선물수급"] = collect_futures_flow_v2()
     if not 결과["선물수급"]:
         print("  🔴 선물수급 미확보 — 위 경로가 2026-09-17에 폐지됐습니다. "
               "새 주소로 교체가 필요합니다(리포트의 파생 코너가 비어 나갑니다).")
