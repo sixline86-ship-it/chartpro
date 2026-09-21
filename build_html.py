@@ -1720,6 +1720,16 @@ def build_radar(강세레이더, 설정=None):
         f"점수 = 회전율×{설정.get('회전비중','?')} + 상승률×{설정.get('상승비중','?')} "
         f"(각각 0~100 정규화) + 거래량 {설정.get('가점배수','?')}배↑ 시 +{설정.get('가점','?')}점 │ "
         f"추적 {설정.get('추적일','?')}거래일"
+        # 🔴 HO 지적 2026-09-19 — 위는 «돈이 몰림» 조건뿐이었다.
+        #   V자 반등은 조건이 «완전히 다른데» 화면에 한 글자도 없었다.
+        #   두 기법을 쓴다고 해놓고 한쪽 조건만 적으면, 독자는 V자도
+        #   같은 조건으로 잡힌 줄 안다.
+        + f"<br><b style=\"color:#1a6b52\">📈 V자 반등</b> · "
+          f"시총 ≥ {설정.get('B최소시총', 3000):,}억 · "
+          f"거래대금 ≥ {설정.get('B최소거래대금', 500):,}억 · "
+          f"<b>시가 대비 저가 {설정.get('B저점', -3.0)}%↓까지 밀렸다가 "
+          f"종가는 시가 대비 {설정.get('B종가', 4.0)}%↑로 마감</b> · "
+          f"전일 대비 거래량 ≥ {설정.get('B거래량배수', 1.5)}배"
     ) if 설정 else ""
     # 🆕 2026-08-26 HO 지시 — 조건 설명 **바로 밑**에 두 기법이 뭔지 쉽게 쓴다.
     #  ⚠️ 구체적 수치(몇 배·몇 %)는 쓰지 않는다. 위 dev_note가 이미 다 말했고,
@@ -2041,16 +2051,30 @@ def sc_click(nm, 색=None, 크기=15, 끼움="", 코드=None):
     #   [왜] 이름이 맨 텍스트로 놓이면 칸이 좁을 때 «글자가 뚝 잘린다».
     #        span으로 감싸야 그 자리에 «…»를 붙일 수 있다(대장주 칸이 좁다).
     #   ⚠️ <b> 안에 그대로 있으므로 클릭(scToggle)은 전혀 안 바뀐다.
+    # 🆕 2026-09-19 — 배지(기업분석·차트)를 «따로» 꺼낼 수 있게 한다.
+    #   [왜] 매집 카드는 이름줄이 좁아 배지가 줄바꿈돼 «이름 밑»으로
+    #     떨어졌다. 그러면 등락률이 배지에 밀려 안 보인다.
+    #     → 이름줄에는 «이름 + 등락률»만, 배지는 «아랫줄»에 따로 둔다.
+    #   ⚠️ 기본 동작은 그대로다 — 세 번째 반환값을 «안 쓰면» 예전과 같다.
+    _배지 = f'<span class="sc-tap"><i>▾</i>기업분석</span>{chart_pill(코드)}'
     이름 = (f'<b style="font-size:{크기}px;{_색}" class="cp-sname" '
            f"onclick=\"scToggle('{안전}','{sid}')\">"
            f'<span class="cp-nm">{nm}</span>'
-           f'{끼움}'
-           f'<span class="sc-tap"><i>▾</i>기업분석</span>{chart_pill(코드)}</b>')
+           f'{끼움}{_배지}</b>')
+    # 이름만(배지 없이) — 아랫줄에 배지를 따로 둘 때 쓴다
+    이름만 = (f'<b style="font-size:{크기}px;{_색}" class="cp-sname" '
+            f"onclick=\"scToggle('{안전}','{sid}')\">"
+            f'<span class="cp-nm">{nm}</span>{끼움}</b>')
+    배지줄 = f'<p class="sc-bar">{_배지}</p>'
     칸 = f'<div id="{sid}" style="display:none"></div>'
+    sc_click.last = (이름만, 배지줄)   # ⚠️ 바로 다음 호출 전에만 유효
     return 이름, 칸
 
 
-def build_accumulation(매집, 설정=None):
+def build_accumulation(매집, 설정=None, 종목사전=None):
+    # 🔴 2026-09-19 — 종목사전을 받아 «오늘 등락률»을 채운다.
+    #   매집 데이터의 기간등락률이 전부 None이라 화면이 비어 있었다.
+    _사전2 = 종목사전 or {}
     if not 매집:
         return '<div class="pending">⏳ 매집 레이더 — 데이터 수집 준비중</div>'
     종목 = 매집.get("종목") or []
@@ -2085,6 +2109,15 @@ def build_accumulation(매집, 설정=None):
             return '<span class="ac-tag ac-both">🤝 쌍끌이</span>'
         return f'<span class="ac-tag ac-solo">💼 {t}</span>'
 
+    def _plain_tags(s, badge_html):
+        """읽기만 하는 표시는 «글자»로 — 알약은 누르는 것에만 남긴다."""
+        # ⚠️ accum_badge는 알약 HTML을 준다. 글자만 뽑아 쓴다.
+        _txt = re.sub(r"<[^>]+>", " ", badge_html or "")
+        _txt = " ".join(_txt.split())
+        _yu = (s.get("유형") or "").strip()
+        _부 = [x for x in (_yu, _txt) if x]
+        return " · ".join(_부)
+
     def 행(i, s, 값HTML, 부가="", 일수=None):
         # 🆕 2026-08-25 — 심층편 매집 행에서도 종목명을 눌러 기업분석을 편다.
         # 🆕 2026-08-26 HO 지시 — 이름 옆에 등락률.
@@ -2093,25 +2126,89 @@ def build_accumulation(매집, 설정=None):
         #  🔴 2026-08-26 (2차) — 처음엔 «기간»이라고만 적었는데 HO가 "이게 뭐냐"고
         #     물었다. 설명이 필요한 라벨은 실패한 라벨이다.
         #     → **실제 일수(«20일»)를 그대로 적는다.** 탭 이름과 같아 바로 읽힌다.
-        _기등 = s.get("기간등락률")
-        if _기등 is None:
-            _기등 = s.get("5일등락률")
+        # 🔴 2026-09-19 — 기간등락률이 «데이터에 아예 없다»(전부 None).
+        #   수집이 안 채우고 있다. 그래서 화면에 등락률이 안 보였다.
+        #   → 종목사전의 «오늘 등락률»로 대신한다. 독자가 가장 먼저 찾는
+        #     숫자가 등락률인데, 기간이든 오늘이든 «있는 것»을 보여야 한다.
+        #   ⚠️ 라벨을 반드시 구분한다 — 「20일 +5%」와 「오늘 +5%」는
+        #     전혀 다른 말이다. 같은 자리에 두되 이름을 다르게 쓴다.
+        # 🔴 2026-09-19 — 저장 키가 탭마다 다르다.
+        #   5일=「5일등락률」 / 20일=「장기등락률」 / 60일=「최장기등락률」
+        #   화면은 「기간등락률」만 찾고 있어서 20·60일은 영영 못 봤다.
+        #   ⚠️ 키 이름이 저장 쪽과 화면 쪽에서 다르면 «조용히» 빈다.
+        #      에러가 안 나니 아무도 모른다 — 그래서 다 찾아본다.
+        _기등 = next((s.get(k) for k in
+                    ("기간등락률", "5일등락률", "장기등락률", "최장기등락률")
+                    if isinstance(s.get(k), (int, float))), None)
+        # ⚠️ 여기서 _기등을 오늘 등락률로 «덮어쓰던» 옛 코드가 있었다.
+        #    그 탓에 「5일 −2.14% · 오늘 −2.14%」처럼 같은 값이 두 번 나왔다.
+        #    기간과 오늘은 다른 값이다 — 섞지 않는다.
         _끼움 = ""
         if isinstance(_기등, (int, float)):
-            _라벨 = f"{일수}일" if 일수 else "기간"
+            _라벨 = "오늘" if _오늘등 else (f"{일수}일" if 일수 else "기간")
             _끼움 = (f'<span style="font-size:9.5px;color:#8b93a0;'
                    f'margin:0 2px 0 6px">{_라벨}</span>'
                    f'<span style="font-size:12px;font-weight:800;'
                    f'color:{"#c1432b" if _기등 >= 0 else "#2e6bd6"};'
                    f'margin-right:4px">{_기등:+.2f}%</span>')
-        _이름, _칸 = sc_click(s['종목명'], None, 13, _끼움, 코드=s.get("코드"))
+        # 🔴 HO 지시 2026-09-19 — 이름줄엔 «이름 + 등락률», 배지는 아랫줄로.
+        #   [왜] 이름줄이 좁아 「기업분석」이 줄바꿈돼 이름 밑에 떨어졌고,
+        #     그 탓에 등락률이 배지에 밀려 안 보였다. 독자가 가장 먼저
+        #     찾는 숫자가 등락률인데 그게 뒤로 가면 안 된다.
+        # 🔴 HO 지시 2026-09-19 — 매집 카드 재구성.
+        #   [순서] ①순위(왼쪽) ②종목명 ③등락률(오른쪽, 5·20·60일 라벨)
+        #          ④기업분석·차트 한 줄 ⑤기관/외국인 단독 배지
+        #   ⚠️ 등락률은 «그 탭의 기간»을 라벨로 쓴다 — 5일 탭이면 「5일」.
+        #      「20일 +5%」와 「오늘 +5%」는 전혀 다른 말이라, 라벨 없이
+        #      숫자만 두면 안 된다.
+        #   ⚠️ 옛 «오늘 등락률» 끼움은 뺐다 — 오른쪽 등락률과 두 개가
+        #      나란히 서면 어느 게 뭔지 알 수 없다(원칙5).
+        _이름, _칸 = sc_click(s['종목명'], None, 13, "", 코드=s.get("코드"))
+        _이름만, _배지줄 = sc_click.last
+        # 🔴 HO 지시 2026-09-19 — 이름 옆은 «오늘 등락률».
+        #   기간 등락률은 데이터가 전부 None이라 어차피 못 쓴다.
+        _오늘율 = None
+        _v3 = _사전2.get(s.get("종목명")) or []
+        if len(_v3) > 3 and isinstance(_v3[3], (int, float)):
+            _오늘율 = _v3[3]
+        # ⚠️ 기간 등락률이 «매집의 본질»이다 — 안 오른 채 모았다는 뜻.
+        #    오늘 등락률은 «이제 반응이 나오나»라 질문이 다르다. 둘 다 둔다.
+        _칸들 = []
+        if isinstance(_기등, (int, float)):
+            _칸들.append((f"{일수}일" if 일수 else "기간", _기등))
+        if isinstance(_오늘율, (int, float)):
+            _칸들.append(("오늘", _오늘율))
+        _등HTML = " · ".join(
+            f'<span class="ac-ch"><em>{_lab}</em>'
+            f'<b style="color:{"#c1432b" if _v >= 0 else "#2e6bd6"}">'
+            f'{_v:+.2f}%</b></span>' for _lab, _v in _칸들)
+        _쓸모없음 = ""
+        if False:
+            _등HTML = (f'<span class="ac-ch">'
+                      f'<em>오늘</em>'
+                      f'<b style="color:{"#c1432b" if _기등 >= 0 else "#2e6bd6"}">'
+                      f'{_기등:+.2f}%</b></span>')
+        # 🔴 HO 지시 2026-09-19 — 순위를 «종목명 바로 왼쪽»으로.
+        #   전엔 카드 바깥 왼쪽에 떠 있어 어느 줄의 순위인지 멀었다.
+        # 🔴 HO 지적 2026-09-19 — 「알약이 많아 종목명이 안 보인다」.
+        #   [진단] 맞다. 한 카드에 알약이 5개까지 붙었다(유형·N차·연속·
+        #     기업분석·차트). 알약은 «눈에 띄라»고 쓰는 건데, 다 알약이면
+        #     아무것도 안 띈다.
+        #   [고침] 알약은 «누르는 것»(기업분석·차트)에만 남긴다.
+        #     읽기만 하는 정보(기관 단독·3일 연속)는 «글자»로 내린다.
+        #     그러면 종목명이 그 줄에서 유일하게 큰 글자가 된다.
+        # ⚠️ 2열이라 한 칸이 ~185px다. 이름 옆에 등락률까지 두면 줄바꿈이
+        #    나서 오히려 지저분해진다. 등락률을 아랫줄로 내려 «이름만»
+        #    홀로 큰 글자로 세운다 — 그래야 이름이 가장 먼저 보인다.
+        _tag = _plain_tags(s, accum_badge(s.get('종목명')))
+        _sub = " · ".join(x for x in (_등HTML, _tag) if x)
         return f"""
         <div class="ac-row">
-          <span class="ac-rank">{i}</span>
           <div class="ac-info">
-            <p class="ac-name">{_이름}{유형뱃지(s.get('유형',''))}</p>
+            <p class="ac-name"><span class="ac-rank">{i}</span>{_이름만}</p>
+            <p class="ac-sub">{_sub}</p>
+            {_배지줄}
             <p class="ac-meta">외 {s.get('외인일수',0)}일 · 기 {s.get('기관일수',0)}일{부가}</p>
-            <p class="ac-badge">{accum_badge(s.get('종목명'))}</p>
             {_칸}
           </div>
           {값HTML}
@@ -2127,7 +2224,7 @@ def build_accumulation(매집, 설정=None):
             return 0, f'<p class="rd-empty">{시장} — 오늘 조건을 만족한 종목이 없습니다.</p>'
         전체 = len([x for x in 종목 if x.get("시장") == 시장])
         행들 = "".join(
-            행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+            행(i, s, "",
               f' · 누적 +{_fmt_eok(s.get("합산"))}', 일수=기간)
             for i, s in enumerate(목록, 1))
         return 전체, 행들
@@ -2147,7 +2244,7 @@ def build_accumulation(매집, 설정=None):
             if not 목록:
                 return f'<p class="rd-empty">{시장} — 조건 만족 종목 없음</p>'
             return "".join(
-                행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+                행(i, s, "",
                   f' · 누적 +{_fmt_eok(s.get("합산"))}'
                   + ('<span class="ac-star2">⭐ 5일 랭킹에도 동시 등재</span>' if s["종목명"] in 별명단 else ""),
                   일수=중기간)
@@ -2174,7 +2271,7 @@ def build_accumulation(매집, 설정=None):
             if not 목록:
                 return f'<p class="rd-empty">{시장} — 조건 만족 종목 없음</p>'
             return "".join(
-                행(i, s, f'<span class="ac-val">{s.get("시총대비","—")}%</span>',
+                행(i, s, "",
                   f' · 누적 +{_fmt_eok(s.get("합산"))}', 일수=장기간)
                 for i, s in enumerate(목록, 1))
         # 🔴 2026-09-07 — 60일 매집은 «매일 절반씩» 갱신한다(발행 시간 평탄화).
@@ -10585,7 +10682,13 @@ def build_core(핵심편, data, 해석):
              #    data["날짜"]에서 직접 만들어 넘긴다(없으면 DATE).
              + build_closing(해석, _closing_date_label(data)))
 
-    _시황 = (움직인것들 + 뒤집블록 + build_odd_today()
+    # 🔴 HO 지시 2026-09-19 — 「지금까지의 줄거리」를 시황 탭 «맨 앞»으로.
+    #   [왜] 전에는 「내 종목」 탭 바로 앞에 끼어 있어 아무 맥락도 없었다.
+    #     줄거리는 «오늘을 최근 며칠과 잇는» 글이다. 오늘 시황을 읽기 «전»에
+    #     「지난 며칠은 이랬다」를 알아야 오늘이 이어지는 이야기로 읽힌다.
+    #   ⚠️ 옛 자리(18660행 근처)에서는 뺐다 — 두 번 나오면 원칙5 위반이다.
+    _시황 = (build_story_bridge()
+             + 움직인것들 + 뒤집블록 + build_odd_today()
              + (f'<p class="sec-label"><small>핵심 이슈</small>'
                 f'🔬 이슈 해부 — 이 이슈가 어디까지 닿나</p>'
                 f'{build_issues(해석.get("핵심이슈"))}' if 해석.get("핵심이슈") else '')
@@ -10722,11 +10825,12 @@ def build_core(핵심편, data, 해석):
                f' · 테마별 1종목</span></p>'
              + build_theme_leaders(data)
              + f'<p class="sec-label"><small>강세 레이더 상세</small>'
-               f'📡 오늘 잡힌 강세 종목</p>'
+               f'📡 오늘 잡힌 강한 종목</p>'
              + build_radar(data.get("강세레이더"), data.get("설정"))
              + f'<p class="sec-label"><small>매집 레이더 상세</small>'
                f'🧲 오늘 잡힌 매집 종목</p>'
-             + build_accumulation(data.get("매집레이더"), data.get("설정"))
+             + build_accumulation(data.get("매집레이더"), data.get("설정"),
+                                  ((data.get("계좌격자") or {}).get("종목사전")))
              # 🔴 HO 지시 2026-09-12 — 공시는 「포착」 맨 아래.
              #    [왜] 공시도 «우리가 골라낸 것»이다. 내 종목(구독자가 담은 것)과
              #    성격이 다르다. 다만 매일 보는 것은 아니라 맨 아래에 둔다.
@@ -10769,7 +10873,7 @@ def build_core(핵심편, data, 해석):
              ("시황", "무슨 일이 있었나", _시황),
              ("수급", "돈은 어디로 갔나", _수급),
              ("테마", "어디가 움직였나", _테마),
-             ("포착", "우리가 잡은 종목", _종목),
+             ("포착", "종목 포착 조건으로 잡은 종목", _종목),
              ("내 종목", "내가 담은 종목", _내종목),
              # 🔴 HO 지시 2026-09-12 — 「성적표」 탭 숨김.
              #    삭제가 아니라 가림이다(원칙3). 채점 자체는 계속 돌아가므로
@@ -15120,6 +15224,25 @@ THEME_V17_CSS = """
 .tm-cmn.up{color:#74f0d4;background:rgba(116,240,212,.12)}
 .tm-cmn.dn{color:#e8c33a;background:rgba(232,195,58,.12)}
 .tm-cmn.fl{color:#7d8695;background:rgba(125,134,149,.1)}
+/* 종목명 아랫줄 배지 — 이름줄이 좁을 때 등락률이 밀리지 않게 */
+.sc-bar{margin:3px 0 0;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+/* 매집 카드 — 이름 오른쪽 등락률 / 배지 줄 */
+/* ⚠️ 종목명은 이 카드에서 «가장 큰 글자»여야 한다. */
+.ac-name{display:flex;align-items:baseline;gap:6px}
+.ac-name .cp-sname{font-size:14.5px !important;font-weight:800}
+.ac-name .cp-nm{letter-spacing:-.3px}
+.ac-ch{margin-left:auto;display:inline-flex;align-items:baseline;gap:3px;
+  white-space:nowrap}
+.ac-ch em{font-style:normal;font-size:9.5px;color:#8b93a0}
+/* 순위 — 종목명 바로 왼쪽 */
+.ac-name .ac-rank{position:static;display:inline-flex;align-items:center;
+  justify-content:center;min-width:17px;height:17px;border-radius:5px;
+  background:#1c2430;color:#9aa3b1;font-size:9.5px;font-weight:800;
+  flex:none;margin-right:2px}
+.ac-ch b{font-size:12.5px;font-weight:800}
+/* 읽기용 정보는 «글자»로 — 알약이 많으면 종목명이 묻힌다 */
+.ac-sub{margin:3px 0 0;font-size:10px;color:#8b93a0;line-height:1.5}
+.ac-tags{margin:4px 0 0;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
 .tm-tmv{font-style:normal;font-size:9px;font-weight:800;margin-left:4px;
   letter-spacing:-.04em}
 /* 작은 범례 — 두 번째부터는 «상기»만 시키면 되므로 한 단계 줄인다 */
@@ -17285,9 +17408,14 @@ html{{scroll-behavior:smooth}}
       9px가 실측 하한선 — 더 키우면 «성적표»가 밀려 잘린다.
    ⚠️ 후광은 ::before에 blur로 그린다. box-shadow로 하면 경계가 남아
       «빛»이 아니라 «둥근 판»으로 보인다(시안 단계에서 확인). */
-.gtab{{display:flex;overflow-x:auto;scrollbar-width:none;background:#080b0f;
-  border-bottom:1px solid rgba(255,255,255,.07);margin:0 0 14px;
-  border-radius:11px 11px 0 0}}
+/* 🔴 HO 선택 2026-09-19 — 시안 4번(위→아래 그라데이션).
+   위가 밝고 아래로 어두워져 «본문 카드와 경계 없이» 이어진다.
+   ⚠️ 글자·후광·선택 표시는 하나도 안 건드렸다 — 바탕만 바꾼다. */
+.gtab{{display:flex;overflow-x:auto;scrollbar-width:none;
+  background:linear-gradient(180deg,#131a24,#080b0f);
+  border-bottom:1px solid rgba(255,255,255,.06);margin:0 0 14px;
+  /* 🔴 HO 지시 2026-09-19 — 아래 두 모서리도 둥글게. */
+  border-radius:12px}}
 .gtab::-webkit-scrollbar{{display:none}}
 .gtab-b{{flex:1 0 auto;position:relative;border:0;background:none;cursor:pointer;
   font-family:inherit;font-weight:700;font-size:13px;letter-spacing:-.3px;
@@ -17410,7 +17538,14 @@ html{{scroll-behavior:smooth}}
 @media (max-width:600px){{ .ac-gap{{text-align:right;flex-shrink:0}}
 .ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
 .ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
-.ac-two{{grid-template-columns:1fr}} }}
+/* 🔴 HO 지시 2026-09-19 — 모바일에서도 «두 시장을 나란히».
+   [왜] 1열로 떨어지면 코스피 5개를 다 지나야 코스닥이 나온다.
+        두 시장은 «비교»하라고 있는 건데 비교가 안 된다.
+   ⚠️ 칸이 좁아지므로 안쪽 여백·글자를 같이 줄인다. */
+.ac-two{{grid-template-columns:1fr 1fr;gap:6px}}
+.ac-col{{padding:.55rem .5rem}}
+.ac-col-t{{font-size:10.5px}}
+.ac-col-s{{font-size:8.5px}} }}
 .ac-group{{margin-bottom:.8rem}}
 .ac-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:.5px solid var(--line)}}
 .ac-row:last-child{{border-bottom:none}}
@@ -18657,7 +18792,8 @@ html{{scroll-behavior:smooth}}
   {hide("군중나침반", f'''<p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
   {build_crowd_compass(data.get('신용잔고'))}''')}
 
-  {build_story_bridge()}
+  <!-- 🔴 2026-09-19 — 「지금까지의 줄거리」는 «시황 탭 맨 앞»으로 옮겼다.
+       여기 두면 아무 맥락 없이 「내 종목」 앞에 끼어 있었다. -->
   <div id="watch"></div>
 
   <!-- 🔴 2026-09-07 — 「마지막 교신」은 «종합» 탭 맨 끝으로 옮겼다(HO 지시).
