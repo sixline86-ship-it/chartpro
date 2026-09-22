@@ -969,7 +969,12 @@ SYSTEM_PROMPT = """\
   ⚠️ 테마요약이 없으면 빈 문자열 "".
 
 - 내일확인: **정확히 3개, 서로 다른 영역에서 하나씩** — '영역'에 적는다.
-    ① "수급"  외국인·기관의 방향이 이어지나/바뀌나 (지수수급·실탄 흐름 근거)
+    ① "수급"  외국인·기관의 방향이 이어지나/바뀌나 — 입력 '외국인파도'를 근거로 쓴다.
+              외국인파도는 «누적 순매수 선»을 다우 이론으로 읽은 것이다 — 기준 숫자를
+              지어내지 말고 1단계(가장 큰 반등 돌파)·2단계(직전 고점 돌파)를 그대로 쓴다.
+              예) 기준 "바닥 이후 +3.7조(1단계)" / 근거 "8/19부터 매도 파도(−20.2조). 이 파도에서
+                  외국인은 한 번 되사러 왔다(9/02→9/08 +3.7조)가 다시 팔았다. 이번 반등이 그보다
+                  커야 «지난번과 다르다»고 말할 수 있고, 지금은 12%다. 확정은 9/08 고점 돌파(+11.9조)."
     ② "이슈"  오늘 핵심이슈가 내일 주가로 이어지나 (뉴스가 먼저 온 종목·업종)
     ③ "테마"  들어온 테마가 버티나 / 다음 후보가 들어오나 (테마요약 근거)
   🔴 2026-09-22 HO 지적 — 셋 다 테마 얘기만 나왔다. 영역을 섞어야 하루를 입체로 본다.
@@ -1600,6 +1605,123 @@ def theme_summary_for_prompt():
     }
 
 
+# ⚠️ 아래 _fv_wave는 build_html.py의 것을 «그대로» 복사했다. 규칙이 달라지면
+#    화면과 해석글이 다른 말을 한다 — 한쪽을 고치면 반드시 같이 고친다.
+FV_SWING_MIN = 1.0   # 꼭짓점으로 인정할 최소 되돌림 = 그때의 평소 하루 폭 × 이 배수(하루치 잡음 거르기)
+
+
+def _fv_wave(rows, key="외현"):
+    """«이번 파도» — 누적 순매수 선을 차트처럼 읽는다(다우 이론).
+    key = "외현"(외국인 현물) | "기관" — 같은 규칙을 주체만 바꿔 쓴다.
+
+    🔴 HO 지적 2026-09-22 — «4배는 근거가 있나? 기준을 그때그때 다르게, 명시하라.»
+      [1차] 전환 = 평소 폭 × 4(고정) — 근거 없는 숫자였다.
+      [2차] 전환 = 실패한 되돌림 최대치 × 1.1 — 돌려보니 8/18에 3.6배 반등을
+            «매수 전환»으로 판정했고 5일 만에 뒤집혔다(가짜 전환). 배수로 선을
+            긋는 방식 자체의 한계였다.
+      [3차 — 지금] 선을 숫자로 정하지 않는다. 파도 «자신의» 고점·저점에서 나온다.
+        ① 누적 순매수 선의 꼭짓점(고점·저점)을 찾는다 — 그때의 평소 하루 폭만큼은
+           되돌려야 꼭짓점으로 인정(하루치 잡음 거르기, 유일한 숫자)
+        ② 매도 파도 = 고점이 낮아지고 저점도 낮아지는 구간.
+           시작 = 마지막 «더 높은 고점» 다음 날
+        ③ 전환 1단계(약한 신호) = 지금 반등이 «이 파도 안 가장 큰 반등»보다 커짐
+           전환 2단계(확정)     = 누적선이 «직전 고점»을 넘음(고점 돌파)
+        → 새 꼭짓점이 생길 때마다 두 기준이 저절로 바뀐다. 매일 다시 계산한다.
+    """
+    vals = [r.get(key) or 0 for r in rows]
+    if len(vals) < 10:
+        return None
+
+    def avg_at(i):
+        w = [abs(x) for x in vals[max(0, i - 19):i + 1]]
+        return (sum(w) / len(w)) or 1
+    cum, c = [], 0.0
+    for v in vals:
+        c += v
+        cum.append(c)
+    # ① 꼭짓점 — [(인덱스, "H"/"L")]
+    piv, d, ext = [], 0, 0
+    for i in range(1, len(cum)):
+        if d == 0:
+            d = 1 if cum[i] >= cum[0] else -1
+            piv.append((0, "L" if d == 1 else "H"))
+            ext = i
+            continue
+        if (d == 1 and cum[i] > cum[ext]) or (d == -1 and cum[i] < cum[ext]):
+            ext = i
+        elif abs(cum[i] - cum[ext]) >= FV_SWING_MIN * avg_at(i):
+            piv.append((ext, "H" if d == 1 else "L"))
+            d, ext = -d, i
+    # 진행 중인 꼭짓점(아직 확정 전) — 지금 파도의 끝점
+    piv.append((ext, "H" if d == 1 else "L"))
+    H = [i for i, t in piv if t == "H"]
+    L = [i for i, t in piv if t == "L"]
+    if len(H) < 2 or len(L) < 2:
+        return None
+    # ② 방향 — 마지막 두 고점·두 저점
+    if cum[H[-1]] < cum[H[-2]] and cum[L[-1]] < cum[L[-2]]:
+        wd = -1
+    elif cum[H[-1]] > cum[H[-2]] and cum[L[-1]] > cum[L[-2]]:
+        wd = 1
+    else:
+        wd = -1 if cum[-1] < cum[0] else 1       # 혼조 — 큰 방향으로
+    # 시작 — 매도 파도면 «더 높은 고점»이 마지막으로 나온 곳
+    src = H if wd < 0 else L
+    k = len(src) - 1
+    while k > 0 and ((cum[src[k]] < cum[src[k - 1]]) if wd < 0 else (cum[src[k]] > cum[src[k - 1]])):
+        k -= 1
+    ws = src[k] + 1 if src[k] < len(cum) - 1 else src[k]
+    # 이 파도 안의 되돌림(반대 방향 다리)
+    되 = []
+    for (x, tx), (y, ty) in zip(piv[:-1], piv[1:]):
+        if x < ws - 1 or y <= x:
+            continue
+        mv = cum[y] - cum[x]
+        if (mv > 0) != (wd > 0):
+            되.append({"a": x, "b": y, "mv": mv, "진행중": y == piv[-1][0] and y == ext})
+    # 지금 되돌림 — 파도 방향의 마지막 꼭짓점(=진행 중 극점)에서 오늘까지
+    seg = range(ws, len(cum))
+    ex = min(seg, key=lambda i: cum[i]) if wd < 0 else max(seg, key=lambda i: cum[i])
+    reb = abs(cum[-1] - cum[ex])
+    # ③ 두 단계 기준
+    과거되 = [abs(x["mv"]) for x in 되 if x["b"] <= ex]
+    lv1 = max(과거되) if 과거되 else None
+    직전 = [i for i in (H if wd < 0 else L) if ws - 1 <= i < ex]
+    lv2_idx = 직전[-1] if 직전 else None
+    lv2 = abs(cum[lv2_idx] - cum[ex]) if lv2_idx is not None else None
+    return {"s": ws, "dir": wd, "ext": ex, "reb": reb, "lv1": lv1, "lv2": lv2,
+            "lv2_idx": lv2_idx, "bounces": [x for x in 되 if x["b"] <= ex],
+            "avg": avg_at(len(cum) - 1), "from_start": ws <= 1}
+
+
+def foreign_wave_for_prompt():
+    """🌊 외국인 «이번 파도» — 다우 이론(누적 순매수 선의 고점·저점)."""
+    try:
+        rows = [r for r in json.load(open("flow_history.json", encoding="utf-8"))
+                if r.get("외현") is not None and r.get("종가")]
+    except Exception:
+        return None
+    w = _fv_wave(rows)
+    if not w:
+        return None
+    D = lambda i: rows[i]["날짜"]
+    wr = rows[w["s"]:]
+    sell = w["dir"] < 0
+    쪽 = [(abs(r["외현"]), r["종가"]) for r in wr if (r["외현"] < 0) == sell and r["외현"] != 0]
+    평균 = round(sum(a * c for a, c in 쪽) / sum(a for a, _ in 쪽)) if 쪽 else None
+    return {"방향": "매도 파도" if sell else "매수 파도", "시작일": wr[0]["날짜"], "일수": len(wr),
+            "누적_억": round(sum(r["외현"] for r in wr)),
+            ("매도평균지수" if sell else "매수평균지수"): 평균, "오늘지수": wr[-1]["종가"],
+            "극점일": D(w["ext"]), "극점이후되돌림_억": round(w["reb"]),
+            "1단계_약한신호": ({"기준": "이 파도에서 가장 큰 반등", "필요_억": round(w["lv1"]),
+                           "진행_퍼센트": round(w["reb"] / w["lv1"] * 100)} if w["lv1"] else None),
+            "2단계_전환확정": ({"기준": f"직전 {'고점' if sell else '저점'}({D(w['lv2_idx'])}) 돌파",
+                           "필요_억": round(w["lv2"]), "진행_퍼센트": round(w["reb"] / w["lv2"] * 100)}
+                          if w["lv2"] else None),
+            "파도안_실패한반등": [{"구간": f"{D(x['a'])}→{D(x['b'])}", "억": round(x["mv"])}
+                           for x in w["bounces"]]}
+
+
 def data_health_for_prompt(data):
     """⚠️ 수집이 끊겼거나 의심스러운 칸 목록 — «근거로 쓰지 말 것» 표시.
 
@@ -1635,6 +1757,9 @@ def ask_claude(data, 시도=1, max_tok=MAX_TOKENS_START):
     _ts = theme_summary_for_prompt()
     if _ts:
         슬림["테마요약"] = _ts
+    _fw = foreign_wave_for_prompt()
+    if _fw:
+        슬림["외국인파도"] = _fw
     _hw = data_health_for_prompt(data)
     if _hw:
         슬림["수집경고"] = _hw
