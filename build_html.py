@@ -1644,7 +1644,10 @@ def one_news_item(idx, item):
 def news_title(핵심뉴스):
     """섹션 제목. 개수가 매일 5~8개로 달라지므로 제목도 따라 움직인다."""
     n = len(핵심뉴스 or [])
-    return f"놓치기 쉬운 것들 {n}건" if n else "놓치기 쉬운 것들"
+    # 🔴 HO 지시 2026-09-21 — 「놓치기 쉬운 것들」 → 「오늘 핵심 뉴스」.
+    #   코너 성격도 바꿨다(generate_report.py): «이슈 밖 뉴스»가 아니라
+    #   «시장을 움직인 뉴스 + 오늘 화제가 된 뉴스»를 고른다.
+    return "오늘 핵심 뉴스"
 
 
 
@@ -2169,7 +2172,11 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
         #    기간과 오늘은 다른 값이다 — 섞지 않는다.
         _끼움 = ""
         if isinstance(_기등, (int, float)):
-            _라벨 = "오늘" if _오늘등 else (f"{일수}일" if 일수 else "기간")
+            # 🔴 2026-09-22 발행 실패 — `_오늘등`을 지우면서 이 줄을 남겨 NameError.
+            #   미리보기에선 기간등락률이 전부 None이라 이 줄까지 오지 않아 못 잡았다.
+            #   새 collect_data가 등락률을 채우자 처음 실행돼 터졌다.
+            #   ⚠️ 이 _끼움은 이제 화면에 안 쓰인다(아래 _등HTML이 대신한다).
+            _라벨 = f"{일수}일" if 일수 else "기간"
             _끼움 = (f'<span style="font-size:9.5px;color:#8b93a0;'
                    f'margin:0 2px 0 6px">{_라벨}</span>'
                    f'<span style="font-size:12px;font-weight:800;'
@@ -10693,26 +10700,29 @@ def build_core(핵심편, data, 해석):
                 f'{내용}</section>')
 
     _종합 = (신호등블록 + 정의블록 + 지수스트립
-             + (f'<p class="sec-label"><small>챙겨볼 뉴스</small>'
+             + (f'<p class="sec-label"><small>시장을 움직인 뉴스</small>'
                 f'🔥 {news_title(해석.get("핵심뉴스"))}</p>'
                 f'{build_news(해석.get("핵심뉴스"))}' if 해석.get("핵심뉴스") else '')
-             + f'<p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>'
-             + build_study(해석.get('오늘의_공부',''))
              # 🔴 2026-09-07 HO 지시 — 「마지막 교신」을 종합 탭으로.
              #    [맞는 배치다] 하루를 닫는 글이라 «미분류» 칸에 떠 있는 것보다
              #    «종합»의 맨 끝이 맞다. 종합 탭이 오늘을 열고(관제지수) 닫는
              #    (마지막 교신) 한 덩어리가 된다.
              # ⚠️ build_core 안에는 «날짜»(표기용 문자열) 변수가 없다.
              #    data["날짜"]에서 직접 만들어 넘긴다(없으면 DATE).
-             + build_closing(해석, _closing_date_label(data)))
+             + build_closing(해석, _closing_date_label(data))
+             # 🔴 HO 지시 2026-09-21 — 「오늘 하나만 배운다면」을 «마지막 교신
+             #    아래»로. 하루를 닫은 뒤 «그래서 오늘 배울 것 하나»로 끝낸다.
+             + f'<p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>'
+             + build_study(해석.get('오늘의_공부','')))
 
     # 🔴 HO 지시 2026-09-19 — 「지금까지의 줄거리」를 시황 탭 «맨 앞»으로.
     #   [왜] 전에는 「내 종목」 탭 바로 앞에 끼어 있어 아무 맥락도 없었다.
     #     줄거리는 «오늘을 최근 며칠과 잇는» 글이다. 오늘 시황을 읽기 «전»에
     #     「지난 며칠은 이랬다」를 알아야 오늘이 이어지는 이야기로 읽힌다.
     #   ⚠️ 옛 자리(18660행 근처)에서는 뺐다 — 두 번 나오면 원칙5 위반이다.
-    _시황 = (build_story_bridge()
-             + 움직인것들 + 뒤집블록 + build_odd_today()
+    # 🔴 HO 지시 2026-09-21 — 「지금까지의 줄거리」 삭제.
+    #   함수(build_story_bridge)는 남긴다(원칙3). 되살리려면 앞에 붙이면 된다.
+    _시황 = (움직인것들 + 뒤집블록 + build_odd_today()
              + (f'<p class="sec-label"><small>핵심 이슈</small>'
                 f'🔬 이슈 해부 — 이 이슈가 어디까지 닿나</p>'
                 f'{build_issues(해석.get("핵심이슈"))}' if 해석.get("핵심이슈") else '')
@@ -10781,7 +10791,7 @@ def build_core(핵심편, data, 해석):
              + build_coming_themes(data)
              # 🔎 2026-09-19 — 「다가오는 테마」가 11~20위를 본 직후에
              #   «그 밖»을 잇는다. 순위로 못 본 자리를 돈으로 본다.
-             + build_reverse_look()
+             + build_reverse_look(data)
              + f'<p class="sec-label">'
                f'<small>3단계 · 그 테마들이 어느 섹터 소속인가</small>'
                f'🗺️ 섹터 × 테마'
@@ -12824,7 +12834,7 @@ def build_judge_tab(data=None):
             + '</div>')
 
 
-def build_reverse_look(n=6):
+def build_reverse_look(data=None, n=6):
     """🔎 거꾸로 보기 — 순위 밖인데 «돈만» 늘고 있는 테마.
 
     🔴 2026-09-19 — 진짜 이른 자리는 «순위 밖»이다. 돈이 순위보다
@@ -12867,15 +12877,28 @@ def build_reverse_look(n=6):
                    f'내일부터 후보가 늘어납니다.</span>' if _밖 < 20 else "")
                 + '</p></div>')
 
+    # 🔴 HO 지시 2026-09-21 — 테마명 옆 ▾로 «관련 종목»을 펼친다.
+    #   순위 밖 테마는 처음 보는 이름이 많다 — 무슨 종목이 든 테마인지
+    #   바로 봐야 판단이 된다. 다른 코너와 «같은 금색 ▾».
+    mem = _theme_members(data) if data else {}
+    _pan = {}
+    for i, x in enumerate(후보):
+        _sp, _span = _stock_panel(x["n"], mem.get(x["n"]) or [], f"rvS{i}")
+        _pan[x["n"]] = (f"rvS{i}", _span)
     줄 = "".join(
-        f'<div class="rv2-r"><span class="rv2-n">{x["n"]}</span>'
+        f'<div class="rv2-r"'
+        + (f' onclick="ztog(\'{_pan[x["n"]][0]}\')" style="cursor:pointer"'
+           if _pan[x["n"]][1] else "")
+        + f'><span class="rv2-n">{x["n"]}'
+        + ('<em class="rv2-ar">▾</em>' if _pan[x["n"]][1] else "")
+        + '</span>'
         f'<span class="rv2-k">{x["rk"]}위</span>'
         + (f'<span class="rv2-s" style="color:'
            f'{TM_HOT if (x["y"] - x["rk"]) >= 10 else TM_WARM}">'
            f'▲{x["y"] - x["rk"]}</span>' if x["y"] and x["y"] > x["rk"]
            else '<span class="rv2-s">—</span>')
         + f'<span class="rv2-m" style="color:{TM_COOL}">+{x["ch"]:.0f}%</span>'
-        f'</div>' for x in 후보)
+        f'</div>{_pan[x["n"]][1]}' for x in 후보)
     return (f'<div class="rv2"><p class="rv2-h">🔎 거꾸로 보기'
             f'<span>순위 밖인데 돈이 붙는 곳</span></p>'
             f'<div class="rv2-r rv2-hd"><span class="rv2-n">테마</span>'
@@ -13623,6 +13646,7 @@ _RL = {"new": "오늘 첫 등장", "in": "올라오는 중",
 #
 # [기준선] 지금까지 기록된 모든 체류 구간의 «중앙값». 표본이 얇으면
 #   비교 문장을 아예 붙이지 않는다 — 표본 부족한 통계는 만들지 않는다.
+THEME_AGE_TOPN = 10           # 나이·보통을 재는 순위권 (레이더·생존곡선과 같게)
 THEME_AGE_MIN_SAMPLE = 30      # 이만큼 안 쌓이면 「보통」 비교를 끄고 숫자만 낸다
 
 
@@ -13632,7 +13656,13 @@ def _theme_age_map():
     days = sorted(rk)
     if not days:
         return {}, None, 0
-    안에 = {d: {nm for nm, _ in (rk.get(d) or [])[:THEME_TOPN]} for d in days}
+    # 🔴 HO 지적 2026-09-21 — 「6일째 머무는 중」이 무엇의 6일인지 헷갈렸다.
+    #   [실제] 여기서 «20위권»(THEME_TOPN)을 세고 있었다. 레이더는 10위권
+    #     코너인데 나이는 20위권 기준이라, 어제 17위였던 시스템반도체가
+    #     «6일째»로 나왔다(10위권으로는 2일째).
+    #   [고침] 나이·보통 둘 다 «10위권» 기준으로 센다 — 생존곡선
+    #     (「10위권에서 며칠 버티나」)과 같은 자다.
+    안에 = {d: {nm for nm, _ in (rk.get(d) or [])[:THEME_AGE_TOPN]} for d in days}
 
     구간 = []          # 끝난 체류 구간들의 길이 (기준선 재료)
     나이 = {}
@@ -13671,13 +13701,15 @@ def _age_phrase(age, 중앙, 표본):
     if age == 1:
         return "<b>오늘 새로</b> 진입", False
     if 중앙 is None or 표본 < THEME_AGE_MIN_SAMPLE:
-        return f"<b>{age}일째</b> 머무는 중", False   # 표본 부족 → 비교 없이 사실만
+        return f"10위권 <b>{age}일째</b>", False   # 표본 부족 → 비교 없이 사실만
+    # 🔴 2026-09-21 — 「보통」이 이 테마의 평균인지 전체 평균인지 헷갈렸다.
+    #   → «모든 테마»의 기준임을 문장에 적는다.
     if age > 중앙:
-        return (f"<b>{age}일째</b> 머무는 중 · "
-                f"보통({중앙}일)보다 <b>{age - 중앙}일 더</b>"), True
+        return (f"10위권 <b>{age}일째</b> · "
+                f"다른 테마 보통({중앙}일)보다 <b>{age - 중앙}일 더</b>"), True
     if age == 중앙:
-        return f"<b>{age}일째</b> 머무는 중 · 보통 딱 이만큼", False
-    return f"<b>{age}일째</b> 머무는 중 · 보통({중앙}일)까진 여유", False
+        return f"10위권 <b>{age}일째</b> · 다른 테마 보통과 같음", False
+    return f"10위권 <b>{age}일째</b> · 다른 테마 보통({중앙}일)까진 여유", False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -13800,13 +13832,21 @@ def build_theme_radar(data):
     etc = [r for r in rows if r["zone"] not in _RADAR_ZONE]
     for i, r in enumerate(etc):
         r["ang"] = _RADAR_ETC + (i - (len(etc) - 1) / 2) * 30
-    used = {}
+    # 🔴 HO 지적 2026-09-21 — 뉴로모픽 반도체가 «자동차» 쪽에 찍혔다.
+    #   [원인] 같은 섹터를 ±14도씩 번갈아 벌렸는데, 반도체가 6개면
+    #     0·+14·−28·+42·−56·+70도까지 퍼져 이웃 섹터(자동차 318도,
+    #     2차전지 72도) 자리로 넘어갔다.
+    #   [고침] 섹터마다 «±18도 부채꼴 안»에서만 고르게 나눈다.
+    #     점이 가까워도 중심 거리(순위)가 달라 겹치지 않는다.
+    _zn = {}
     for r in rows:
-        if "ang" in r:
-            continue
-        a = _RADAR_ZONE[r["zone"]]
-        k = round(a); c = used.get(k, 0); used[k] = c + 1
-        r["ang"] = a + (0 if c == 0 else (14 * c if c % 2 else -14 * c))
+        if "ang" not in r:
+            _zn.setdefault(r["zone"], []).append(r)
+    for z, lst in _zn.items():
+        a = _RADAR_ZONE[z]
+        n = len(lst)
+        for i, r in enumerate(lst):
+            r["ang"] = a if n == 1 else a - 18 + 36 * i / (n - 1)
 
     # 상태 판정 — 5일 전 대비 몇 칸 움직였나
     # 🔴 2026-09-17 — 4단계(new/in/hold/out) → «세 코너 공통» 6단계.
@@ -14746,6 +14786,7 @@ THEME_V17_CSS = """
 .rv2-n{text-align:left !important;color:#dfe4ea;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .rv2-k{color:#7d8695}
+.rv2-ar{font-style:normal;color:#e0c060;font-size:11px;font-weight:900;margin-left:5px}
 .rv2-s{font-weight:800;color:#5f6875}
 .rv2-m{font-weight:800}
 .rv2-wait{margin:0;padding:12px 10px;border-radius:8px;background:#111a24;
@@ -15355,6 +15396,12 @@ def _leader_stay(name, days=3):
     return max(cnt, 1)
 
 
+def _is_pref(nm):
+    """우선주인가 — 삼성전자우 · 현대차2우B · ○○우(전환) 꼴."""
+    nm = (nm or "").strip()
+    return bool(re.search(r"(\d?우B?|우\(전환\))$", nm)) and not nm.endswith("대우")
+
+
 def build_theme_leaders(data):
     """테마 순위 순으로 «테마당 대장주 1종목»."""
     import re as _re
@@ -15369,6 +15416,11 @@ def build_theme_leaders(data):
         for x in (s.get("종목") or []):
             nm = x.get("종목명")
             if not nm:
+                continue
+            # 🔴 HO 지시 2026-09-21 — 우선주는 대장에서 뺀다.
+            #   삼성전자우가 삼성전자와 나란히 대장 후보로 나왔다. 테마를
+            #   «끄는» 건 보통주다. 우선주는 거래가 얇아 등락만 크게 튄다.
+            if _is_pref(nm):
                 continue
             대금 = x.get("거래대금") or 0
             try:
@@ -15901,7 +15953,10 @@ def _fs_timeline_svg(이력, p, W=380):
     YB = lambda v: BB - (BB - BT) * (v - blo) / ((bhi - blo) or 1)
     g.append(f'<rect x="{PL}" y="{BT}" width="{W-PR-PL}" height="{BB-BT}" fill="#0a0e14" rx="4"/>')
     g.append(f'<line x1="{PL}" y1="{YB(0):.1f}" x2="{W-PR}" y2="{YB(0):.1f}" stroke="#fff" stroke-opacity=".18"/>')
-    if q >= 6:
+    # ⚠️ 2026-09-21 — 끊긴 날을 0으로 채운 누적으로 기울기를 내면 거짓 숫자다
+    #    (실측: 9/17 이후 None인데 「하루 −844억」이 찍혔다). 최근 5일이 다
+    #    있을 때만 기울기를 그린다.
+    if q >= 6 and all(v is not None for v in 선[q-6:q]):
         i0 = q - 6
         sl5 = (C선[q-1] - C선[i0]) / 5
         sc = FS_BUY if sl5 >= 0 else FS_SELL
@@ -15916,7 +15971,9 @@ def _fs_timeline_svg(이력, p, W=380):
     g.append(f'<text x="{W-PR+4}" y="{min(max(YB(C선[-1])+3, BT+10), BB-3):.1f}" font-size="8.5" '
              f'fill="{FS_FUT}" font-weight="800">선물</text>')
     g.append(f'<rect x="{PL+1}" y="{BT+1}" width="62" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
-    g.append(f'<text x="{PL+4}" y="{BT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🛩️ 선물 누적</text>')
+    # 🔴 HO 지적 2026-09-21 — 레인 제목이 너무 작았다(7.5px). 10.5px로.
+    g.append(f'<rect x="{PL+1}" y="{BT+1}" width="92" height="15" rx="3" fill="#0a0e14" opacity=".92"/>')
+    g.append(f'<text x="{PL+4}" y="{BT+12:.1f}" font-size="10.5" fill="#aab3c0" font-weight="800">🛩️ 선물 누적</text>')
 
     # ── 레인 C: 비차익 비중(%) — 세로축이 곧 비중이라 숫자를 매일 안 적어도 읽힌다 ──
     CT, CB = 216, 284
@@ -15974,8 +16031,33 @@ def _fs_timeline_svg(이력, p, W=380):
     else:
         g.append(f'<text x="{W/2:.1f}" y="{(CT+CB)/2+4:.1f}" font-size="8" fill="#4a5462" '
                  f'text-anchor="middle" font-weight="700">이 구간에는 비차익 데이터가 없습니다</text>')
-    g.append(f'<rect x="{W-PR-136}" y="{CT+1}" width="132" height="12" rx="3" fill="#0a0e14" opacity=".92"/>')
-    g.append(f'<text x="{W-PR-133}" y="{CT+10:.1f}" font-size="7.5" fill="#8b93a0" font-weight="800">🧺 비차익 — 비중(%) · 금액</text>')
+    g.append(f'<rect x="{PL+1}" y="{CT+1}" width="176" height="15" rx="3" fill="#0a0e14" opacity=".92"/>')
+    g.append(f'<text x="{PL+4}" y="{CT+12:.1f}" font-size="10.5" fill="#aab3c0" font-weight="800">🧺 비차익 — 비중(%) · 금액</text>')
+
+    # 🔴 2026-09-21 HO 지적 — 「그래프가 며칠째 멈춰 있다」.
+    #   [원인] 선물(외선)·비차익이 2026-09-17부터 None이다. 네이버
+    #     finance.naver.com/sise/ 계열이 폐지됐다(수급과 같은 사고).
+    #   [왜 «멈춘» 것처럼 보였나] 선물은 None을 0으로 «누적»해서 마지막 값이
+    #     평평하게 이어졌다. 멈춘 게 아니라 «수집이 끊긴» 건데, 그림은
+    #     «아무 일도 없었다»고 말하고 있었다 — 거짓말이다.
+    #   [고침] 끊긴 구간을 빗금으로 덮고 «언제부터 끊겼나»를 적는다.
+    # ⚠️ 1차 시도는 빗금 «패턴»(url(#…))이었는데 안 보였다. 5·20·60일
+    #    그림이 한 페이지에 있고 숨은 탭 SVG의 패턴은 크롬이 못 읽는다.
+    #    → 패턴 없이 «단색 반투명»으로 덮는다.
+    # ⚠️ 글자를 끊긴 구간 «안»에 두면 칸이 좁아(3칸≈50px) 옆 글자와 겹쳤다.
+    #    → 레인 «제목 줄 옆»에 적는다. 제목 줄은 비어 있어서 안 부딪힌다.
+    def _stop(series, top, bot, 제목폭):
+        _ok = [k for k, v in enumerate(series) if v is not None]
+        if not _ok or _ok[-1] >= q - 1:
+            return
+        k0 = _ok[-1] + 1
+        x0 = X(k0) - (W - PR - PL) / q / 2
+        g.append(f'<rect x="{x0:.1f}" y="{top+17}" width="{W-PR-x0:.1f}" '
+                 f'height="{bot-top-17}" fill="#0b0f15" opacity=".82"/>')
+        g.append(f'<text x="{PL+제목폭+7}" y="{top+12:.1f}" font-size="9" '
+                 f'fill="#e8c33a" font-weight="800">※ {날[k0]}부터 수집 중단</text>')
+    _stop(선, BT, BB, 92)
+    _stop(비, CT, CB, 176)
 
     # ── 레인 D · 💳 신용융자 잔고 ─────────────────────────
     #  왜 보나: 빚내서 산 돈이 쌓일수록 **반대매매 위험**이 커진다.
@@ -15986,13 +16068,25 @@ def _fs_timeline_svg(이력, p, W=380):
     DT, DB = 296, 356
     g.append(f'<line x1="{PL}" y1="{DT-8}" x2="{W-PR}" y2="{DT-8}" '
              f'stroke="#fff" stroke-opacity=".07"/>')
-    _신 = []
+    # 🔴 2026-09-21 — 신용잔고를 «기준일»로 줄 세운다.
+    #   [전] archive 파일 날짜(=발행일)로 붙였다. 그런데 신용잔고는
+    #     2거래일 늦게 발표돼서, 9/21 파일의 값은 실제로는 9/17 값이다.
+    #     날짜축이 이틀씩 밀려 있었다.
+    #   [후] 새 API가 주는 «이력»(날짜별 20일치)을 기준일 그대로 꽂는다.
+    #     폐지로 끊겼던 구간도 이력으로 «소급» 채워진다.
+    _신맵 = {}
     try:
-        for _ymd, _d in archive_days(q):
-            _v = (_d.get("신용잔고") or {}).get("잔고")
-            _신.append(_v if isinstance(_v, (int, float)) else None)
+        for _ymd, _d in archive_days(max(q, 60)):
+            _c = _d.get("신용잔고") or {}
+            _bd = _c.get("기준일")
+            if isinstance(_c.get("잔고"), (int, float)) and _bd:
+                _신맵[_bd] = _c["잔고"]
+            for _h in (_c.get("이력") or []):
+                if isinstance(_h.get("잔고"), (int, float)):
+                    _신맵[_h["날짜"]] = _h["잔고"]
     except Exception:
-        _신 = []
+        _신맵 = {}
+    _신 = [_신맵.get(x.get("날짜")) for x in sl]
     _실값 = [v for v in _신 if v is not None]
     if len(_실값) >= 3:
         _hi, _lo = max(_실값), min(_실값)
@@ -16017,14 +16111,26 @@ def _fs_timeline_svg(이력, p, W=380):
         #     길어지는 날 왼쪽으로 밀려와 제목 위에 올라탔다.
         #  [고침] 금액을 **한 줄 아래로** 내린다(DT+21). 제목과 높이를 다르게 두면
         #     금액이 아무리 길어져도 겹칠 수가 없다.
-        g.append(f'<text x="{W-PR-4}" y="{DT+21:.1f}" font-size="8" fill="{_c}" '
+        # ⚠️ 2026-09-21 — 제목 옆에 「기준일」 안내가 붙으면서 DT+21과 겹쳤다. 한 줄 더 내린다.
+        g.append(f'<text x="{W-PR-4}" y="{DT+30:.1f}" font-size="8" fill="{_c}" '
                  f'font-weight="800" text-anchor="end">{_flow_amt(_실값[-1])} '
                  f'({_증:+,.0f}억)</text>')
     else:
         g.append(f'<text x="{(PL+W-PR)/2:.0f}" y="{(DT+DB)/2:.0f}" font-size="8.5" '
-                 f'fill="#6f7784" text-anchor="middle">신용융자 잔고는 아직 수집 전입니다 '
-                 f'— 없는 숫자를 지어내지 않습니다</text>')
-    g.append(f'<text x="{W-PR-133}" y="{DT+10:.1f}" font-size="7.5" fill="#8b93a0" '
+                 f'fill="#e8c33a" text-anchor="middle" font-weight="700">'
+                 f'※ 신용융자 수집 중단 — 네이버 경로 폐지(새 주소 확보 중)</text>')
+    # ⚠️ 신용은 «끊김»이 아니라 «발표 전»일 수 있다(2거래일 늦음).
+    #    끝쪽 빈칸이 3일 이하면 「발표 전」, 그보다 길면 「수집 중단」.
+    _ok신 = [k for k, v in enumerate(_신) if v is not None]
+    if len(_ok신) >= 3 and _ok신[-1] < q - 1:
+        _빈 = q - 1 - _ok신[-1]
+        if _빈 <= 3:
+            g.append(f'<text x="{PL+203}" y="{DT+12:.1f}" font-size="9" '
+                     f'fill="#8b93a0" font-weight="800">※ {날[_ok신[-1]]} 기준(2일 늦게 발표)</text>')
+        else:
+            _stop(_신, DT, DB, 196)
+    g.append(f'<rect x="{PL+1}" y="{DT+1}" width="196" height="15" rx="3" fill="#0a0e14" opacity=".92"/>')
+    g.append(f'<text x="{PL+4}" y="{DT+12:.1f}" font-size="10.5" fill="#aab3c0" '
              f'font-weight="800">💳 신용융자 잔고 — 빚내서 산 돈</text>')
 
     # ── 공통 날짜축 ──
@@ -18806,24 +18912,12 @@ html{{scroll-behavior:smooth}}
           마감 브리핑·군중 나침반 등은 HO 분류안에 없었다. 지우지 않고
           «미분류»로 따로 모아 두었다가, 탭 작업 때 자리를 정한다.
        ══════════════════════════════════════════════════════════════ -->
-  <div class="deep-wrap tabsec tab-미분류" data-tab="미분류">
-    <div class="tabsec-hd"><span class="tabsec-name">그 밖에</span>
-    <span class="tabsec-sub">아직 자리를 못 정한 코너</span></div>
-
-  {hide("그들은뭐라했나", f'''<p class="sec-label"><small>마감 브리핑</small>📺 그들은 뭐라 했나</p>
-  {build_briefings(해석.get('마감브리핑'))}''')}
-
-  {hide("군중나침반", f'''<p class="sec-label"><small>시장 심리</small>🧭 군중 나침반</p>
-  {build_crowd_compass(data.get('신용잔고'))}''')}
-
-  <!-- 🔴 2026-09-19 — 「지금까지의 줄거리」는 «시황 탭 맨 앞»으로 옮겼다.
-       여기 두면 아무 맥락 없이 「내 종목」 앞에 끼어 있었다. -->
-  <div id="watch"></div>
-
-  <!-- 🔴 2026-09-07 — 「마지막 교신」은 «종합» 탭 맨 끝으로 옮겼다(HO 지시).
-       여기 두면 같은 글이 두 번 나온다(원칙5). -->
-
-  </div><!-- /deep-wrap -->
+  <!-- 🔴 HO 지시 2026-09-21 — «그 밖에(아직 자리를 못 정한 코너)» 삭제.
+       [왜 모든 탭에 보였나] 이 블록은 <section>이 아니라 <div>라서
+       탭 전환 JS가 숨기지 않았다 — 어느 탭을 눌러도 맨 아래 붙어 나왔다.
+       마감 브리핑(그들은 뭐라 했나)·군중 나침반이 여기 있었다.
+       ⚠️ 두 함수(build_briefings·build_crowd_compass)는 지우지 않았다(원칙3).
+          자리를 정하면 해당 탭 조립부에 한 줄로 되살리면 된다. -->
   {build_archive()}
 
   <p class="foot">데이터: {날짜} 기준, 한국거래소·DART·네이버 증권 종합 · 관제지수는 등락률·수급·시장폭을 근거로 한 자체 참고 지표입니다 · 별점·예측은 참고용이며 매수·매도 신호가 아닙니다 · 본 브리핑은 정보 제공 목적으로, 투자 권유가 아니며 투자 판단과 책임은 투자자 본인에게 있습니다. <span style="opacity:.5">[{SCRIPT_VERSION}]</span></p>
