@@ -16628,8 +16628,31 @@ def _fv_who(data):
             말 = (f'오늘 <b>{파는[0][0]}</b>이 <b>{_fv_amt(파는[0][1]).lstrip("-")}</b>를 팔았고, '
                   f'그걸 받은 건 ' + " · ".join(f'<b>{a}</b>({_fv_amt(v)})' for a, v in 사는[:2])
                   + '였습니다.')
-        판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행)
-                   ))
+        # 🛩️ 선물 — «선물도 동의하나?»(HO 지시 2026-09-22). 코스피 판에만.
+        #   현물 × 선물 조합으로 외국인의 의도를 가른다.
+        선행 = ""
+        if 시장 == "코스피":
+            fu = ((data.get("파생") or {}).get("선물수급") or {})
+            fv = _fv_f(fu.get("외국인"))
+            계 = fu.get("외국인계약")
+            if fv is None:
+                선행 = ('<div class="fv-fut off"><span>🛩️ 외국인 선물</span>'
+                        '<p>수집 복구 대기 — 새 경로(9/21 확보)로 다음 발행부터 들어옵니다</p></div>')
+            else:
+                조 = {(True, True): ("방향 베팅", "현물·선물 모두 사는 중 — 가장 강한 매수", TM_HOT),
+                     (False, False): ("이탈", "현물·선물 모두 파는 중 — 방향을 같이 뺀 가장 약한 조합", TM_DOWN),
+                     (False, True): ("헤지·전환 준비", "현물은 팔고 선물은 사는 중 — 현물 매도를 선물로 가려 두거나 방향을 바꿀 준비", "#e8c33a"),
+                     (True, False): ("헤지", "현물은 사고 선물은 파는 중 — 산 만큼 선물로 위험을 가려 둠", "#e8c33a")}[(외 >= 0, fv >= 0)]
+                # ⚠️ 현물이 «사실상 0»이면 조합이라 부르지 않는다(9/21 +61억 같은 날).
+                #    기준 1,000억 = 코스피 외국인 하루 폭(평소 1조 안팎)의 약 1/10.
+                if abs(외) < 1000:
+                    조 = (("선물로만 사는 중", "현물은 사실상 0 — 방향은 선물로만 걸고 있어요", TM_HOT) if fv >= 0 else
+                          ("선물로만 파는 중", "현물은 사실상 0 — 방향은 선물로만 빼고 있어요", TM_DOWN))
+                선행 = (f'<div class="fv-fut"><span>🛩️ 외국인 선물</span>'
+                        f'<b style="color:{TM_HOT if fv >= 0 else TM_DOWN}">{_fv_amt(fv)}'
+                        + (f' · {계:+,}계약' if isinstance(계, (int, float)) else "") + '</b>'
+                        f'<p><i style="color:{조[2]};border-color:{조[2]}">{조[0]}</i>{조[1]}</p></div>')
+        판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행) + 선행))
     if not 판:
         return ""
     btn = "".join(f'<button class="fv-tb{" on" if i == 0 else ""}" '
@@ -16643,10 +16666,174 @@ def _fv_who(data):
             'p.querySelectorAll(".fv-tb").forEach(function(x){x.className="fv-tb"+(x===el?" on":"")});}</script>')
 
 
+FV_SWING_MIN = 1.0   # 꼭짓점으로 인정할 최소 되돌림 = 그때의 평소 하루 폭 × 이 배수(하루치 잡음 거르기)
+
+
+def _fv_wave(rows, key="외현"):
+    """«이번 파도» — 누적 순매수 선을 차트처럼 읽는다(다우 이론).
+    key = "외현"(외국인 현물) | "기관" — 같은 규칙을 주체만 바꿔 쓴다.
+
+    🔴 HO 지적 2026-09-22 — «4배는 근거가 있나? 기준을 그때그때 다르게, 명시하라.»
+      [1차] 전환 = 평소 폭 × 4(고정) — 근거 없는 숫자였다.
+      [2차] 전환 = 실패한 되돌림 최대치 × 1.1 — 돌려보니 8/18에 3.6배 반등을
+            «매수 전환»으로 판정했고 5일 만에 뒤집혔다(가짜 전환). 배수로 선을
+            긋는 방식 자체의 한계였다.
+      [3차 — 지금] 선을 숫자로 정하지 않는다. 파도 «자신의» 고점·저점에서 나온다.
+        ① 누적 순매수 선의 꼭짓점(고점·저점)을 찾는다 — 그때의 평소 하루 폭만큼은
+           되돌려야 꼭짓점으로 인정(하루치 잡음 거르기, 유일한 숫자)
+        ② 매도 파도 = 고점이 낮아지고 저점도 낮아지는 구간.
+           시작 = 마지막 «더 높은 고점» 다음 날
+        ③ 전환 1단계(약한 신호) = 지금 반등이 «이 파도 안 가장 큰 반등»보다 커짐
+           전환 2단계(확정)     = 누적선이 «직전 고점»을 넘음(고점 돌파)
+        → 새 꼭짓점이 생길 때마다 두 기준이 저절로 바뀐다. 매일 다시 계산한다.
+    """
+    vals = [r.get(key) or 0 for r in rows]
+    if len(vals) < 10:
+        return None
+
+    def avg_at(i):
+        w = [abs(x) for x in vals[max(0, i - 19):i + 1]]
+        return (sum(w) / len(w)) or 1
+    cum, c = [], 0.0
+    for v in vals:
+        c += v
+        cum.append(c)
+    # ① 꼭짓점 — [(인덱스, "H"/"L")]
+    piv, d, ext = [], 0, 0
+    for i in range(1, len(cum)):
+        if d == 0:
+            d = 1 if cum[i] >= cum[0] else -1
+            piv.append((0, "L" if d == 1 else "H"))
+            ext = i
+            continue
+        if (d == 1 and cum[i] > cum[ext]) or (d == -1 and cum[i] < cum[ext]):
+            ext = i
+        elif abs(cum[i] - cum[ext]) >= FV_SWING_MIN * avg_at(i):
+            piv.append((ext, "H" if d == 1 else "L"))
+            d, ext = -d, i
+    # 진행 중인 꼭짓점(아직 확정 전) — 지금 파도의 끝점
+    piv.append((ext, "H" if d == 1 else "L"))
+    H = [i for i, t in piv if t == "H"]
+    L = [i for i, t in piv if t == "L"]
+    if len(H) < 2 or len(L) < 2:
+        return None
+    # ② 방향 — 마지막 두 고점·두 저점
+    if cum[H[-1]] < cum[H[-2]] and cum[L[-1]] < cum[L[-2]]:
+        wd = -1
+    elif cum[H[-1]] > cum[H[-2]] and cum[L[-1]] > cum[L[-2]]:
+        wd = 1
+    else:
+        wd = -1 if cum[-1] < cum[0] else 1       # 혼조 — 큰 방향으로
+    # 시작 — 매도 파도면 «더 높은 고점»이 마지막으로 나온 곳
+    src = H if wd < 0 else L
+    k = len(src) - 1
+    while k > 0 and ((cum[src[k]] < cum[src[k - 1]]) if wd < 0 else (cum[src[k]] > cum[src[k - 1]])):
+        k -= 1
+    ws = src[k] + 1 if src[k] < len(cum) - 1 else src[k]
+    # 이 파도 안의 되돌림(반대 방향 다리)
+    되 = []
+    for (x, tx), (y, ty) in zip(piv[:-1], piv[1:]):
+        if x < ws - 1 or y <= x:
+            continue
+        mv = cum[y] - cum[x]
+        if (mv > 0) != (wd > 0):
+            되.append({"a": x, "b": y, "mv": mv, "진행중": y == piv[-1][0] and y == ext})
+    # 지금 되돌림 — 파도 방향의 마지막 꼭짓점(=진행 중 극점)에서 오늘까지
+    seg = range(ws, len(cum))
+    ex = min(seg, key=lambda i: cum[i]) if wd < 0 else max(seg, key=lambda i: cum[i])
+    reb = abs(cum[-1] - cum[ex])
+    # ③ 두 단계 기준
+    과거되 = [abs(x["mv"]) for x in 되 if x["b"] <= ex]
+    lv1 = max(과거되) if 과거되 else None
+    직전 = [i for i in (H if wd < 0 else L) if ws - 1 <= i < ex]
+    lv2_idx = 직전[-1] if 직전 else None
+    lv2 = abs(cum[lv2_idx] - cum[ex]) if lv2_idx is not None else None
+    return {"s": ws, "dir": wd, "ext": ex, "reb": reb, "lv1": lv1, "lv2": lv2,
+            "lv2_idx": lv2_idx, "bounces": [x for x in 되 if x["b"] <= ex],
+            "avg": avg_at(len(cum) - 1), "from_start": ws <= 1}
+
+
 def _fv_price(이력):
     """② 외국인이 판 가격대 — 20일·60일. 순매도한 날의 코스피를 매도금액으로 가중평균."""
     칸 = []
     _prev = None
+    # ── 이번 파도 ──
+    _w = _fv_wave([r for r in 이력 if r.get("종가")])
+    _rows_all = [r for r in 이력 if r.get("외현") is not None and r.get("종가")]
+    if _w and _w["s"] < len(_rows_all):
+        wr = _rows_all[_w["s"]:]
+        판 = [(-r["외현"], r["종가"]) for r in wr if r["외현"] < 0]
+        산 = [(r["외현"], r["종가"]) for r in wr if r["외현"] > 0]
+        now = wr[-1]["종가"]
+        net = sum(r["외현"] for r in wr)
+        pa = (sum(w * c for w, c in 판) / sum(w for w, _ in 판)) if 판 else None
+        ba = (sum(w * c for w, c in 산) / sum(w for w, _ in 산)) if 산 else None
+        d0 = wr[0]["날짜"]
+        이름 = "이번 매도 구간" if _w["dir"] < 0 else "이번 매수 구간"
+        vs = [v for v in (pa, ba, now) if v]
+        lo, hi = min(vs), max(vs)
+        span = (hi - lo) or 1
+        X = lambda v: 6 + (v - lo) / span * 88
+        점 = ((f'<i class="fv-m s" style="left:{X(pa):.1f}%"><em>매도 {pa:,.0f}</em></i>' if pa else "")
+              + (f'<i class="fv-m b" style="left:{X(ba):.1f}%"><em>매수 {ba:,.0f}</em></i>' if ba else "")
+              + f'<i class="fv-m now" style="left:{X(now):.1f}%"><em>오늘 {now:,.0f}</em></i>')
+        ex = _rows_all[_w["ext"]]["날짜"]
+        _dd = lambda i: f'{_rows_all[i]["날짜"][4:6]}/{_rows_all[i]["날짜"][6:]}'
+        _buy = _w["dir"] < 0          # 매도 파도면 «되사야» 전환
+        _c = TM_HOT if _buy else TM_DOWN
+        _단 = []
+        if _w["lv1"]:
+            p1 = min(100, _w["reb"] / _w["lv1"] * 100)
+            _단.append(f'<div class="fv-stp"><p><b>1단계 · 약한 신호</b> — 이번 반등이 이 파도의 '
+                       f'«가장 큰 반등»({_fv_amt(_w["lv1"]).lstrip("+")})보다 커지면</p>'
+                       f'<span class="fv-tg{"" if _buy else " n"}"><i style="width:{p1:.0f}%"></i></span>'
+                       f'<em>{p1:.0f}%</em></div>')
+        if _w["lv2"]:
+            p2 = min(100, _w["reb"] / _w["lv2"] * 100)
+            _단.append(f'<div class="fv-stp"><p><b>2단계 · 전환 확정</b> — 누적선이 직전 '
+                       f'{"고점" if _buy else "저점"}({_dd(_w["lv2_idx"])})을 '
+                       f'{"넘으면" if _buy else "깨면"} · {_fv_amt(_w["lv2"]).lstrip("+")} 필요</p>'
+                       f'<span class="fv-tg{"" if _buy else " n"} s2"><i style="width:{p2:.0f}%"></i></span>'
+                       f'<em>{p2:.0f}%</em></div>')
+        _bt = "".join(
+            f'<div class="fv-bt-r"><span>{_dd(x["a"])}→{_dd(x["b"])}</span>'
+            f'<b style="color:{TM_HOT if x["mv"] >= 0 else TM_DOWN}">{_fv_amt(x["mv"])}</b>'
+            f'<i>❌ 다시 {"팔았음" if _buy else "샀음"}</i></div>' for x in _w["bounces"])
+        근거 = (f'<details class="fv-why"><summary>▾ 이 기준은 어디서 나왔나</summary>'
+               f'<p>외국인 <b>누적 순매수 선</b>을 차트처럼 읽습니다(다우 이론). '
+               + ('고점도 낮아지고 저점도 낮아지는 동안이 «매도 파도», '
+                  '누적선이 <b>직전 고점을 넘는 순간</b>이 전환입니다.' if _buy else
+                  '고점도 높아지고 저점도 높아지는 동안이 «매수 파도», '
+                  '누적선이 <b>직전 저점을 깨는 순간</b>이 전환입니다.')
+               + '</p><p>기준 숫자를 제가 정하지 않습니다 — <b>파도 자신의 고점·저점</b>에서 나오고, '
+               '새 꼭짓점이 생길 때마다 <b>매일 저절로 바뀝니다.</b></p>'
+               + (f'<p>이 파도에서 외국인은 <b>{len(_w["bounces"])}번</b> 되돌렸다가 '
+                  f'<b>{len(_w["bounces"])}번 다</b> 원래 방향으로 돌아갔어요:</p><div class="fv-bt">{_bt}</div>'
+                  if _w["bounces"] else '')
+               + f'<p class="fv-why-w">⚠️ 꼭짓점은 «그때의 평소 하루 폭({_fv_amt(_w["avg"]).lstrip("+")})» 이상 '
+               f'되돌려야 인정합니다 — 하루치 잡음을 거르는 유일한 숫자예요. 기록이 {len(_rows_all)}일이라 '
+               f'그 전의 흐름은 모릅니다.</p></details>')
+        전환 = (f'<div class="fv-turn"><p>바닥({ex[4:6]}/{ex[6:]}) 이후 지금까지 '
+               f'<b style="color:{_c}">{_fv_amt(_w["reb"] if _buy else -_w["reb"])}</b> '
+               f'{"되삼" if _buy else "되팖"}</p>{"".join(_단)}{근거}</div>') if _단 else ""
+        if _w["dir"] < 0:
+            gap = (now / pa - 1) * 100 if pa else 0
+            말 = (f'외국인은 <b>{d0[4:6]}/{d0[6:]}</b>부터 팔기 시작해 이 파도에서 평균 <b>{pa:,.0f}</b>에 '
+                  f'팔았습니다. 지금({now:,.0f})은 그보다 <b>{abs(gap):.1f}% {"높아" if gap > 0 else "낮아"}</b>'
+                  + (' 되사려면 판 값보다 비싸게 사야 하는 자리예요.' if gap > 0 else
+                     ' 판 값보다 싸게 되살 수 있는 자리예요.')) if pa else ""
+        else:
+            gap = (now / ba - 1) * 100 if ba else 0
+            말 = (f'외국인은 <b>{d0[4:6]}/{d0[6:]}</b>부터 사기 시작해 이 파도에서 평균 <b>{ba:,.0f}</b>에 '
+                  f'샀습니다. 지금은 그보다 <b>{abs(gap):.1f}% {"높아" if gap > 0 else "낮아"}</b>'
+                  + (' 외국인이 이익을 보고 있는 자리예요.' if gap > 0 else ' 외국인이 손실 구간에 있어요.')) if ba else ""
+        칸.append(f'<div class="fv-pw fv-pp" data-w="0" style="display:block">'
+                  f'<p class="fv-pt"><b>{이름}</b> · {d0[4:6]}/{d0[6:]}'
+                  f'{"(기록 시작일 — 그 전부터 이어졌을 수 있음)" if _w["from_start"] else ""}부터 '
+                  f'<b>{len(wr)}일</b> · 누적 '
+                  f'<b style="color:{TM_HOT if net>=0 else TM_DOWN}">{_fv_amt(net)}</b></p>'
+                  f'<div class="fv-scale">{점}</div><p class="fv-pm">{말}</p>{전환}</div>')
+    _has_wave = bool(칸)
     for win in (20, 60):
         rows = [r for r in 이력[-win:] if r.get("외현") is not None and r.get("종가")]
         if len(rows) < min(win, 10):
@@ -16683,7 +16870,8 @@ def _fv_price(이력):
         _prev = pa
         _창 = (f"최근 <b>{win}일</b>" if len(rows) >= win else
                f"최근 <b>{len(rows)}일</b> <span class=\"fv-dim\">({win}일 목표 · 기록이 쌓이는 중)</span>")
-        칸.append(f'<div class="fv-pw fv-pp" data-w="{win}" style="display:{"block" if win == 20 else "none"}">'
+        _show = (win == 20 and not _has_wave)
+        칸.append(f'<div class="fv-pw fv-pp" data-w="{win}" style="display:{"block" if _show else "none"}">'
                   f'<p class="fv-pt">{_창} · 순매도 '
                   f'{len(판)}/{len(rows)}일 · 누적 <b style="color:{TM_HOT if net>=0 else TM_DOWN}">'
                   f'{_fv_amt(net)}</b></p><div class="fv-scale">{점}</div>'
@@ -16694,8 +16882,10 @@ def _fv_price(이력):
     #   ⚠️ 60일인 이유: 20일 ≈ 한 달(단기 매매), 60일 ≈ 한 분기(외국인 포지션을
     #     다시 짜는 주기 — 분기 리밸런싱·실적 시즌). 40일은 시장에서 뜻이 없는 숫자다.
     #     기록이 60일이 안 되면 «있는 만큼»으로 그리고 그렇게 적는다.
-    탭 = "".join(f'<button class="fv-tb{" on" if w == 20 else ""}" onclick="fvW(this,{w})">{w}일</button>'
-                for w in (20, 60))
+    _tabs = ([(0, "이번 구간")] if _has_wave else []) + [(20, "20일"), (60, "60일")]
+    _on = 0 if _has_wave else 20
+    탭 = "".join(f'<button class="fv-tb{" on" if w == _on else ""}" onclick="fvW(this,{w})">{t}</button>'
+                for w, t in _tabs)
     return (f'<div class="fv-box fv-price"><p class="fv-h">🎯 외국인이 판 가격대'
             f'<span>순매도한 날의 코스피 · 매도금액 가중평균</span></p>'
             f'<div class="fv-tabs">{탭}</div>{"".join(칸)}'
@@ -16724,6 +16914,118 @@ def _fv_timeline_caption(이력):
                if ch > 0 and 외 < 0 else
                f'지수와 {주}의 방향이 같습니다 — 그 방향을 이끈 건 {주}예요.')
             + '</p>')
+
+
+WAVE_LOG = "wave_log.json"
+
+
+def _fv_wave_summary(rows, key):
+    """파도 한 줄 요약 — 화면·기록 공용."""
+    w = _fv_wave(rows, key)
+    if not w:
+        return None
+    wr = rows[w["s"]:]
+    sell = w["dir"] < 0
+    쪽 = [(abs(r[key]), r["종가"]) for r in wr if r.get(key) and (r[key] < 0) == sell]
+    avg = round(sum(a * c for a, c in 쪽) / sum(a for a, _ in 쪽)) if 쪽 else None
+    return {"dir": w["dir"], "시작": wr[0]["날짜"], "일수": len(wr),
+            "누적": round(sum((r.get(key) or 0) for r in wr)), "평균지수": avg,
+            "극점": rows[w["ext"]]["날짜"], "되돌림": round(w["reb"]),
+            "p1": (round(w["reb"] / w["lv1"] * 100) if w["lv1"] else None),
+            "p2": (round(w["reb"] / w["lv2"] * 100) if w["lv2"] else None),
+            "lv2일": (rows[w["lv2_idx"]]["날짜"] if w["lv2_idx"] is not None else None),
+            "from_start": w["from_start"]}
+
+
+def _fv_waves_pair(이력):
+    """🔁 외국인 vs 기관 — 파도를 나란히 놓고 «누가 받아냈나»를 말한다.
+
+    🔴 HO 지시 2026-09-22 — 기관에도 같은 파도 분석.
+      외국인만 보면 «팔고 있다»까지다. 같은 기간 기관이 어떤 파도였는지 겹치면
+      «외국인이 판 걸 기관이 받는 중 — 기관 파도가 꺾이는 날이 위험»처럼
+      «조합»으로 판단할 수 있다.
+    ⚠️ 개인은 flow_history에 없어 archive(지수수급)에서 같은 날짜를 더한다.
+    """
+    rows = [r for r in 이력 if r.get("종가") and r.get("외현") is not None and r.get("기관") is not None]
+    if len(rows) < 10:
+        return ""
+    F, I = _fv_wave_summary(rows, "외현"), _fv_wave_summary(rows, "기관")
+    if not (F and I):
+        return ""
+
+    def card(nm, x, color):
+        dirn = "매도 파도" if x["dir"] < 0 else "매수 파도"
+        dc = TM_DOWN if x["dir"] < 0 else TM_HOT
+        return (f'<div class="fv-wc"><p class="fv-wn" style="color:{color}">{nm}'
+                f'<span style="color:{dc};border-color:{dc}">{dirn}</span></p>'
+                f'<p class="fv-wl">{x["시작"][4:6]}/{x["시작"][6:]}부터 <b>{x["일수"]}일</b> · 누적 '
+                f'<b style="color:{dc}">{_fv_amt(x["누적"])}</b></p>'
+                + (f'<p class="fv-wl">파도 평균 코스피 <b>{x["평균지수"]:,}</b></p>' if x["평균지수"] else "")
+                + (f'<p class="fv-wl">전환 1단계 <b>{x["p1"]}%</b> · 2단계 <b>{x["p2"]}%</b></p>'
+                   if x["p1"] is not None and x["p2"] is not None else "")
+                + '</div>')
+    # 외국인 파도 기간 동안 세 주체 누적 — «누가 받아냈나»
+    st = F["시작"]
+    겹 = [r for r in rows if r["날짜"] >= st]
+    외s = sum(r["외현"] for r in 겹)
+    기s = sum(r["기관"] for r in 겹)
+    개s, n개 = 0.0, 0
+    try:
+        for _d, dd in archive_days(80):
+            if _d < st:
+                continue
+            v = _fv_f(((dd.get("지수수급") or {}).get("코스피_수급") or {}).get("개인"))
+            if v is not None:
+                개s += v
+                n개 += 1
+    except Exception:
+        n개 = 0
+    받 = [(nm, v) for nm, v in (("기관", 기s), ("개인", 개s if n개 else None)) if v is not None]
+    받문 = " · ".join(f'<b>{nm}</b> <b style="color:{TM_HOT if v >= 0 else TM_DOWN}">{_fv_amt(v)}</b>'
+                     for nm, v in 받)
+    fd, idr = F["dir"], I["dir"]
+    판정 = {(-1, 1): ("🤝 외국인이 판 걸 기관이 받는 중",
+                     "기관의 매수 파도가 꺾이는(2단계) 날이 가장 위험합니다 — 받아줄 손이 사라지니까요."),
+           (-1, -1): ("⚠️ 외국인·기관이 함께 파는 중",
+                      "개인 혼자 받아내는 가장 약한 구조예요."),
+           (1, 1): ("🔥 외국인·기관이 함께 사는 중", "큰돈이 같은 방향 — 가장 강한 구조입니다."),
+           (1, -1): ("🧭 외국인이 사고 기관이 파는 중",
+                     "외국인이 끄는 장이에요. 외국인 파도의 2단계 진행률을 먼저 보세요.")}[(fd, idr)]
+    return (f'<div class="fv-box"><p class="fv-h">🔁 외국인 vs 기관 — 파도 나란히'
+            f'<span>같은 규칙(다우 이론)</span></p>'
+            f'<div class="fv-wg">{card("외국인", F, "#f472b6")}{card("기관", I, "#5eead4")}</div>'
+            f'<div class="fv-jd"><p class="fv-jt">{판정[0]}</p><p>{판정[1]}</p></div>'
+            f'<p class="fv-take">외국인 매도 파도가 시작된 <b>{st[4:6]}/{st[6:]}</b>부터 — 외국인 '
+            f'<b style="color:{TM_HOT if 외s>=0 else TM_DOWN}">{_fv_amt(외s)}</b>를 '
+            f'{"판" if 외s < 0 else "산"} 동안 {받문}</p></div>')
+
+
+def _fv_log_waves(이력):
+    """🗂 파도 판정 기록 — 검증용(HO 지시 2026-09-22).
+
+    [왜] 지금 기준(다우 이론)도 «검증 전»이다. 매일의 판정(방향·1단계%·2단계%)을
+      남겨 두면 나중에 «2단계 확정 뒤 5일·20일 코스피는 어땠나»를 채점할 수 있다.
+    ⚠️ 소급이 안 되는 기록이다 — 그날의 판정은 그날만 남길 수 있다.
+       (과거 flow_history로 다시 계산하면 «그날 알 수 없던 미래»가 섞인다)
+    ⚠️ 실패해도 발행은 막지 않는다.
+    """
+    try:
+        rows = [r for r in 이력 if r.get("종가") and r.get("외현") is not None]
+        if len(rows) < 10:
+            return
+        기록 = load_json(WAVE_LOG) or {}
+        기록[DATE] = {"코스피": rows[-1]["종가"],
+                    "외국인": _fv_wave_summary(rows, "외현"),
+                    "기관": (_fv_wave_summary([r for r in rows if r.get("기관") is not None], "기관")
+                           if all(r.get("기관") is not None for r in rows[-10:]) else None),
+                    "규칙": "다우이론·꼭짓점=그때 평소 하루폭 1배 되돌림"}
+        for d in sorted(기록)[:-400]:
+            기록.pop(d, None)
+        with open(WAVE_LOG, "w", encoding="utf-8") as f:
+            json.dump(기록, f, ensure_ascii=False, indent=1)
+        print(f"   🌊 파도 판정 기록 저장 ({DATE})")
+    except Exception as e:
+        print(f"   ⚠️ 파도 판정 기록 실패 — {type(e).__name__}: {e}")
 
 
 def _fv_tl_caption(이력, p):
@@ -16893,7 +17195,9 @@ def build_flow_v2(data, 해석):
         tl = (f'<div class="fv-box"><p class="fv-h">🕒 하나의 타임라인'
               f'<span>지수 + 수급 + 선물 + 비차익 + 신용</span></p>'
               f'{build_flow_timeline(이력, caption=_fv_tl_caption)}</div>')
-    return (_fv_who(data) + _fv_price(이력) + tl + _fv_retail(data) + _fv_trust(해석))
+    _fv_log_waves(이력)
+    return (_fv_who(data) + _fv_price(이력) + _fv_waves_pair(이력) + tl
+            + _fv_retail(data) + _fv_trust(해석))
 
 
 def build_flow_signal(파생, 지수수급, 해석=None):
@@ -19280,6 +19584,26 @@ html{{scroll-behavior:smooth}}
 .fv-r b{{text-align:right;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}}
 .fv-r em{{grid-column:2 / 4;text-align:right;font-style:normal;font-size:9.5px;color:#6f7784}}
 .fv-r.dim{{opacity:.55}}
+.fv-fut{{margin:8px 0 0;padding:9px 10px;border-radius:9px;background:#0d141c;border:1px solid #1e2937;
+  display:grid;grid-template-columns:1fr auto;gap:4px 8px;align-items:center}}
+.fv-fut span{{font-size:11.5px;font-weight:800;color:#e0c060}}
+.fv-fut b{{font-size:13px;font-weight:800;text-align:right}}
+.fv-fut p{{grid-column:1 / 3;margin:0;font-size:11.5px;line-height:1.6;color:#aab3c0}}
+.fv-fut p i{{font-style:normal;font-size:10px;font-weight:800;border:1px solid;border-radius:4px;
+  padding:1px 6px;margin-right:6px}}
+.fv-fut.off p{{color:#6f7784}}
+.fv-wg{{display:grid;grid-template-columns:1fr 1fr;gap:6px}}
+.fv-wc{{background:#0d141c;border:1px solid #1e2937;border-radius:9px;padding:9px 9px 7px}}
+.fv-wn{{margin:0 0 6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12.5px;font-weight:800}}
+.fv-wn span{{font-size:9.5px;font-weight:800;border:1px solid;border-radius:4px;padding:1px 5px}}
+.fv-wl{{margin:3px 0 0;font-size:10.5px;line-height:1.55;color:#9aa3b1}}
+.fv-wl b{{color:#dfe4ea}}
+.fv-jd{{margin:9px 0 0;padding:9px 10px;border-radius:9px;background:rgba(232,195,58,.07);
+  border:1px solid rgba(232,195,58,.25)}}
+.fv-jt{{margin:0 0 3px !important;font-size:13px !important;font-weight:800;color:#f1d27a !important}}
+.fv-jd p{{margin:0;font-size:12px;line-height:1.65;color:#c3cad4}}
+.fv-take{{margin:9px 0 0;font-size:12px;line-height:1.7;color:#c3cad4}}
+.fv-take b{{color:#eef1f5}}
 .fv-note{{margin:9px 0 0;padding-top:8px;border-top:1px solid #172130;font-size:10px;
   color:#6f7784;line-height:1.7}}
 .fv-note b{{color:#9aa3b1}}
@@ -19299,6 +19623,33 @@ html{{scroll-behavior:smooth}}
 .fv-m.now em{{top:-18px;color:#ffc93c}}
 .fv-pm{{margin:0;font-size:12.5px;line-height:1.75;color:#c3cad4}}
 .fv-dim{{color:#6f7784;font-size:10px}}
+.fv-turn{{margin:10px 0 0;padding:9px 10px;border-radius:9px;background:#0d141c;border:1px solid #1e2937}}
+.fv-turn p{{margin:0 0 7px;font-size:11.5px;line-height:1.65;color:#aab3c0}}
+.fv-turn p b{{color:#dfe4ea}}
+.fv-tg{{display:block;height:7px;border-radius:4px;background:#1b2530;overflow:hidden}}
+.fv-tg i{{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,#ff8a72,#ff5a4e)}}
+.fv-tg.n i{{background:linear-gradient(90deg,#7fb0ff,#5b9bff)}}
+.fv-turn em{{display:block;margin:4px 0 0;text-align:right;font-style:normal;font-size:10px;
+  font-weight:800;color:#8b93a0}}
+.fv-why{{margin:8px 0 0}}
+.fv-why>summary{{cursor:pointer;list-style:none;font-size:11px;font-weight:800;color:#e0c060}}
+.fv-why>summary::-webkit-details-marker{{display:none}}
+.fv-why p{{margin:6px 0 0;font-size:11.5px;line-height:1.7;color:#aab3c0}}
+.fv-why p b{{color:#eef1f5}}
+.fv-why-w{{padding:7px 9px;border-radius:7px;background:rgba(232,195,58,.07);color:#c3cad4 !important}}
+.fv-bt{{margin:8px 0 0;border-top:1px solid #1e2937}}
+.fv-stp{{margin:8px 0 0}}
+.fv-stp p{{margin:0 0 5px;font-size:11.5px;line-height:1.6;color:#aab3c0}}
+.fv-stp p b{{color:#eef1f5}}
+.fv-stp em{{display:block;margin:3px 0 0;text-align:right;font-style:normal;font-size:10px;font-weight:800;color:#8b93a0}}
+.fv-tg.s2 i{{opacity:.75}}
+.fv-bt-r{{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;
+  padding:6px 0;border-bottom:1px solid #172130;font-size:11px}}
+.fv-bt-r span{{color:#8b93a0;font-weight:700}}
+.fv-bt-r b{{text-align:right;font-weight:800}}
+.fv-bt-r em{{font-style:normal;text-align:right;color:#ffc93c;font-weight:800}}
+.fv-bt-r i{{font-style:normal;text-align:right;color:#7d8695;font-size:10px}}
+.fv-bt-r.now i{{color:#8fd0e8}}
 .fv-pm b{{color:#eef1f5}}
 .fv-cap{{margin:0 0 9px;padding:9px 11px;border-radius:9px;background:rgba(143,208,232,.07);
   border-left:3px solid #8fd0e8}}
