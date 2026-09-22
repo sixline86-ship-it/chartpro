@@ -107,6 +107,18 @@ on:
         options:
           - 'no'
           - 'yes'
+      # 🆕 2026-09-22 — 🚨 이중 과금 방지.
+      #   9/22 실측: 18:05 발행이 해석글까지 정상 완료됐는데, 18:40 실행이
+      #   «사람이 누른 것»으로 처리돼 해석글을 또 만들었다(사건명이 바뀜 = 과금).
+      #   → 오늘 정상 발행이 이미 있으면, '새로 생성'을 골랐어도 자동으로
+      #     '재사용(무료)'로 돌린다. 정말 새로 만들 때만 아래를 '예'로 바꾼다.
+      force:
+        description: '💸 오늘 이미 정상 발행됐어도 해석글을 다시 만들까요? (과금 · 보통은 아니오)'
+        type: choice
+        default: '아니오'
+        options:
+          - '아니오'
+          - '예 (과금 — 해석글 강제 재생성)'
 
   # (2) 자동 실행 시간표 (cron은 UTC 기준! 한국시간 = UTC + 9시간)
   # 🔴 2026-08-28 (3차) — GitHub 자체 schedule(cron)을 완전히 없앤다.
@@ -176,7 +188,16 @@ jobs:
           fi
           if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
             echo "run=yes" >> $GITHUB_OUTPUT
-            echo "🔘 사람이 직접 실행 — 중복 확인을 건너뛰고 새로 만듭니다."
+            echo "🔘 사람이 직접 실행 — 화면은 새로 만듭니다."
+            # 🆕 2026-09-22 — 해석글(과금)은 «오늘 정상 발행이 없을 때»만 새로 만든다.
+            if [ -f "archive/report_${TODAY}.json" ] \
+               && ! grep -q '"승계원본"' "archive/report_${TODAY}.json" 2>/dev/null \
+               && ! grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null \
+               && [[ "${{ inputs.force }}" != 예* ]]; then
+              echo "gen=no" >> $GITHUB_OUTPUT
+              echo "💰 오늘 해석글까지 정상 발행이 이미 있습니다 — 해석글은 **재사용(무료)**으로 돌립니다."
+              echo "   정말 새로 만들려면 실행할 때 '💸 강제 재생성'을 '예'로 고르세요."
+            fi
           elif [ -f "archive/report_${TODAY}.json" ]; then
             # ⚠️ 예전엔 report_*.html 존재 여부로 판단했다.
             #    문제: 해석글(Claude) 생성이 실패해도 build_html.py는 html을 만들어버려서,
@@ -363,6 +384,7 @@ jobs:
       - name: 해석글 생성 (Claude)
         if: >-
           steps.guard.outputs.run == 'yes' &&
+          steps.guard.outputs.gen != 'no' &&
           steps.holiday.outputs.closed != 'yes' &&
           (github.event_name != 'workflow_dispatch' ||
            startsWith(inputs.claude, '새로 생성'))
@@ -575,8 +597,6 @@ jobs:
           #      조건부 취급이 맞다. 이 기록이 쌓여야 한 달 뒤
           #      「4/5 켜진 자리는 그 뒤 어땠나」를 말할 수 있다.
           #      오늘 안 쌓으면 되돌릴 방법이 없는 종류의 파일이다.
-          #    🆕 2026-09-22 — wave_log.json(외국인·기관 파도 판정 기록).
-          #      그날의 판정은 그날만 남길 수 있다(나중에 다시 계산하면 미래가 섞인다).
           for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
                    biz_report_fail.json stock_news_fail.json \
