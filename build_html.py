@@ -16635,6 +16635,13 @@ def _fv_who(data):
             fu = ((data.get("파생") or {}).get("선물수급") or {})
             fv = _fv_f(fu.get("외국인"))
             계 = fu.get("외국인계약")
+            # ⚠️ 2026-09-22 — 금액을 못 읽고 계약 수만 온 날(선물 응답 diffValue=0)도
+            #    방향 판정은 계약 수로 할 수 있다. 금액 자리는 비워 둔다.
+            if fv == 0 and isinstance(계, (int, float)) and 계 != 0:
+                fv = None            # 9/22 저장분처럼 «0.0»은 금액을 못 읽은 값
+            if fv is None and isinstance(계, (int, float)) and 계 != 0:
+                fv = float(계)
+                fu = {**fu, "_계약만": True}
             if fv is None:
                 선행 = ('<div class="fv-fut off"><span>🛩️ 외국인 선물</span>'
                         '<p>수집 복구 대기 — 새 경로(9/21 확보)로 다음 발행부터 들어옵니다</p></div>')
@@ -16649,8 +16656,10 @@ def _fv_who(data):
                     조 = (("선물로만 사는 중", "현물은 사실상 0 — 방향은 선물로만 걸고 있어요", TM_HOT) if fv >= 0 else
                           ("선물로만 파는 중", "현물은 사실상 0 — 방향은 선물로만 빼고 있어요", TM_DOWN))
                 선행 = (f'<div class="fv-fut"><span>🛩️ 외국인 선물</span>'
-                        f'<b style="color:{TM_HOT if fv >= 0 else TM_DOWN}">{_fv_amt(fv)}'
-                        + (f' · {계:+,}계약' if isinstance(계, (int, float)) else "") + '</b>'
+                        f'<b style="color:{TM_HOT if fv >= 0 else TM_DOWN}">'
+                        f'{"" if fu.get("_계약만") else _fv_amt(fv)}'
+                        + ((" · " if not fu.get("_계약만") else "") + f'{계:+,}계약'
+                           if isinstance(계, (int, float)) else "") + '</b>'
                         f'<p><i style="color:{조[2]};border-color:{조[2]}">{조[0]}</i>{조[1]}</p></div>')
         판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행) + 선행))
     if not 판:
