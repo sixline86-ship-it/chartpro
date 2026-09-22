@@ -782,11 +782,16 @@ def _norm_stocks(rows):
             continue
         out.append({
             "종목명": clean_name(str(nm)),
-            "현재가": to_num(_pick(it, "closePrice", "currentPrice", "price", "nv")),
+            # 🔴 2026-09-21 — 9/15(새 테마 API 전환)부터 현재가가 전부 None이었다.
+            #   같은 개편의 시총 API가 «nowPrice»를 쓰는 것을 실측했으므로 앞에 둔다.
+            "현재가": to_num(_pick(it, "nowPrice", "closePrice", "currentPrice",
+                                "tradePrice", "price", "nv")),
             "등락률": to_num(_pick(it, "fluctuationsRatio", "changeRate", "rate", "cr")),
             "거래대금": to_num(_pick(it, "accumulatedTradingValue", "tradingValue",
                                  "accTradeValue", "amount")),
         })
+    if out and all(x["현재가"] is None for x in out) and rows:
+        print(f"  ⚠️ [테마 종목] 현재가 키 못 찾음 — 첫 항목 키: {sorted(rows[0])[:25]}")
     return out or None
 
 
@@ -3009,6 +3014,38 @@ def collect_program_and_futures():
     return 결과
 
 
+_OHLC_KEY_LOGGED = {"done": False}
+def _fetch_day_ohlc_api(code):
+    """종목별 trend API(매집이 쓰는 것)에서 오늘 시·고·저·종 + 전일 거래량.
+    ⚠️ 거래량·시고저 키 이름은 실측 전이다. 후보를 훑고, 첫 호출 때 키를 찍는다."""
+    try:
+        r = requests.get(TREND_API.format(code=code), headers=THEME_API_HEADERS,
+                         timeout=10, params={"tradeType": "KRX", "startIdx": 0,
+                                             "pageSize": 5})
+        if r.status_code != 200:
+            return None
+        rows = _dig_list(r.json())
+    except Exception:
+        return None
+    if not rows or len(rows) < 2:
+        return None
+    if not _OHLC_KEY_LOGGED["done"]:
+        print(f"  🔍 [일봉 API] 첫 항목 키: {sorted(rows[0])}")
+        _OHLC_KEY_LOGGED["done"] = True
+    오늘, 어제 = rows[0], rows[1]
+    V = ("accumulatedTradingVolume", "tradeVolume", "tradingVolume",
+         "volume", "accTradeVolume", "quant")
+    out = {"시가": to_num(_pick(오늘, "openPrice", "startPrice", "open")),
+           "고가": to_num(_pick(오늘, "highPrice", "high")),
+           "저가": to_num(_pick(오늘, "lowPrice", "low")),
+           "종가": to_num(_pick(오늘, "closePrice", "nowPrice", "price", "endPrice")),
+           "전일거래량": to_num(_pick(어제, *V))}
+    if out["전일거래량"] is None and not _OHLC_KEY_LOGGED.get("warned"):
+        print("  ⚠️ [일봉 API] 거래량 키를 못 찾음 — 위 키 목록으로 후보를 추가할 것")
+        _OHLC_KEY_LOGGED["warned"] = True
+    return out
+
+
 def _fetch_day_ohlc(code):
     """오늘의 시가·고가·저가·종가 + 전일 거래량을 한 번에 가져온다.
 
@@ -3023,6 +3060,15 @@ def _fetch_day_ohlc(code):
     """
     url = "https://finance.naver.com/item/sise_day.naver"
     빈 = {"시가": None, "고가": None, "저가": None, "종가": None, "전일거래량": None}
+    # 🔴🔴 2026-09-21 — 이 옛 페이지(item/sise_day)도 9/12 개편으로 죽었다.
+    #   [증상] 강세 레이더 «신규 포착»이 9/12부터 매일 0건(9/16 1건).
+    #     1차 필터(시총·대금·상승률)는 새 API로 통과하는데, 2차 필터의
+    #     «전일 거래량»을 여기서 못 받아 모든 후보가 continue로 빠졌다.
+    #     코스피 +2.66%인 9/18에도 0건 — 조건이 아니라 «수집»이 문제였다.
+    #   [고침] 매집이 이미 쓰고 있는(=살아 있는) 종목별 trend API로 먼저 받는다.
+    _api = _fetch_day_ohlc_api(code)
+    if _api and _api.get("전일거래량"):
+        return _api
     try:
         r = requests.get(url, headers=HEADERS, params={"code": code, "page": "1"}, timeout=10)
         r.encoding = "euc-kr"
@@ -3323,7 +3369,19 @@ def _fetch_investor_flow_api(code, days):
         기.append(_억(기량))
     if not 외 or len(종가들) < ACC_DAYS:
         return None
-    return {"외국인": 외, "기관": 기, "종가": 종가들[0]}
+    # 🔴 2026-09-21 — 이 새 경로는 «등락률을 아예 안 만들고» 있었다.
+    #   그래서 9/16(새 API 전환일)부터 매집의 5일·20일·60일 등락률이
+    #   전부 None이었다. 옛 HTML 경로엔 계산이 있었는데 이사하면서 빠졌다.
+    #   ⚠️ 2026-09-19에 «옛 경로»의 계산을 고쳤지만 그 경로는 안 쓰이고 있었다.
+    #      고친 곳이 실제로 도는 곳인지 먼저 확인했어야 했다.
+    def _등락(n):
+        if len(종가들) < 2:
+            return None
+        _s = 종가들[min(n, len(종가들)) - 1]
+        return round((종가들[0] - _s) / _s * 100, 2) if _s else None
+    return {"외국인": 외, "기관": 기, "종가": 종가들[0],
+            "5일등락률": _등락(ACC_DAYS), "장기등락률": _등락(ACC_LONG),
+            "최장기등락률": (_등락(ACC_LONGEST) if ACC_LONGEST else None)}
 
 
 def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
@@ -6417,6 +6475,54 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+    # 🔴🔴 2026-09-21 — 등락종목수를 «종목사전»으로 센다.
+    #   [사고 1] 옛 경로(finance.naver.com/sise/, sise_index)가 9/12 개편으로
+    #     죽어 9/12부터 매일 None이었다.
+    #   [사고 2 — 더 오래된 것] 살아 있던 9/10에도 값이 틀렸다:
+    #     «코스닥 상승 2,406 · 하락 11». 코스닥은 1,700종목 남짓이다.
+    #     페이지에서 숫자를 «더듬어» 뽑다 보니 다른 숫자를 집었던 것이다.
+    #   [고침] 새 시총 API로 받은 종목사전(≈2,600종목, 종목마다 등락률)을
+    #     직접 센다. 전 종목은 아니지만 «실제로 센 숫자»다.
+    #   ⚠️ 표본 수를 같이 남긴다 — 「몇 종목 중」인지 모르면 비율을 못 읽는다.
+    if not 등락수:
+        try:
+            _사전 = (계좌격자 or {}).get("종목사전") or {}
+            _c = {"코스피": {"상승": 0, "보합": 0, "하락": 0},
+                  "코스닥": {"상승": 0, "보합": 0, "하락": 0}}
+            for _v in _사전.values():
+                if len(_v) > 4 and _v[4] in _c and isinstance(_v[3], (int, float)):
+                    _k = "상승" if _v[3] > 0 else ("하락" if _v[3] < 0 else "보합")
+                    _c[_v[4]][_k] += 1
+            if sum(sum(x.values()) for x in _c.values()) >= 1000:
+                for _m in _c:
+                    _c[_m]["표본"] = sum(_c[_m].values())
+                    _c[_m]["출처"] = "종목사전 집계"
+                등락수 = _c
+                print(f"  ✅ 등락종목수(종목사전 집계) 코스피 ↑{_c['코스피']['상승']} "
+                      f"↓{_c['코스피']['하락']} · 코스닥 ↑{_c['코스닥']['상승']} "
+                      f"↓{_c['코스닥']['하락']}")
+                # ⚠️ update_market_history()가 이 집계보다 «먼저» 돌아 오늘 줄에
+                #    null이 적혔다. 오늘 줄만 찾아 채운다(다른 날은 안 건드림).
+                try:
+                    _mf = "market_history.json"
+                    _mh = json.load(open(_mf, encoding="utf-8"))
+                    _rows = _mh.get("일별") if isinstance(_mh, dict) else _mh
+                    _today = f"{DATE[:4]}-{DATE[4:6]}-{DATE[6:]}"
+                    for _r in (_rows or []):
+                        if str(_r.get("날짜")) in (_today, DATE):
+                            _r["상승_코스피"] = _c["코스피"]["상승"]
+                            _r["하락_코스피"] = _c["코스피"]["하락"]
+                            _r["상승_코스닥"] = _c["코스닥"]["상승"]
+                            _r["하락_코스닥"] = _c["코스닥"]["하락"]
+                            _r["상승종목수"] = _c["코스피"]["상승"] + _c["코스닥"]["상승"]
+                            _r["하락종목수"] = _c["코스피"]["하락"] + _c["코스닥"]["하락"]
+                            _r["보합종목수"] = _c["코스피"]["보합"] + _c["코스닥"]["보합"]
+                    with open(_mf, "w", encoding="utf-8") as _f:
+                        json.dump(_mh, _f, ensure_ascii=False, indent=1)
+                except Exception as _e2:
+                    print(f"  ⚠️ market_history 등락수 보강 실패 — {type(_e2).__name__}")
+        except Exception as _e:
+            print(f"  ⚠️ 등락종목수 집계 실패 — {type(_e).__name__}")
 
     # 🆕 2026-08-25 — 기업 프로필 캐시(종목명 클릭 시 펼쳐질 재료).
     #  ⚠️ 오늘 레이더에 잡힌 종목을 최우선으로 채우고, 남는 할당량은
