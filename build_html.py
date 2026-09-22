@@ -994,8 +994,14 @@ def _mkt_supply3(수급):
             표시, 색 = "—", "#6f7784"
         칸.append(f'<div class="sc3-c"><p class="sc3-k">{k}</p>'
                   f'<p class="sc3-v" style="color:{색}">{표시}</p></div>')
-    return (f'<p class="sc3-unit">순매수 <b>(조 원)</b></p>'
-            f'<div class="sc3">{"".join(칸)}</div>')
+    # 🔴 HO 지시 2026-09-22 — 옆 칸(최근 5일 실탄)과 «줄을 맞춘다».
+    #   [전] 「순매수 (조 원)」 한 줄 + 숫자 → 칸 가운데 정렬이라 제목이
+    #     옆 칸 제목보다 아래에 떴다.
+    #   [후] 옆 칸과 똑같이 «제목 / 설명 / 내용» 세 층으로 쌓고, 두 칸 모두
+    #     위에서부터 채운다(CSS). 그러면 제목끼리·설명끼리·내용끼리 같은 줄.
+    return (f'<p class="sc2-spark-t sc3-t">순매수'
+            f'<span class="sc2-spark-def">(단위: 조)</span></p>'
+            f'<div class="sc3 sc3-body">{"".join(칸)}</div>')
 
 
 def build_score_card(이름, 지수, 수급):
@@ -1601,6 +1607,154 @@ def build_archive():
 
 
 # ── 핵심 이슈 ──
+# ══════════════════════════════════════════════════════════════
+# 📰 시황 탭 — 4단 재구성 (HO 지시 2026-09-22)
+#
+#   [무엇이 문제였나] 같은 네 주제(반도체·산업·정책·수급)를 같은 기사로,
+#     말투만 바꿔 두 번 썼다(「무슨 일이」 → 「이슈 해부」). 「이슈 해부」는
+#     네 개 전부 «왜 하필 오늘 ~했을까요?»로 시작했다 — 템플릿이 보이면
+#     독자는 읽지 않고 넘긴다. 투자에 쓸 «내일 볼 것»은 맨 끝 3막에 묻혔다.
+#   [새 순서] 사실 → 돈 → 행동
+#     ① 📌 오늘 한 줄          — 헤드라인 + 숫자 셋
+#     ② 📰 오늘 무슨 일        — 카드 하나에 «사실» + ▾펼침(왜·어디까지)
+#     ③ 🔥 오늘 테마는 이렇게  — 들어온/나간 테마 + 해석 한 단락
+#     ④ ✅ 내일 확인할 것      — 기준 + «왜 그 기준인가» + 맞으면/아니면
+#     ⑤ 🔍 남들이 놓친 자리    — 접어 둔다(원하는 사람만)
+#   ⚠️ 새 칸(시황한줄·테마시황·내일확인)이 없는 옛 해석글에서도 깨지지
+#      않게, 없으면 옛 칸이나 데이터로 대신 채운다.
+def _sh_num(v):
+    try:
+        return float(str(v).replace(",", "").replace("%", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _sh_headline(data, 해석):
+    """① 오늘 한눈에 — 헤드라인 2~3개(HO 지시 2026-09-22).
+
+    [왜 여러 개] 한 줄로는 «지수» 얘기만 남는다. 오늘 시장은 최소 세 겹이다 —
+      지수가 어떻게 움직였나 / 누가 사고 팔았나 / 돈이 어디로 갔나.
+      세 줄을 위아래로 쌓으면 스크롤 없이 하루가 보인다.
+    ⚠️ 옛 해석글(시황한줄이 dict 하나)도 그대로 읽는다.
+    """
+    h = 해석.get("시황한줄")
+    줄 = []
+    if isinstance(h, list):
+        줄 = [x for x in h if isinstance(x, dict) and x.get("제목")][:3]
+    elif isinstance(h, dict) and h.get("제목"):
+        줄 = [h]
+    if not 줄:
+        t = 해석.get("사건명") or 해석.get("오늘의_한문장") or ""
+        if not t:
+            return ""
+        줄 = [{"제목": t, "부제": ""}]
+    _ic = ["📈", "💰", "🔄"]
+    몸 = "".join(
+        f'<div class="sh-hl h{i}{" first" if i == 0 else ""}"><span class="sh-hi">{_ic[i % 3]}</span>'
+        f'<div class="sh-hb"><p class="sh-t">{x.get("제목","")}</p>'
+        + (f'<p class="sh-s">{x.get("부제","")}</p>' if x.get("부제") else "")
+        + '</div></div>' for i, x in enumerate(줄))
+    return f'<div class="sh-top">{몸}</div>'
+
+
+def _sh_issues(해석):
+    """사실 카드 + ▾펼침(해부). 같은 주제를 두 코너에 두 번 나열하지 않는다."""
+    its = (해석.get("핵심이슈") or [])[:4]
+    if not its:
+        return ('<div class="sh-box"><p class="sh-h">📰 오늘 무슨 일</p>'
+                '<p class="sh-empty">오늘 이슈 정리가 아직 준비되지 않았어요.</p></div>')
+    카드 = []
+    for it in its:
+        태그 = it.get("태그", "")
+        내용 = it.get("내용", "")
+        상세 = it.get("상세", "")
+        링크 = "".join(
+            f'<a class="sh-ln" href="{esc_url(l.get("링크",""))}" target="_blank">'
+            f'📎 {l.get("제목","")}</a>'
+            for l in (it.get("관련링크") or [])[:2] if l.get("링크"))
+        펼침 = (f'<details class="sh-d"><summary>▾ 왜 지금 · 어디까지 닿나</summary>'
+               f'<p>{상세}</p>{링크}</details>') if (상세 or 링크) else ""
+        _tc = {"반도체": "t-semi", "산업": "t-ind", "정책": "t-pol", "수급": "t-sup",
+               "글로벌": "t-glo", "금리": "t-pol", "환율": "t-glo"}.get(태그, "")
+        카드.append(f'<div class="sh-c"><span class="sh-tag {_tc}">{태그}</span>'
+                    f'<p class="sh-p">{내용}</p>{펼침}</div>')
+    return (f'<div class="sh-box sh-news"><p class="sh-h">📰 오늘 무슨 일'
+            f'<span>주가를 실제로 움직인 것만</span></p>{"".join(카드)}</div>')
+
+
+def _sh_theme(해석):
+    """들어온/나간 테마(데이터) + 해석 한 단락(Claude)."""
+    rk = _theme_cum_rank()
+    days = sorted(rk)
+    if len(days) < 2:
+        return ""
+    오 = [n for n, _ in (rk.get(days[-1]) or [])[:10]]
+    어 = [n for n, _ in (rk.get(days[-2]) or [])[:10]]
+    들, 나 = [n for n in 오 if n not in 어], [n for n in 어 if n not in 오]
+    zm = _theme_zone_map()
+    zc = {}
+    for n in 오:
+        z = zm.get(n)
+        if z:
+            zc[z] = zc.get(z, 0) + 1
+    top = sorted(zc.items(), key=lambda x: -x[1])[:1]
+    말 = 해석.get("테마시황") or ""
+    칸 = [("🥇 1위", 오[0] if 오 else "–"),
+         ("➕ 들어옴", " · ".join(들) or "없음"),
+         ("➖ 빠짐", " · ".join(나) or "없음")]
+    if top:
+        칸.append(("🧲 몰린 섹터", f"{top[0][0]} {top[0][1]}/10"))
+    줄 = "".join(f'<div class="sh-tr"><span>{a}</span><b>{b}</b></div>' for a, b in 칸)
+    return (f'<div class="sh-box sh-theme"><p class="sh-h">🔥 오늘 테마는 이렇게 돌았다'
+            f'<span>10위권 기준</span></p>{줄}'
+            + (f'<p class="sh-cm">{말}</p>' if 말 else
+               '<p class="sh-empty">해석은 다음 정규 발행부터 붙습니다 — 위 칸은 오늘 데이터입니다.</p>')
+            + '</div>')
+
+
+def _sh_tomorrow(해석):
+    """내일 확인할 것 — 기준만 던지지 않는다. «왜 그 기준인가»를 같이 둔다."""
+    xs = [x for x in (해석.get("내일확인") or []) if isinstance(x, dict)][:3]
+    if not xs:
+        대체 = ((해석.get("프로의시선") or {}).get("다음_시나리오") or "")
+        if not 대체:
+            return ""
+        return (f'<div class="sh-box"><p class="sh-h">✅ 내일 확인할 것</p>'
+                f'<p class="sh-p">{대체}</p></div>')
+    카드 = []
+    for i, x in enumerate(xs, 1):
+        카드.append(
+            f'<div class="sh-k"><p class="sh-kq"><b>{i}</b>'
+            + (f'<em class="sh-ka">{x.get("영역")}</em>' if x.get("영역") else "")
+            + f'{x.get("무엇","")}</p>'
+            + (f'<p class="sh-kb">기준 <em>{x.get("기준","")}</em></p>' if x.get("기준") else "")
+            + (f'<p class="sh-kw"><span>왜 이 기준?</span>{x.get("근거","")}</p>' if x.get("근거") else "")
+            + '<div class="sh-ky">'
+            + (f'<p><i class="y">맞으면</i>{x.get("맞으면","")}</p>' if x.get("맞으면") else "")
+            + (f'<p><i class="n">아니면</i>{x.get("아니면","")}</p>' if x.get("아니면") else "")
+            + '</div></div>')
+    return (f'<div class="sh-box sh-next"><p class="sh-h">✅ 내일 확인할 것'
+            f'<span>예언이 아니라 «확인할 조건»</span></p>{"".join(카드)}</div>')
+
+
+def _sh_pro(해석):
+    """남들이 놓친 자리 — 1·2막만, 접어서. 3막(시나리오)은 ④가 대신한다."""
+    p = 해석.get("프로의시선") or {}
+    막 = [("과거", p.get("조용한_강세")), ("현재", p.get("짖지_않은_개"))]
+    막 = [(a, b) for a, b in 막 if b]
+    if not 막:
+        return ""
+    몸 = "".join(f'<div class="sh-c"><span class="sh-tag">{a}</span>'
+                f'<p class="sh-p">{b}</p></div>' for a, b in 막)
+    return (f'<details class="sh-box sh-fold sh-pro"><summary class="sh-h">🔍 남들이 놓친 자리'
+            f'<span>▾ 펼쳐 보기</span></summary>{몸}</details>')
+
+
+def build_sihwang(data, 해석):
+    return (_sh_headline(data, 해석) + _sh_issues(해석) + _sh_theme(해석)
+            + _sh_tomorrow(해석) + _sh_pro(해석))
+
+
 def build_issues(핵심이슈):
     if not 핵심이슈:
         return '<div class="pending">⏳ 오늘 시장을 만든 이슈 3~4개 — 뉴스/공시 기반 자동 추출 준비중</div>'
@@ -10722,12 +10876,10 @@ def build_core(핵심편, data, 해석):
     #   ⚠️ 옛 자리(18660행 근처)에서는 뺐다 — 두 번 나오면 원칙5 위반이다.
     # 🔴 HO 지시 2026-09-21 — 「지금까지의 줄거리」 삭제.
     #   함수(build_story_bridge)는 남긴다(원칙3). 되살리려면 앞에 붙이면 된다.
-    _시황 = (움직인것들 + 뒤집블록 + build_odd_today()
-             + (f'<p class="sec-label"><small>핵심 이슈</small>'
-                f'🔬 이슈 해부 — 이 이슈가 어디까지 닿나</p>'
-                f'{build_issues(해석.get("핵심이슈"))}' if 해석.get("핵심이슈") else '')
-             + f'<p class="sec-label"><small>프로의 시선</small>🔍 남들이 놓친 자리</p>'
-             + build_insight(해석.get("프로의시선")))
+    # 🔴 2026-09-22 — 시황 탭 4단 재구성(build_sihwang).
+    #   옛 조각(움직인것들·뒤집블록·build_issues·build_insight)은 지우지 않는다
+    #   (원칙3). 되돌리려면 아래 한 줄을 옛 조립으로 바꾸면 된다.
+    _시황 = build_sihwang(data, 해석) + build_odd_today()
 
     # ⚠️ 안쪽 세 조각이 전부 가려지면(hide) «빈 박스»만 남는다 — 실측으로
     #    수급 탭 맨 위에 아무것도 없는 회색 칸이 떴다. 내용이 있을 때만 감싼다.
@@ -10736,8 +10888,11 @@ def build_core(핵심편, data, 해석):
              + hide("수급특징", f'<div class="mny-feat">{특징}</div>'))
     _수급 = ((f'<div class="mny">{_mny속}</div>' if _mny속.strip() else '')
              + 격자블록
-             + f'<p class="sec-label"><small>수급 관제신호</small>💰 큰돈은 어디로 갔나</p>'
-             + build_flow_signal(data.get("파생"), data.get("지수수급"), 해석))
+             # 🔴 2026-09-22 — 수급 탭 5단(build_flow_v2). 옛 관제신호는 맨 아래 접어 둔다.
+             + build_flow_v2(data, 해석)
+             + (f'<details class="fv-old"><summary>📦 이전 수급 화면 (게이지·비차익 판독·사후 통계) — 정리 중</summary>'
+                + build_flow_signal(data.get("파생"), data.get("지수수급"), 해석)
+                + '</details>'))
 
     # 🔴 v17 (2026-09-12) — 테마 탭 3코너로 재편.
     #    ① 테마 레이더(지금 어디) → ② 다가오는 테마(다음은 어디)
@@ -16339,8 +16494,9 @@ def build_atc_talk(해석):
     return f'<div class="atc">{블록}</div>'
 
 
-def build_flow_timeline(이력):
-    """기간 탭(5·20·60) + 통합 타임라인. 이력 부족 탭은 진행 막대."""
+def build_flow_timeline(이력, caption=None):
+    """기간 탭(5·20·60) + 통합 타임라인. 이력 부족 탭은 진행 막대.
+    caption(이력, p)을 주면 탭마다 «이 그림이 말하는 것»을 따로 붙인다."""
     N = len(이력)
     _FS_TL_SEQ[0] += 1
     gid = f"fstl{_FS_TL_SEQ[0]}"
@@ -16360,6 +16516,11 @@ def build_flow_timeline(이력):
             if N < p:
                 몸체 += (f'<p class="fs-tnote">※ 이력이 {N}거래일이라 {N}일치로 그렸습니다 '
                         f'({p}일까지 {p-N}일 남음)</p>')
+        if caption:
+            try:
+                몸체 = caption(이력, p) + 몸체
+            except Exception:
+                pass
         몸 += f'<div class="fs-pbody{" on" if p==20 else ""}" data-g="{gid}" data-p="{p}">{몸체}</div>'
     return f'''
     <div class="fs-tl">
@@ -16386,6 +16547,353 @@ def build_flow_timeline(이력):
         }});
       }});
     }})();</script>'''
+
+
+# ══════════════════════════════════════════════════════════════
+# 💰 수급 탭 5단 재구성 (HO 지시 2026-09-22)
+#
+#   [무엇이 문제였나]
+#     · 같은 숫자(실탄 +1.51조)가 게이지·큰 숫자·막대·「두 가지 확인」에 네 번.
+#     · 「누가 샀나」를 셋(개인·외국인·기관)으로만 셌다. 9/21 실측: 셋의 합이
+#       −1.66조 — 제로섬이므로 «나머지 주체(기타법인 등)가 +1.66조»를 샀는데,
+#       그게 기관(+1.51조)보다 컸다. 오늘의 진짜 매수자가 화면에 없었다.
+#     · 타임라인이 말없이 그려져 «무엇을 보라는 그림인지» 알 수 없었다.
+#   [새 순서] 누가 넣었나 → 외국인은 어디 서 있나 → 흐름 → 개인 온도 → 믿어도 되나
+#   ⚠️ 옛 화면(build_flow_signal)은 지우지 않고 맨 아래에 접어 둔다(원칙3).
+def _fv_f(v):
+    try:
+        return float(str(v).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _fv_amt(v):
+    """억원 → 「+1.51조」/「+61억」"""
+    if v is None:
+        return "–"
+    return f"{v/10000:+.2f}조" if abs(v) >= 10000 else f"{v:+,.0f}억"
+
+
+def _fv_who(data):
+    """① 오늘 돈은 누가 넣고 누가 뺐나 — 네 주체, 숫자는 한 번씩."""
+    수 = data.get("지수수급") or {}
+    판 = []
+    for 시장 in ("코스피", "코스닥"):
+        r = 수.get(f"{시장}_수급") or {}
+        개, 외, 기 = _fv_f(r.get("개인")), _fv_f(r.get("외국인")), _fv_f(r.get("기관계"))
+        if None in (개, 외, 기):
+            continue
+        # ⚠️ 제로섬 — 세 주체의 합의 반대 부호가 «그 밖의 주체»(기타법인 등)다.
+        #    직접 수집한 값이 아니라 «계산상» 값이므로 화면에 그렇게 적는다.
+        그 = -(개 + 외 + 기)
+        # 20일 누적 — archive에서 같은 주체를 더한다
+        누 = {"개인": 0.0, "외국인": 0.0, "기관": 0.0, "그밖": 0.0}
+        n = 0
+        try:
+            for _d, dd in archive_days(20):
+                rr = ((dd.get("지수수급") or {}).get(f"{시장}_수급") or {})
+                a, b, c = _fv_f(rr.get("개인")), _fv_f(rr.get("외국인")), _fv_f(rr.get("기관계"))
+                if None in (a, b, c):
+                    continue
+                누["개인"] += a; 누["외국인"] += b; 누["기관"] += c; 누["그밖"] += -(a + b + c)
+                n += 1
+        except Exception:
+            n = 0
+        # 🔴🔴 2026-09-22 정정 — «그 밖»을 매수 주체로 읽지 않는다.
+        #   실측: 9/2~9/21 거의 매일 +1.5~1.8조로 «똑같은 크기»였다(장이 오르든
+        #   내리든). 실제 투자자라면 그럴 수 없다 — 집계 방식 차이(분류 밖 항목)일
+        #   가능성이 크다. 정체를 확인하기 전까지 «숨은 매수자»로 해석하지 않는다.
+        #   ⚠️ 한 번 «진짜 매수자는 기타법인»이라고 말했다가 거둬들였다(교훈).
+        # 🔴 HO 지시 2026-09-22 — 순서는 외국인·기관·개인. «그 밖»은 뺀다.
+        #   [왜 빼나] 매일 거의 같은 +1.5~1.8조라 «누가 샀나»에 답하지 못한다.
+        #     읽는 사람이 판단을 바꿀 정보가 아니면 화면에 두지 않는다.
+        줄 = [("외국인", 외, "#f472b6"), ("기관", 기, "#5eead4"), ("개인", 개, "#a78bfa")]
+        mx = max(abs(v) for _, v, _ in 줄) or 1
+        행 = []
+        for 이름, v, c in 줄:
+            w = abs(v) / mx * 50
+            막 = (f'<span class="fv-bar"><i style="left:{50 if v >= 0 else 50 - w:.1f}%;'
+                  f'width:{w:.1f}%;background:{TM_HOT if v >= 0 else TM_DOWN}"></i></span>')
+            키 = {"개인": "개인", "외국인": "외국인", "기관": "기관"}.get(이름, "그밖")
+            _누 = 누.get(키)
+            _dim = " dim" if 키 == "그밖" else ""
+            행.append(f'<div class="fv-r{_dim}"><span class="fv-n" style="color:{c}">{이름}</span>'
+                      f'{막}<b style="color:{TM_HOT if v >= 0 else TM_DOWN}">{_fv_amt(v)}</b>'
+                      f'<em>{("20일 " + _fv_amt(_누)) if n >= 5 else ""}</em></div>')
+        # 한 문장 — 판 쪽과 산 쪽을 크기 순으로
+        파는 = sorted([(a, v) for a, v, _ in 줄 if v < 0], key=lambda x: x[1])
+        사는 = sorted([(a, v) for a, v, _ in 줄 if v > 0], key=lambda x: -x[1])
+        말 = ""
+        if 파는 and 사는:
+            말 = (f'오늘 <b>{파는[0][0]}</b>이 <b>{_fv_amt(파는[0][1]).lstrip("-")}</b>를 팔았고, '
+                  f'그걸 받은 건 ' + " · ".join(f'<b>{a}</b>({_fv_amt(v)})' for a, v in 사는[:2])
+                  + '였습니다.')
+        판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행)
+                   ))
+    if not 판:
+        return ""
+    btn = "".join(f'<button class="fv-tb{" on" if i == 0 else ""}" '
+                  f"onclick=\"fvTab(this,'fvP{i}')\">{m}</button>" for i, (m, _) in enumerate(판))
+    pane = "".join(f'<div class="fv-p" id="fvP{i}" style="display:{"block" if i == 0 else "none"}">{b}</div>'
+                   for i, (_, b) in enumerate(판))
+    return (f'<div class="fv-box"><p class="fv-h">💰 오늘 돈은 누가 넣고 누가 뺐나</p>'
+            f'<div class="fv-tabs">{btn}</div>{pane}</div>'
+            '<script>function fvTab(el,id){var p=el.parentElement.parentElement;'
+            'p.querySelectorAll(".fv-p").forEach(function(x){x.style.display=(x.id===id?"block":"none")});'
+            'p.querySelectorAll(".fv-tb").forEach(function(x){x.className="fv-tb"+(x===el?" on":"")});}</script>')
+
+
+def _fv_price(이력):
+    """② 외국인이 판 가격대 — 20일·60일. 순매도한 날의 코스피를 매도금액으로 가중평균."""
+    칸 = []
+    _prev = None
+    for win in (20, 60):
+        rows = [r for r in 이력[-win:] if r.get("외현") is not None and r.get("종가")]
+        if len(rows) < min(win, 10):
+            continue
+        판 = [(-r["외현"], r["종가"]) for r in rows if r["외현"] < 0]
+        산 = [(r["외현"], r["종가"]) for r in rows if r["외현"] > 0]
+        if not 판:
+            continue
+        pa = sum(w * c for w, c in 판) / sum(w for w, _ in 판)
+        ba = (sum(w * c for w, c in 산) / sum(w for w, _ in 산)) if 산 else None
+        now = rows[-1]["종가"]
+        net = sum(r["외현"] for r in rows)
+        gap = (now / pa - 1) * 100
+        lo = min([pa, now] + ([ba] if ba else [])); hi = max([pa, now] + ([ba] if ba else []))
+        span = (hi - lo) or 1
+        def X(v):
+            return 6 + (v - lo) / span * 88
+        점 = (f'<i class="fv-m s" style="left:{X(pa):.1f}%"><em>매도 {pa:,.0f}</em></i>'
+              + (f'<i class="fv-m b" style="left:{X(ba):.1f}%"><em>매수 {ba:,.0f}</em></i>' if ba else "")
+              + f'<i class="fv-m now" style="left:{X(now):.1f}%"><em>오늘 {now:,.0f}</em></i>')
+        if _prev is None:
+            말 = (f'외국인은 지금보다 <b>{abs(gap):.1f}% 싼</b> 값에 팔았습니다. 되사려면 판 값보다 '
+                  f'비싸게 사야 해서 쉽게 돌아오기 어려운 자리지만, 돌아온다면 «쫓아 사는» '
+                  f'급한 매수가 나올 수 있는 자리이기도 해요.' if gap > 0 else
+                  f'외국인이 판 값보다 지금이 <b>{abs(gap):.1f}% 쌉니다.</b> 판 값보다 싸게 '
+                  f'되살 수 있는 자리라, 되돌아올 여지가 있는 구간이에요.')
+        else:
+            # ⚠️ 두 번째 창은 같은 문장을 반복하지 않는다 — «길게 보면 무엇이 다른가»만.
+            _d = pa - _prev
+            말 = (f'더 길게 보면 매도 평균이 <b>{pa:,.0f}</b>로 {"더 낮아요" if _d < 0 else "더 높아요"}'
+                  f'({_d:+,.0f}). ' + ('오래전에 판 물량일수록 지금과 거리가 멀어서, '
+                  '외국인 입장에선 «되사기 가장 부담스러운» 물량이 뒤에 쌓여 있는 셈이에요.'
+                  if _d < 0 else '최근에 판 물량이 오히려 더 싸서, 가까운 매물부터 되살 여지가 있어요.'))
+        _prev = pa
+        _창 = (f"최근 <b>{win}일</b>" if len(rows) >= win else
+               f"최근 <b>{len(rows)}일</b> <span class=\"fv-dim\">({win}일 목표 · 기록이 쌓이는 중)</span>")
+        칸.append(f'<div class="fv-pw fv-pp" data-w="{win}" style="display:{"block" if win == 20 else "none"}">'
+                  f'<p class="fv-pt">{_창} · 순매도 '
+                  f'{len(판)}/{len(rows)}일 · 누적 <b style="color:{TM_HOT if net>=0 else TM_DOWN}">'
+                  f'{_fv_amt(net)}</b></p><div class="fv-scale">{점}</div>'
+                  f'<p class="fv-pm">{말}</p></div>')
+    if not 칸:
+        return ""
+    # 🔴 HO 지시 2026-09-22 — 20일·60일을 «탭»으로. 두 판이 위아래로 쌓이면 길다.
+    #   ⚠️ 60일인 이유: 20일 ≈ 한 달(단기 매매), 60일 ≈ 한 분기(외국인 포지션을
+    #     다시 짜는 주기 — 분기 리밸런싱·실적 시즌). 40일은 시장에서 뜻이 없는 숫자다.
+    #     기록이 60일이 안 되면 «있는 만큼»으로 그리고 그렇게 적는다.
+    탭 = "".join(f'<button class="fv-tb{" on" if w == 20 else ""}" onclick="fvW(this,{w})">{w}일</button>'
+                for w in (20, 60))
+    return (f'<div class="fv-box fv-price"><p class="fv-h">🎯 외국인이 판 가격대'
+            f'<span>순매도한 날의 코스피 · 매도금액 가중평균</span></p>'
+            f'<div class="fv-tabs">{탭}</div>{"".join(칸)}'
+            f'<p class="fv-note">※ «매도 평균»은 외국인이 순매도한 날들의 코스피 종가를 '
+            f'그날 매도금액만큼 무겁게 쳐서 평균 낸 값, «매수 평균»은 순매수한 날들로 같은 계산을 '
+            f'한 값입니다(코스피 현물 기준).</p></div>'
+            '<script>function fvW(el,w){var b=el.closest(".fv-price");'
+            'b.querySelectorAll(".fv-pp").forEach(function(x){x.style.display=(+x.dataset.w===w?"block":"none")});'
+            'b.querySelectorAll(".fv-tb").forEach(function(x){x.className="fv-tb"+(x===el?" on":"")});}</script>')
+
+
+def _fv_timeline_caption(이력):
+    """③ 타임라인 위 «이 그림이 말하는 것» 한 줄."""
+    rows = [r for r in 이력[-20:] if r.get("종가")]
+    if len(rows) < 5:
+        return ""
+    ch = (rows[-1]["종가"] / rows[0]["종가"] - 1) * 100
+    외 = sum(r.get("외현") or 0 for r in rows)
+    기 = sum(r.get("기관") or 0 for r in rows)
+    주 = "기관" if 기 > 외 else "외국인"
+    return (f'<p class="fv-cap">📌 <b>이 그림이 말하는 것</b> — 최근 {len(rows)}거래일 코스피 '
+            f'<b style="color:{TM_HOT if ch>=0 else TM_DOWN}">{ch:+.1f}%</b> · 외국인 '
+            f'<b style="color:{TM_HOT if 외>=0 else TM_DOWN}">{_fv_amt(외)}</b> · 기관 '
+            f'<b style="color:{TM_HOT if 기>=0 else TM_DOWN}">{_fv_amt(기)}</b>. '
+            + (f'지수는 올랐는데 외국인은 팔았어요 — 지수를 받친 건 외국인이 아니었습니다.'
+               if ch > 0 and 외 < 0 else
+               f'지수와 {주}의 방향이 같습니다 — 그 방향을 이끈 건 {주}예요.')
+            + '</p>')
+
+
+def _fv_tl_caption(이력, p):
+    """③ 기간 탭마다 «이 그림이 말하는 것» — 같은 문장을 되풀이하지 않는다.
+
+    🔴 HO 지시 2026-09-22 — 탭을 누를 때마다 특징이 달라야 한다.
+      [각 탭의 질문]
+        5일  = «지금 방향이 바뀌고 있나» — 연속·전환·가장 큰 하루
+        20일 = «지수와 돈이 같은 편인가» — 괴리·현물 vs 선물·비차익
+        60일 = «큰 흐름과 개인의 빚» — 누적 방향·신용·만기
+      ⚠️ 끊긴 데이터(선물·비차익·신용)는 «있는 날만» 쓰고, 그렇다고 밝힌다.
+    """
+    rows = [r for r in 이력[-p:] if r.get("종가")]
+    if len(rows) < 3:
+        return ""
+    n = len(rows)
+    ch = (rows[-1]["종가"] / rows[0]["종가"] - 1) * 100
+    외 = [r.get("외현") for r in rows]
+    기 = [r.get("기관") for r in rows]
+    외s = sum(v for v in 외 if v is not None)
+    기s = sum(v for v in 기 if v is not None)
+    선 = [r.get("외선") for r in rows if r.get("외선") is not None]
+    비 = [r.get("비차익") for r in rows if r.get("비차익") is not None]
+    C = lambda v: TM_HOT if v >= 0 else TM_DOWN
+    B = lambda v: f'<b style="color:{C(v)}">{_fv_amt(v)}</b>'
+
+    def streak(vals):
+        vs = [v for v in vals if v is not None]
+        if not vs:
+            return 0, 0
+        sgn = 1 if vs[-1] > 0 else -1
+        k = 0
+        for v in reversed(vs):
+            if v != 0 and (v > 0) == (sgn > 0):
+                k += 1
+            else:
+                break
+        return sgn, k
+    말 = []
+    if p == 5:
+        sg, k = streak(외)
+        vs = [v for v in 외 if v is not None]
+        prev = vs[:-k] if 0 < k < len(vs) else []
+        if k >= 2 and prev:
+            말.append(f'외국인이 <b>{k}일 연속 {"순매수" if sg > 0 else "순매도"}</b>입니다 — '
+                      f'그 전 {len(prev)}일은 {B(sum(prev))}였어요. '
+                      + ('방향이 막 바뀐 자리라, 크기가 붙는지가 관건입니다.'
+                         if (sum(prev) > 0) != (sg > 0) else '같은 방향이 이어지는 중입니다.'))
+        big = max(((abs(v), i, v) for i, v in enumerate(외) if v is not None), default=None)
+        if big:
+            d = rows[big[1]]["날짜"]
+            kr = rows[big[1]].get("코스피등락") or 0
+            말.append(f'5일 중 외국인이 가장 크게 움직인 날은 <b>{d[4:6]}/{d[6:]}</b>({B(big[2])})이고, '
+                      f'그날 코스피는 <b style="color:{C(kr)}">{kr:+.2f}%</b>였습니다.')
+        sgi, ki = streak(기)
+        if ki >= 3:
+            말.append(f'기관은 <b>{ki}일 연속 {"순매수" if sgi > 0 else "순매도"}</b>로 '
+                      f'{"받치는" if sgi > 0 else "빼는"} 쪽을 꾸준히 지키고 있어요.')
+    elif p == 20:
+        if ch > 0 and 외s < 0:
+            말.append(f'{n}거래일 코스피 <b style="color:{C(ch)}">{ch:+.1f}%</b>인데 외국인은 {B(외s)}, '
+                      f'기관은 {B(기s)} — <b>지수를 받친 건 외국인이 아니었습니다.</b>')
+        elif ch < 0 and 외s > 0:
+            말.append(f'{n}거래일 코스피 <b style="color:{C(ch)}">{ch:+.1f}%</b>인데 외국인은 {B(외s)}를 '
+                      f'샀어요 — 외국인이 사는데도 지수가 밀렸다면 다른 쪽 매도가 더 컸다는 뜻입니다.')
+        else:
+            말.append(f'{n}거래일 코스피 <b style="color:{C(ch)}">{ch:+.1f}%</b> · 외국인 {B(외s)} · '
+                      f'기관 {B(기s)} — 지수와 큰돈의 방향이 같습니다.')
+        if len(선) >= 3:
+            ss = sum(선)
+            말.append(f'선물은 외국인 {B(ss)}'
+                      + (f'(기록 있는 {len(선)}일만)' if len(선) < n else '') + ' — '
+                      + ('현물을 파는 동안 선물은 사 모았어요. 현물 매도를 «선물로 되사 두는» 헤지일 수 있습니다.'
+                         if 외s < 0 and ss > 0 else
+                         '현물·선물 모두 팔았어요 — 방향을 같이 뺀, 가장 약한 조합입니다.'
+                         if 외s < 0 and ss < 0 else
+                         '현물·선물 모두 샀어요 — 방향을 같이 건, 가장 강한 조합입니다.'
+                         if 외s > 0 and ss > 0 else
+                         '현물은 사면서 선물은 팔았어요 — 오른 만큼 선물로 가려 두는 모양입니다.'))
+        if len(비) >= 3:
+            bs = sum(비)
+            말.append(f'프로그램 비차익은 {B(bs)}'
+                      + (f'(기록 있는 {len(비)}일만)' if len(비) < n else '')
+                      + ' — ' + ('바구니째(여러 종목을 한 번에) 사는 돈이 들어왔어요.' if bs > 0
+                                 else '바구니째(여러 종목을 한 번에) 파는 돈이 더 컸어요.'))
+    else:
+        말.append(f'{n}거래일 동안 외국인 {B(외s)} · 기관 {B(기s)} · 코스피 '
+                  f'<b style="color:{C(ch)}">{ch:+.1f}%</b>'
+                  + (f' — 기록이 {n}일이라 60일을 다 채우진 못했어요.' if n < 60 else '.'))
+        try:
+            m = {}
+            for _d, dd in archive_days(80):
+                c = dd.get("신용잔고") or {}
+                for h in (c.get("이력") or []):
+                    if isinstance(h.get("잔고"), (int, float)):
+                        m[h["날짜"]] = h["잔고"]
+                if isinstance(c.get("잔고"), (int, float)) and c.get("기준일"):
+                    m[c["기준일"]] = c["잔고"]
+            sv = [m[r["날짜"]] for r in rows if r["날짜"] in m]
+            if len(sv) >= 5:
+                dv = sv[-1] - sv[0]
+                말.append(f'개인의 빚(신용잔고)은 이 기간 {B(dv)} — '
+                          + ('지수가 오르는 동안 빚도 늘었어요. 개인이 빌려서 따라붙는 중이라, '
+                             '꺾이는 날 매물이 한꺼번에 나올 수 있는 자리입니다.' if dv > 0 and ch > 0 else
+                             '지수가 빠지는데 빚은 늘었어요 — 물타기 신호일 수 있어 가장 조심할 조합입니다.'
+                             if dv > 0 else '빚은 줄었어요 — 개인이 레버리지를 걷어내는 중입니다.'))
+        except Exception:
+            pass
+        만 = [r for r in rows if r.get("만기")]
+        if 만:
+            d = 만[-1]["날짜"]
+            말.append(f'이 구간엔 <b>선물 만기({d[4:6]}/{d[6:]})</b>가 끼어 있어요 — 만기 전후엔 '
+                      f'선물·비차익이 포지션 정리로 크게 흔들리니, 그날 숫자는 방향보다 «청산»으로 읽어야 합니다.')
+    if not 말:
+        return ""
+    return ('<div class="fv-cap"><p class="fv-cap-h">📌 이 그림이 말하는 것 '
+            f'<span>{p}일</span></p>' + "".join(f'<p>{x}</p>' for x in 말[:3]) + '</div>')
+
+
+def _fv_retail(data):
+    """④ 개인 온도 — 예탁금 × 신용."""
+    c = data.get("신용잔고") or {}
+    신, 신증 = c.get("잔고"), c.get("증감")
+    예, 예증 = c.get("예탁금"), c.get("예탁금증감")
+    if 신증 is None or 예증 is None:
+        return ('<div class="fv-box"><p class="fv-h">🏦 개인 온도<span>예탁금 × 신용</span></p>'
+                '<p class="fv-wait">새 경로(증시자금동향)로 바꾼 뒤 <b>첫 수집을 기다리는 중</b>입니다. '
+                '들어오면 «개인이 현금으로 들어오나, 빚내서 들어오나»를 네 칸으로 보여드려요.</p></div>')
+    칸 = {(True, True): ("🔥 개인 과열", "현금도 늘고 빚도 늘었어요 — 빚까지 내서 들어오는 중"),
+         (True, False): ("🙂 조심스러운 유입", "현금은 늘고 빚은 줄었어요 — 무리 없이 들어오는 중"),
+         (False, True): ("⚠️ 위험 신호", "현금은 빠지는데 빚은 늘었어요 — 버티려고 빌리는 중일 수 있음"),
+         (False, False): ("🧊 개인 이탈", "현금도 빚도 줄었어요 — 개인이 물러나는 중")}
+    k = (예증 >= 0, 신증 >= 0)
+    제, 설 = 칸[k]
+    bd = c.get("기준일") or ""
+    return (f'<div class="fv-box"><p class="fv-h">🏦 개인 온도<span>예탁금 × 신용 · '
+            f'{bd[4:6]}/{bd[6:]} 기준(2일 늦게 발표)</span></p>'
+            f'<p class="fv-rt">{제}</p><p class="fv-rs">{설}</p>'
+            f'<div class="fv-rg"><span>고객예탁금 <b>{예/10000:,.1f}조</b> '
+            f'<i style="color:{TM_HOT if 예증>=0 else TM_DOWN}">{_fv_amt(예증)}</i></span>'
+            f'<span>신용잔고 <b>{신/10000:,.1f}조</b> '
+            f'<i style="color:{TM_HOT if 신증>=0 else TM_DOWN}">{_fv_amt(신증)}</i></span></div></div>')
+
+
+def _fv_trust(해석):
+    """⑤ 믿어도 되나 — 관제교신에서 이 세 줄만."""
+    t = ((해석.get("관제교신") or {}).get("믿어도되나") or "")
+    if not t:
+        return ""
+    parts = re.split(r"\*\*(믿어도 되는 것|의심스러운 것|아직 모르는 것)\*\*\s*[—-]?\s*", t)
+    쌍 = [(parts[i], parts[i + 1].strip()) for i in range(1, len(parts) - 1, 2)]
+    if not 쌍:
+        return ""
+    ic = {"믿어도 되는 것": ("✅", "#3ecf9a"), "의심스러운 것": ("⚠️", "#e8c33a"),
+          "아직 모르는 것": ("❔", "#8b93a0")}
+    행 = "".join(f'<div class="fv-tr"><span style="color:{ic[a][1]}">{ic[a][0]} {a}</span>'
+                f'<p>{b}</p></div>' for a, b in 쌍 if a in ic)
+    return f'<div class="fv-box"><p class="fv-h">🔍 그래서, 믿어도 되나</p>{행}</div>'
+
+
+def build_flow_v2(data, 해석):
+    이력 = load_json("flow_history.json") or []
+    if not isinstance(이력, list):
+        이력 = []
+    tl = ""
+    if 이력:
+        tl = (f'<div class="fv-box"><p class="fv-h">🕒 하나의 타임라인'
+              f'<span>지수 + 수급 + 선물 + 비차익 + 신용</span></p>'
+              f'{build_flow_timeline(이력, caption=_fv_tl_caption)}</div>')
+    return (_fv_who(data) + _fv_price(이력) + tl + _fv_retail(data) + _fv_trust(해석))
 
 
 def build_flow_signal(파생, 지수수급, 해석=None):
@@ -18652,6 +19160,185 @@ html{{scroll-behavior:smooth}}
 .macro-grid2{{display:grid;grid-template-columns:minmax(0,1fr);
   gap:8px;margin-top:8px}}
 @media (max-width:359px){{.macro-grid2{{grid-template-columns:1fr}}}}
+/* 🔴 2026-09-22 HO 지시 — 아래 두 칸(순매수 / 최근 5일 실탄)을 «같은 줄»로.
+   두 칸 모두 위에서부터 채운다(가운데 정렬이면 내용 높이 차이만큼 어긋난다).
+   숫자 칸은 옆 막대그래프 높이(64px)에 맞춰 세로 가운데 — 그래야
+   «숫자 줄»과 «막대 줄»이 같은 높이에 선다. */
+.sc4-c3,.sc4-c4{{justify-content:flex-start}}
+/* ══ 📰 시황 탭 4단 ══ */
+/* 🔴 HO 지시 2026-09-22 — 헤드라인 박스는 «다른 색». 탭의 첫 인상이다.
+   보라-남색 바탕 + 오른쪽 위 호박색 빛. 세 줄마다 아이콘 칩 색이 다르다. */
+.sh-top{{position:relative;overflow:hidden;
+  background:radial-gradient(120% 90% at 100% 0%,rgba(255,176,64,.18),transparent 55%),
+             linear-gradient(155deg,#231a3a 0%,#18203a 55%,#121a2a 100%);
+  border:1px solid rgba(180,140,240,.35);border-radius:15px;padding:15px 14px 13px;
+  margin:0 0 14px;box-shadow:0 6px 22px rgba(0,0,0,.35)}}
+.sh-top::before{{content:'오늘 한눈에';display:block;font-size:10px;font-weight:800;
+  letter-spacing:.08em;color:#c9b3f5;margin:0 0 10px}}
+.sh-hl{{display:flex;gap:10px;align-items:flex-start}}
+.sh-hi{{flex:none;width:30px;height:30px;border-radius:9px;display:inline-flex;
+  align-items:center;justify-content:center;font-size:15px;margin-top:1px}}
+.sh-hl.h0 .sh-hi{{background:rgba(255,176,64,.18);box-shadow:inset 0 0 0 1px rgba(255,176,64,.4)}}
+.sh-hl.h1 .sh-hi{{background:rgba(94,234,212,.14);box-shadow:inset 0 0 0 1px rgba(94,234,212,.35)}}
+.sh-hl.h2 .sh-hi{{background:rgba(255,120,120,.14);box-shadow:inset 0 0 0 1px rgba(255,120,120,.35)}}
+.sh-hb{{flex:1;min-width:0}}
+/* 코너마다 고유 색 — 왼쪽 띠 + 제목 색 */
+.sh-box{{position:relative;border-left-width:3px !important}}
+.sh-news{{border-left-color:#6ea8ff !important}}
+.sh-news>.sh-h{{color:#9cc3ff}}
+.sh-theme{{border-left-color:#ff9838 !important;
+  background:linear-gradient(180deg,rgba(255,152,56,.05),transparent 40%),#101720}}
+.sh-theme>.sh-h{{color:#ffb070}}
+.sh-next{{border-left-color:#3ecf9a !important;
+  background:linear-gradient(180deg,rgba(62,207,154,.06),transparent 40%),#101720}}
+.sh-next>.sh-h{{color:#6fe3b8}}
+.sh-pro{{border-left-color:#b48cf0 !important}}
+.sh-pro>.sh-h{{color:#c9b3f5}}
+/* 이슈 태그 색 */
+.sh-tag.t-semi{{color:#ffb070;background:rgba(255,152,56,.12)}}
+.sh-tag.t-ind{{color:#c9b3f5;background:rgba(180,140,240,.13)}}
+.sh-tag.t-pol{{color:#ffd76a;background:rgba(255,201,60,.12)}}
+.sh-tag.t-sup{{color:#6fe3b8;background:rgba(62,207,154,.12)}}
+.sh-tag.t-glo{{color:#9cc3ff;background:rgba(110,168,255,.13)}}
+/* 사실 카드 구분 — 카드 사이를 조금 띄워 «한 덩어리 글»로 안 보이게 */
+.sh-c{{padding:11px 0 !important}}
+.sh-c+.sh-c{{border-top:1px dashed #1f2a38 !important}}
+.sh-t{{margin:0;font-size:15px;font-weight:800;color:#eef1f5;line-height:1.45;letter-spacing:-.3px}}
+.sh-hl{{padding:10px 0;border-top:1px solid rgba(255,255,255,.07)}}
+.sh-hl:first-child{{border-top:0;padding-top:0}}
+.sh-hl:last-child{{padding-bottom:0}}
+.sh-hl.first .sh-t{{font-size:17.5px}}
+.sh-s{{margin:5px 0 0;font-size:12px;color:#9aa3b1;line-height:1.6}}
+.sh-ns{{display:flex;flex-wrap:wrap;gap:6px;margin:11px 0 0}}
+.sh-n{{display:inline-flex;align-items:baseline;gap:5px;background:#0d141c;
+  border:1px solid #1e2937;border-radius:8px;padding:5px 9px}}
+.sh-n em{{font-style:normal;font-size:10px;color:#7d8695;font-weight:700}}
+.sh-n b{{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}}
+.sh-box{{background:#101720;border:1px solid #1e2937;border-radius:12px;
+  padding:12px 13px 10px;margin:0 0 12px}}
+.sh-h{{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:14px;
+  font-weight:800;color:#e2e7ee;list-style:none;cursor:default}}
+.sh-h span{{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784}}
+.sh-c{{padding:10px 0;border-top:1px solid #172130}}
+.sh-c:first-of-type{{border-top:0;padding-top:2px}}
+.sh-tag{{display:inline-block;font-size:10.5px;font-weight:800;color:#8fd0e8;
+  background:rgba(143,208,232,.1);border-radius:5px;padding:2px 8px;margin:0 0 6px}}
+.sh-p{{margin:0;font-size:13.5px;line-height:1.75;color:#dfe3e8}}
+.sh-d{{margin:7px 0 0}}
+.sh-d summary{{cursor:pointer;font-size:11px;font-weight:800;color:#e0c060;list-style:none}}
+.sh-d summary::-webkit-details-marker{{display:none}}
+.sh-d p{{margin:6px 0 0;font-size:12.5px;line-height:1.75;color:#b6bfcb;
+  padding:8px 10px;background:#0d141c;border-radius:8px}}
+.sh-ln{{display:block;margin:5px 0 0;font-size:11px;color:#7fb0d8;text-decoration:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.sh-tr{{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #172130;
+  font-size:12px}}
+.sh-tr:first-of-type{{border-top:0}}
+.sh-tr span{{flex:none;width:78px;color:#7d8695;font-weight:700;font-size:11px}}
+.sh-tr b{{color:#dfe4ea;font-weight:700;line-height:1.55}}
+.sh-cm{{margin:9px 0 0;padding:10px 11px;border-radius:9px;background:rgba(255,152,56,.06);
+  border:1px solid rgba(255,152,56,.2);font-size:13px;line-height:1.75;color:#e2e7ee}}
+.sh-k{{padding:11px 0;border-top:1px solid #172130}}
+.sh-k:first-of-type{{border-top:0;padding-top:2px}}
+.sh-kq{{margin:0;display:flex;gap:8px;font-size:13.5px;font-weight:800;color:#eef1f5;line-height:1.55}}
+.sh-kq b{{flex:none;width:20px;height:20px;border-radius:6px;background:#3ecf9a;color:#0b0e13;
+  font-size:11px;display:inline-flex;align-items:center;justify-content:center;margin-top:1px}}
+.sh-ka{{flex:none;font-style:normal;font-size:9.5px;font-weight:800;color:#8fd0e8;
+  background:rgba(143,208,232,.12);border-radius:4px;padding:2px 6px;margin-top:2px}}
+.sh-kb{{margin:6px 0 0 28px;font-size:11.5px;color:#9aa3b1}}
+.sh-kb em{{font-style:normal;color:#ffc93c;font-weight:800}}
+.sh-kw{{margin:6px 0 0 28px;font-size:12.5px;line-height:1.75;color:#c3cad4}}
+.sh-kw span{{display:block;font-size:10px;font-weight:800;color:#8fd0e8;margin:0 0 2px}}
+.sh-ky{{margin:7px 0 0 28px;display:flex;flex-direction:column;gap:4px}}
+.sh-ky p{{margin:0;font-size:12px;line-height:1.65;color:#aab3c0}}
+.sh-ky i{{font-style:normal;font-size:9.5px;font-weight:800;border-radius:4px;padding:1px 6px;
+  margin-right:6px}}
+.sh-ky i.y{{color:#0b0e13;background:#3ecf9a}}
+.sh-ky i.n{{color:#0b0e13;background:#8b93a0}}
+.sh-fold summary{{cursor:pointer}}
+.sh-fold summary::-webkit-details-marker{{display:none}}
+.sh-empty{{margin:4px 0 0;font-size:11.5px;color:#7d8695;line-height:1.7}}
+/* ══ 💰 수급 탭 5단 ══ */
+.fv-box{{background:#101720;border:1px solid #1e2937;border-radius:12px;
+  padding:12px 13px 11px;margin:0 0 12px}}
+.fv-box,.fv-box *{{white-space:normal;word-break:keep-all;overflow-wrap:anywhere}}
+.fv-h{{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;margin:0 0 9px;
+  font-size:14px;font-weight:800;color:#e2e7ee}}
+.fv-h span{{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784}}
+.fv-tabs{{display:flex;gap:5px;margin:0 0 9px}}
+.fv-tb{{flex:1;padding:6px 0;font:inherit;font-size:11.5px;font-weight:800;color:#7d8695;
+  background:#121a24;border:1px solid #1e2937;border-radius:7px;cursor:pointer}}
+.fv-tb.on{{color:#0b0e13;background:#8fd0e8;border-color:#8fd0e8}}
+.fv-say{{margin:0 0 9px;font-size:13px;line-height:1.7;color:#dfe3e8}}
+.fv-say b{{color:#eef1f5}}
+.fv-r{{display:grid;grid-template-columns:92px 1fr 62px;grid-template-rows:auto auto;
+  gap:2px 8px;align-items:center;padding:7px 0;border-top:1px solid #172130}}
+.fv-n{{font-size:11.5px;font-weight:800}}
+.fv-bar{{position:relative;height:9px;background:#141d27;border-radius:5px}}
+.fv-bar::after{{content:'';position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:#2f3b4a}}
+.fv-bar i{{position:absolute;top:0;bottom:0;border-radius:5px}}
+.fv-r b{{text-align:right;font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}}
+.fv-r em{{grid-column:2 / 4;text-align:right;font-style:normal;font-size:9.5px;color:#6f7784}}
+.fv-r.dim{{opacity:.55}}
+.fv-note{{margin:9px 0 0;padding-top:8px;border-top:1px solid #172130;font-size:10px;
+  color:#6f7784;line-height:1.7}}
+.fv-note b{{color:#9aa3b1}}
+.fv-pw{{padding:9px 0 11px;border-top:1px solid #172130}}
+.fv-pw:first-of-type{{border-top:0;padding-top:2px}}
+.fv-pt{{margin:0 0 22px;font-size:11.5px;color:#9aa3b1}}
+.fv-pt b{{color:#dfe4ea}}
+.fv-scale{{position:relative;height:6px;background:linear-gradient(90deg,#1b2530,#2a3646);
+  border-radius:3px;margin:0 4px 26px}}
+.fv-m{{position:absolute;top:-4px;width:14px;height:14px;margin-left:-7px;border-radius:50%;
+  border:2px solid #0b0e13}}
+.fv-m em{{position:absolute;left:50%;transform:translateX(-50%);white-space:nowrap !important;
+  font-style:normal;font-size:9.5px;font-weight:800}}
+.fv-m.s{{background:#5b9bff}} .fv-m.s em{{top:16px;color:#5b9bff}}
+.fv-m.b{{background:#ff5a4e}} .fv-m.b em{{top:-17px;color:#ff8a72}}
+.fv-m.now{{background:#ffc93c;width:16px;height:16px;margin-left:-8px;top:-5px}}
+.fv-m.now em{{top:-18px;color:#ffc93c}}
+.fv-pm{{margin:0;font-size:12.5px;line-height:1.75;color:#c3cad4}}
+.fv-dim{{color:#6f7784;font-size:10px}}
+.fv-pm b{{color:#eef1f5}}
+.fv-cap{{margin:0 0 9px;padding:9px 11px;border-radius:9px;background:rgba(143,208,232,.07);
+  border-left:3px solid #8fd0e8}}
+.fv-cap-h{{margin:0 0 4px !important;font-size:11px;font-weight:800;color:#8fd0e8 !important}}
+.fv-cap-h span{{float:right;color:#6f7784;font-weight:700}}
+.fv-cap p{{margin:4px 0 0;font-size:12px;line-height:1.7;color:#c3cad4}}
+.fv-wait{{margin:0;padding:12px 10px;border-radius:8px;background:#0d141c;
+  border:1px dashed #2a3646;font-size:11.5px;color:#8b93a0;line-height:1.8}}
+.fv-wait b{{color:#c3cad4}}
+.fv-rt{{margin:0;font-size:15px;font-weight:800;color:#eef1f5}}
+.fv-rs{{margin:4px 0 9px;font-size:12px;color:#9aa3b1;line-height:1.6}}
+.fv-rg{{display:flex;flex-wrap:wrap;gap:6px}}
+.fv-rg span{{background:#0d141c;border:1px solid #1e2937;border-radius:8px;padding:6px 9px;
+  font-size:11px;color:#8b93a0}}
+.fv-rg b{{color:#dfe4ea;margin:0 4px}}
+.fv-rg i{{font-style:normal;font-weight:800}}
+.fv-tr{{padding:8px 0;border-top:1px solid #172130}}
+.fv-tr:first-of-type{{border-top:0;padding-top:0}}
+.fv-tr span{{display:block;font-size:11px;font-weight:800;margin:0 0 3px}}
+.fv-tr p{{margin:0;font-size:12.5px;line-height:1.75;color:#c3cad4}}
+.fv-old{{margin:4px 0 0}}
+.fv-old>summary{{cursor:pointer;font-size:11px;font-weight:700;color:#6f7784;
+  padding:9px 12px;background:#0d141c;border:1px dashed #2a3646;border-radius:9px;list-style:none}}
+.fv-old>summary::-webkit-details-marker{{display:none}}
+/* ⚠️ 상위 규칙이 white-space:nowrap을 물려줘 글이 한 줄로 2,000px 늘어났다(실측).
+   시황 카드 안은 전부 «보통 줄바꿈»으로 되돌린다. 링크 한 줄만 말줄임 유지. */
+.sh-top,.sh-top *,.sh-box,.sh-box *{{white-space:normal;word-break:keep-all;
+  overflow-wrap:anywhere}}
+.sh-box .sh-ln{{white-space:nowrap;max-width:100%}}
+/* 본문은 «보통 굵기». 굵게 물려받아 카드 전체가 제목처럼 보였다. */
+.sh-p,.sh-d p,.sh-cm,.sh-kw,.sh-ky p{{font-weight:400 !important}}
+/* 🔴 HO 지시 2026-09-22 — 시황 세 코너(무슨 일 / 이슈 해부 / 프로의 시선)
+   라벨을 글 «옆»이 아니라 «위»로. 라벨 칸(≈60px)이 모바일 폭의 1/6을
+   먹어 글이 좁은 기둥처럼 길게 늘어졌다. 라벨을 위로 올리면 글이
+   카드 폭을 다 쓴다 — 같은 글이 줄 수는 약 30% 줄어든다. */
+.i9,.iss,.si-item{{display:block !important;padding:10px 0 !important}}
+.i9-t,.itag,.si-lens{{display:inline-flex !important;margin:0 0 5px !important;
+  flex-direction:row !important;gap:5px !important;align-items:baseline !important}}
+.i9>span:not(.i9-t),.iss-text,.si-item>span:not(.si-lens){{display:block;width:100%}}
+.sc3-body{{min-height:64px;align-content:center;width:100%}}
 @media (max-width:359px){{.sc4{{grid-template-columns:1fr}}}}
 /* 정말 좁은 화면에서만 세로로 쌓는다 — 320px에서 실측해 정한 문턱. */
 @media (max-width:400px){{
