@@ -575,11 +575,13 @@ jobs:
           #      조건부 취급이 맞다. 이 기록이 쌓여야 한 달 뒤
           #      「4/5 켜진 자리는 그 뒤 어땠나」를 말할 수 있다.
           #      오늘 안 쌓으면 되돌릴 방법이 없는 종류의 파일이다.
+          #    🆕 2026-09-22 — wave_log.json(외국인·기관 파도 판정 기록).
+          #      그날의 판정은 그날만 남길 수 있다(나중에 다시 계산하면 미래가 섞인다).
           for f in stock_profile.json corp_map.json corp_stockcode.json \
                    biz_report_raw.json stock_news_raw.json \
                    biz_report_fail.json stock_news_fail.json \
                    stock_capture_log.json judge_log.json \
-                   accum_long_cache.json; do
+                   wave_log.json accum_long_cache.json; do
             git add "$f" 2>/dev/null || true
           done
           git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
