@@ -641,6 +641,12 @@ def _dig_list(obj, depth=0):
 #   하루에 한 번, 첫 테마에서만 탐색한다(그 뒤 20번은 찾은 주소를 재사용).
 #   ⚠️ 옛 HTML 상세는 «아직 살아 있을 수 있다» — 후보 맨 끝에 남겨둔다.
 THEME_DETAIL_CANDIDATES = [
+    # 🔴🔴 2026-09-22 — HO F12로 확보한 «진짜» 주소(테마 상세 화면의 종목 목록).
+    #   테마 번호만 바꾸면 모든 테마에 쓰인다. pageSize=100 → 테마 종목 «전부».
+    #   [전] 이 주소를 몰라 테마마다 목록에 딸려 오는 4종목만 봤다 —
+    #     확산도·대장주가 4종목 안에서만 계산됐다.
+    "https://stock.naver.com/api/domestic/market/theme/{code}/stocklist"
+    "?marketType=ALL&orderType=priceTop&startIdx=0&pageSize=100",
     "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}/stocks",
     "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}/items",
     "https://stock.naver.com/api/stockSecurity/rankings/v2/domestic/themes/{code}",
@@ -735,14 +741,15 @@ def _theme_stocks_via_api(code):
 
     def _try(tpl):
         try:
+            # ⚠️ 주소에 이미 질의(?…)가 박힌 후보는 옛 params를 덧붙이지 않는다.
             r = requests.get(tpl.format(code=code), headers=THEME_API_HEADERS,
-                             params=params, timeout=10)
+                             params=(None if "?" in tpl else params), timeout=10)
             if r.status_code != 200:
                 return None, f"HTTP {r.status_code}"
             rows = _dig_list(r.json())
             if not rows:
                 return None, "배열 없음"
-            if _pick(rows[0], "stockName", "itemName", "name", "hname") is None:
+            if _pick(rows[0], "stockName", "itemName", "itemname", "name", "hname") is None:
                 return None, f"종목명 없음 (키: {sorted(rows[0])[:8]})"
             return rows, "ok"
         except Exception as e:
@@ -777,18 +784,26 @@ def _norm_stocks(rows):
     """API 종목 배열 → [{종목명, 현재가, 등락률, 거래대금}] 로 정규화."""
     out = []
     for it in rows:
-        nm = _pick(it, "stockName", "itemName", "name", "hname")
+        nm = _pick(it, "stockName", "itemName", "itemname", "name", "hname")
         if not nm:
             continue
+        # 🔴 2026-09-22 — 새 stocklist는 거래대금을 «원»으로 줄 수 있다(시총 API가 그랬다).
+        #   화면·주도점수는 «백만원» 기준이라, 원이면 백만원으로 맞춘다.
+        _amt = to_num(_pick(it, "accumulatedTradingValue", "tradingValue", "tradeAmount",
+                            "accTradeValue", "amount"))
+        if _amt is not None and _amt >= 1e10:
+            _amt = _amt / 1e6
         out.append({
             "종목명": clean_name(str(nm)),
             # 🔴 2026-09-21 — 9/15(새 테마 API 전환)부터 현재가가 전부 None이었다.
             #   같은 개편의 시총 API가 «nowPrice»를 쓰는 것을 실측했으므로 앞에 둔다.
             "현재가": to_num(_pick(it, "nowPrice", "closePrice", "currentPrice",
                                 "tradePrice", "price", "nv")),
-            "등락률": to_num(_pick(it, "fluctuationsRatio", "changeRate", "rate", "cr")),
-            "거래대금": to_num(_pick(it, "accumulatedTradingValue", "tradingValue",
-                                 "accTradeValue", "amount")),
+            "등락률": to_num(_pick(it, "fluctuationsRatio", "changeRate", "prevChangeRate",
+                                "rate", "cr")),
+            "거래대금": _amt,
+            "코드": (str(_pick(it, "itemcode", "itemCode", "stockCode", "code"))
+                   if _pick(it, "itemcode", "itemCode", "stockCode", "code") else None),
         })
     if out and all(x["현재가"] is None for x in out) and rows:
         print(f"  ⚠️ [테마 종목] 현재가 키 못 찾음 — 첫 항목 키: {sorted(rows[0])[:25]}")
@@ -1920,6 +1935,10 @@ def update_flow_history(지수수급, 파생):
     _선이력 = ((파생 or {}).get("선물수급") or {}).get("이력") or {}
     _채움 = 0
     for x in 이력:
+        # 🔴 2026-09-22 — 9/17 이후 «정확히 0.0»은 금액을 못 읽은 오염값이다.
+        #   (선물 응답 diffValue=0을 그대로 소급해 넣었다) → 다시 채우거나 비운다.
+        if x.get("날짜", "") >= "20260917" and x.get("외선") == 0.0:
+            x["외선"] = None
         if x.get("외선") is None and x.get("날짜") in _선이력:
             x["외선"] = _선이력[x["날짜"]]
             _채움 += 1
@@ -2832,11 +2851,21 @@ def collect_program_trading_v2():
             if kb and ks:
                 return _eok(_num(last[kb]) - _num(last[ks])), f"{kb}-{ks}"
             return None, None
-        비, kb = _net("nonarb")
+        # 🔴 2026-09-22 실측 키: diffPureBuyAmt(차익) · biDiffPureBuyAmt(비차익) ·
+        #   totalDiffPureBuyAmt(전체). «bi»가 비(非)차익이다 — nonarb로는 못 찾았다.
+        비, kb = None, None
+        if "biDiffPureBuyAmt" in last:
+            비, kb = _eok(_num(last["biDiffPureBuyAmt"])), "biDiffPureBuyAmt"
+        if 비 is None:
+            비, kb = _net("nonarb")
         if 비 is None:
             비, kb = _net("non")
         차, ka = None, None
-        for cand in (("arb",),):
+        if "diffPureBuyAmt" in last:
+            차, ka = _eok(_num(last["diffPureBuyAmt"])), "diffPureBuyAmt"
+        for cand in (() if 차 is not None else ("arb",),):
+            if not cand:
+                break
             k1 = [k for k in last if "arb" in k.lower() and "non" not in k.lower()]
             if k1:
                 sub = {k: last[k] for k in k1}
@@ -2907,10 +2936,17 @@ def collect_futures_flow_v2():
         계약외, 수량합 = 0.0, 0.0
         for row in (day.get("netAmounts") or []):
             c = str(row.get("investorGubun") or "")
+            # 🔴 2026-09-22 — 선물 응답은 diffValue가 «0»으로 온다(실측: 외국인 +1,823계약인데
+            #   금액 +0억). 금액은 buyPrice − sellPrice로 계산한다.
             try:
-                v = float(row.get("diffValue"))
+                v = float(row.get("diffValue") or 0)
             except (TypeError, ValueError):
-                continue
+                v = 0.0
+            if v == 0:
+                try:
+                    v = float(row.get("buyPrice") or 0) - float(row.get("sellPrice") or 0)
+                except (TypeError, ValueError):
+                    v = 0.0
             try:
                 bq, sq = float(row.get("buyQuant") or 0), float(row.get("sellQuant") or 0)
             except (TypeError, ValueError):
@@ -2934,13 +2970,19 @@ def collect_futures_flow_v2():
             print(f"  🔴 선물수급 — {d} 수량 합 {수량:,.0f}: «계약»이 아니라 «주» 단위로 보임. "
                   f"선물이 아닌 숫자라 버립니다(marketType={FUT_MARKET_TYPE} 재확인 필요).")
             return None
-        이력[d] = round(합["외국인"] / 1e8, 1)
+        # ⚠️ 금액이 전부 0이면(금액을 못 읽은 것) 이력에 0을 넣지 않는다.
+        #    9/22 실측: 0.0이 소급 채우기로 9/17~9/21 flow_history를 덮었다.
+        if any(abs(x) > 0 for x in 합.values()):
+            이력[d] = round(합["외국인"] / 1e8, 1)
         if d == DATE:
             오늘값 = (합, 계약)
     if not 오늘값:
         print(f"  ⚠️ 선물수급 — {DATE} 자료 없음 (응답 날짜: {list(이력)[:3]})")
         return None
     합, 계약 = 오늘값
+    if not any(abs(x) > 0 for x in 합.values()):
+        print(f"  ⚠️ 선물수급 — 금액이 전부 0 (계약 {계약:+,.0f}). 금액 필드를 못 읽음 → 금액은 저장 안 함")
+        return {"외국인계약": round(계약), "sosok": "api", "이력": {}}
     # 👉 네이버 선물 화면의 «외국인 N계약»과 이 숫자가 같아야 한다(9/21: +4,251).
     print(f"  ✅ 선물수급(새 API) 외국인 {합['외국인']/1e8:+,.0f}억 · {계약:+,.0f}계약 "
           f"· 개인 {합['개인']/1e8:+,.0f}억 · 기관 {합['기관계']/1e8:+,.0f}억 · 이력 {len(이력)}일")
@@ -3015,6 +3057,9 @@ def collect_program_and_futures():
 
 
 _OHLC_KEY_LOGGED = {"done": False}
+_NOWPRICE = {}   # 종목명 → 현재가 (시총 API). 테마 종목 현재가를 채우는 데 쓴다.
+
+
 def _fetch_day_ohlc_api(code):
     """종목별 trend API(매집이 쓰는 것)에서 오늘 시·고·저·종 + 전일 거래량.
     ⚠️ 거래량·시고저 키 이름은 실측 전이다. 후보를 훑고, 첫 호출 때 키를 찍는다."""
@@ -4003,6 +4048,7 @@ def collect_strength_radar(지수종가=None):
                     대금 = 거래량 * 현재가num / 100_000_000
                 if 현재가num is not None:
                     가격맵[이름] = {"현재가": 현재가num, "등락률": 등락률}
+                    _NOWPRICE[이름] = 현재가num          # 🔴 테마 종목 현재가 채움용
                 if 시총 is None or 대금 is None or 등락률 is None:
                     continue
                 종목들.append({
@@ -4011,6 +4057,13 @@ def collect_strength_radar(지수종가=None):
                            if _pick(it, "itemcode", "itemCode", "code") else None),
                     "시장": 시장, "시총": 시총, "거래대금": 대금,
                     "거래량": 거래량, "현재가": 현재가num, "등락률": 등락률,
+                    # 🔴 2026-09-22 — 오늘 시가·고가·저가를 여기서 받는다.
+                    #   [사고] V자 반등은 시가·저가가 있어야 판정된다. 일봉 API(trend)
+                    #     실측 키에 openPrice/highPrice/lowPrice가 «없었다» → V자가 매일 0건.
+                    #   시총 API 실측 키에는 openPrice·highPrice·lowPrice가 있다.
+                    "시가": to_num(_pick(it, "openPrice")),
+                    "고가": to_num(_pick(it, "highPrice")),
+                    "저가": to_num(_pick(it, "lowPrice")),
                 })
         if 종목들:
             print(f"  ✅ [강세] {시장} 새 시총 API로 {len(종목들)}종목 확보")
@@ -4061,6 +4114,7 @@ def collect_strength_radar(지수종가=None):
                     continue
                 if 현재가num is not None:
                     가격맵[이름] = {"현재가": 현재가num, "등락률": 등락률}
+                    _NOWPRICE[이름] = 현재가num          # 🔴 테마 종목 현재가 채움용
                 if 시총 is None or 대금 is None or 등락률 is None:
                     continue
                 종목들.append({
@@ -4089,8 +4143,9 @@ def collect_strength_radar(지수종가=None):
             s["전일거래량"] = int(전일량)
             s["배수"] = round(배수, 1)
 
-            시, 고, 저, 종 = (ohlc.get("시가"), ohlc.get("고가"),
-                            ohlc.get("저가"), ohlc.get("종가") or s.get("현재가"))
+            # ⚠️ 일봉 API엔 시·고·저가 없다 — 시총 API에서 실은 값을 먼저 쓴다.
+            시, 고, 저, 종 = (s.get("시가") or ohlc.get("시가"), s.get("고가") or ohlc.get("고가"),
+                            s.get("저가") or ohlc.get("저가"), s.get("현재가") or ohlc.get("종가"))
             # 고가 대비 종가 위치 — 0=저가에서 마감, 1=고가에서 마감
             위치 = None
             if 고 and 저 and 종 and 고 > 저:
@@ -5849,6 +5904,9 @@ def _marketcap_via_api():
                 if not 이름:
                     continue
                 nm = clean_name(str(이름))
+                _np = to_num(_pick(it, "nowPrice", "closePrice"))
+                if _np:
+                    _NOWPRICE.setdefault(nm, _np)   # 🔴 2026-09-22 테마 종목 현재가 채움용(2,659종목)
                 if _grid_is_excluded(nm) or nm in 본이름:
                     continue
                 시총n, 등락n = to_num(시총), to_num(등락)
@@ -5900,6 +5958,9 @@ def _marketcap_via_api():
                     if not 이름:
                         continue
                     nm = clean_name(str(이름))
+                    _np = to_num(_pick(it, "nowPrice", "closePrice"))
+                    if _np:
+                        _NOWPRICE.setdefault(nm, _np)   # 🔴 2026-09-22 테마 종목 현재가 채움용(2,659종목)
                     if _grid_is_excluded(nm) or nm in 합이름:
                         continue
                     시총n, 등락n = to_num(시총), to_num(등락)
@@ -5947,6 +6008,9 @@ def _marketcap_via_api():
                 if not 이름:
                     continue
                 nm = clean_name(str(이름))
+                _np = to_num(_pick(it, "nowPrice", "closePrice"))
+                if _np:
+                    _NOWPRICE.setdefault(nm, _np)   # 🔴 2026-09-22 테마 종목 현재가 채움용(2,659종목)
                 if _grid_is_excluded(nm) or nm in 더:
                     continue
                 시총n, 등락n = to_num(시총), to_num(등락)
@@ -6009,6 +6073,9 @@ def _marketcap_via_api():
                     if not 이름:
                         continue
                     nm = clean_name(str(이름))
+                    _np = to_num(_pick(it, "nowPrice", "closePrice"))
+                    if _np:
+                        _NOWPRICE.setdefault(nm, _np)   # 🔴 2026-09-22 테마 종목 현재가 채움용(2,659종목)
                     if _grid_is_excluded(nm) or nm in 더:
                         continue
                     시총n, 등락n = to_num(시총), to_num(등락)
@@ -6568,6 +6635,24 @@ if __name__ == "__main__":
         print(f"   ⚠️ 군중 나침반 수집 중 예외({type(e).__name__}: {e}) — 생략합니다")
         군중나침반 = None
     마감브리핑 = collect_briefings()
+
+    # 🔴🔴 2026-09-22 — 테마 종목 «현재가»를 시총 API 가격으로 채운다.
+    #   [사고] 9/15 새 테마 API 전환 뒤 현재가가 매일 0/22였다. 로그로 확인하니
+    #     테마 목록(topByChangeRate 등)의 항목 키가 {code, name, value, itemLogoUrl}뿐 —
+    #     «가격 필드가 아예 없다». 상세 페이지(HTML)도 폐지돼 No tables found.
+    #   [여파] 대장주 종가가 None → judge_log 종가 None → «자리별 실제 성과»를
+    #     영원히 계산할 수 없다.
+    #   [고침] 같은 실행에서 받은 시총 API(2,659종목, nowPrice 있음)로 이름을 맞춰 채운다.
+    try:
+        _채움 = 0
+        for _s in (테마결과.get("주도섹터") or []):
+            for _x in (_s.get("종목") or []):
+                if _x.get("현재가") is None and _x.get("종목명") in _NOWPRICE:
+                    _x["현재가"] = _NOWPRICE[_x["종목명"]]
+                    _채움 += 1
+        print(f"  ✅ 테마 종목 현재가 {_채움}개 채움 (시총 API 가격)")
+    except Exception as _e:
+        print(f"  ⚠️ 테마 종목 현재가 채움 실패 — {type(_e).__name__}")
 
     전체 = {
         "날짜": DATE,
