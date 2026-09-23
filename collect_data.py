@@ -764,7 +764,9 @@ def _theme_stocks_via_api(code):
     if _DETAIL_WINNER["tried"] and not _DETAIL_WINNER["url"]:
         return None                            # 오늘은 이미 다 두드려봤다
 
-    print("  🔎 [테마 종목 API] 주소 자동 탐색 시작...")
+    # 🔴 2026-09-22 — 테마 «번호»를 같이 찍는다. 새 stocklist 주소가 이 번호를
+    #   그대로 쓰기 때문에(theme/608/stocklist), 형식이 다르면 404가 난다.
+    print(f"  🔎 [테마 종목 API] 주소 자동 탐색 시작... (이 테마 번호: {code!r})")
     for tpl in THEME_DETAIL_CANDIDATES:
         rows, why = _try(tpl)
         짧은 = tpl.replace("https://", "").split("?")[0]
@@ -2936,17 +2938,20 @@ def collect_futures_flow_v2():
         계약외, 수량합 = 0.0, 0.0
         for row in (day.get("netAmounts") or []):
             c = str(row.get("investorGubun") or "")
-            # 🔴 2026-09-22 — 선물 응답은 diffValue가 «0»으로 온다(실측: 외국인 +1,823계약인데
-            #   금액 +0억). 금액은 buyPrice − sellPrice로 계산한다.
+            # 🔴🔴 2026-09-22 (확정) — 선물 응답은 «현물과 단위가 다르다». HO 실측:
+            #     9000: diffValue −20 · buyQuant 37,734 · sellQuant 37,754
+            #           buyPrice 10,631,737 · sellPrice 10,632,229
+            #   ① diffValue = 금액이 아니라 «계약 수»다 (37,734−37,754 = −20 과 일치)
+            #   ② buyPrice·sellPrice = «백만원» 단위
+            #      (10,632,229백만원 ÷ 37,754계약 ≈ 계약당 2.8억 = KOSPI200 선물 1계약 규모)
+            #   → 금액(억) = (buyPrice − sellPrice) ÷ 100
+            #   ⚠️ 현물(KOSPI/KOSDAQ)은 diffValue가 «원»이다 — 같은 주소인데 단위가 다르다.
+            #      그래서 선물 전용 계산을 따로 둔다.
             try:
-                v = float(row.get("diffValue") or 0)
+                bp, sp = float(row.get("buyPrice") or 0), float(row.get("sellPrice") or 0)
+                v = (bp - sp) * 1_000_000          # 백만원 → 원 (아래에서 /1e8로 억 환산)
             except (TypeError, ValueError):
                 v = 0.0
-            if v == 0:
-                try:
-                    v = float(row.get("buyPrice") or 0) - float(row.get("sellPrice") or 0)
-                except (TypeError, ValueError):
-                    v = 0.0
             try:
                 bq, sq = float(row.get("buyQuant") or 0), float(row.get("sellQuant") or 0)
             except (TypeError, ValueError):
@@ -2972,7 +2977,7 @@ def collect_futures_flow_v2():
             return None
         # ⚠️ 금액이 전부 0이면(금액을 못 읽은 것) 이력에 0을 넣지 않는다.
         #    9/22 실측: 0.0이 소급 채우기로 9/17~9/21 flow_history를 덮었다.
-        if any(abs(x) > 0 for x in 합.values()):
+        if any(abs(x) > 0 for x in 합.values()) and not (abs(합["외국인"]) / 1e8 < 1 and abs(계약) >= 100):
             이력[d] = round(합["외국인"] / 1e8, 1)
         if d == DATE:
             오늘값 = (합, 계약)
@@ -2980,6 +2985,11 @@ def collect_futures_flow_v2():
         print(f"  ⚠️ 선물수급 — {DATE} 자료 없음 (응답 날짜: {list(이력)[:3]})")
         return None
     합, 계약 = 오늘값
+    # ⚠️ 상식 검사 — 계약이 100개 넘게 움직였는데 금액이 1억도 안 되면 단위를 잘못 읽은 것이다.
+    #   (계약당 약 2.8억이므로 100계약이면 최소 수십억이 나와야 한다)
+    if abs(합["외국인"]) / 1e8 < 1 and abs(계약) >= 100:
+        print(f"  ⚠️ 선물수급 — 외국인 {계약:+,.0f}계약인데 금액 {합['외국인']:,.0f}(원?) — 단위 불명, 금액 저장 안 함")
+        return {"외국인계약": round(계약), "sosok": "api", "이력": {}}
     if not any(abs(x) > 0 for x in 합.values()):
         print(f"  ⚠️ 선물수급 — 금액이 전부 0 (계약 {계약:+,.0f}). 금액 필드를 못 읽음 → 금액은 저장 안 함")
         return {"외국인계약": round(계약), "sosok": "api", "이력": {}}
