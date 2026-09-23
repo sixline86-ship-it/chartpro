@@ -18,6 +18,7 @@ import json
 import os
 import io
 import math
+import statistics
 import time      # ⚠️ 매집 스캔 sleep — 차단 방지
 import yfinance as yf
 from datetime import datetime
@@ -603,6 +604,23 @@ THEME_API_HEADERS = {
 }
 
 
+# 🆕 2026-09-23 HO 지시 — «오늘 뜬 테마에서 우선주는 빼줘.»
+#   [왜] 우선주는 본주와 같은 회사다. S7 테마 목록 1번에 «삼성전자우»가 서면
+#     같은 회사를 두 번 세는 셈이고, 거래대금합도 본주 몫이 겹친다.
+#   [판별] 이름 끝이 우/우B/1우/2우B/우(전환) «그리고» 종목코드 끝자리가 0이 아니다.
+#     (본주 코드는 0으로 끝난다 — 삼성전자 005930, 삼성전자우 005935)
+#     이름만 보면 «~우»로 끝나는 보통주를 잘못 거를 수 있어 코드로 한 번 더 확인.
+_PREF_RE = re.compile(r"(\d?우[A-Z]?|우\(전환\))$")
+
+
+def _is_pref(name, code=None):
+    nm = str(name or "").strip()
+    if not _PREF_RE.search(nm):
+        return False
+    c = str(code or "").strip()
+    return (not c) or (c[-1:] != "0")
+
+
 def _pick(d, *cands):
     """딕셔너리에서 후보 키를 순서대로 찾는다. 대소문자·언더스코어 무시."""
     if not isinstance(d, dict):
@@ -1073,6 +1091,7 @@ def collect_themes_and_gauge():
     #   레코드를 만든다. 대장주·종목 펼침은 비지만, 순위·확산도·거래대금은
     #   살아서 테마 레이더·섹터×테마·채점판이 다시 채워진다.
     분석 = []
+    _테마행 = {}          # 테마명 → 구성종목 전체(쏠림 계산용 · 2026-09-23)
     for _rank_i, (테마명, 번호, 테마등락) in enumerate(후보20, 1):
         _meta = (API맵.get(번호) or {}) if API목록 else {}
         _appended = False
@@ -1080,6 +1099,8 @@ def collect_themes_and_gauge():
         # 🔴 2026-09-15 — 1순위: SSR 페이지 직접 읽기(진짜 정답, 위 함수 설명 참고).
         _srows, _swhy = _theme_stocks_via_page(번호, rank_hint=_rank_i)
         if _srows:
+            _srows = [x for x in _srows if not _is_pref(x.get("종목명"), x.get("코드"))]
+            _테마행[테마명] = _srows
             _유효 = [x for x in _srows if x["등락률"] is not None]
             총 = len(_유효)
             오른 = sum(1 for x in _유효 if x["등락률"] > 0)
@@ -1113,6 +1134,8 @@ def collect_themes_and_gauge():
         if API목록 and not _appended:
             _rows = _theme_stocks_via_api(번호)
             if _rows:
+                _rows = [x for x in _rows if not _is_pref(x.get("종목명"), x.get("코드"))]
+                _테마행[테마명] = _rows
                 _유효 = [x for x in _rows if x["등락률"] is not None]
                 총 = len(_유효)
                 오른 = sum(1 for x in _유효 if x["등락률"] > 0)
@@ -1225,11 +1248,72 @@ def collect_themes_and_gauge():
         return [(v - lo) / (hi - lo) * 100 for v in vals]
 
     강도 = 순위점수([a["테마등락"] for a in 분석])
-    거래 = 순위점수([a["거래대금합"] for a in 분석])
     폭 = 순위점수([a["확산도"] for a in 분석])
+
+    # 🔴🔴 2026-09-23 HO 지시 — 거래대금을 «크기»가 아니라 «평소 대비 몇 배»로.
+    #   [문제] 9/23 실측: S7·CXL·소캠·온디바이스 AI·전력반도체 다섯 테마의
+    #     거래대금이 전부 약 11조. 다섯 모두 삼성전자(하루 5.45조)를 품고 있어서다.
+    #     35% 몫이 «삼성전자가 들어 있는 테마인가»를 재고 있었다 — 테마의 열기가
+    #     아니라 구성종목의 덩치를 잰 것. CXL 19위→6위에도 이 효과가 섞였다.
+    #   [고침] 그 테마의 «평소 거래대금»(theme_history 최근 10번 기록의 중앙값)
+    #     대비 오늘이 몇 배인가. 덩치가 달라도 «평소보다 뜨거운가»로 줄 세운다.
+    #   [순위로 바꾸는 이유] 배수는 한 테마가 30배만 나와도 나머지가 0 근처로
+    #     눌린다(최소·최대 정규화의 약점). 그래서 배수의 «백분위»를 점수로 쓴다.
+    #   [기록 없는 테마] 평소를 모르면 판단하지 않는다 → 중간값 50점.
+    #     (3번 미만 기록 = 평소를 말할 수 없음)
+    #   ⚠️ 한계: theme_history는 그날 상위 50개만 저장한다. 그래서 «평소»는
+    #      «순위권에 들었던 날들의 평소»라 실제 평소보다 높게 잡힌다 → 배수는
+    #      보수적으로(작게) 나온다. 모든 테마가 같은 방향으로 치우치므로 순서는 유지된다.
+    #   ⚠️ 5,000만 백만원(50조)을 넘는 값은 9/22 단위 섞임 사고 값이라 버린다.
+    try:
+        _hist = (_load_json(THEME_HISTORY_FILE, {}) or {}).get("일별") or {}
+    except Exception:
+        _hist = {}
+    _과거 = {}
+    for _d in sorted(k for k in _hist if k < DATE):
+        for _x in (_hist[_d] or []):
+            _v = _x.get("거래대금")
+            if _v is not None and 0 < _v <= 5e7:
+                _과거.setdefault(_x.get("테마명"), []).append(_v)
+    for a in 분석:
+        _p = _과거.get(a["테마명"], [])[-10:]
+        a["평소거래대금"] = float(statistics.median(_p)) if len(_p) >= 3 else None
+        a["거래배수"] = (round(a["거래대금합"] / a["평소거래대금"], 2)
+                        if a["평소거래대금"] and a["거래대금합"] else None)
+    _배수들 = sorted(a["거래배수"] for a in 분석 if a["거래배수"] is not None)
+    def _백분위(v):
+        if v is None or len(_배수들) < 2:
+            return 50.0
+        아래 = sum(1 for b in _배수들 if b < v)
+        같음 = sum(1 for b in _배수들 if b == v)
+        return (아래 + (같음 - 1) / 2) / (len(_배수들) - 1) * 100
+    거래 = [_백분위(a["거래배수"]) for a in 분석]
+    print(f"  📐 거래대금 = 평소 대비 배수 · 기준 있음 {len(_배수들)}/{len(분석)}개 테마"
+          + (f" · 배수 중앙 {statistics.median(_배수들):.2f}배" if _배수들 else ""))
+
+    # 🆕 2026-09-23 — 한 종목 쏠림. 테마 거래대금의 80% 이상이 한 종목이면
+    #   «테마가 뜬 게 아니라 종목 하나가 뜬 것». 9/23 광고 테마: 1.1조 중
+    #   1.09조(98%)가 상장 첫날 와이즈플래닛컴퍼니 한 종목이었다.
+    #   → 점수 × 0.8 (감점) + 화면 표시용 «쏠림» 값 저장.
+    #   ⚠️ 0.8은 판단값이다(실측 근거 아직 없음). 쏠림 테마의 다음 날 생존을
+    #      기록해 두었다가 표본이 쌓이면 조정한다.
+    for a in 분석:
+        _r = _테마행.get(a["테마명"]) or []
+        _am = [x.get("거래대금") or 0 for x in _r]
+        _tot = sum(_am)
+        if _tot > 0 and len(_am) >= 2:
+            _i = max(range(len(_am)), key=lambda k: _am[k])
+            a["쏠림"] = round(_am[_i] / _tot * 100, 1)
+            a["쏠림종목"] = _r[_i].get("종목명")
+        else:
+            a["쏠림"], a["쏠림종목"] = None, None
 
     for i, a in enumerate(분석):
         a["주도력점수"] = round(강도[i] * 0.40 + 거래[i] * 0.35 + 폭[i] * 0.25, 1)
+        if (a.get("쏠림") or 0) >= THEME_SOLO_PCT:
+            a["주도력점수"] = round(a["주도력점수"] * THEME_SOLO_PENALTY, 1)
+            print(f"  ⚠️ 쏠림 감점 [{a['테마명']}] {a['쏠림종목']} {a['쏠림']:.0f}% "
+                  f"→ 점수 ×{THEME_SOLO_PENALTY}")
 
     분석.sort(key=lambda x: x["주도력점수"], reverse=True)
 
@@ -1300,6 +1384,8 @@ def collect_themes_and_gauge():
 
 
 THEME_HISTORY_FILE = "theme_history.json"
+THEME_SOLO_PCT = 80        # 한 종목이 테마 거래대금의 이 % 이상 = 쏠림 (2026-09-23)
+THEME_SOLO_PENALTY = 0.8   # 쏠림 테마 점수 배율 — 판단값, 표본 쌓이면 조정
 
 
 def _save_theme_history(주도N):
@@ -1335,6 +1421,9 @@ def _save_theme_history(주도N):
         "거래대금": t.get("거래대금합"),
         "구역": t.get("계좌구역"),
         "점수": t.get("주도력점수"),
+        "거래배수": t.get("거래배수"),        # 평소 대비 배수 (2026-09-23~)
+        "쏠림": t.get("쏠림"),                # 한 종목 비중 % (2026-09-23~)
+        "쏠림종목": t.get("쏠림종목"),
         # 상위 종목은 이름만 — 가격·등락은 archive에 이미 있어 중복 저장이다
         "종목들": [ (x.get("종목명") if isinstance(x, dict) else x)
                   for x in (t.get("종목") or []) ][:4],
@@ -6487,8 +6576,14 @@ def collect_account_grid(테마후보):
             # 🆕 2026-08-24 — 6번째 자리에 **종목코드** 추가(토론방 링크용).
             #  ⚠️ 배열 순서를 바꾸지 않고 **뒤에만 붙인다.** 앞을 건드리면
             #     과거 archive를 읽는 코드가 전부 어긋난다.
+            # 🆕 2026-09-23 — 7번째 자리에 «시총(억원)». 대장주 회전율용.
+            #   [왜] 회전율을 «시총 순위로 근사»했더니 삼성전자 109%가 나왔다
+            #     (실제 약 1%). 시총은 이미 시총 API로 받고 있었는데 사전에 안 담았다.
+            #   ⚠️ 뒤에만 붙인다(위 규칙 그대로). 옛 archive는 6칸이라 읽는 쪽이
+            #      «7칸이 있을 때만» 쓴다.
             n: [종목구역.get(n, []), v.get("순위"), v.get("층"),
-                round(v.get("등락률", 0), 2), v.get("시장"), v.get("코드")]
+                round(v.get("등락률", 0), 2), v.get("시장"), v.get("코드"),
+                (round(v["시총"]) if isinstance(v.get("시총"), (int, float)) else None)]
             for n, v in 유니버스.items()
         },
     }
@@ -6673,7 +6768,13 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 군중 나침반 수집 중 예외({type(e).__name__}: {e}) — 생략합니다")
         군중나침반 = None
-    마감브리핑 = collect_briefings()
+    # 🔴 HO 지시 2026-09-23 — «마감브리핑 자막은 빼줘.»
+    #   [왜] Supadata 무료 한도 초과(429)로 몇 주째 제목만 들어왔고, 해석글 품질에
+    #     주는 몫이 작았다. 유료 전환보다 빼는 쪽을 골랐다.
+    #   [어떻게] 수집만 끈다. 빈 배열이면 generate_report는 「마감브리핑」 칸을
+    #     [] 로 두는 규칙(규칙 7)이 이미 있고, build_html은 이 값을 쓰지 않는다.
+    #   ⚠️ 함수(collect_briefings)는 남겨 둔다(원칙3) — 다시 켤 땐 이 줄만 되돌린다.
+    마감브리핑 = []
 
     # 🔴🔴 2026-09-22 — 테마 종목 «현재가»를 시총 API 가격으로 채운다.
     #   [사고] 9/15 새 테마 API 전환 뒤 현재가가 매일 0/22였다. 로그로 확인하니
