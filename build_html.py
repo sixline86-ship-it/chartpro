@@ -1178,6 +1178,8 @@ def archive_days(days=None):
             try:
                 with open(apath(f), encoding="utf-8") as fp:
                     d = json.load(fp)
+                if isinstance(d.get("주도섹터"), list):     # 신규상장 제외(2026-09-23)
+                    d["주도섹터"] = [t for t in d["주도섹터"] if _theme_ok(t.get("테마명"))]
             except Exception:
                 continue
             ymd = str(d.get("날짜") or "")
@@ -11682,12 +11684,74 @@ _FS_TL_SEQ = [0]
 # ══════════════════════════════════════════════════════════════
 
 def _theme_hist_all():
-    """theme_history.json의 {날짜: [테마...]}. 없으면 {}."""
+    """theme_history.json의 {날짜: [테마...]}. 없으면 {}.
+
+    🔴 2026-09-23 — 여기서 두 가지를 «읽을 때» 거른다(원본 파일은 안 건드린다).
+      ① 제외 테마(신규상장) — HO 지시(9/07) «항상 제외»가 테마 탭에는 안 먹고
+         있었다. 레이더 4위·생존곡선·판단 탭에 «2026 하반기 신규상장»이 떴다.
+         이 함수 하나를 테마 탭 모든 코너가 거치므로 여기서 한 번에 막는다.
+      ② 단위가 섞인 날 복구 — _theme_amt_repair() 설명 참고.
+    """
     try:
         d = load_json("theme_history.json") or {}
-        return d.get("일별") or {}
+        일별 = d.get("일별") or {}
     except Exception:
         return {}
+    out = {}
+    for dd, xs in 일별.items():
+        xs = [x for x in (xs or []) if _theme_ok(x.get("테마명"))]
+        out[dd] = _theme_amt_repair(dd, xs)
+    return out
+
+
+# 🔴🔴 2026-09-23 — 거래대금 «단위 섞임» 사고 (9/22·9/23 발행분)
+#
+#   [무슨 일] collect_data가 새 stocklist의 거래대금을 «크기로» 단위 추측했다
+#     (100억 원 이상만 백만원으로 변환). 그래서 한 테마 안에 백만원과 원이 섞여
+#     더해졌다. 실측 9/23: 반도체 대표주 10,700,000(정상) vs 반도체 재료/부품
+#     138,939,621,919(원이 섞임 — 1경 3,894조라는 뜻이 된다).
+#
+#   [피해가 두 겹이다]
+#     ① 화면의 «돈» — 어제 대비 +650,128% 같은 숫자.
+#     ② 순위 자체 — 주도력점수 = 등락 40 + «거래대금 순위» 35 + 확산도 25.
+#        소형주가 많은 테마일수록 «원» 종목이 많아 거래대금이 부풀었고,
+#        그 35%가 순위를 비틀었다. 9/23 레이더의 반도체 재료/부품·장비
+#        «오늘 새로 진입»은 상당 부분 이 부풀림이었다.
+#
+#   [판별] 테마 하나의 거래대금이 5,000만 백만원(=50조)을 넘을 수 없다
+#     (그날 시장 전체가 28조). 그런 값이 하나라도 있는 날 = «섞인 날».
+#     날짜를 손으로 적지 않는다 — 오늘 밤 재수집으로 9/23이 깨끗해지면
+#     자동으로 «섞인 날»에서 빠진다.
+#
+#   [복구] 섞인 날은
+#     · 거래대금 → None (화면은 «침묵», 없는 숫자를 지어내지 않는다)
+#     · 점수 → 오염 안 된 두 재료(등락 40·확산도 25)로 «순서만» 다시 매기고,
+#       점수 «값»은 그날 원래 점수 분포를 그대로 옮겨 붙인다.
+#       [왜 값을 옮기나] 누적 순위는 4일치 점수를 더한다. 새 점수 척도를 쓰면
+#       그날 하루의 무게가 다른 날과 달라진다. 분포를 유지해야 무게가 같다.
+#   ⚠️ 이건 «근사»다. 진짜 거래대금 순위는 복구할 수 없다(구성종목 대금이
+#      저장돼 있지 않다). 그래서 이 날들은 화면 어디에도 «돈» 숫자를 내지 않는다.
+THEME_AMT_MAX = 5e7        # 백만원 — 테마 하나가 넘을 수 없는 거래대금(50조)
+
+
+def _theme_amt_repair(dd, xs):
+    if not any((x.get("거래대금") or 0) > THEME_AMT_MAX for x in xs):
+        return xs
+    def _mm(v):
+        v = [a if a is not None else 0 for a in v]
+        lo, hi = min(v), max(v)
+        return [50.0] * len(v) if hi == lo else [(a - lo) / (hi - lo) * 100 for a in v]
+    s1 = _mm([x.get("등락") for x in xs])
+    s3 = _mm([x.get("확산도") for x in xs])
+    깨끗 = [s1[i] * 0.40 + s3[i] * 0.25 for i in range(len(xs))]
+    분포 = sorted((x.get("점수") or 0 for x in xs), reverse=True)
+    순서 = sorted(range(len(xs)), key=lambda i: -깨끗[i])
+    new = [dict(x) for x in xs]
+    for k, i in enumerate(순서):
+        new[i]["점수"] = 분포[k]
+        new[i]["거래대금"] = None
+        new[i]["_단위복구"] = True
+    return new
 
 
 # ══════════════════════════════════════════════════════════
@@ -13181,7 +13245,7 @@ def build_my_themes(data):
     """
     import json as _j
     ti = load_json("theme_index.json") or {}
-    그룹 = ti.get("그룹") or {}
+    그룹 = {k: v for k, v in (ti.get("그룹") or {}).items() if _theme_ok(k)}  # 신규상장 제외
     if not 그룹:
         return ""
     rk = _theme_cum_rank()
@@ -13579,7 +13643,7 @@ def _theme_members(data):
     except Exception:
         그룹 = {}
     for nm, 종목들 in 그룹.items():
-        if nm in out or not 종목들:
+        if nm in out or not 종목들 or not _theme_ok(nm):     # 신규상장 제외
             continue
         cand = []
         for n in 종목들:
@@ -13691,6 +13755,21 @@ _RADAR_ZONE = {
     "바이오·헬스": 248, "통신·유틸리티": 288, "자동차·부품": 318, "소비·유통": 342,
 }
 _RADAR_ETC = 222          # 구역 미상 테마를 모으는 「기타」 방향
+# 🔴 2026-09-23 — 레이더 섹터 «고리». 지금 쓰는 계좌구역 15칸 이름 그대로 +기타.
+#   순서 = 이웃 업종끼리 붙여 둔 원형 줄(반도체 옆에 전자·부품, 그 옆 AI…).
+#   두 번째 값 = 원 밖에 쓰는 짧은 이름.
+#   ⚠️ 위의 _RADAR_ZONE·_RADAR_LABEL은 옛 11칸 체계라 더는 안 쓴다(원칙3 — 남겨둠).
+_RADAR_RING = [
+    ("반도체", "반도체"), ("전기전자·부품", "전자·부품"), ("AI·소프트웨어", "AI·SW"),
+    ("인터넷·게임·엔터", "인터넷·게임"), ("통신·유틸리티", "통신"),
+    ("전력·신재생·원전", "전력·원전"), ("2차전지·소재", "2차전지"),
+    ("에너지·정유·화학", "에너지·화학"), ("건설·부동산", "건설"),
+    ("조선·기계·방산", "조선·방산"), ("자동차·부품", "자동차"), ("운송·물류", "운송"),
+    ("금융·지주", "금융"), ("소비·유통·식품", "소비재"), ("바이오·제약", "바이오"),
+    ("기타", "기타"),
+]
+RADAR_GAP_EMPTY = 0.45    # 사이에 빈 섹터가 있을 때 남기는 틈(테마 0.45개 폭)
+RADAR_GAP_TOUCH = 0.12    # 고리에서 원래 이웃인 두 섹터 사이의 얇은 경계
 _RADAR_LABEL = [("반도체", 0), ("2차전지", 72), ("에너지", 136),
                 ("건설", 172), ("기타", 222), ("통신", 288), ("자동차", 318)]
 # ══════════════════════════════════════════════════════════════
@@ -13983,25 +14062,7 @@ def build_theme_radar(data):
     if not rows:
         return '<div class="tm-none">오늘 테마 데이터가 없습니다.</div>'
 
-    # 각도 배정 — 「기타」는 부채꼴로 벌리고, 같은 구역은 ±14도씩 벌린다
-    etc = [r for r in rows if r["zone"] not in _RADAR_ZONE]
-    for i, r in enumerate(etc):
-        r["ang"] = _RADAR_ETC + (i - (len(etc) - 1) / 2) * 30
-    # 🔴 HO 지적 2026-09-21 — 뉴로모픽 반도체가 «자동차» 쪽에 찍혔다.
-    #   [원인] 같은 섹터를 ±14도씩 번갈아 벌렸는데, 반도체가 6개면
-    #     0·+14·−28·+42·−56·+70도까지 퍼져 이웃 섹터(자동차 318도,
-    #     2차전지 72도) 자리로 넘어갔다.
-    #   [고침] 섹터마다 «±18도 부채꼴 안»에서만 고르게 나눈다.
-    #     점이 가까워도 중심 거리(순위)가 달라 겹치지 않는다.
-    _zn = {}
-    for r in rows:
-        if "ang" not in r:
-            _zn.setdefault(r["zone"], []).append(r)
-    for z, lst in _zn.items():
-        a = _RADAR_ZONE[z]
-        n = len(lst)
-        for i, r in enumerate(lst):
-            r["ang"] = a if n == 1 else a - 18 + 36 * i / (n - 1)
+    # 각도 배정은 아래(RR·POS를 정한 뒤)에서 한다 — 겹침을 «좌표로» 재야 해서.
 
     # 상태 판정 — 5일 전 대비 몇 칸 움직였나
     # 🔴 2026-09-17 — 4단계(new/in/hold/out) → «세 코너 공통» 6단계.
@@ -14014,8 +14075,13 @@ def build_theme_radar(data):
         r["st"] = move_tier(r["from"], r["h"][-1])
 
     CX, CY, RMAX = 190, 182, 120
+    # 🔴 HO 지시 2026-09-23 — 1·2·3위가 한가운데서 겹쳤다(HBM·온디바이스·기판).
+    #   [원인] 1위 반지름이 16px인데 점 반지름이 최대 13.5px. 한가운데는
+    #     각도를 아무리 벌려도 거리가 안 나온다.
+    #   [고침] 1위를 가운데서 30px 띄운다. 10위 자리(136px)는 그대로라
+    #     4·7·10위 고리와 섹터 글자 자리는 안 바뀐다.
     def RR(rank):
-        return (min(rank, 10) - 1) / 9 * RMAX + 16
+        return 30 + (min(rank, 10) - 1) / 9 * (RMAX - 14)
     def POS(rank, a):
         t = math.radians(a - 90); r = RR(rank)
         return CX + r * math.cos(t), CY + r * math.sin(t)
@@ -14026,42 +14092,138 @@ def build_theme_radar(data):
         t = nm.split("(")[0].strip()
         return t if len(t) <= mx else t[:mx - 1] + "…"
 
+    # ── 각도 배정 ────────────────────────────────────────────
+    # 🔴 HO 지시 2026-09-23 — «반도체 테마가 많으면 반도체 칸을 넓히고,
+    #   테마가 없는 섹터는 좁혀라. 반도체 테마끼리 안 겹치게.»
+    #
+    #   [전] 섹터마다 각도가 «고정»(반도체 0°, 2차전지 72° …)이고, 한 섹터 안은
+    #     ±18도(36도) 부채꼴에만 몰아넣었다. 8개 중 5개가 반도체인 날에도
+    #     반도체 몫은 36도 — 원의 10%에 5개가 끼었다. 빈 섹터 7곳은
+    #     아무것도 없는데 원의 대부분을 차지했다.
+    #     또 섹터 이름이 옛 체계(IT·전자·바이오·헬스…)라 지금 15칸 중
+    #     절반이 이름이 안 맞아 «기타»로 쏠렸다(전기전자·부품·조선·방산 등).
+    #
+    #   [후] 칸 넓이 = 그 섹터에 찍힌 테마 «개수». 빈 섹터는 이름 없이
+    #     얇은 틈으로만 남긴다(연달아 빈 섹터 여럿도 틈 하나).
+    #     → 칸 넓이 자체가 정보가 된다: 반도체가 원의 절반을 먹었으면
+    #       «오늘 돈이 반도체 한 동네에 몰렸다»가 그림만으로 읽힌다.
+    #   ⚠️ 섹터 «순서»는 고정한다(이웃 업종끼리 붙여 둠). 날마다 순서가
+    #      바뀌면 매일 보는 사람이 위치를 새로 외워야 한다. 넓이만 바뀐다.
+    #   ⚠️ 반도체는 항상 12시 방향 — 가장 자주 등장하는 섹터의 기준점.
+    _ring = [z for z, _s in _RADAR_RING]
+    _cnt = {}
+    for r in rows:
+        r["zone2"] = r["zone"] if r["zone"] in _ring else "기타"
+        _cnt[r["zone2"]] = _cnt.get(r["zone2"], 0) + 1
+    _occ = [z for z in _ring if z in _cnt]
+    _seg = []                                   # (구역 또는 None, 폭)
+    for i, z in enumerate(_occ):
+        _seg.append((z, float(_cnt[z])))
+        if len(_occ) > 1:
+            nz = _occ[(i + 1) % len(_occ)]
+            a1, a2 = _ring.index(z), _ring.index(nz)
+            사이 = (a2 - a1 - 1) % len(_ring)     # 두 섹터 사이 빈 섹터 수
+            _seg.append((None, RADAR_GAP_EMPTY if 사이 else RADAR_GAP_TOUCH))
+    _unit = 360.0 / sum(w for _z, w in _seg)
+    _arc, _pos, _gaps = {}, 0.0, []
+    for z, w in _seg:
+        if z:
+            _arc[z] = (_pos, _pos + w * _unit)
+        else:
+            _gaps.append((w, _pos + w * _unit / 2))   # (폭, 가운데 각도)
+        _pos += w * _unit
+    # 기준 섹터(반도체, 없으면 첫 섹터)의 가운데가 12시(0°)에 오도록 돌린다
+    _base = "반도체" if "반도체" in _arc else _occ[0]
+    _rot = -(_arc[_base][0] + _arc[_base][1]) / 2
+    _arc = {z: (s + _rot, e + _rot) for z, (s, e) in _arc.items()}
+    # 4·7·10위 글자는 «가장 넓은 빈 틈»에 쓴다 — 12시에 두면 반도체 점에 가려진다
+    #   (9/23 시안에서 «4위»가 온디바이스 AI 점 밑에 묻혔다).
+    _ringlab_a = (max(_gaps)[1] + _rot) if _gaps else 0.0
+
+    # 섹터 안: 칸을 균등하게 나눈 뒤, «누가 어느 칸에 앉을지»를 겹침이
+    #   가장 적게 고른다. 순위가 가까운 두 테마(1위·2위)는 반지름도 비슷해서
+    #   옆 칸에 앉으면 붙는다 — 그래서 최소 거리를 최대로 만드는 배치를 찾는다.
+    import itertools
+    for z, (s, e) in _arc.items():
+        lst = [r for r in rows if r["zone2"] == z]
+        k = len(lst)
+        slots = [s + (e - s) * (j + 0.5) / k for j in range(k)]
+        def _rad(r):
+            return 5.5 + (r["stay"] - 1) * 2.0
+        best, best_sc = None, None
+        cands = (itertools.permutations(range(k)) if k <= 7
+                 else [tuple(range(k))])
+        for perm in cands:
+            ps = [(POS(lst[i]["h"][-1], slots[perm[i]]), _rad(lst[i])) for i in range(k)]
+            sc = min((math.hypot(p[0][0] - q[0][0], p[0][1] - q[0][1]) - p[1] - q[1]
+                      for ii, p in enumerate(ps) for q in ps[ii + 1:]), default=0)
+            if best_sc is None or sc > best_sc + 1e-9:
+                best, best_sc = perm, sc
+        for i, r in enumerate(lst):
+            r["ang"] = slots[best[i]]
+
     sv, placed = [], []
-    for rank, lab in ((4, "4위"), (7, "7위"), (10, "10위")):
-        rr = RR(rank)
-        sv.append(f'<circle cx="{CX}" cy="{CY}" r="{rr:.1f}" fill="none" '
-                  f'stroke="#2b3648" stroke-width="1"/>')
-        sv.append(f'<text x="{CX+3}" y="{CY-rr+11:.1f}" fill="#55627a" '
-                  f'font-size="8.5">{lab}</text>')
-    for z, a in _RADAR_ZONE.items():
-        t = math.radians(a - 90)
-        sv.append(f'<line x1="{CX}" y1="{CY}" x2="{CX+RR(10)*math.cos(t):.1f}" '
-                  f'y2="{CY+RR(10)*math.sin(t):.1f}" stroke="#1e2634"/>')
-    t = math.radians(_RADAR_ETC - 90)
-    sv.append(f'<line x1="{CX}" y1="{CY}" x2="{CX+RR(10)*math.cos(t):.1f}" '
-              f'y2="{CY+RR(10)*math.sin(t):.1f}" stroke="#1e2634"/>')
+    # 섹터 칸 — 옅은 부채꼴을 깔아 «어디까지가 이 섹터인가»를 보이게 한다
+    # 섹터 바탕 — 이웃끼리 확실히 구별되게 세 가지 색을 돌려 쓴다
+    _WEDGE_FILL = ("#17243a", "#1d1a2e", "#142a2a")
+    def _wedge(s, e, r0, r1):
+        def P(a, r):
+            t = math.radians(a - 90)
+            return CX + r * math.cos(t), CY + r * math.sin(t)
+        big = 1 if (e - s) > 180 else 0
+        (x1, y1), (x2, y2) = P(s, r1), P(e, r1)
+        (x3, y3), (x4, y4) = P(e, r0), P(s, r0)
+        return (f'M{x1:.1f},{y1:.1f} A{r1},{r1} 0 {big} 1 {x2:.1f},{y2:.1f} '
+                f'L{x3:.1f},{y3:.1f} A{r0},{r0} 0 {big} 0 {x4:.1f},{y4:.1f}Z')
+    # 🔴 HO 지시 2026-09-23 (2차) — «섹터 영역이 어디부터 어디까지인지 모호하다.
+    #   중앙에서 뻗어가는 선으로 영역을 그어라. 너무 레이더처럼 안 해도 된다.
+    #   오히려 선들 때문에 헷갈린다.»
+    #   [뺀 것] ① 4·7·10위 동심원 — 섹터 경계선과 교차해 격자처럼 보였다.
+    #             순위는 점 안의 숫자가 이미 말한다(가운데 가까울수록 높다는 규칙은 유지).
+    #           ② 5일 전 자리 꼬리(점선) — 섹터 경계를 넘어 옆 칸까지 뻗어
+    #             «이 점이 어느 섹터냐»를 흐렸다. 움직임은 색(빠르게↑·↑·제자리·↓)과
+    #             아래 목록의 「5일 전 N위 → 오늘 N위」가 이미 말한다.
+    #   [남긴 것] 중심에서 바깥까지 곧게 뻗은 섹터 경계선 + 섹터마다 다른 바탕색.
+    for i, z in enumerate(_occ):
+        s, e = _arc[z]
+        if e - s >= 359.9:                       # 섹터가 하나뿐 = 원 전체
+            sv.append(f'<circle cx="{CX}" cy="{CY}" r="{RR(10)+8:.1f}" '
+                      f'fill="#16202e" opacity="0.55"/>')
+            continue
+        sv.append(f'<path d="{_wedge(s, e, 0.01, RR(10) + 12)}" '
+                  f'fill="{_WEDGE_FILL[i % len(_WEDGE_FILL)]}"/>')
+    # (4·7·10위 동심원은 2026-09-23 HO 지시로 뺐다 — 위 설명 참고)
+    # 섹터 경계선
+    for z in _occ:
+        for a in _arc[z]:
+            if _arc[z][1] - _arc[z][0] >= 359.9:
+                break
+            t = math.radians(a - 90)
+            sv.append(f'<line x1="{CX}" y1="{CY}" '
+                      f'x2="{CX+(RR(10)+12)*math.cos(t):.1f}" '
+                      f'y2="{CY+(RR(10)+12)*math.sin(t):.1f}" '
+                      f'stroke="#5a6b88" stroke-width="1.3"/>')
     # 섹터 글자를 «먼저» 배치하고 점유 목록에 등록 — 테마 글자가 이걸 피해간다
-    for z, a in _RADAR_LABEL:
+    #   빈 섹터는 글자를 안 쓴다(틈만 남는다). 찍힌 섹터만 «이름 개수».
+    _SH = dict(_RADAR_RING)
+    for z in _occ:
+        s, e = _arc[z]
+        a = (s + e) / 2
         t = math.radians(a - 90)
-        x, y = CX + 150 * math.cos(t), CY + 150 * math.sin(t)
-        sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#7d8ca3" font-size="9.5" '
-                  f'letter-spacing="1.5" text-anchor="middle" '
-                  f'dominant-baseline="central">{z}</text>')
-        placed.append((x - len(z) * 11 / 2 - 2, y - 6, len(z) * 11 + 4, 13))
+        x, y = CX + 156 * math.cos(t), CY + 156 * math.sin(t)
+        lab = f"{_SH[z]} {_cnt[z]}"
+        w = len(lab) * 10 + 4
+        x = min(max(x, w / 2 + 2), 378 - w / 2)          # 좌우 끝에서 잘리지 않게
+        y = min(max(y, 9), 363)
+        sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#9aa8bd" font-size="10" '
+                  f'font-weight="700" text-anchor="middle" '
+                  f'dominant-baseline="central">{lab}</text>')
+        placed.append((x - w / 2, y - 7, w, 14))
 
     for r in rows:
         a = r["ang"]; x, y = POS(r["h"][-1], a)
         c = _MC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
-        if r["from"]:
-            ox, oy = POS(r["from"], a)
-            d = math.hypot(x - ox, y - oy)
-            if d > 1:
-                ux, uy = (ox - x) / d, (oy - y) / d
-                sv.append(f'<line x1="{x+ux*(rad+2):.1f}" y1="{y+uy*(rad+2):.1f}" '
-                          f'x2="{ox:.1f}" y2="{oy:.1f}" stroke="{c}" stroke-width="1.5" '
-                          f'stroke-dasharray="3 3" opacity="0.65"/>')
-                sv.append(f'<circle cx="{ox:.1f}" cy="{oy:.1f}" r="2.6" fill="none" '
-                          f'stroke="{c}" stroke-width="1.2" opacity="0.7"/>')
+        # (5일 전 자리 꼬리는 2026-09-23 HO 지시로 뺐다 — 위 설명 참고)
         sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad+4:.1f}" fill="{c}" opacity="0.16"/>')
         sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad:.1f}" fill="{c}"/>')
         sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#0a0d12" '
@@ -14096,6 +14258,20 @@ def build_theme_radar(data):
                 tot += ox * oy
         return tot
 
+    # 🔴 2026-09-23 — 글자가 «자기 섹터 칸 밖»에 앉으면 어느 섹터 테마인지 헷갈린다
+    #   (시안에서 «반도체 기판» 글자가 경계선을 넘어 빈 틈에 걸쳤다).
+    #   글자 상자의 네 귀퉁이 중 칸 밖에 나간 개수만큼 벌점을 준다.
+    def _in_arc(px, py, z):
+        s0, e0 = _arc[z]
+        if e0 - s0 >= 359.9:
+            return True
+        ang = (math.degrees(math.atan2(py - CY, px - CX)) + 90) % 360
+        return ((ang - s0) % 360) <= ((e0 - s0) % 360 or 360)
+    def _out_of_zone(box, z):
+        l, t, w, h = box
+        return 400.0 * sum(1 for px, py in ((l, t), (l + w, t), (l, t + h), (l + w, t + h))
+                           if not _in_arc(px, py, z))
+
     for r in rows:
         x, y, rad, _a = r["_p"]
         nm = short(r["n"], 9); w = len(nm) * 9.8 + 3; h = 13
@@ -14115,7 +14291,7 @@ def build_theme_radar(data):
             if l < 4 or l + w > 376 or ly2 - h < 2 or ly2 > 364:
                 continue                      # 그림 밖으로 나가는 자리는 버린다
             box = (l, ly2 - h + 2, w, h)
-            ov = _overlap(box)
+            ov = _overlap(box) + _out_of_zone(box, r["zone2"])
             if ov == 0:
                 best = (lx, ly2, anc, box); break      # 깨끗한 자리 → 즉시 채택
             if best_ov is None or ov < best_ov:
@@ -20073,6 +20249,10 @@ if __name__ == "__main__":
     if data is None:
         print(f"❌ {DATA_PATH} 없음. collect_data.py 먼저 실행.")
         exit(1)
+    # 🔴 HO 지시 2026-09-23 — 신규상장은 «테마에서 뺀다». 새 collect_data는 수집에서
+    #   이미 빼지만, 그 전에 쌓인 날(과 오늘 재수집 전 데이터)도 여기서 거른다.
+    data["주도섹터"] = [t for t in (data.get("주도섹터") or [])
+                       if _theme_ok(t.get("테마명"))]
     report = load_json(REPORT_PATH)
     if report is None:
         print(f"⚠️ {REPORT_PATH} 없음 (해석글 미생성) — '오늘의 시장'은 안내문으로 채움.")
