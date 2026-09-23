@@ -791,10 +791,27 @@ def _norm_stocks(rows):
             continue
         # 🔴 2026-09-22 — 새 stocklist는 거래대금을 «원»으로 줄 수 있다(시총 API가 그랬다).
         #   화면·주도점수는 «백만원» 기준이라, 원이면 백만원으로 맞춘다.
-        _amt = to_num(_pick(it, "accumulatedTradingValue", "tradingValue", "tradeAmount",
-                            "accTradeValue", "amount"))
-        if _amt is not None and _amt >= 1e10:
-            _amt = _amt / 1e6
+        # 🔴🔴 2026-09-23 — 단위가 «종목마다» 섞였다(9/22·9/23 두 번 발행).
+        #   [전] «1e10(=100억 원) 이상이면 원으로 보고 ÷100만» — 크기로 단위를 추측했다.
+        #     그래서 거래대금 100억 이상 종목만 백만원으로 바뀌고, 그 아래 종목은
+        #     «원» 그대로 남았다. 한 테마 안에서 두 단위가 더해졌다.
+        #     실측: 와이즈플래닛 1,068,419(백만원·변환됨) + 케이앤에스 7,855,875,000(원·그대로)
+        #   [피해] ① 테마 거래대금 변화 «+650,128%» ② 주도력점수의 35%(거래대금 순위)가
+        #     «작은 종목이 많은 테마»를 위로 끌어올림 → 순위표 자체가 비틀림.
+        #   [고침] 새 stocklist의 tradeAmount는 «항상 원»이다(시총 API와 같은 개편 · 9/15 실측).
+        #     크기로 추측하지 않고 «어떤 키에서 왔나»로 단위를 정한다.
+        _amt_key, _amt = None, None
+        for _k in ("accumulatedTradingValue", "tradingValue", "tradeAmount",
+                   "accTradeValue", "amount"):
+            _v = _pick(it, _k)                   # _pick = 대소문자 무시(기존 규칙 그대로)
+            if _v not in (None, ""):
+                _amt_key, _amt = _k, to_num(_v)
+                break
+        if _amt is not None:
+            if _amt_key == "tradeAmount":
+                _amt = _amt / 1e6                  # 원 → 백만원 (크기와 상관없이)
+            elif _amt >= 1e10:
+                _amt = _amt / 1e6                  # 출처 미확인 키 — 예전 추측 유지
         out.append({
             "종목명": clean_name(str(nm)),
             # 🔴 2026-09-21 — 9/15(새 테마 API 전환)부터 현재가가 전부 None이었다.
@@ -1028,6 +1045,18 @@ def collect_themes_and_gauge():
     #   [비용] 0에 가깝다 — 2차 상세는 이미 계산돼 있고 담기만 한다.
     THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "80")) if API목록 else 20
     유효 = [c for c in 후보 if c[2] is not None and not math.isnan(c[2])]
+    # 🔴 HO 지시 2026-09-23 — «하반기 신규상장은 테마에서 빼. 의미없잖아.»
+    #   [전] 화면(build_html)에서만 걸렀다(9/07). 그래서 수집 단계에선 살아 있어
+    #     주도섹터·주도력점수 정규화·theme_history·AI 해석 입력에 전부 들어갔다.
+    #     9/23: 해석글이 «신규상장 테마가 주도섹터 상위권»이라고 썼고,
+    #     포착 탭 카드에 «신규상장 · 테마 1위»가 떴다.
+    #   [후] 후보 단계에서 뺀다 → 뒤따르는 모든 곳에서 사라진다.
+    #   ⚠️ 연도·반기가 바뀌어도 걸리게 «이름에 들어가면» 거른다.
+    _비테마 = ("신규상장", "신규 상장")
+    _빠짐 = [c[0] for c in 유효 if any(k in str(c[0]) for k in _비테마)]
+    if _빠짐:
+        print(f"  🚫 테마 아님(상장 시기로 묶인 자루) 제외: {' · '.join(_빠짐)}")
+    유효 = [c for c in 유효 if not any(k in str(c[0]) for k in _비테마)]
     유효.sort(key=lambda x: x[2], reverse=True)
     후보20 = 유효[:THEME_CAND_MAX]
     print(f"📊 1차 후보(등락률 상위) {len(후보20)}개 → 상세 분석 중...")
