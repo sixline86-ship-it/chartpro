@@ -4140,6 +4140,7 @@ def collect_strength_radar(지수종가=None):
     신규 = {"코스피": [], "코스닥": []}
     가격맵 = {}          # 종목명 → {"현재가": float, "등락률": float}  (추적 갱신용)
     시장맵 = {"코스피": "0", "코스닥": "1"}
+    global _대금유니버스_캐시     # 🆕 2026-09-24 — 종목뉴스 우선순위(거래대금 상위)가 쓴다
 
     for 시장, sosok in 시장맵.items():
         종목들 = []
@@ -4251,6 +4252,12 @@ def collect_strength_radar(지수종가=None):
                     "현재가": 현재가num, "등락률": 등락률,
                 })
 
+        # 🆕 2026-09-24 — 이 시장에서 오늘 이미 다 긁은 «거래대금 있는 전 종목»을
+        #   버리지 않고 남긴다. 종목뉴스가 «오늘 거래대금 상위»를 고를 때 쓴다.
+        #   ⚠️ 새로 크롤링하지 않는다 — 강세 레이더가 이미 받은 걸 재사용할 뿐이라 비용 0.
+        for _s in 종목들:
+            if _s.get("거래대금") is not None:
+                _대금유니버스_캐시[_s["종목명"]] = _s
         후보 = [s for s in 종목들
                 if s["시총"] >= MIN_시총 and s["거래대금"] >= MIN_거래대금
                 and not _str_excluded(s.get("종목명"))]             # ① ETF·스팩·우선주 제외
@@ -5016,6 +5023,7 @@ def collect_market_halts():
 #  ⚠️ 샌드박스에서 DART가 403이라 **실측 검증을 못 했다.**
 #     실패해도 아무 일도 안 일어나는 형태로만 만든다. 첫 실행 후 로그 확인.
 _유니버스_캐시 = {}          # collect_account_grid가 채운다(프로필이 참조)
+_대금유니버스_캐시 = {}       # collect_strength_radar가 채운다(종목명 → {거래대금,...}) · 종목뉴스 우선순위용
 # 🔴 2026-09-16 — (대형끝, 중형끝) 순위 경계.
 #   전 종목(1,500개↑)을 받으면 (100, 300) 고정이지만, 네이버 개편으로
 #   유니버스가 100종목 수준으로 줄면 같은 비율로 좁혀 세 층이 살아나게 한다.
@@ -5456,6 +5464,7 @@ SNEWS_재시도일 = 180
 #    화면에 나가는 건 대부분 레이더 종목(약 230개)이고 이들이 우선순위 1이라,
 #    3일이면 레이더 종목은 사실상 매번 최신으로 유지된다.
 SNEWS_갱신주기일 = int(os.environ.get("CP_SNEWS_REFRESH_DAYS", "3"))
+SNEWS_대금상위N = int(os.environ.get("CP_SNEWS_TOP_AMT", "300"))  # 🆕 거래대금 상위 몇 종목을 후보 풀로 볼지
 # 🔴 2026-09-07 (2차) — «반드시 최신이어야 하는 종목» 목록.
 #   ⚠️ 이건 구독자 문제의 해법이 **아니다.** 구독자가 담은 종목은
 #      브라우저(localStorage)에만 있어 서버가 알 수 없고, 그래서 결국
@@ -5505,6 +5514,88 @@ def _unescape(t):
     except Exception:
         pass
     return re.sub(r"\s+", " ", t).strip()
+
+
+# 🆕 2026-09-24 HO 지시 — «내 종목 뉴스 중 필요한 것만 골라내야 한다.»
+#   [1단계] 지금은 **로그로만** 본다(Q3: 처음 며칠은 화면에 안 붙이고 기준을
+#   다듬는다). 그래서 기사마다 분류만 매겨 저장하고(화면 쪽 코드는 이 필드를
+#   아직 안 읽으므로 안전하다), 로그에 집계만 찍는다.
+#   [기준] 종목명이 제목에 직접 나오는지 + 사건 키워드로 3단.
+_NEWS_RED = ("실적", "영업이익", "적자전환", "흑자전환", "수주", "계약",
+             "공급계약", "유상증자", "무상증자", "전환사채", "신주인수권",
+             "자사주", "배당", "감자", "상장폐지", "거래정지", "관리종목",
+             "최대주주", "지분", "인수", "합병", "특허", "임상")
+_NEWS_YELLOW = ("목표가", "투자의견", "리포트", "전망", "규제", "정책",
+                "소송", "과징금", "조사", "인증", "승인")
+_NEWS_JUNK = ("특징주", "코스피", "코스닥", "마감시황", "오늘의 증시",
+              "사회공헌", "기부", "봉사", "ESG", "채용", "인사", "동정")
+
+
+def _뉴스분류(제목, 회사명):
+    t = str(제목 or "")
+    if any(k in t for k in _NEWS_JUNK):
+        return "백"
+    이름언급 = 회사명 and (회사명 in t or 회사명.replace("(주)", "") in t)
+    if any(k in t for k in _NEWS_RED):
+        return "홍" if 이름언급 else "황"
+    if any(k in t for k in _NEWS_YELLOW):
+        return "황"
+    return "홍" if 이름언급 else "백"
+
+
+# 🆕 2026-09-24 — HO가 알려준 모바일 종목뉴스 페이지
+#   (m.stock.naver.com/domestic/stock/{code}/news)의 실제 데이터 주소를
+#   찾는다. 화면(m.stock.naver.com)은 브라우저가 안에서 다시 API를 부르는
+#   구조라, 페이지 자체가 아니라 **그 API**를 찾아야 한다(테마 stocklist와
+#   같은 유형의 문제).
+#   ⚠️ 1단계다 — 주소와 형식을 «로그로만» 확인한다. 맞는 게 나오면 다음
+#   버전에서 _naver_stock_news와 같은 결과 모양({"t","u","d","s"})으로
+#   파싱해 붙인다. 지금은 기존 PC 수집(_naver_stock_news)을 그대로 쓴다.
+#   ⚠️ 개발 환경(이 대화)에서는 네이버 도메인 접속이 막혀 있어 여기서는
+#   시험할 수 없었다 — GitHub Actions 실행 로그로만 확인 가능하다.
+_MOBILE_NEWS_CAND = (
+    "https://m.stock.naver.com/api/news/stock/{code}?pageSize=20&page=1",
+    "https://m.stock.naver.com/api/news/domesticStock/{code}?page=1&pageSize=20",
+    "https://api.stock.naver.com/news/stock/{code}?pageSize=20",
+)
+_MOBILE_NEWS_TRIED = False
+
+
+def _mobile_news_probe(코드, 회사명):
+    """오늘 딱 한 번만 시도해 로그에 구조를 남긴다. 실패해도 조용히 넘어간다."""
+    global _MOBILE_NEWS_TRIED
+    if _MOBILE_NEWS_TRIED:
+        return
+    _MOBILE_NEWS_TRIED = True
+    for url_tmpl in _MOBILE_NEWS_CAND:
+        url = url_tmpl.format(code=코드)
+        try:
+            r = requests.get(url, headers={
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                "Referer": f"https://m.stock.naver.com/domestic/stock/{코드}/news",
+            }, timeout=8)
+            if r.status_code != 200:
+                print(f"   📱뉴스탐색 [{url}] → {r.status_code}")
+                continue
+            try:
+                j = r.json()
+            except Exception:
+                print(f"   📱뉴스탐색 [{url}] → 200이지만 JSON 아님 "
+                      f"(본문 앞 80자: {r.text[:80]!r})")
+                continue
+            # 구조만 로그로 — 실제 데이터는 아직 안 씀
+            if isinstance(j, list) and j:
+                keys = list(j[0].keys()) if isinstance(j[0], dict) else type(j[0]).__name__
+                print(f"   📱뉴스탐색 ✅ [{url}] → 리스트 {len(j)}건, 첫 항목 키: {keys}")
+                print(f"      예시: {json.dumps(j[0], ensure_ascii=False)[:300]}")
+            elif isinstance(j, dict):
+                print(f"   📱뉴스탐색 ✅ [{url}] → 딕셔너리 키: {list(j.keys())}")
+                print(f"      예시: {json.dumps(j, ensure_ascii=False)[:300]}")
+            return       # 하나라도 성공하면 나머지 후보는 안 본다
+        except Exception as e:
+            print(f"   📱뉴스탐색 [{url}] → 실패 {type(e).__name__}")
+    print("   📱뉴스탐색 — 후보 3개 모두 실패. 실제 주소는 HO가 앱/브라우저 "
+          "개발자도구 네트워크 탭에서 확인해 주셔야 합니다.")
 
 
 def _naver_stock_news(코드, 회사명):
@@ -5566,7 +5657,8 @@ def _naver_stock_news(코드, 회사명):
                 _u = "https://finance.naver.com" + _u
             기사.append({"t": _t, "u": _u,
                         "d": _d.group(1) if _d else "",
-                        "s": _unescape(_s.group(1)) if _s else ""})
+                        "s": _unescape(_s.group(1)) if _s else "",
+                        "c": _뉴스분류(_t, 회사명)})   # 🆕 홍/황/백 — 로그 집계 전용, 화면 미사용
             if len(기사) >= 15:
                 break
         return {"회사": 회사명, "코드": 코드, "원문길이": len(html),
@@ -5605,6 +5697,39 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     #    코드지도 전체에서 "아직 안 해본" 종목으로 채운다.
     대상 = [n for n in (레이더종목들 or []) if 코드지도.get(n)]
     _오늘 = DATE
+
+    # 🆕 2026-09-24 HO 지시 — 우선순위 2단계 «거래대금 상위».
+    #   [순서] ① 리포트에 나오는 종목(레이더 — 위에서 이미 채움)
+    #          ② 오늘 거래대금 상위 (이 블록)
+    #          ③ 나머지 순환 (아래 기존 «오래 안 받은 것부터» 로직)
+    #   [왜 2순위인가] 뉴스는 돈이 몰리는 종목에 몰린다. 실측: 저장된
+    #     3,962종목 중 1,086개는 기사가 아예 없다 — 전 종목을 고르게
+    #     도는 것보다, 거래가 활발한 곳부터 자주 보는 게 «필요한 뉴스를
+    #     놓치지 않는» 데 훨씬 효율적이다.
+    #   [재료] _대금유니버스_캐시 — 강세 레이더가 이미 받은 전 종목 거래대금을
+    #     재사용한다(새 크롤링 없음, 비용 0). 강세 레이더보다 먼저 이 함수가
+    #     불리면(예: 몰아 모으기 순서가 바뀌면) 캐시가 비어 있을 수 있어
+    #     조용히 건너뛴다 — 없어도 되는 보강이라 원칙 15와 같은 맥락이다.
+    if len(대상) < SNEWS_하루할당 and _대금유니버스_캐시:
+        _대금상위 = sorted(_대금유니버스_캐시.values(),
+                        key=lambda s: s.get("거래대금") or 0, reverse=True)
+        _추가 = 0
+        for _s in _대금상위[:SNEWS_대금상위N]:
+            n = _s.get("종목명")
+            if not n or n in 대상 or not 코드지도.get(n):
+                continue
+            _마지막시도 = 실패기록.get(n)
+            if _마지막시도 and _날짜차이(_오늘, _마지막시도) < SNEWS_재시도일:
+                continue
+            _수집일 = ((저장.get(n) or {}).get("수집일")) or ""
+            if _수집일 and _날짜차이(_오늘, _수집일) < SNEWS_갱신주기일:
+                continue        # 최근에 이미 받았으면 자리만 차지하지 않는다
+            대상.append(n)
+            _추가 += 1
+            if len(대상) >= SNEWS_하루할당:
+                break
+        if _추가:
+            print(f"   💰 거래대금 상위에서 {_추가}종목 추가 편성")
 
     # 🆕 2026-08-29 (2차) — 실측 확인: 폴백만 넣었더니 코드지도 앞쪽에
     #    몰린 휴면 법인(한빛네트·엔플렉스·동서정보기술 등)부터 시도해
@@ -5690,6 +5815,12 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     for nm in 정리[:SNEWS_하루할당 + len(_관심)]:
         time.sleep(PROFILE_SLEEP)
         res = _naver_stock_news(코드지도[nm], nm)
+        # 🆕 2026-09-24 — 오늘 처음 도는 종목 하나로 모바일 주소를 시험해 본다
+        #   (내부에서 1회 제한 — _MOBILE_NEWS_TRIED). 실패해도 위 res는 그대로 쓴다.
+        try:
+            _mobile_news_probe(코드지도[nm], nm)
+        except Exception as e:
+            print(f"   📱뉴스탐색 예외 {type(e).__name__} — 무시하고 진행")
         if not res:
             실패기록[nm] = DATE
             새실패 += 1
@@ -5706,6 +5837,12 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
             for _a in res["기사"][:3]:
                 print(f"      · [{_a.get('d','?')}] {_a.get('s','')} "
                       f"{_a['t'][:60]}")
+            # 🆕 2026-09-24 Q3 — 화면엔 아직 안 붙인다. 분류가 맞는지
+            #   HO가 로그로만 먼저 확인하고, 기준을 다듬은 뒤에 화면에 붙인다.
+            _집계 = {"홍": 0, "황": 0, "백": 0}
+            for _a in res["기사"]:
+                _집계[_a.get("c", "백")] = _집계.get(_a.get("c", "백"), 0) + 1
+            print(f"      🏷 분류(로그전용) 홍{_집계['홍']}·황{_집계['황']}·백{_집계['백']}")
     if 채움:
         with io.open(SNEWS_FILE, "w", encoding="utf-8") as _f:
             json.dump(저장, _f, ensure_ascii=False, separators=(",", ":"))
