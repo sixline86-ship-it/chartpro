@@ -10955,37 +10955,37 @@ def build_core(핵심편, data, 해석):
              + build_theme_radar(data)
              # 🌊 2026-09-19 — 돈의 이동 경로. 레이더가 «오늘 어디»를
              #   말한 직후에 «어디서 와서 어디로 가는 중»을 잇는다.
-             + build_money_flow() + _chapter_note("돈의이동")
+             + _chapter_block(build_money_flow(), "돈의이동")
              + f'<p class="sec-label">'
                f'<small>2단계 · 아직 10위 밖, 올라오는 중인 테마</small>'
                f'🛬 다가오는 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 같은 {THEME_CUM_DAYS}일 누적 <b>11~20위</b></span></p>'
-             + build_coming_themes(data) + _chapter_note("다가오는")
+             + _chapter_block(build_coming_themes(data), "다가오는", ("tm-foot",))
              # 🔎 2026-09-19 — 「다가오는 테마」가 11~20위를 본 직후에
              #   «그 밖»을 잇는다. 순위로 못 본 자리를 돈으로 본다.
-             + build_reverse_look(data) + _chapter_note("거꾸로")
+             + _chapter_block(build_reverse_look(data), "거꾸로", ("rv2-f", "rv2-note"))
              + f'<p class="sec-label">'
                f'<small>3단계 · 그 테마들이 어느 섹터 소속인가</small>'
                f'🗺️ 섹터 × 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 같은 순위를 섹터별로 · 섹터는 중앙값</span></p>'
-             + build_sector_theme(data) + _chapter_note("섹터테마")
+             + _chapter_block(build_sector_theme(data), "섹터테마", ("tm-sfoot", "tm-snote"))
              # 🔗 2026-09-19 — 섹터로 묶은 직후에 «데이터로 묶은 것»을 잇는다.
              #   섹터가 달라도 같이 움직이는 짝은 여기서만 보인다.
-             + build_theme_pairs() + _chapter_note("짝꿍")
+             + _chapter_block(build_theme_pairs(), "짝꿍", ("pp-w", "pp-f"))
              + f'<p class="sec-label">'
                f'<small>4단계 · 누적 말고, 오늘 하루만 센 테마</small>'
                f'🏆 오늘 뜬 테마'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 상승률 + 거래대금 + 확산도 기준</span></p>'
-             + build_sectors(data.get("주도섹터")) + _chapter_note("오늘뜬")
+             + _chapter_block(build_sectors(data.get("주도섹터")), "오늘뜬")
              + f'<p class="sec-label">'
                f'<small>5단계 · 앞서 지목한 테마, 그래서 맞았나</small>'
                f'📊 테마 채점판'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 우리가 지목한 테마의 그 뒤</span></p>'
-             + build_theme_scorecard() + _chapter_note("채점판"))
+             + _chapter_block(build_theme_scorecard(), "채점판", ("tsc-foot",)))
 
     _테마 = (_테마앞
              + hide("관제레이더", build_sector_radar())
@@ -11744,39 +11744,136 @@ _THEME_HIST_CACHE = {}
 _NOTES_CACHE = {}
 
 
-def _chapter_note(key):
+def _note_md(txt):
+    """짧은 마크다운 → HTML.
+    «### 제목» 소제목 · «- 항목» 목록 · «**굵게**» · 빈 줄 = 문단
+    🆕 2026-09-24 (가독성) — HO «글자가 너무 많다, 들어온 무리·나가는 무리처럼»
+      «> 글»           = 한 줄 포인트 상자
+      «@ 제목 | 이름 | 설명» = 무리 카드 (연속이면 격자로 나란히)
+      «! 글»           = 주의 한 줄
+    """
+    import re as _re, html as _h
+    # 🆕 2026-09-24 HO — «빨강은 실제 빨강 글씨, 주황은 실제 주황 글씨로(글자만)»
+    #   «{빨강:글}» → 레이더 점과 «같은 색» 글자. 색 이름이 곧 색이 되게 한다.
+    _색 = {"노랑": TM_NEW, "빨강": TM_HOT, "주황": TM_WARM,
+          "초록": TM_COOL, "파랑": TM_DOWN}
+    def _inl(t):
+        t = _h.escape(t)
+        t = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
+        return _re.sub(r"\{(노랑|빨강|주황|초록|파랑):(.+?)\}",
+                       lambda m: f'<b style="color:{_색[m.group(1)]}">{m.group(2)}</b>', t)
+    out, ul, cards = [], [], []
+    def _flush():
+        if ul:
+            out.append("<ul>" + "".join(f"<li>{x}</li>" for x in ul) + "</ul>")
+            ul.clear()
+        if cards:
+            out.append('<div class="cn-cards">' + "".join(cards) + "</div>")
+            cards.clear()
+    for blk in str(txt).split("\n"):
+        ln = blk.rstrip()
+        st = ln.lstrip()
+        if not st:
+            _flush(); continue
+        if st.startswith("@ "):
+            if ul:
+                out.append("<ul>" + "".join(f"<li>{x}</li>" for x in ul) + "</ul>"); ul.clear()
+            p = [x.strip() for x in st[2:].split("|")] + ["", ""]
+            cards.append(f'<div class="cn-card"><p class="cn-ct">{_inl(p[0])}</p>'
+                         f'<p class="cn-cn">{_inl(p[1])}</p>'
+                         f'<p class="cn-cd">{_inl(p[2])}</p></div>')
+            continue
+        _flush()
+        if st.startswith("### "):
+            out.append(f"<h5>{_inl(st[4:])}</h5>")
+        elif st.startswith("> "):
+            out.append(f'<div class="cn-pt">{_inl(st[2:])}</div>')
+        elif st.startswith("! "):
+            out.append(f'<p class="cn-warn">❗ {_inl(st[2:])}</p>')
+        elif st.startswith("- "):
+            ul.append(_inl(st[2:]))
+        else:
+            out.append(f"<p>{_inl(st)}</p>")
+    _flush()
+    return "".join(out)
+
+
+def _note_for(key):
     if "d" not in _NOTES_CACHE:
         try:
             d = load_json("theme_notes.json") or {}
             _NOTES_CACHE["d"] = (d.get("노트") or {}) if str(d.get("날짜")) == DATE else {}
         except Exception:
             _NOTES_CACHE["d"] = {}
-    txt = (_NOTES_CACHE["d"] or {}).get(key)
-    if not txt:
+    return (_NOTES_CACHE["d"] or {}).get(key)
+
+
+def _chapter_note(key, guides=""):
+    v = _note_for(key)
+    if not v:
         return ""
-    import re as _re, html as _h
-    def _inl(t):
-        t = _h.escape(t)
-        return _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t)
-    out, ul = [], []
-    def _flush():
-        if ul:
-            out.append("<ul>" + "".join(f"<li>{x}</li>" for x in ul) + "</ul>")
-            ul.clear()
-    for blk in str(txt).split("\n"):
-        ln = blk.rstrip()
-        if not ln.strip():
-            _flush(); continue
-        if ln.startswith("### "):
-            _flush(); out.append(f"<h5>{_inl(ln[4:])}</h5>")
-        elif ln.lstrip().startswith("- "):
-            ul.append(_inl(ln.lstrip()[2:]))
-        else:
-            _flush(); out.append(f"<p>{_inl(ln)}</p>")
-    _flush()
-    return ('<details class="cn"><summary>🔍 포인트 · 분석 · 판단'
-            '<span>눌러서 펼치기</span></summary>'
-            f'<div class="cn-b">{"".join(out)}</div></details>')
+    # 🔴 2026-09-24 HO — «읽는 방법 / 해석과 판단 두 칸. 읽는 방법은 따로 화살표로
+    #   접어줘 — 매번 뜨는 게 피로하다.»
+    # 🔴 2026-09-24 (2차) HO — «읽는 방법이 동떨어져 있어 위 챕터인지 아래 챕터인지
+    #   헷갈린다. 챕터 맨 아래 ⚠️ 안내문 자리에 두고, 그 안내문도 읽는 방법에 넣어라.»
+    #   → 순서: [챕터 본문] → 📖 읽는 방법(노트 + 챕터의 ⚠️·📌 안내문) → 💡 해석과 판단
+    #     guides = _chapter_block()이 챕터에서 뽑아 온 안내문 HTML.
+    if isinstance(v, dict):
+        해석 = _note_md(v.get("해석") or "")
+        읽는법 = _note_md(v.get("읽는법") or "")
+    else:
+        해석, 읽는법 = _note_md(v), ""
+    읽는법 = 읽는법 + (f'<div class="cn-guide">{guides}</div>' if guides else "")
+    html = ""
+    if 읽는법:
+        html += ('<details class="cn-how"><summary>📖 읽는 방법</summary>'
+                 f'<div class="cn-hb">{읽는법}</div></details>')
+    if 해석:
+        html += ('<details class="cn"><summary>💡 해석과 판단'
+                 '<span>눌러서 펼치기</span></summary>'
+                 f'<div class="cn-b">{해석}</div></details>')
+    return html
+
+
+def _pull_guides(html, classes):
+    """챕터 HTML에서 «읽는 법» 성격의 안내 요소(클래스로 지정)를 떼어 낸다.
+    반환: (안내문 뺀 본문, 떼어 낸 안내문 HTML). div는 중첩을 세어 끝을 찾는다."""
+    import re as _re
+    뽑음 = []
+    for cls in classes:
+        while True:
+            m = _re.search(r'<(p|div)\s+class="' + _re.escape(cls) + r'(?:\s[^"]*)?"[^>]*>', html)
+            if not m:
+                break
+            tag, st = m.group(1), m.start()
+            if tag == "p":
+                e = html.find("</p>", m.end())
+                if e < 0:
+                    break
+                e += 4
+            else:
+                depth, k = 1, m.end()
+                while depth and k < len(html):
+                    a = html.find("<div", k); b = html.find("</div>", k)
+                    if b < 0:
+                        break
+                    if 0 <= a < b:
+                        depth += 1; k = a + 4
+                    else:
+                        depth -= 1; k = b + 6
+                e = k
+            뽑음.append(html[st:e])
+            html = html[:st] + html[e:]
+    return html, "".join(뽑음)
+
+
+def _chapter_block(html, key, classes=()):
+    """챕터 본문 + (안내문을 품은) 읽는 방법 + 해석과 판단.
+    노트가 없는 날(오늘 해설이 없는 날)은 안내문을 떼지 않는다 — 본문 그대로."""
+    if not _note_for(key):
+        return html
+    body, guides = _pull_guides(html, classes)
+    return body + _chapter_note(key, guides)
 
 
 # 🆕 2026-09-23 — 쌍둥이 테마.
@@ -12241,10 +12338,12 @@ def theme_board():
            if 어제d else {})
     # 5일 전 자리 — 레이더와 «같은 창»을 쓴다(어긋나면 두 화면이 다른 말을 한다)
     _win = days[-5:]
-    과거 = {}
-    for dd in _win[:-1]:
+    과거, 과거일 = {}, {}
+    for _k, dd in enumerate(_win[:-1]):
         for i, (nm, _s) in enumerate(rk.get(dd) or []):
-            과거.setdefault(nm, i + 1)
+            if nm not in 과거:
+                과거[nm] = i + 1
+                과거일[nm] = len(_win) - 1 - _k      # 🔴 2026-09-24 — «며칠 전»을 실제로 센다
     나이맵, 중앙, 표본 = _theme_age_map()
     zm, am = _theme_zone_map(), _theme_amt_map()
 
@@ -12256,6 +12355,7 @@ def theme_board():
         돈 = ((b / a - 1) * 100) if (a and b) else None
         f5 = 과거.get(nm)
         out.append({"n": nm, "rk": pos, "y": 어제.get(nm), "from5": f5,
+                    "from5_ago": 과거일.get(nm),
                     "st": move_tier(f5, pos), "age": 나이맵.get(nm),
                     "돈": 돈, "zone": zm.get(nm) or "기타"})
     생존 = theme_survival() or {}
@@ -12350,7 +12450,7 @@ def _judge_light(t, 메타):
 
     if 내림 or 돈빠짐:
         if 내림:
-            근거.append(f'순위가 5일 전 {t["from5"]}위 → {t["rk"]}위로 밀렸어요')
+            근거.append(f'순위가 {t.get("from5_ago") or 4}일 전 {t["from5"]}위 → {t["rk"]}위로 밀렸어요')
         if 돈빠짐:
             근거.append(f'거래대금이 어제보다 {t["돈"]:.0f}% 줄었어요')
         return ("red", "식는 중", 근거)
@@ -12362,7 +12462,7 @@ def _judge_light(t, 메타):
         return ("yellow", "조건은 맞는데 늦음", 근거)
 
     if t["st"] in ("hot", "warm", "new"):
-        근거.append(f'5일 전 {t["from5"]}위 → {t["rk"]}위로 올라오는 중')
+        근거.append(f'{t.get("from5_ago") or 4}일 전 {t["from5"]}위 → {t["rk"]}위로 올라오는 중')
         # ⚠️ 2026-09-17 HO 지적 — 3일째인데 중앙값도 3일이면 «이른 자리»가
         #    아니라 «같은 자리»다. 같은 값에 «보다»를 쓰면 틀린 말이 된다.
         if 생존중앙 is None:
@@ -12612,7 +12712,7 @@ def theme_spots(data=None):
         #        덤으로 시간 순서도 맞는다: 5일 전 → 어제 → 오늘.
         chk = [
             (True, "10위권 안", f'{t["rk"]}위'),
-            (올라옴, "5일 전보다 앞",
+            (올라옴, "4일 전보다 앞",
              move_label(t["from5"], t["rk"]) if t["from5"] else "기록 부족"),
             (새로 or 어제상승, "어제보다 앞",
              ("어제는 20위 밖" if 새로
@@ -12908,7 +13008,7 @@ def build_spot_table(data=None):
             #   ⚠️ 순서가 곧 점의 순서다 — 왼쪽부터 1·2·3·4·5.
             f'<p class="sp-ck5"><b>조건 5칸</b>은 «이 테마에 던지는 5가지 '
             f'질문»이에요. 불이 켜진 게 <b>「그렇다」</b>입니다.<br>'
-            f'<i>①10위권 안인가</i> <i>②5일 전보다 앞인가</i> '
+            f'<i>①10위권 안인가</i> <i>②4일 전보다 앞인가</i> '
             f'<i>③어제보다 앞인가</i> <i>④시간이 남았나</i> '
             f'<i>⑤돈도 늘었나</i></p>'
             f'<p class="sp-tip">세로로도 읽어 보세요 — 「돈」 칸이 거의 비어 '
@@ -13472,6 +13572,69 @@ def build_my_themes(data):
             f'}}catch(e){{}}}})();</script>')
 
 
+# 🧪 2026-09-24 — «돈의 이동 경로» 100% 세로 막대 «시안».
+#   HO: «적용 전에 시안을 먼저 보여줘.» → CP_MF_V2=1 일 때만 그린다.
+#   실제 발행(환경변수 없음)에는 아무것도 안 나온다.
+#   [무엇을 보나] 날짜마다 막대 하나 = 그날 돈 전체(100%). 띠 두께 = 섹터 몫.
+#     시장 전체가 커지고 작아지는 «밀물·썰물»을 빼고, «몫의 이동»만 남긴다.
+#   ⚠️ 시안의 재료는 아직 옛 방식(10위권 테마 합 — 중복 포함)이다.
+#      실제 적용은 중복 없는 «섹터거래대금»이 5거래일 쌓인 뒤.
+def _mf_v2(dsw, 순):
+    if os.getenv("CP_MF_V2") != "1" or not 순:
+        return ""
+    W, H, top, bot, left = 340, 190, 26, 26, 6
+    n = len(dsw)
+    cw = (W - left * 2) / n
+    bw = cw * 0.72
+    sv = []
+    for i, d in enumerate(dsw):
+        tot = sum((v["per"].get(d, 0) or 0) for _z, v in 순)
+        x = left + i * cw + (cw - bw) / 2
+        if tot <= 0:
+            sv.append(f'<rect x="{x:.1f}" y="{top}" width="{bw:.1f}" height="{H-top-bot}" '
+                      f'fill="url(#mfhatch)" stroke="#2a3548"/>')
+            sv.append(f'<text x="{x+bw/2:.1f}" y="{top-8}" fill="#5f6b7d" font-size="8" '
+                      f'text-anchor="middle">기록없음</text>')
+        else:
+            y = H - bot
+            for k, (z, v) in enumerate(순):
+                a = v["per"].get(d, 0) or 0
+                if a <= 0:
+                    continue
+                h = (H - top - bot) * a / tot
+                y -= h
+                c = MF_PAL[min(k, len(MF_PAL) - 1)]
+                sv.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw:.1f}" height="{h:.1f}" '
+                          f'fill="{c}" opacity="0.9"/>')
+                if h >= 13 and i == n - 1:
+                    sv.append(f'<text x="{x+bw/2:.1f}" y="{y+h/2:.1f}" fill="#0a0d12" '
+                              f'font-size="8.5" font-weight="800" text-anchor="middle" '
+                              f'dominant-baseline="central">{a/tot*100:.0f}%</text>')
+            조 = tot / 1_000_000
+            sv.append(f'<text x="{x+bw/2:.1f}" y="{top-8}" fill="#8b95a5" font-size="8" '
+                      f'text-anchor="middle">{조:.0f}조</text>')
+        if i % 3 == 0 or i == n - 1:
+            sv.append(f'<text x="{x+bw/2:.1f}" y="{H-bot+13}" fill="#6f7a8b" font-size="8.5" '
+                      f'text-anchor="middle">{d[4:6]}/{d[6:8]}</text>')
+    범례 = "".join(f'<span style="display:inline-flex;align-items:center;gap:4px;margin:0 9px 4px 0">'
+                 f'<i style="width:9px;height:9px;border-radius:2px;background:'
+                 f'{MF_PAL[min(k, len(MF_PAL)-1)]}"></i>{z}</span>'
+                 for k, (z, _v) in enumerate(순))
+    return ('<div style="margin:14px 0 6px;padding:11px 10px 8px;border:1px dashed #3b4a63;'
+            'border-radius:11px;background:#0c131d">'
+            '<p style="margin:0 0 3px;font-size:12.5px;font-weight:800;color:#e8c33a">'
+            '🧪 시안 — 날짜별 100% 세로 막대</p>'
+            '<p style="margin:0 0 8px;font-size:10.5px;color:#8b95a5;line-height:1.55">'
+            '막대 하나 = 그날 돈 전체(100%) · 띠 두께 = 섹터 몫 · 위 숫자 = 그날 합계<br>'
+            '⚠️ 재료는 아직 옛 방식(테마 합·중복 포함) — 모양만 보는 시안이에요</p>'
+            f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block">'
+            '<defs><pattern id="mfhatch" width="6" height="6" patternUnits="userSpaceOnUse" '
+            'patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" '
+            'stroke="#3a4558" stroke-width="2"/></pattern></defs>'
+            + "".join(sv) + '</svg>'
+            f'<div style="font-size:10.5px;color:#aab4c2;margin-top:6px">{범례}</div></div>')
+
+
 def build_money_flow(win=10):
     """🌊 돈의 이동 경로 — 섹터 «거래대금»을 날짜별로 쌓는다.
 
@@ -13578,15 +13741,20 @@ def build_money_flow(win=10):
             f'<div class="mf-wrap">{"".join(블)}'
             f'<div class="mf-tr"><span class="mf-tn"></span>'
             f'<span class="mf-cs mf-ax">{축}</span>'
-            f'<span class="mf-td"></span></div></div>{흐름}'
-            f'<p class="mf-f">📌 <b>막대가 3일 연속 커지면</b> 돈이 들어오는 중 — '
+            f'<span class="mf-td"></span></div></div>{흐름}{_mf_v2(dsw, 순)}'
+            # 🔴 2026-09-24 HO — «읽는 방법을 따로 접어줘. 항시 나오게 하지 말고.»
+            #   📈 결론 한 줄(위 흐름)은 그날의 정보라 그대로 두고,
+            #   매일 같은 📌 안내만 «📖 읽는 방법»으로 접는다(레이더와 같은 모양).
+            f'<details class="cn-how" style="margin:8px 0 2px"><summary>📖 읽는 방법</summary>'
+            f'<div class="cn-hb">'
+            f'<p class="mf-f" style="margin:0">📌 <b>막대가 3일 연속 커지면</b> 돈이 들어오는 중 — '
             f'그 섹터 안에서 고르면 돼요.<br>'
             f'📌 <b>가장 큰 막대가 어제·그제였고 오늘 줄면</b> 정점을 지난 겁니다 '
             f'(이틀 연속 줄면 신호).<br>'
             f'📌 <b>0이었다가 막대가 처음 생기는 곳</b>이 다음 주자 후보예요.<br>'
             f'📌 <b>막대는 그대로인데 「테마 수」만 늘면</b> — 관심만 흩어지는 겁니다.<br>'
             f'▨ 빗금은 «돈이 없었다»가 아니라 <b>«기록이 없다»</b>예요 '
-            f'(2026-09-10까지 하루 10개만 저장).</p></div>')
+            f'(2026-09-10까지 하루 10개만 저장).</p></div></details></div>')
 
 
 def build_breadth_line():
@@ -14102,7 +14270,10 @@ def move_key(작게=False):
     항목 = [("new", "첫 등장"), ("hot", "빠르게 ↑"), ("warm", "↑"),
            ("hold", "제자리"), ("down", "↓")]
     return ('<div class="tm-key' + (' tm-key-s' if 작게 else '') + '">'
-            + "".join(f'<span><i style="background:{_MC[k]}"></i>{t}</span>'
+            + "".join(f'<span><i style="background:{_MC[k]}'
+                      + (';box-shadow:0 0 0 1.5px #0d1119,0 0 0 2.6px #ffffff'
+                         if k == "new" else "")
+                      + f'"></i>{t}</span>'
                       for k, t in 항목) + '</div>')
 
 
@@ -14317,8 +14488,13 @@ def build_theme_radar(data):
     #   다가오는 테마는 이미 고속·가속을 나누고 있어 축이 안 맞았다.
     #   이제 move_tier() 하나가 세 코너를 다 판정한다.
     for r in rows:
-        seq = [x for x in r["h"][:-1] if x and x <= THEME_TOPN]
-        r["from"] = seq[0] if seq else None
+        # 🔴 2026-09-24 HO — «"5일 전 3위"면 4일 전이라고 해야 하지 않아?»
+        #   맞다. 창은 오늘 포함 5거래일이라 가장 이른 날은 «4거래일 전»이다.
+        #   게다가 그날 20위 밖이었으면 시작점은 더 늦은 날(3·2·1일 전)이 된다.
+        #   → 고정 문구 «5일 전» 대신, 시작점이 실제로 «며칠 전»인지 센다.
+        _idx = [k for k, x in enumerate(r["h"][:-1]) if x and x <= THEME_TOPN]
+        r["from"] = r["h"][_idx[0]] if _idx else None
+        r["from_ago"] = (len(r["h"]) - 1 - _idx[0]) if _idx else None
         r["st"] = move_tier(r["from"], r["h"][-1])
 
     CX, CY, RMAX = 190, 182, 120
@@ -14468,17 +14644,69 @@ def build_theme_radar(data):
     for r in rows:
         a = r["ang"]; x, y = POS(r["h"][-1], a)
         c = _MC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
-        if r["from"]:      # 5일 전 자리 꼬리 (2026-09-23 3차에 복원)
-            ox, oy = POS(r["from"], a)
-            d = math.hypot(x - ox, y - oy)
-            if d > 1:
-                ux, uy = (ox - x) / d, (oy - y) / d
-                sv.append(f'<line x1="{x+ux*(rad+2):.1f}" y1="{y+uy*(rad+2):.1f}" '
-                          f'x2="{ox:.1f}" y2="{oy:.1f}" stroke="{c}" stroke-width="1.5" '
-                          f'stroke-dasharray="3 3" opacity="0.65"/>')
+        # ── 꼬리 = «5거래일 창의 첫 기록» 자리 → 오늘 자리 ──
+        #   ⚠️ 어제 대비가 아니다. 오늘 포함 최근 5거래일 중 가장 이른 날(4거래일 전)의
+        #      순위에서 출발한다. 그날 20위 밖이었으면 창 안에서 처음 20위 안에 든 날.
+        #      어제 대비는 아래 목록의 «어제 N위 ▲▼»가 맡는다.
+        # 🔴 HO 지시 2026-09-24 — «첫 등장도 꼬리가 있는 게 좋지 않나? 10위권 밖에서
+        #   올라왔으니 시작점 없는 점선으로. 원 밖으로 나오게 그려도 되고.»
+        #   [전] 11~20위에서 온 테마는 시작점이 «10위 고리 위»에 찍혀 «10위에서 왔다»로
+        #        잘못 읽혔고, 첫 등장(창 안에서 20위 밖)은 꼬리가 아예 없었다.
+        #   [후] 원 밖 = 10위 밖 — 한 가지 시각 규칙으로 통일.
+        #        · 1~10위에서 옴  : 원 안 시작점 ○ + 점선 (기존 그대로)
+        #        · 11~20위에서 옴 : 원 «밖»에 시작점 ○ (순위만큼 바깥으로) + 점선
+        #        · 첫 등장         : 원 밖 멀리서 들어오는 점선, 시작점 없음
+        #                           («어디서 왔는지 모른다»는 사실 그대로)
+        # 🔴 2026-09-24 HO — «기판·전력반도체·S7이 다 같은 시작점인데?»
+        #   [원인] 셋은 실제로 12~13위로 거의 같았고, 간격도 1칸=1.7px라
+        #     눈으로 구별이 안 됐다. → 간격을 1칸=2.6px로 넓히고,
+        #     원 밖 시작점 옆에 «13» 같은 순위 숫자를 작게 붙인다.
+        #     그림이 같아 보여도 숫자가 «어디서 왔는지»를 정확히 말한다.
+        def _out_r(rank):                        # 11위 → 고리 바로 밖, 20위 → +29px
+            return RR(10) + 6 + (min(rank, 20) - 11) * 2.6
+        if r["from"] is not None and r["from"] <= 10:
+            ox, oy = POS(r["from"], a); 시작점 = True
+        elif r["from"] is not None:
+            _t = math.radians(a - 90); _rr = _out_r(r["from"])
+            ox, oy = CX + _rr * math.cos(_t), CY + _rr * math.sin(_t); 시작점 = True
+        else:
+            _t = math.radians(a - 90); _rr = RR(10) + 36
+            ox, oy = CX + _rr * math.cos(_t), CY + _rr * math.sin(_t); 시작점 = False
+        d = math.hypot(x - ox, y - oy)
+        if d > 1:
+            ux, uy = (ox - x) / d, (oy - y) / d
+            sv.append(f'<line x1="{x+ux*(rad+2):.1f}" y1="{y+uy*(rad+2):.1f}" '
+                      f'x2="{ox:.1f}" y2="{oy:.1f}" stroke="{c}" stroke-width="1.5" '
+                      f'stroke-dasharray="{"3 3" if 시작점 else "2 4"}" '
+                      f'opacity="{0.65 if 시작점 else 0.75}"/>')
+            if 시작점:
                 sv.append(f'<circle cx="{ox:.1f}" cy="{oy:.1f}" r="2.6" fill="none" '
                           f'stroke="{c}" stroke-width="1.2" opacity="0.7"/>')
+                if r["from"] > 10:               # 원 밖 시작점엔 출발 순위 숫자
+                    #   섹터 이름 글자와 겹치면 옆으로 비켜 앉는다(9/23 시안: 전자파 «14»가
+                    #   «기타 1» 위에 겹침)
+                    _lr = _out_r(r["from"]) + 9
+                    for _da in (0, 9, -9, 16, -16):
+                        _tt = math.radians(a + _da - 90)
+                        _lx, _ly = CX + _lr*math.cos(_tt), CY + _lr*math.sin(_tt)
+                        _bx = (_lx - 7, _ly - 6, 14, 12)
+                        if not any(_bx[0] < p[0] + p[2] and p[0] < _bx[0] + _bx[2]
+                                   and _bx[1] < p[1] + p[3] and p[1] < _bx[1] + _bx[3]
+                                   for p in placed):
+                            break
+                    sv.append(f'<text x="{_lx:.1f}" '
+                              f'y="{_ly:.1f}" fill="{c}" '
+                              f'font-size="8" font-weight="700" opacity="0.9" '
+                              f'text-anchor="middle" dominant-baseline="central">'
+                              f'{r["from"]}</text>')
         sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad+4:.1f}" fill="{c}" opacity="0.16"/>')
+        # 🔴 2026-09-24 HO — «주황과 노랑이 구분이 잘 안 된다.»
+        #   색은 리포트 전체가 같은 상수(TM_NEW 등)를 쓰므로 여기서만 바꾸면 규칙이 깨진다.
+        #   대신 «첫 등장»에만 흰 점선 고리를 두른다 — 색이 헷갈려도 모양으로 구별된다.
+        if r["st"] == "new":
+            sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad+3.2:.1f}" fill="none" '
+                      f'stroke="#ffffff" stroke-width="1.3" stroke-dasharray="2.2 2.2" '
+                      f'opacity="0.9"/>')
         sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad:.1f}" fill="{c}"/>')
         sv.append(f'<text x="{x:.1f}" y="{y:.1f}" fill="#0a0d12" '
                   f'font-size="{9.5 if rad < 8 else 10.5}" font-weight="800" '
@@ -14607,8 +14835,8 @@ def build_theme_radar(data):
                      if _ph else "")
         pid = f"tmr{r['r']}"
         arw, pan = _stock_panel(r["n"], mem.get(r["n"]) or [], pid)
-        mv = ("5일 전엔 없었음" if r["from"] is None
-              else f"5일 전 {r['from']}위 → {r['h'][-1]}위")
+        mv = (f"{len(r['h']) - 1}일간 20위 밖 → 첫 등장" if r["from"] is None
+              else f"{r['from_ago']}일 전 {r['from']}위 → {r['h'][-1]}위")
         # 어제 대비 — 새로 들어왔나, 몇 칸 움직였나
         _y = _어제순위.get(r["n"])
         if _y is None:
@@ -14690,8 +14918,7 @@ def build_theme_radar(data):
             #   근거는 주장 바로 옆에 있어야 한다.
             #   ⚠️ 오늘 1위 테마의 나이를 넘겨 «내 자리»를 표시한다.
             f'{move_key()}{"".join(_묶음)}{_chapter_note("레이더")}'
-            f'{build_theme_survival((_나이맵.get(rows[0]["n"]) if rows else None))}'
-            f'{_chapter_note("생존")}'
+            f'{_chapter_block(build_theme_survival((_나이맵.get(rows[0]["n"]) if rows else None)), "생존", ("sv-note",))}'
             # 🔴🔴 HO 지시 2026-09-19 — 한 줄짜리 각주를 «교체 카드»로 승격.
             #   [왜] 순환매는 «돈이 옮겨다니는 것»이다. 그런데 화면은
             #     「오늘 뭐가 떴나」만 말하고, 「어디서 나와 어디로 갔나」는
@@ -14701,9 +14928,10 @@ def build_theme_radar(data):
             #     하루 만의 손바뀜 — 지금 화면에선 전혀 안 보였다.
             #   ⚠️ 나간 쪽을 왼쪽(파랑), 들어온 쪽을 오른쪽(빨강)에 둔다.
             #      리포트 전체의 «파랑=빠짐 / 빨강=들어옴» 규칙과 같다.
-            + _swap_card(rk, days)
-            + f'<div class="tm-foot">🌫 어제 있다 오늘 빠진 곳 · '
-            f'{" · ".join(out) if out else "없음"}</div>' + _chapter_note("교체"))
+            + _chapter_block(
+                _swap_card(rk, days)
+                + f'<div class="tm-foot">🌫 어제 있다 오늘 빠진 곳 · '
+                f'{" · ".join(out) if out else "없음"}</div>', "교체", ("sw-n",)))
 
 
 # ──────────────────────────────────────────────────────────────
@@ -15472,6 +15700,28 @@ THEME_V17_CSS = """
 .cn-b ul{margin:4px 0 8px;padding-left:18px}
 .cn-b li{margin:3px 0}
 .cn-b b{color:#fff}
+.cn-pt{margin:2px 0 10px;padding:9px 11px;border-radius:9px;background:#172233;
+  border-left:3px solid #e8c33a;font-size:13px;font-weight:700;color:#f1f4f8;line-height:1.6}
+.cn-cards{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:6px 0 10px}
+@media (max-width:340px){.cn-cards{grid-template-columns:1fr}}
+.cn-card{padding:8px 9px;border-radius:9px;background:#121b28;border:1px solid #223047;min-width:0}
+.cn-ct{margin:0 0 3px!important;font-size:11px;font-weight:800;color:#8fc1ff}
+.cn-cn{margin:0 0 3px!important;font-size:12px;font-weight:800;color:#fff;line-height:1.45;
+  word-break:keep-all}
+.cn-cd{margin:0!important;font-size:11px;color:#9aa6b6;line-height:1.5}
+.cn-warn{font-size:11.5px;color:#c9a34a}
+.cn-how{margin:-6px 0 14px}
+.cn-how summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:5px;
+  padding:4px 2px;font-size:11.5px;font-weight:700;color:#7d8aa0}
+.cn-how summary::-webkit-details-marker{display:none}
+.cn-how summary::before{content:"▸";font-size:10px;transition:transform .15s}
+.cn-how[open] summary::before{transform:rotate(90deg)}
+.cn-hb{padding:8px 12px 10px;border-radius:9px;background:#0d141e;border:1px solid #1d2838;
+  font-size:12px;line-height:1.75;color:#b3bdca}
+.cn-guide{margin-top:8px;padding-top:8px;border-top:1px dashed #243044}
+.cn-guide p,.cn-guide div{margin:4px 0!important;font-size:11.5px!important;line-height:1.7!important}
+.cn{margin-bottom:22px!important}
+.cn-hb ul{margin:2px 0;padding-left:17px}.cn-hb li{margin:3px 0}.cn-hb b{color:#e6ebf1}
 /* ══ 🌊 돈의 이동 경로 ══ */
 /* 🔴 2026-09-23 HO — «테마명 글자가 너무 작다» → 테마명 8→10px, 섹터명 9→10.5px, 칸 폭 80→88px */
 .mf-box{background:#0d141c;border:1px solid #1d2734;border-radius:11px;
