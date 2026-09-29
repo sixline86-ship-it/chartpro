@@ -423,6 +423,88 @@ def _장마감후():
     return v
 
 
+# 🆕 2026-09-29 — 9/28 장중 스냅샷 «1회 보정» (HO 요청)
+#   [사고] 9/28은 14:10 장중 실행 한 번뿐이었고 저녁 정식 발행이 없었다.
+#     그래서 누적 파일에 코스피 6,938.55(-2.01%)·수급 잠정치가 남았다.
+#   [보정] 마감 후 언론 보도로 확인된 값만 바꾼다(지어내지 않는다):
+#     코스피 6,889.74 (-2.70%) · 거래대금 21.807조 · 개인 +2조6,054억 ·
+#     외국인 -3조2,263억 · 기관 -1조174억  — 서울신문 2026-09-28
+#     코스닥 846.58 (+0.25%)                — 머니투데이 2026-09-28
+#   ⚠️ 못 고치는 것(14:10 값 그대로): 테마 순위·레이더·등락종목수·코스닥 수급·
+#      선물·비차익·관제지수. 각 줄에 «보정» 메모를 남겨 숨기지 않는다.
+#   ⚠️ 한 번만 돈다 — 코스피가 아직 6938.55(14:10 값)인 줄만 고친다.
+_보정0928_메모 = ("9/28 14:10 장중값 → 지수 종가·코스피 수급만 마감값(언론 보도)으로 보정. "
+               "테마·레이더·등락종목수·코스닥수급·선물은 14:10 값")
+
+
+def _보정_20260928():
+    바뀜 = []
+    # ① market_history.json
+    try:
+        파일 = "market_history.json"
+        if os.path.exists(파일):
+            with open(파일, encoding="utf-8") as f:
+                본체 = json.load(f)
+            for r in (본체.get("일별") or []):
+                if r.get("날짜") == "2026-09-28" and r.get("코스피") == 6938.55:
+                    r.update({"코스피": 6889.74, "코스피등락": -2.70,
+                              "코스닥": 846.58, "코스닥등락": 0.25,
+                              "거래대금_코스피": 218070,
+                              "외국인_코스피": -32263.0, "기관_코스피": -10174.0,
+                              "개인_코스피": 26054.0, "실탄": -42437,
+                              "보정": _보정0928_메모})
+                    with open(파일, "w", encoding="utf-8") as f:
+                        json.dump(본체, f, ensure_ascii=False, indent=1)
+                    바뀜.append(파일)
+                    break
+    except Exception as e:
+        print(f"   ⚠️ 9/28 보정(market_history) 실패 — {type(e).__name__}: {str(e)[:120]}")
+    # ② flow_history.json
+    try:
+        파일 = "flow_history.json"
+        if os.path.exists(파일):
+            with open(파일, encoding="utf-8") as f:
+                이력 = json.load(f)
+            for r in (이력 if isinstance(이력, list) else []):
+                if r.get("날짜") == "20260928" and r.get("종가") == 6938.55:
+                    r.update({"외현": -32263.0, "기관": -10174.0, "실탄": -42437,
+                              "코스피등락": -2.70, "종가": 6889.74,
+                              "저가": min(r.get("저가") or 6889.74, 6889.74),
+                              "보정": _보정0928_메모})
+                    with open(파일, "w", encoding="utf-8") as f:
+                        json.dump(이력, f, ensure_ascii=False, indent=1)
+                    바뀜.append(파일)
+                    break
+    except Exception as e:
+        print(f"   ⚠️ 9/28 보정(flow_history) 실패 — {type(e).__name__}: {str(e)[:120]}")
+    # ③ archive/data_20260928.json (5일 캔들·성적표가 여기서 읽는다)
+    try:
+        파일 = os.path.join(ARCHIVE, "data_20260928.json")
+        if os.path.exists(파일):
+            with open(파일, encoding="utf-8") as f:
+                전체 = json.load(f)
+            jx = (전체.get("지수수급") or {})
+            kp = (jx.get("지수") or {}).get("코스피") or {}
+            if kp.get("종가") == "6,938.55":
+                kp.update({"종가": "6,889.74", "등락률": "-2.70", "거래대금": "21,807,000백만"})
+                try:
+                    if float(str(kp.get("저가", "0")).replace(",", "")) > 6889.74:
+                        kp["저가"] = "6,889.74"
+                except ValueError:
+                    pass
+                kd = (jx.get("지수") or {}).get("코스닥") or {}
+                kd.update({"종가": "846.58", "등락률": "0.25"})
+                jx["코스피_수급"] = {"개인": "26054.0", "외국인": "-32263.0", "기관계": "-10174.0"}
+                (전체.setdefault("데이터완전성", {}))["보정"] = _보정0928_메모
+                with open(파일, "w", encoding="utf-8") as f:
+                    json.dump(전체, f, ensure_ascii=False, indent=2)
+                바뀜.append(파일)
+    except Exception as e:
+        print(f"   ⚠️ 9/28 보정(data) 실패 — {type(e).__name__}: {str(e)[:120]}")
+    if 바뀜:
+        print(f"   🩹 9/28 장중값 → 마감값 보정 완료: {', '.join(바뀜)}")
+
+
 def _휴장줄_청소(휴장들):
     """이미 섞인 휴장일 줄을 걷어낸다. 휴장들 = {"YYYYMMDD", ...}"""
     if not 휴장들:
@@ -6925,6 +7007,7 @@ if __name__ == "__main__":
     print(f"=== {DATE} 데이터 수집 시작 | collect_data {SCRIPT_VERSION} ===\n")
     # 🧹 2026-09-28 — 이미 섞인 휴장일 줄(9/24 추석 등)을 먼저 걷어낸다
     _휴장줄_청소({d for d in _KRX_휴장_2026 if d <= DATE})
+    _보정_20260928()          # 🆕 2026-09-29 — 한 번만 돈다(이미 고쳐졌으면 아무것도 안 함)
 
     # ⚠️ 장 마감(15:30) 전에 돌리면 지수·주도섹터·강세레이더가 전부 0%로 잡힌다.
     #    데이터 버그가 아니라 실행 시각 문제라서, 눈에 띄게 경고만 남기고 진행한다.
