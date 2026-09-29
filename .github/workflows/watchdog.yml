@@ -1,0 +1,41 @@
+# ============================================================
+# .github/workflows/watchdog.yml — 🐕 저녁 정식 발행 누락 감시 (2026-09-29)
+# ------------------------------------------------------------
+#  cron-job.org가 매일 19:30(한국시간)에 이 워크플로를 부른다.
+#  오늘이 거래일인데 정식 발행이 안 끝났으면 **운영자에게만** 알린다.
+#  ⚠️ 읽기만 한다 — 수집·커밋·구독자 발송 없음. 몇 번을 돌려도 안전하다.
+#  ⚠️ GitHub 자체 예약(schedule)은 쓰지 않는다 — 몇 시간씩 밀리는 문제로
+#     daily.yml에서도 뺐다(2026-08-28). 타이밍은 cron-job.org가 맡는다.
+# ============================================================
+name: 발행 누락 감시
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Seoul
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 패키지 설치
+        run: pip install requests
+
+      - name: 오늘 정식 발행 확인
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python watchdog.py
