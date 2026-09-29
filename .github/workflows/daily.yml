@@ -60,7 +60,15 @@ on:
         #    ("용" 없음)이었다. GitHub는 options 목록에 정확히 없는 값을
         #    거부(422)한다 — 어제까지 되던 게 이 한 글자 차이로 갑자기
         #    막혔다. cron-job.org가 실제 보내는 값에 맞춰 여기를 고친다.
-        default: '보냄 (정식 발행용)'
+        # 🔴 2026-09-29 — 기본값을 '보내지 않음'으로 바꾼다 (HO 결정).
+        #    [WHY] 앞으로 디자인·챕터 확인은 Claude 대화창 미리보기로 하고,
+        #    정식 발행은 저녁 cron-job.org 자동 실행만 맡는다. 그런데 형이
+        #    버튼을 실수로 누르면 기본값 '보냄' 때문에 구독자 전원에게
+        #    알림이 나갔다(장중이면 잠정 리포트가). 수동 실행에서 발송은
+        #    «일부러 골라야만» 되게 한다.
+        #    ⚠️ cron-job.org는 본문에 '보냄 (정식 발행용)'을 직접 적어 보내므로
+        #       이 기본값과 무관하다 — 자동 발행의 발송은 그대로다.
+        default: '보내지 않음 (테스트)'
         options:
           - '보냄 (정식 발행용)'
           - '보내지 않음 (테스트)'
@@ -187,16 +195,51 @@ jobs:
             IS_HUMAN_MANUAL=yes
           fi
           if [ "$IS_HUMAN_MANUAL" = "yes" ]; then
-            echo "run=yes" >> $GITHUB_OUTPUT
-            echo "🔘 사람이 직접 실행 — 화면은 새로 만듭니다."
-            # 🆕 2026-09-22 — 해석글(과금)은 «오늘 정상 발행이 없을 때»만 새로 만든다.
+            # 🆕 2026-09-29 — 🚨 사람이 누른 실행을 «세 가지 경우»로 나눈다 (HO 결정).
+            #   [사고] 9/28 14:10 장중에 화면 확인용으로 누른 실행이
+            #     잠정 숫자 + 남의 날 글(9/24)로 라이브 첫 화면을 덮고,
+            #     누적 기록 13개 파일에 장중 값을 남겼다.
+            #   [원칙] 화면 확인은 Claude 대화창 미리보기로 한다. 이 버튼은
+            #     ① 발행이 끝난 뒤 «고친 디자인을 오늘 화면에 반영»하거나
+            #     ② 저녁 자동 발행이 빠졌을 때 «비상 발행»할 때만 쓴다.
+            #     그 밖의 경우(장중·휴장·주말·자정 이후 아침)엔 **아무것도 하지 않는다.**
+            DONE=no
             if [ -f "archive/report_${TODAY}.json" ] \
                && ! grep -q '"승계원본"' "archive/report_${TODAY}.json" 2>/dev/null \
-               && ! grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null \
-               && [[ "${{ inputs.force }}" != 예* ]]; then
-              echo "gen=no" >> $GITHUB_OUTPUT
-              echo "💰 오늘 해석글까지 정상 발행이 이미 있습니다 — 해석글은 **재사용(무료)**으로 돌립니다."
-              echo "   정말 새로 만들려면 실행할 때 '💸 강제 재생성'을 '예'로 고르세요."
+               && ! grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null; then
+              DONE=yes
+            fi
+            # 거래일 판정은 inherit_report.py의 목록을 그대로 쓴다(목록을 한 벌 더 만들지 않는다).
+            if python3 -c "import sys, inherit_report as m; sys.exit(0 if m._거래일('${TODAY}') else 1)"; then
+              TRADING=yes
+            else
+              TRADING=no
+            fi
+            HM=$(date +%H%M)
+
+            if [ "$DONE" = "yes" ]; then
+              # ① 오늘 정식 발행 완료 → 화면만 새로 (재수집·과금·발송 없음)
+              echo "run=yes" >> $GITHUB_OUTPUT
+              if [[ "${{ inputs.force }}" != 예* ]]; then
+                echo "gen=no" >> $GITHUB_OUTPUT
+                #   [WHY 재수집 안 함] 이미 확정된 데이터를 다시 받다가 그 순간
+                #   네이버가 한 번만 삐끗해도(테마 0개·수급 미수집) 멀쩡한 하루치가
+                #   깨진 값으로 덮어써진다. 목적은 «고친 디자인 반영»뿐이다.
+                echo "collect=no" >> $GITHUB_OUTPUT
+                echo "🧊 오늘 정식 발행 완료 — 확정 데이터·해석글 그대로, 화면만 다시 만듭니다(무료)."
+              else
+                echo "💸 강제 재생성 — 해석글을 다시 만듭니다(과금)."
+              fi
+            elif [ "$TRADING" = "yes" ] && [ "$((10#$HM))" -ge 1800 ]; then
+              # ② 거래일 18시 이후인데 정식 발행이 없음 → 비상 발행 허용
+              echo "run=yes" >> $GITHUB_OUTPUT
+              echo "🚑 거래일 18시 이후 · 정식 발행 없음 — 비상 발행으로 진행합니다."
+              echo "   (구독자 발송은 '텔레그램 = 보냄'을 직접 골랐을 때만 나갑니다)"
+            else
+              # ③ 장중·휴장·주말·자정 이후 → 아무것도 안 함
+              echo "run=no" >> $GITHUB_OUTPUT
+              echo "::warning title=수동 실행 차단::지금(${HM}, 거래일=${TRADING})은 정식 발행 전이라 수동 실행을 막았습니다. 수집·기록·사이트·발송 모두 그대로입니다. 화면 확인은 Claude 대화창 미리보기로 하세요. (허용: 발행 완료 후 자정 전 / 거래일 18시 이후 비상 발행)"
+              echo "🛑 수동 실행 차단 — 아무것도 바꾸지 않았습니다."
             fi
           elif [ -f "archive/report_${TODAY}.json" ]; then
             # ⚠️ 예전엔 report_*.html 존재 여부로 판단했다.
@@ -259,7 +302,7 @@ jobs:
       # ── ① 숫자 수집 ──
       - name: 데이터 수집
         id: collect
-        if: steps.guard.outputs.run == 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.guard.outputs.collect != 'no'
         env:
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
           SUPADATA_API_KEY: ${{ secrets.SUPADATA_API_KEY }}
