@@ -10954,7 +10954,12 @@ def build_core(핵심편, data, 해석):
              + build_theme_radar(data)
              # 🌊 2026-09-19 — 돈의 이동 경로. 레이더가 «오늘 어디»를
              #   말한 직후에 «어디서 와서 어디로 가는 중»을 잇는다.
-             + _chapter_block(build_money_flow(), "돈의이동")
+             # 🌊 2026-09-28 — A+ «10일 흐름»(중복 없는 섹터 몫). 옛 차트(테마 합 · 중복 포함)는
+             #   새 데이터가 다 찰 때까지 «이전 방식»으로 접어 둔다(원칙3 — 지우지 않는다).
+             + _chapter_block(build_money_flow_v3()
+                              + '<details class="cn-how" style="margin-top:6px"><summary>📦 이전 방식 보기 '
+                                '(10위권 테마 거래대금 합 · 중복 포함)</summary>'
+                              + build_money_flow() + '</details>', "돈의이동")
              + f'<p class="sec-label">'
                f'<small>2단계 · 아직 10위 밖, 올라오는 중인 테마</small>'
                f'🛬 다가오는 테마'
@@ -11719,6 +11724,9 @@ def _theme_hist_all():
         return {}
     out, _과거 = {}, {}
     for dd in sorted(일별):
+        # 🔴 2026-09-28 — 휴장일 줄은 읽지 않는다(9/24 추석에 «9/23 장»이 한 줄 더 적혔다).
+        if not _is_trading_ymd(dd):
+            continue
         xs = [x for x in (일별[dd] or []) if _theme_ok(x.get("테마명"))]
         xs = _theme_amt_repair(dd, xs)
         xs = _theme_ratio_rescore(xs, _과거)
@@ -11732,6 +11740,17 @@ def _theme_hist_all():
 
 
 _THEME_HIST_CACHE = {}
+
+
+def _is_trading_ymd(ymd):
+    """주말·KRX_HOLIDAYS가 아니면 거래일."""
+    try:
+        d = datetime.strptime(str(ymd)[:8], "%Y%m%d")
+        if d.weekday() >= 5:
+            return False
+        return str(ymd)[:8] not in (KRX_HOLIDAYS.get(d.year) or set())
+    except Exception:
+        return True
 
 
 # 🆕 2026-09-23 HO 지시 — «당분간 모든 테마 챕터 밑에 포인트 설명·분석·판단을
@@ -12850,6 +12869,13 @@ def _spot_log_save(spots):
     """
     try:
         기록 = load_json(SPOT_LOG) or {}
+        # 🔴 2026-09-28 — 휴장일 줄은 지우고, 휴장일엔 새로 쓰지 않는다
+        for _d in [d for d in 기록 if not _is_trading_ymd(d)]:
+            기록.pop(_d, None)
+        if not _is_trading_ymd(DATE):
+            with open(SPOT_LOG, "w", encoding="utf-8") as f:
+                json.dump(기록, f, ensure_ascii=False, indent=1)
+            return
         # 🔴 2026-09-19 — «대장주 종목코드와 종가»를 같이 남긴다.
         #   이 한 줄이 있어야 10거래일 뒤 «이 자리는 그 뒤 어땠나»를
         #   말할 수 있다. 없으면 이 리포트는 영원히 검증 불가다.
@@ -13049,7 +13075,9 @@ def _spot_v3(data=None):
       그래서 ✓를 늘어놓지 않고, 꺼진 것만 말로 붙인다:
         ⏱늦음(평균 수명 넘김) · 📉어제보다 밀림 · ↘4일 전보다 뒤 · 💰?돈 미확인 · 💸돈 줄어듦
       다 켜진 테마는 꼬리표가 없다 = «깨끗한 자리»가 한눈에 보인다."""
-    if os.getenv("CP_SPOT_V3") != "1":
+    # 🔴 2026-09-29 HO — «테마순환표 적용해서» → 나이 사다리를 기본으로 켠다.
+    #   끄려면 CP_SPOT_V3=0 (예전 점검표만 보이게).
+    if os.getenv("CP_SPOT_V3") == "0":
         return ""
     rows, _m = theme_board()
     rows = [r for r in (rows or []) if r.get("age")][:10]
@@ -13127,16 +13155,16 @@ def _spot_v3(data=None):
         # 수평: «N일째» 글자 줄높이를 칩 높이(약 25px)에 맞춰 첫 칩과 같은 선에 선다
         줄 += (f'<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0 0;'
               f'border-left:3px solid {색};padding-left:8px;margin-left:2px">'
-              f'<span style="flex:none;width:34px;font-size:11px;font-weight:800;color:#ffffff;'
+              f'<span style="flex:none;width:40px;white-space:nowrap;font-size:11px;font-weight:800;color:#ffffff;'
               f'line-height:25px">{a}일째</span>'
               f'<div style="flex:1;min-width:0">'
               + (칩 or '<span style="font-size:10.5px;color:#4d586a;line-height:25px">—</span>')
               + '</div></div>'
               + "".join(_pan[r["n"]][1] for r in lst))
-    return ('<div style="margin:10px 0 12px;padding:11px 10px 8px;border:1px dashed #3b4a63;'
+    return ('<div style="margin:10px 0 12px;padding:11px 10px 8px;border:1px solid #1d2734;'
             'border-radius:11px;background:#0c131d">'
             '<p style="margin:0 0 3px;font-size:12.5px;font-weight:800;color:#e8c33a">'
-            '🧪 시안 B — 나이 사다리</p>'
+            '🪜 테마 나이 사다리</p>'
             '<p style="margin:0 0 9px;font-size:10.5px;color:#8b95a5;line-height:1.6">'
             '줄 = 개별 테마 나이(위가 젊음) · 칩 = 순위·테마 · '
             '꼬리표 = <b style="color:#5b9bff">파랑 나쁜 소식</b> · <b style="color:#ff5a4e">빨강 좋은 소식</b>(돈 들어옴·재등판) · 테마를 누르면 종목</p>'
@@ -13550,11 +13578,22 @@ def build_judge_tab(data=None):
     #   순환표가 «오늘 어느 자리인가»를 말하고, 성과표가 «그 자리는
     #   보통 얼마 주나»를 말한다. 붙어 있어야 한 문장으로 읽힌다.
     _점검 = build_spot_table(data)
+    # 🔴 2026-09-29 HO 확정 — 나이 사다리(시안 B)가 순환표 본문, 조건 5칸 점검표는 접어 둔다.
+    #   [WHY] 사다리 한 장이 «지금 어느 자리냐»를 먼저 보여 주고, 5칸 점검은
+    #   근거가 궁금한 사람만 펼친다. 둘 다 펴 두면 같은 테마 10개를 두 번 읽는다.
+    _사다리 = _spot_v3(data)
+    if _사다리 and _점검:
+        _순환본문 = (_사다리
+                   + '<details class="cn-how" style="margin-top:6px">'
+                     '<summary>📋 조건 5칸 점검표 보기</summary>'
+                   + _점검 + '</details>')
+    else:
+        _순환본문 = _사다리 + (_점검 if _점검 else (층2 + 층3))
     # 🔴 2026-09-24 HO — «잠금탭에서도 읽는 방법과 해석과 판단을 다 동일하게.»
     #   블록마다 [본문] → 📖 읽는 방법(⚠️ 안내 포함) → 💡 해석과 판단.
     return (f'<div class="jd-wrap">'
             + _chapter_block(층1, "판단-한줄")
-            + _chapter_block(_spot_v3(data) + (_점검 if _점검 else (층2 + 층3)), "판단-순환", ("jd-warn",))
+            + _chapter_block(_순환본문, "판단-순환", ("jd-warn",))
             + _chapter_block(build_spot_perf(), "판단-성과", ("jd-warn",))
             + _chapter_block(build_my_themes(data), "판단-내종목")
             + _chapter_block(f'{층4}', "판단-엇갈림", ("jd-note",))
@@ -13848,6 +13887,143 @@ MF_SIG_REL = 0.20          # ① 임시 기준: 평소 몫의 ±20%
 MF_SIG_SIGMA = 2.0         # ② 20거래일 이후: 2σ (잦으면 2.5)
 MF_SIG_FLOOR = 0.5         # ② 최소 %p
 MF_SIG_MIN_DAYS = 20       # ①→② 전환에 필요한 새 데이터 거래일 수
+MF_WIN = 10                # 그래프 기간
+MF_BASE = 20               # 평소 = 그래프 바로 앞 20거래일
+MF_MIN_SHOW = 2            # 유효한 날이 이보다 적으면 «쌓는 중»만 보인다
+
+
+def _mf_series():
+    """archive의 «섹터거래대금»(중복 없음) → [(날짜, {섹터: 몫%})], 오래된 순.
+    ⚠️ 합계가 상식 범위(5조~100조) 밖인 날은 건너뛴다 — 9/24(단위 사고)가 그랬다.
+    ⚠️ «미분류»는 몫 계산의 분모엔 넣고, 선으로는 그리지 않는다."""
+    out = []
+    try:
+        for ymd, d in archive_days():
+            sd = (d or {}).get("섹터거래대금") or {}
+            tot = sd.get("합계") or 0
+            sec = sd.get("섹터") or {}
+            if not sec or not (50_000 <= tot <= 1_000_000):
+                continue
+            out.append((str(ymd), {k: v / tot * 100 for k, v in sec.items() if k != "미분류"}))
+    except Exception as e:
+        print(f"   ⚠️ 돈의 이동(새 방식) 읽기 실패 — {type(e).__name__}")
+    return out
+
+
+def _mf_demo():
+    """미리보기 전용 예시(CP_MF_DEMO=1). 실제 발행엔 절대 안 쓰인다."""
+    import math
+    names = {"반도체": 30.0, "바이오·제약": 10.0, "전력·신재생·원전": 9.0, "2차전지·소재": 8.0,
+             "조선·기계·방산": 7.0, "인터넷·게임·엔터": 7.0, "자동차·부품": 6.0, "금융·지주": 5.0}
+    shape = {"반도체": [-0.8,-0.2,0.5,0.3,0.9,1.0,3.5,4.0,6.5,8.2],
+             "조선·기계·방산": [0.4,0.1,-0.3,-0.2,-0.5,-0.4,0.1,0.8,1.2,1.6],
+             "금융·지주": [0.2,0.3,0.1,0.0,0.2,0.1,-0.1,-0.2,-0.4,-0.6],
+             "인터넷·게임·엔터": [0.5,0.4,0.6,0.3,0.2,0.2,0.0,-0.2,-0.4,-0.6],
+             "2차전지·소재": [1.2,0.9,0.6,0.4,0.3,0.1,-0.1,-0.4,-0.6,-0.9],
+             "바이오·제약": [-0.3,0.2,0.4,0.6,0.5,0.2,-0.2,-0.5,-0.7,-0.9],
+             "자동차·부품": [0.1,0.3,0.2,0.1,0.3,0.2,-0.1,-0.4,-0.6,-0.9],
+             "전력·신재생·원전": [2.8,3.1,2.4,1.9,1.2,0.4,-0.9,-2.0,-2.9,-3.7]}
+    days = ["20260908","20260909","20260910","20260915","20260916",
+            "20260917","20260918","20260921","20260922","20260923"]
+    base = []
+    for i in range(20):
+        base.append((f"base{i:02d}", {k: v + v * 0.17 * math.sin(i * 1.7 + len(k) * 0.9) for k, v in names.items()}))
+    win = [(d, {k: names[k] + shape[k][j] for k in names}) for j, d in enumerate(days)]
+    return base + win
+
+
+def build_money_flow_v3():
+    """🌊 돈의 이동 경로 — A+ «10일 흐름» (HO 확정 2026-09-24, 설계는 위 명세).
+    점 = 그날 하루 섹터 몫 − 평소 몫(%p). 평소 = 그래프 10일 «바로 앞» 20거래일 평균.
+    ▲(선 아래 빨강) / ▼(선 위 파랑) = 평소를 «크게» 처음 벗어난 날."""
+    import math, statistics
+    demo = os.getenv("CP_MF_DEMO") == "1"
+    ser = _mf_demo() if demo else _mf_series()
+    n_ok = len(ser)
+    if n_ok < MF_MIN_SHOW:
+        return (f'<div class="mf3"><p class="mf3-h">🌊 돈의 이동 경로 · 10일 흐름</p>'
+                f'<p class="mf3-wait">새 방식 데이터 <b>쌓는 중 {n_ok}/{MF_WIN}일</b> — '
+                f'전 종목 거래대금을 섹터별로 <b>중복 없이</b> 세기 시작했어요. '
+                f'{MF_MIN_SHOW}거래일이 모이면 선이 그려지고, {MF_WIN}일이면 화면이 다 차요.</p></div>')
+    win = ser[-MF_WIN:]
+    pre = ser[:-MF_WIN][-MF_BASE:]
+    base_src = pre if pre else ser          # 앞 기간이 없으면 쌓인 날 전체(임시)
+    base_n = len(base_src)
+    secs = sorted({k for _d, m in win for k in m})
+    평소 = {k: statistics.mean([m.get(k, 0.0) for _d, m in base_src]) for k in secs}
+    σ = {k: (statistics.pstdev([m.get(k, 0.0) for _d, m in base_src]) if base_n >= 2 else 0.0) for k in secs}
+    def 문턱(k):
+        if base_n >= MF_SIG_MIN_DAYS:
+            return max(MF_SIG_FLOOR, MF_SIG_SIGMA * σ[k])
+        return max(0.3, 평소[k] * MF_SIG_REL)
+    path = {k: [m.get(k, 0.0) - 평소[k] for _d, m in win] for k in secs}
+    days = [d for d, _m in win]
+    lab = lambda d: (f"{int(d[4:6])}/{d[6:8]}" if d[:4].isdigit() else d)
+    # 오늘 크게 벗어난 섹터만 색, 나머지 회색 — 너무 많으면 이름은 상·하위만
+    n = len(days)
+    W, H, L, R, T, Bt = 360, 300, 30, 118, 22, 34
+    allv = [v for k in secs for v in path[k]] or [0]
+    mx = max(abs(v) for v in allv) + 0.5
+    X = (lambda j: L + j * (W - L - R) / (n - 1)) if n > 1 else (lambda j: L + (W - L - R) / 2)
+    Y = lambda v: T + (mx - v) / (2 * mx) * (H - T - Bt)
+    RED, BLUE = TM_HOT, TM_DOWN
+    b = [f'<line x1="{L}" y1="{Y(0):.1f}" x2="{X(n-1):.1f}" y2="{Y(0):.1f}" stroke="#4a5670" stroke-dasharray="3 3"/>',
+         f'<text x="{L-4}" y="{Y(0)+3:.1f}" fill="#6f7a8b" font-size="8" text-anchor="end">평소</text>']
+    step = 2 if mx > 6 else 1
+    for v in range(-int(mx) // step * step, int(mx) + 1, step * 2):
+        if v and abs(v) < mx:
+            b.append(f'<line x1="{L}" y1="{Y(v):.1f}" x2="{X(n-1):.1f}" y2="{Y(v):.1f}" stroke="#1b2433"/>'
+                     f'<text x="{L-4}" y="{Y(v)+3:.1f}" fill="#4d586a" font-size="7.5" text-anchor="end">{v:+d}</text>')
+    for j, d in enumerate(days):
+        b.append(f'<text x="{X(j):.1f}" y="{H-Bt+14}" fill="{"#e6ebf1" if j == n-1 else "#8b95a5"}" '
+                 f'font-size="7.8" font-weight="{700 if j == n-1 else 400}" text-anchor="middle">{lab(d)}</text>')
+    labs, 돌파 = [], []
+    for k in sorted(secs, key=lambda k: abs(path[k][-1])):
+        p = path[k]; z = p[-1]; th = 문턱(k); 센 = abs(z) >= th
+        c = (RED if z > 0 else BLUE) if 센 else "#5a6475"
+        pts = " ".join(f"{X(j):.1f},{Y(v):.1f}" for j, v in enumerate(p))
+        b.append(f'<polyline points="{pts}" fill="none" stroke="{c}" stroke-width="{2.4 if 센 else 1.1}" '
+                 f'opacity="{1 if 센 else .7}" stroke-linejoin="round"/>')
+        if 센:
+            for j, v in enumerate(p):
+                b.append(f'<circle cx="{X(j):.1f}" cy="{Y(v):.1f}" r="{2.6 if j == n-1 else 1.6}" fill="{c}"/>')
+        for j in range(1, n):          # ▲ 처음 크게 넘은 날(선 아래)
+            if p[j] >= th and all(v < th for v in p[:j]):
+                b.append(f'<text x="{X(j):.1f}" y="{Y(p[j])+16:.1f}" fill="{RED}" font-size="11" font-weight="900" text-anchor="middle">▲</text>'
+                         f'<text x="{X(j):.1f}" y="{Y(p[j])+26:.1f}" fill="{RED}" font-size="8" font-weight="700" text-anchor="middle">{lab(days[j])}</text>')
+                돌파.append((j, f'<b style="color:{RED}">{k} ▲{lab(days[j])}</b>')); break
+        for j in range(1, n):          # ▼ 처음 크게 빠진 날(선 위)
+            if p[j] <= -th and all(v > -th for v in p[:j]):
+                b.append(f'<text x="{X(j):.1f}" y="{Y(p[j])-7:.1f}" fill="{BLUE}" font-size="11" font-weight="900" text-anchor="middle">▼</text>'
+                         f'<text x="{X(j):.1f}" y="{Y(p[j])-18:.1f}" fill="{BLUE}" font-size="8" font-weight="700" text-anchor="middle">{lab(days[j])}</text>')
+                돌파.append((j, f'<b style="color:{BLUE}">{k} ▼{lab(days[j])}</b>')); break
+        labs.append([Y(z), k, z, c, 센])
+    labs.sort()
+    for i in range(1, len(labs)):
+        if labs[i][0] - labs[i-1][0] < 12.5:
+            labs[i][0] = labs[i-1][0] + 12.5
+    for y, k, z, c, 센 in labs:
+        if y > H - 4:
+            continue
+        b.append(f'<text x="{X(n-1)+7:.1f}" y="{y+3:.1f}" fill="{c if 센 else "#8b95a5"}" '
+                 f'font-size="{9.3 if 센 else 8.2}" font-weight="{700 if 센 else 500}">{k} {z:+.1f}</text>')
+    기준 = (f"평소 흔들림의 2배(2σ, 최소 {MF_SIG_FLOOR}%p)" if base_n >= MF_SIG_MIN_DAYS
+            else f"평소 몫의 ±{int(MF_SIG_REL*100)}% (20거래일 쌓이기 전 임시 기준)")
+    평소말 = (f"앞 {base_n}거래일 평균 몫" if pre else f"쌓인 {base_n}거래일 평균 몫(임시 — 앞 기간이 아직 없음)")
+    return ('<div class="mf3"><p class="mf3-h">🌊 돈의 이동 경로 · 10일 흐름'
+            f'<span>{"예시 데이터" if demo else f"새 방식 {min(n_ok, MF_WIN)}/{MF_WIN}일"}</span></p>'
+            + ('<p class="mf3-demo">🧪 미리보기 — <b>예시 데이터</b>로 그린 모양이에요. 실제 발행엔 쌓인 날만큼만 그려져요.</p>' if demo else "")
+            + '<p class="mf3-sum">📍 평소를 크게 벗어나기 시작한 날 — '
+            + (" · ".join(x for _j, x in sorted(돌파)) or "없음") + '</p>'
+            + f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto;display:block">{"".join(b)}</svg>'
+            + '<div class="mf3-leg"><b>표시 설명</b><br>'
+            '· 선 = 섹터별 <b>평소 대비 몫(%p)</b> — 그날 시장 거래대금에서 그 섹터가 차지한 비율 − 평소 비율<br>'
+            f'· 점선 = 평소({평소말})<br>'
+            f'· <b style="color:{RED}">빨강 선</b> = 평소보다 돈이 더 몰림 · <b style="color:{BLUE}">파랑 선</b> = 평소보다 빠짐 · 회색 = 평소 근처<br>'
+            f'· <b style="color:{RED}">▲</b>(선 아래) = 평소를 크게 넘기 시작한 첫날 · '
+            f'<b style="color:{BLUE}">▼</b>(선 위) = 평소 밑으로 크게 빠지기 시작한 첫날<br>'
+            f'· «크게» = {기준}<br>'
+            '· 오른쪽 숫자 = 오늘의 평소 대비 몫(%p)</div></div>')
 # ══════════════════════════════════════════════════════════════════
 # 🧪 2026-09-24 — «돈의 이동 경로» 100% 세로 막대 «시안».
 #   HO: «적용 전에 시안을 먼저 보여줘.» → CP_MF_V2=1 일 때만 그린다.
@@ -16034,6 +16210,16 @@ THEME_V17_CSS = """
 .cn-guide p,.cn-guide div{margin:4px 0!important;font-size:11.5px!important;line-height:1.7!important}
 .cn{margin-bottom:22px!important}
 .cn-hb ul{margin:2px 0;padding-left:17px}.cn-hb li{margin:3px 0}.cn-hb b{color:#e6ebf1}
+/* ══ 🌊 돈의 이동 경로 · A+ 10일 흐름 (2026-09-28) ══ */
+.mf3{background:#0d141c;border:1px solid #1d2734;border-radius:11px;padding:11px 12px 10px;margin:10px 0 6px}
+.mf3-h{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:12.5px;font-weight:800;color:#dfe5ec}
+.mf3-h span{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784}
+.mf3-sum{margin:0 0 6px;padding:8px 10px;border-radius:9px;background:#12202e;font-size:12px;line-height:1.6;color:#c9d1dc}
+.mf3-demo{margin:0 0 6px;font-size:11px;color:#e8c33a}
+.mf3-wait{margin:0;font-size:12px;line-height:1.7;color:#9aa6b6}
+.mf3-leg{margin-top:8px;padding:9px 11px;border-radius:9px;background:#0a1018;border:1px solid #1d2838;
+  font-size:11px;line-height:1.8;color:#9aa6b6}
+.mf3-leg b{color:#e6ebf1}
 /* ══ 🌊 돈의 이동 경로 ══ */
 /* 최근 5거래일 옅은 박스 (2026-09-24) */
 .mf-s.r5,.mf-cn.r5,.mf-t.r5{background-color:rgba(143,193,255,.13)!important}
@@ -18039,6 +18225,12 @@ def _fv_log_waves(이력):
         if len(rows) < 10:
             return
         기록 = load_json(WAVE_LOG) or {}
+        for _d in [d for d in 기록 if not _is_trading_ymd(d)]:     # 2026-09-28 휴장일 줄 제거
+            기록.pop(_d, None)
+        if not _is_trading_ymd(DATE):
+            with open(WAVE_LOG, "w", encoding="utf-8") as f:
+                json.dump(기록, f, ensure_ascii=False, indent=1)
+            return
         기록[DATE] = {"코스피": rows[-1]["종가"],
                     "외국인": _fv_wave_summary(rows, "외현"),
                     "기관": (_fv_wave_summary([r for r in rows if r.get("기관") is not None], "기관")
