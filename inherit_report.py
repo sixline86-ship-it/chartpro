@@ -25,7 +25,7 @@ import re
 import sys
 from datetime import datetime
 
-SCRIPT_VERSION = "v2026.08.30-a1"   # ⬅ 다른 파일과 항상 같아야 한다.
+SCRIPT_VERSION = "v2026.09.28-a2"   # ⬅ 다른 파일과 항상 같아야 한다.
 
 ARCHIVE = "archive"
 DATE = os.environ.get("CP_DATE") or datetime.now().strftime("%Y%m%d")
@@ -34,6 +34,28 @@ TODAY_PATH = os.path.join(ARCHIVE, f"report_{DATE}.json")
 # 최대 며칠 전까지 거슬러 올라갈지. 이보다 오래된 글은 시황이 완전히 달라져
 # 승계해도 도움이 안 된다 — 차라리 핵심편을 비우고 사실을 알리는 게 낫다.
 MAX_BACK_DAYS = 5
+
+# 🆕 2026-09-28 — 🚨 휴장일 오발행 승계 사고 수정.
+#    9/24(추석 휴장)에 워크플로가 잘못 돌아 report_20260924.json이 남았다.
+#    이 후보 선정 로직은 "가장 최근 파일"만 보고 골라서, 9/25~27(휴장·주말)엔
+#    아무 파일도 없었는데 9/28에 승계할 때 **날짜만 더 최근인 9/24 깨진 글**을
+#    집어갔다 — 정상 거래일인 9/23 글이 있는데도 무시됐다.
+#    → collect_data.py와 같은 휴장일 목록을 여기도 두고, 후보에서 제외한다.
+_KRX_휴장_2026 = {"20260101", "20260216", "20260217", "20260218", "20260302", "20260501",
+                 "20260505", "20260525", "20260603", "20260717", "20260817", "20260924",
+                 "20260925", "20261005", "20261009", "20261225", "20261231"}
+
+
+def _거래일(ymd):
+    """주말·KRX 휴장일이면 False. 승계 후보에서 걸러내는 용도."""
+    if ymd in _KRX_휴장_2026:
+        return False
+    try:
+        if datetime.strptime(ymd, "%Y%m%d").weekday() >= 5:   # 토(5)·일(6)
+            return False
+    except ValueError:
+        return False
+    return True
 
 
 def main():
@@ -55,6 +77,9 @@ def main():
         ymd = f[7:15]
         if ymd >= DATE:
             continue                      # 미래·오늘 파일은 건너뛴다
+        if not _거래일(ymd):
+            print(f"   ⏭️ {f}는 휴장일({ymd}) 기록입니다 — 승계 후보에서 제외합니다.")
+            continue
         try:
             _d0 = datetime.strptime(ymd, "%Y%m%d")
             _dn = datetime.strptime(DATE, "%Y%m%d")
