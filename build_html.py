@@ -5635,9 +5635,11 @@ def build_my_stocks(data):
     ' onchange="msToggleSel(\\''+nm+'\\')"'+
     ' style="flex:none;width:14px;height:14px;margin-top:3px;'+
     'accent-color:#8fd0e8;cursor:pointer">';
-   html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c;'+
-    (_on?'':'opacity:.55')+'">'+
-    '<div style="display:flex;align-items:flex-start;gap:8px">'+_cb+
+   /* 🔴 2026-09-29 HO 지시 — «내 종목 추적하기에서 종목명 앞 체크박스는 없애줘.»
+      그래프에 넣을 종목 고르기는 그래프 바로 밑 범례(색상별 종목)로 옮겼다.
+      목록은 «등록·순서·삭제·성적» 자리라 흐림(opacity)도 없앤다. */
+   html+='<div style="padding:9px 8px;border-bottom:1px solid #1b212c">'+
+    '<div style="display:flex;align-items:flex-start;gap:8px">'+
     '<div style="flex:1;min-width:0">'+
     /* 🆕 2026-08-29 HO 지시 — 목록 글자가 전체적으로 작다. 13 → 14.5 */
     '<div style="font-size:14.5px;font-weight:800;color:#e8eaee">'+
@@ -5665,10 +5667,13 @@ def build_my_stocks(data):
   });
   /* 🆕 그래프·브리핑·평균은 **체크된 종목만** 대상으로 한다. */
   var pick=selected();
-  box.innerHTML=html; drawChart(pick); drawBrief(pick); if(window.cpFire)cpFire();
+  /* 🔴 2026-09-29 — 체크는 이제 «그래프에 넣을 종목» 고르기다(범례 체크박스).
+     브리핑은 등록한 종목 전부를 보여 준다. */
+  box.innerHTML=html; drawChart(pick); drawBrief(my); if(window.cpFire)cpFire();
   /* 몇 개를 보고 있는지 항상 알려준다. 안 그러면 "왜 선이 줄었지?"가 된다. */
   var _hd=document.getElementById('ms-selbar');
-  if(_hd){
+  if(_hd) _hd.innerHTML='';   /* 🔴 2026-09-29 — 전체 선택은 그래프 범례로 옮겼다 */
+  if(false){
    var _allOn=(_sel.length===my.length);
    _hd.innerHTML = my.length<2 ? '' :
     ('<label style="display:flex;align-items:center;gap:6px;font-size:11px;'+
@@ -6938,7 +6943,7 @@ def build_my_stocks(data):
    var mkNm=(mk===P.mkt_kosdaq)?'코스닥':'코스피';
    mkVals[mkNm]=mv;
    rows.push({nm:nm, ex:r[last]-mv, ret:r[last], mkNm:mkNm});});
-  if(!rows.length){host.innerHTML=''; return;}
+  if(!rows.length){host.innerHTML=msLegend(my, false); return;}
   rows.sort(function(a,b){return b.ex-a.ex;});
   var W=360,H=Math.max(70,26+rows.length*22),L=70,R=52,mx=1;  /* R=수치 자리. +33.1%p가 잘려 넓혔다 */
   rows.forEach(function(x){mx=Math.max(mx,Math.abs(x.ex));});
@@ -6969,7 +6974,41 @@ def build_my_stocks(data):
       fmt(x.ex)+'%p</text>';});
   host.innerHTML='<p style="margin:9px 0 3px;font-size:10.5px;color:#8b93a0">'+
    '오늘 <b style="color:#c9ced6">시장 대비 수익률</b>(%p) · 노란 점선이 코스피예요</p>'+
-   '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+g+'</svg>';
+   '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto">'+g+'</svg>'+
+   msLegend(my, false);
+ }
+ /* 🆕 2026-09-29 HO 지시 — «그래프 밑 색상별 종목에 체크박스를 달아
+    그래프로 볼 종목을 고르게.»
+    · 등록한 종목 전부를 범례에 늘어놓고, 켜진 것만 선으로 그린다.
+    · 색은 «등록 순서»에 묶는다 — 체크를 껐다 켜도 종목 색이 바뀌지 않게.
+    · 맨 앞 «전체»로 한 번에 켜고 끈다(다 끄면 맨 위 한 종목만 남는다 —
+      빈 그래프는 고장으로 보인다). */
+ var MS_COL=['#f0c65a','#ff6b4a','#22d3ee','#4ade80','#a78bfa',
+             '#fb923c','#f472b6','#5b9bff','#34d399','#e879f9'];
+ function msColor(nm){var i=get().indexOf(nm); return MS_COL[(i<0?0:i)%MS_COL.length];}
+ function msLegend(pick, colorful){
+  var all=get(); if(!all.length) return '';
+  var h='';
+  if(all.length>=2){
+   var allOn=(pick.length===all.length);
+   h+='<label style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;'+
+      'color:#c9ced6;cursor:pointer;padding:3px 7px;border:1px solid #2a3446;border-radius:99px">'+
+      '<input type="checkbox"'+(allOn?' checked':'')+' onchange="msSelAll(this.checked)" '+
+      'style="width:13px;height:13px;margin:0;accent-color:#f0c65a;cursor:pointer">전체</label>';
+  }
+  all.forEach(function(nm){
+   var on=pick.indexOf(nm)>=0, c=colorful?msColor(nm):'#c9ced6';
+   h+='<label style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;'+
+      'color:'+c+';cursor:pointer;padding:3px 7px;border:1px solid '+(on?'#2a3446':'#1b212c')+
+      ';border-radius:99px;opacity:'+(on?1:.45)+'">'+
+      '<input type="checkbox"'+(on?' checked':'')+' data-nm="'+nm+'" onchange="msToggleSel(this.dataset.nm)" '+
+      'style="width:13px;height:13px;margin:0;accent-color:'+c+';cursor:pointer">'+
+      (colorful?'<b style="font-weight:800">—</b> ':'')+nm+'</label>';
+  });
+  return '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px">'+h+'</div>'+
+   '<p style="margin:5px 0 0;font-size:10px;color:#6f7784">체크한 종목만 그래프와 '+
+   '«내 종목 평균»에 들어가요 · 그래프에 <b style="color:#8fd0e8">'+pick.length+
+   '개</b> / 등록 '+all.length+'개</p>';
  }
  function drawChart(my){
   var host=document.getElementById('ms-chart'); if(!host) return;
@@ -7001,7 +7040,7 @@ def build_my_stocks(data):
     tc*=(1+r[i]/100); mc*=(1+mk[i]/100);
     var v=(tc-mc)*100; pts.push(v); all.push(v);});
    if(pts.length>=3) series.push({nm:nm,pts:pts});});
-  if(!series.length){host.innerHTML=''; return;}
+  if(!series.length){host.innerHTML=msLegend(my, true); return;}
   all.push(0);
   var hi=Math.max.apply(null,all), lo=Math.min.apply(null,all), rng=Math.max(0.01,hi-lo);
   var n=Math.max.apply(null,series.map(function(s){return s.pts.length;}));
@@ -7017,10 +7056,9 @@ def build_my_stocks(data):
         '" stroke="#8b93a0" stroke-width="1.3"/>';
   var leg='';
   series.forEach(function(s,k){
-   var c=COL[k%COL.length];
+   var c=msColor(s.nm);   /* 🔴 2026-09-29 — 색은 등록 순서에 고정 */
    g+='<polyline points="'+s.pts.map(function(v,i){return PX(i)+','+PY(v);}).join(' ')+
-      '" fill="none" stroke="'+c+'" stroke-width="1.6"/>';
-   leg+='<span style="font-size:10px;color:'+c+'">— '+s.nm+'</span>';});
+      '" fill="none" stroke="'+c+'" stroke-width="1.6"/>';});
   [hi,0,lo].forEach(function(t){
    g+='<text x="'+(L-3)+'" y="'+(PY(t)+3)+'" text-anchor="end" font-size="8" fill="#6f7784">'+
       (t>=0?'+':'')+t.toFixed(0)+'</text>';});
@@ -7031,7 +7069,7 @@ def build_my_stocks(data):
   host.innerHTML='<p style="margin:9px 0 3px;font-size:10.5px;color:#8b93a0;line-height:1.5">'+
    _제목+'</p>'+
    '<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:auto;display:block">'+g+'</svg>'+
-   '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:4px">'+leg+'</div>';
+   msLegend(my, true);
  }
  window.msAdd=function(){
   var el=document.getElementById('ms-in'), nm=(el.value||'').trim();
@@ -13101,8 +13139,11 @@ def _spot_v3(data=None):
     for k, r in enumerate(rows):
         _a, p = _stock_panel(r["n"], mem.get(r["n"]) or [], f"lad{k}")
         _pan[r["n"]] = (f"lad{k}", p)
+    # 🔴 2026-09-29 — 경계를 «조건 5칸 ④ 시간이 남았나»(나이 < 평균 수명)와 같게.
+    #   전에는 ≤ 라서 3일째가 수명표에선 🟢 여유, 점검표에선 «시간 없음»으로
+    #   같은 챕터 안에서 말이 엇갈렸다. 평균 수명 당일 = 절반이 빠지는 날이라 🟠.
     def 구역(a):
-        if a <= 반:
+        if a < 반:
             return "#3ecf9a", "🟢 아직 여유"
         if a < 5:
             return "#ff9838", "🟠 오래 버티는 중"
@@ -13163,12 +13204,107 @@ def _spot_v3(data=None):
               + "".join(_pan[r["n"]][1] for r in lst))
     return ('<div style="margin:10px 0 12px;padding:11px 10px 8px;border:1px solid #1d2734;'
             'border-radius:11px;background:#0c131d">'
-            '<p style="margin:0 0 3px;font-size:12.5px;font-weight:800;color:#e8c33a">'
-            '🪜 테마 나이 사다리</p>'
-            '<p style="margin:0 0 9px;font-size:10.5px;color:#8b95a5;line-height:1.6">'
-            '줄 = 개별 테마 나이(위가 젊음) · 칩 = 순위·테마 · '
-            '꼬리표 = <b style="color:#5b9bff">파랑 나쁜 소식</b> · <b style="color:#ff5a4e">빨강 좋은 소식</b>(돈 들어옴·재등판) · 테마를 누르면 종목</p>'
+            # 🔴 2026-09-29 HO — «이모티콘 오류» → 🪜(유니코드 13, 2020)는 옛 폰·PC
+            #   글꼴에 없어 네모(□)로 깨진다. ⏳(1990년대부터 있는 기호)로 바꾸고,
+            #   이름도 «테마 수명표»로 — 위 «테마들 평균 수명» 카드와 한 쌍으로 읽힌다.
+            '<p style="margin:0 0 9px;font-size:12.5px;font-weight:800;color:#e8c33a">'
+            '⏳ 테마 수명표</p>'
+            # 🔴 2026-09-29 HO — «읽는 방법과 해석이 없다.» 범례 한 줄을 «읽는 방법»으로
+            #   키워서 챕터 아래 📖 읽는 방법 칸으로 보낸다(_chapter_block이 sv3-how를 떼어 감).
+            f'<p class="sv3-how"><b>이렇게 읽어요</b><br>'
+            f'· <b>줄 = 나이</b> — 10위권에 <b>연속으로</b> 머문 날수예요. 위가 젊고, 아래로 갈수록 오래 버틴 테마예요.<br>'
+            f'· <b>세 구역</b> — 🟢 아직 여유({반}일째 전) · 🟠 오래 버티는 중({반}일째 ~ 4일째) · 🔴 끝물 주의(5일째부터).<br>'
+            f'· <b>구분선</b> — «평균 수명 {반}일»은 10위권 테마의 <b>절반이 빠지는 날</b>, «5일째 절벽»은 <b>대부분이 빠져나가는 지점</b>이에요(지난 기록으로 센 값).<br>'
+            f'· <b>칩</b> — 오늘 순위와 테마 이름. 누르면 대장·후발 종목이 열려요. 🆕 = 오늘 처음 10위권.<br>'
+            f'· <b>꼬리표</b> — <b style="color:{TM_HOT}">빨강 = 좋은 소식</b>(💰돈 늘어남 · ♻️재등판), '
+            f'<b style="color:{TM_DOWN}">파랑 = 나쁜 소식</b>(📉어제보다 밀림 · ↘4일 전보다 뒤 · 💸돈 줄어듦). '
+            f'꼬리표가 없으면 «깨끗한 자리»예요.<br>'
+            f'· 다섯 가지 조건으로 따져 본 근거는 아래 <b>📋 조건 5칸 점검표</b>를 펼치면 있어요.</p>'
             + 줄 + '</div>')
+
+
+# 🆕 2026-09-29 HO — «조건 5칸 점검표에 정작 5칸이 안 보인다. 직관적으로.»
+#   [전] 옛 순환표를 통째로 접어 넣었다 — 네 단계 그림(수명표와 중복) + 표 끝의
+#     작은 점 5개. 점이 무슨 질문인지는 표 아래 글을 읽어야 알았다.
+#   [후] 질문 5개를 «열 제목»으로 세우고, 칸마다 ●/✕/? + 근거 숫자를 적는다.
+#     · 줄은 «켜진 개수» 많은 순 → 가장 튼튼한 테마가 맨 위.
+#     · 맨 아래 «세로 합계» — 어느 질문에서 시장 전체가 막혔는지 보인다.
+#   ⚠️ 판정은 theme_spots()의 chk를 그대로 쓴다 — 계산을 두 벌 만들지 않는다.
+def build_check5(data=None):
+    try:
+        spots, _m = theme_spots(data)
+    except Exception:
+        return ""
+    if not spots:
+        return ""
+    Q = [("①", "10위권", "안"), ("②", "4일 새", "올라옴"), ("③", "어제", "보다 앞"),
+         ("④", "시간", "남음"), ("⑤", "돈", "늘어남")]
+    모름표 = ("기록 부족", "확인 안 됨", "—")
+
+    def 칸값(j, x, ok, v):
+        """칸 아래 작은 근거(짧게)."""
+        if j == 0:
+            return f'{x["rk"]}위'
+        if j == 1:
+            if not x.get("from5"):
+                return "새로 옴" if ok else "기록 없음"
+            return f'{x["from5"]}→{x["rk"]}'
+        if j == 2:
+            return ("밖→" + str(x["rk"]) if x.get("y") is None else f'{x["y"]}→{x["rk"]}')
+        if j == 3:
+            return (f'{x["age"]}일째' if x.get("age") else "기록 없음")
+        return ("기록 없음" if x.get("돈") is None else f'{x["돈"]:+.0f}%')
+
+    rows = sorted(spots, key=lambda x: (-x["켜짐"], x["rk"]))
+    합 = [0, 0, 0, 0, 0]
+    모름합 = [0, 0, 0, 0, 0]
+    줄 = ""
+    for x in rows:
+        칸 = ""
+        for j, (ok, _a, v) in enumerate(x["chk"]):
+            모름 = (not ok) and (str(v) in 모름표)
+            if ok:
+                합[j] += 1
+                기호, 색, 배경 = "●", TM_HOT, "rgba(255,90,78,.10)"
+            elif 모름:
+                모름합[j] += 1
+                기호, 색, 배경 = "?", "#7d8695", "transparent"
+            else:
+                기호, 색, 배경 = "✕", TM_DOWN, "rgba(91,155,255,.08)"
+            칸 += (f'<span class="c5-c" style="background:{배경}">'
+                  f'<b style="color:{색}">{기호}</b>'
+                  f'<i>{칸값(j, x, ok, v)}</i></span>')
+        n = x["켜짐"]
+        n색 = TM_HOT if n >= 4 else ("#e8c33a" if n == 3 else TM_DOWN)
+        # 🔴 2026-09-29 — 이름을 칸 위 한 줄로 뺀다. 한 줄에 이름+5칸을 넣으면
+        #   320px 폰에서 이름이 «반…»으로 잘려 무슨 테마인지 안 보였다.
+        줄 += (f'<div class="c5-r"><div class="c5-top"><span class="c5-n">{x["n"]}</span>'
+              f'<span class="c5-s" style="color:{n색}">{n}<small>/5</small></span></div>'
+              f'<div class="c5-g">{칸}</div></div>')
+    머리 = "".join(f'<span class="c5-h"><b>{a}</b>{b}<br>{c}</span>' for a, b, c in Q)
+    바닥 = "".join(
+        f'<span class="c5-h"><b style="color:{TM_HOT}">{합[j]}</b>'
+        + (f'<i>?{모름합[j]}</i>' if 모름합[j] else "") + '</span>'
+        for j in range(5))
+    풀이 = (
+        '<div class="c5-q">'
+        '<p><b>①</b> <b>10위권 안인가</b> — 오늘 테마 순위 10위 안. 이 표에 오른 테마는 모두 켜져요(밀려나는 날 꺼져요).</p>'
+        '<p><b>②</b> <b>4일 새 올라왔나</b> — 4거래일 전보다 순위가 <b>3칸 이상</b> 올랐나(1~2칸은 «제자리»로 봐요 · 레이더 색과 같은 기준). 4일 전에 없던 테마면 켜져요.</p>'
+        '<p><b>③</b> <b>어제보다 앞인가</b> — 어제 순위보다 올랐나(어제 20위 밖이었다면 켜짐). 오늘의 방향.</p>'
+        '<p><b>④</b> <b>시간이 남았나</b> — 나이가 평균 수명 전인가. 위 수명표의 🟢 구역과 같은 말이에요.</p>'
+        '<p><b>⑤</b> <b>돈도 늘었나</b> — 테마 거래대금이 평소보다 15% 이상 늘었나. «?»는 비교할 기록이 비어 판정을 멈춘 것.</p>'
+        '</div>')
+    return (f'<div class="c5-w">'
+            f'<p class="c5-t">켜진 칸이 많은 순이에요 · <b style="color:{TM_HOT}">● 그렇다</b> '
+            f'<b style="color:{TM_DOWN}">✕ 아니다</b> <b style="color:#7d8695">? 모름</b></p>'
+            f'<div class="c5-g c5-hd">{머리}</div>'
+            f'{줄}'
+            f'<p class="c5-fl">질문별로 켜진 테마 수 <span>(10개 중)</span></p>'
+            f'<div class="c5-g c5-ft">{바닥}</div>'
+            f'{풀이}'
+            f'<p class="c5-x">⚠️ <b>점수가 아니에요.</b> «4/5»는 다섯 질문 중 넷이 «그렇다»일 뿐이에요. '
+            f'질문마다 무게가 다른데 그 무게를 정할 근거가 아직 없어요. <b>꺼진 칸이 곧 리스크</b>예요.</p>'
+            f'</div>')
 
 
 def build_spot_table(data=None):
@@ -13582,18 +13718,29 @@ def build_judge_tab(data=None):
     #   [WHY] 사다리 한 장이 «지금 어느 자리냐»를 먼저 보여 주고, 5칸 점검은
     #   근거가 궁금한 사람만 펼친다. 둘 다 펴 두면 같은 테마 10개를 두 번 읽는다.
     _사다리 = _spot_v3(data)
+    _순환안내 = ("jd-warn",)
     if _사다리 and _점검:
+        # 🔴 2026-09-29 HO — «점검표를 펼치니 "테마 순환표"가 나온다, 오류 같다.»
+        #   점검표 자체 제목이 옛 이름(🔄 테마 순환표) 그대로였다. 접힌 안에서는
+        #   «조건 5칸 점검표»로 부른다. 점검표의 ⚠️ 안내문(jd-warn)은 점검표 안에 두고,
+        #   챕터의 📖 읽는 방법은 수명표 설명(sv3-how)만 가져간다 — 둘이 섞이면
+        #   어느 그림 설명인지 헷갈린다.
+        #   🔴 2026-09-29 (2차) — 옛 순환표 대신 «5칸 격자»를 넣는다.
+        #   build_spot_table()은 판정 기록(_spot_log_save)을 남기므로 계속 부른다.
+        _격자 = build_check5(data) or _점검.replace(
+            '<p class="jd-h">🔄 테마 순환표', '<p class="jd-h">📋 조건 5칸 점검표', 1)
         _순환본문 = (_사다리
                    + '<details class="cn-how" style="margin-top:6px">'
                      '<summary>📋 조건 5칸 점검표 보기</summary>'
-                   + _점검 + '</details>')
+                   + _격자 + '</details>')
+        _순환안내 = ("sv3-how",)
     else:
         _순환본문 = _사다리 + (_점검 if _점검 else (층2 + 층3))
     # 🔴 2026-09-24 HO — «잠금탭에서도 읽는 방법과 해석과 판단을 다 동일하게.»
     #   블록마다 [본문] → 📖 읽는 방법(⚠️ 안내 포함) → 💡 해석과 판단.
     return (f'<div class="jd-wrap">'
             + _chapter_block(층1, "판단-한줄")
-            + _chapter_block(_순환본문, "판단-순환", ("jd-warn",))
+            + _chapter_block(_순환본문, "판단-순환", _순환안내)
             + _chapter_block(build_spot_perf(), "판단-성과", ("jd-warn",))
             + _chapter_block(build_my_themes(data), "판단-내종목")
             + _chapter_block(f'{층4}', "판단-엇갈림", ("jd-note",))
@@ -16291,6 +16438,31 @@ THEME_V17_CSS = """
   font-size:10px;color:#6f7784;line-height:1.8}
 .pf2-f b{color:#9aa3b1}
 /* ══ 🎯 자리 점검표 — 격자형 ══ */
+/* 🆕 2026-09-29 — 조건 5칸 점검표 격자 */
+.c5-w{background:#101720;border:1px solid #1e2937;border-radius:12px;padding:11px 9px 10px;margin:8px 0 4px}
+.c5-t{margin:0 0 8px;font-size:10.5px;color:#8b95a5;line-height:1.6}
+.c5-t b{margin-left:5px}
+.c5-r{padding:6px 0 7px;border-bottom:1px solid #18212c}
+.c5-top{display:flex;justify-content:space-between;align-items:baseline;margin:0 1px 4px}
+.c5-g{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.c5-hd{padding:0 0 6px;border-bottom:1px solid #2a3446}
+.c5-ft{padding:2px 0 0}
+.c5-fl{margin:8px 1px 3px;font-size:10px;color:#7d8695}
+.c5-fl span{color:#5f6875}
+.c5-n{font-size:12.5px;font-weight:800;color:#e8ecf2}
+.c5-h{text-align:center;font-size:9.5px;line-height:1.3;color:#8b95a5}
+.c5-h b{display:block;font-size:11px;color:#e8c33a}
+.c5-h i{display:block;font-style:normal;font-size:9px;color:#7d8695}
+.c5-c{display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:6px;padding:3px 0;min-height:30px}
+.c5-c b{font-size:13px;line-height:1.1}
+.c5-c i{font-style:normal;font-size:9px;color:#8b95a5;white-space:nowrap;margin-top:1px}
+.c5-s{font-size:14px;font-weight:800}
+.c5-s small{font-size:9px;color:#6f7a8b;font-weight:600}
+.c5-q{margin:10px 0 0;padding:9px 10px;background:#0b1118;border-radius:9px}
+.c5-q p{margin:0 0 5px;font-size:11px;line-height:1.6;color:#aab3c0}
+.c5-q p:last-child{margin:0}
+.c5-q b{color:#e8ecf2}
+.c5-x{margin:9px 0 0;font-size:10.5px;line-height:1.6;color:#8b95a5}
 .sp-wrap{background:#101720;border:1px solid #1e2937;border-radius:12px;
   padding:12px 12px 11px;margin-bottom:11px}
 /* 유형 범례 — 아이콘 뜻은 «한 번만» 말한다 */
