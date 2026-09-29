@@ -1571,7 +1571,7 @@ def build_study(공부):
 
 
 # ── 지난 리포트 아카이브 (report_YYYYMMDD.html 자동 스캔) ──
-ARCHIVE_MAX = 14          # 최근 몇 개까지 보여줄지
+ARCHIVE_MAX = 400         # 🔴 2026-09-29 HO «지난 리포트를 다 보여줘» — 사실상 전부(앞 7개만 펼침)
 ARCHIVE_FOLD = 7          # 이 개수까지만 펼쳐 두고 나머지는 '더보기'
 _WD = ["월", "화", "수", "목", "금", "토", "일"]
 
@@ -1620,7 +1620,7 @@ def build_archive():
                   f'<button class="more-btn" style="margin-top:8px;margin-bottom:0" '
                   f'onclick="toggleMore(\'moreArch\',this,\'▾ 이전 리포트 {len(뒤목록)}개 더보기\')">'
                   f'▾ 이전 리포트 {len(뒤목록)}개 더보기</button>')
-    return (f'<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 — 날짜를 누르면 그날 브리핑으로 이동합니다</p>'
+    return (f'<div class="arch-wrap"><p class="arch-head">🗂️ 지난 리포트 {len(목록)}개 — 날짜를 누르면 그날 리포트의 <b>지금 보는 탭</b>으로 열립니다</p>'
             f'<div class="arch-grid">{앞}</div>{뒤HTML}</div>')
 
 
@@ -5932,8 +5932,8 @@ def build_my_stocks(data):
    svg+='<text x="'+X(i).toFixed(1)+'" y="'+(B+14)+'" text-anchor="middle" font-size="10" font-weight="'+(last?800:500)+'" fill="'+(last?'#ffc93c':'#6f7a8b')+'">'+(last&&F.fl?'오늘':r[0])+'</text>'; });
   var L=sf[n-1], who=F.fl?'오늘 하루':(L[0]+' 하루');
   return '<svg class="mt-fc" viewBox="0 0 '+W+' '+(B+18)+'">'+svg+'</svg>'+
-   '<p class="mt-fl"><span><i style="background:#f0c65a"></i>외국인 '+n+'일 누적 <b style="color:'+_msC(cF[n-1])+'">'+_msAmt(cF[n-1])+'</b></span>'+
-   '<span><i style="background:#74f0d4"></i>기관 '+n+'일 누적 <b style="color:'+_msC(cG[n-1])+'">'+_msAmt(cG[n-1])+'</b></span></p>'+
+   /* 🔴 2026-09-29 (3차) HO — «누적 금액은 그래프에 있으니 또 쓸 필요 없다» → 색 이름표만 */
+   '<p class="mt-fl"><span><i style="background:#f0c65a"></i>외국인</span><span><i style="background:#74f0d4"></i>기관</span></p>'+
    '<p class="mt-fs">'+who+' — 외국인 <b style="color:'+_msC(L[1])+'">'+_msAmt(L[1])+'</b>'+(F.fl&&F.fl.sf?'<em>'+F.fl.sf+'</em>':'')+
    ' · 기관 <b style="color:'+_msC(L[2])+'">'+_msAmt(L[2])+'</b>'+(F.fl&&F.fl.sg?'<em>'+F.fl.sg+'</em>':'')+
    (F.fl&&F.fl.x!==null&&F.fl.x>=1.8?' <i class="mt-big">평소의 '+F.fl.x.toFixed(1)+'배</i>':'')+'</p>';
@@ -18041,7 +18041,7 @@ def _fs_timeline_svg(이력, p, W=380):
         sl5 = (C선[q-1] - C선[i0]) / 5
         sc = FS_BUY if sl5 >= 0 else FS_SELL
         g.append(f'<line x1="{X(i0):.1f}" y1="{YB(C선[i0]):.1f}" x2="{X(q-1):.1f}" y2="{YB(C선[q-1]):.1f}" '
-                 f'stroke="{sc}" stroke-width="3" stroke-linecap="round" opacity=".9"/>')
+                 f'stroke="{sc}" stroke-width="1.2" stroke-dasharray="4 3" stroke-linecap="round" opacity=".85"/>')
         ar = "↗" if sl5 >= 0 else "↘"
         g.append(f'<text x="{W-PR-6}" y="{BT+10:.1f}" font-size="8" fill="{sc}" font-weight="800" '
                  f'text-anchor="end">5일 기울기 {ar} 하루 {sl5:,.0f}억</text>')
@@ -18520,6 +18520,18 @@ def _fv_cmp_txt(c, v):
     return f'<p class="fv-cmp{" hi" if 강 else ""}">{"🔥 " if 강 else ""}{말}</p>'
 
 
+def _fv_cmp_em(c, v, 앞=""):
+    """🔴 2026-09-29 (2차) HO — «20일 −15.00조» 자리에 «평소의 N배 · 20일 중 N번째»를.
+    막대 바로 밑 오른쪽(em 칸)에 한 줄로. 순위는 늘 적는다(5등 밖이어도)."""
+    if not c:
+        return f'<em>{앞}</em>'
+    배, 순, n = c
+    강 = 배 >= 1.8 or 순 <= 2
+    말 = (f'{"🔥 " if 강 else ""}평소의 <b>{배:.1f}배</b> · {n}일 중 '
+          f'{"매수" if v >= 0 else "매도"} <b>{순}번째</b>')
+    return f'<em class="fv-ce{" hi" if 강 else ""}">{앞 + " · " if 앞 else ""}{말}</em>'
+
+
 def _fv_bar(v, mx, color_pos=None, color_neg=None):
     w = min(50.0, abs(v) / (mx or 1) * 50)
     c = (color_pos or TM_HOT) if v >= 0 else (color_neg or TM_DOWN)
@@ -18598,8 +18610,7 @@ def _fv_who(data):
             _dim = " dim" if 키 == "그밖" else ""
             행.append(f'<div class="fv-r{_dim}"><span class="fv-n" style="color:{c}">{이름}</span>'
                       f'{막}<b style="color:{TM_HOT if v >= 0 else TM_DOWN}">{_fv_amt(v)}</b>'
-                      f'<em>{(f"{일수.get(키, n)}일 " + _fv_amt(_누)) if 일수.get(키, n) >= 5 else ""}</em></div>'
-                      + _fv_cmp_txt(_fv_cmp(과.get(키, []), v), v))
+                      + _fv_cmp_em(_fv_cmp(과.get(키, []), v), v) + '</div>')
         # 한 문장 — 판 쪽과 산 쪽을 크기 순으로
         파는 = sorted([(a, v) for a, v, _ in 줄 if v < 0], key=lambda x: x[1])
         사는 = sorted([(a, v) for a, v, _ in 줄 if v > 0], key=lambda x: -x[1])
@@ -18657,8 +18668,9 @@ def _fv_who(data):
                 _보 = (f'{_계:+,}계약' if (isinstance(_계, (int, float)) and _fv not in (None, 0.0)) else "")
                 파생행.append(
                     f'<div class="fv-r"><span class="fv-n" style="color:#f472b6">외국인 선물</span>'
-                    f'{_fv_bar(_v, _mx)}<b style="color:{TM_HOT if _v >= 0 else TM_DOWN}">{_금}</b><em>{_보}</em></div>'
-                    + (_fv_cmp_txt(_fv_cmp(_이, _fv), _fv) if _fv not in (None, 0.0) else ""))
+                    f'{_fv_bar(_v, _mx)}<b style="color:{TM_HOT if _v >= 0 else TM_DOWN}">{_금}</b>'
+                    + (_fv_cmp_em(_fv_cmp(_이, _fv), _fv, _보) if _fv not in (None, 0.0) else f'<em>{_보}</em>')
+                    + '</div>')
         _pg = ((data.get("파생") or {}).get("프로그램매매") or {})
         if 시장 == "코스닥":
             _pg = _pg.get("코스닥") or {}
@@ -18667,8 +18679,8 @@ def _fv_who(data):
             _mx = max([abs(x) for x in 과["비차익"][-20:]] + [abs(_bv)])
             파생행.append(
                 f'<div class="fv-r"><span class="fv-n" style="color:#e8c33a">비차익</span>'
-                f'{_fv_bar(_bv, _mx)}<b style="color:{TM_HOT if _bv >= 0 else TM_DOWN}">{_fv_amt(_bv)}</b><em></em></div>'
-                + _fv_cmp_txt(_fv_cmp(과["비차익"][-20:], _bv), _bv))
+                f'{_fv_bar(_bv, _mx)}<b style="color:{TM_HOT if _bv >= 0 else TM_DOWN}">{_fv_amt(_bv)}</b>'
+                + _fv_cmp_em(_fv_cmp(과["비차익"][-20:], _bv), _bv) + '</div>')
         파생 = ""
         if 파생행:
             _지 = _fv_f(((수.get("지수") or {}).get(시장) or {}).get("등락률"))
@@ -18681,14 +18693,15 @@ def _fv_who(data):
             파생 = (f'<p class="fv-sub">파생·프로그램 <span>단위가 달라 막대는 각자 최근 20일 최대치 기준</span></p>'
                    + "".join(파생행)
                    + (f'<p class="fv-bsay">{_비말}</p>' if _비말 else "")
-                   + '<div class="fv-learn"><p><b>🧺 비차익이 뭐예요?</b> 기관·외국인이 컴퓨터 주문으로 '
+                   + '<details class="fv-learnd"><summary>🧺 비차익이 뭐예요? · 보는 법</summary>'
+                     '<div class="fv-learn"><p>기관·외국인이 컴퓨터 주문으로 '
                      '<b>여러 종목을 바구니째</b> 한꺼번에 사고파는 돈이에요(선물과 짝지은 «차익»거래를 뺀 것). '
                      '종목을 골라서가 아니라 <b>시장 전체</b>를 사고파는 돈이라, 지수 방향을 직접 밀어요.</p>'
                      '<p><b>보는 법</b> ① <b>빨강</b>이면 바구니째 산 날, <b>파랑</b>이면 판 날. '
                      '② 지수와 <b>같은 방향</b>이면 그 등락은 «시장 전체의 돈», <b>반대</b>면 몇몇 종목이 끈 것. '
                      '③ 선물 만기일 전후엔 포지션 정리로 크게 흔들리니 방향보다 «청산»으로 읽어요.</p>'
                      '<p><b>🛩️ 외국인 선물</b>은 «앞으로의 방향»에 거는 돈이에요. 현물(위 외국인 막대)과 '
-                     '<b>같은 색</b>이면 방향을 한쪽으로 건 것, <b>다른 색</b>이면 한쪽을 가려 두는 헤지일 수 있어요.</p></div>')
+                     '<b>같은 색</b>이면 방향을 한쪽으로 건 것, <b>다른 색</b>이면 한쪽을 가려 두는 헤지일 수 있어요.</p></div></details>')
         판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행) + 파생 + 선행))
     if not 판:
         return ""
@@ -21850,6 +21863,15 @@ html{{scroll-behavior:smooth}}
 .fv-cmp b{{color:#c9d0da}}
 .fv-cmp.hi{{color:#e8c33a}}
 .fv-cmp.hi b{{color:#ffd66b}}
+.fv-r em.fv-ce{{color:#7d8695;font-size:10px}}
+.fv-r em.fv-ce b{{font-size:10px;font-weight:800;color:#c9d0da;text-align:right}}
+.fv-r em.fv-ce.hi{{color:#e8c33a}}
+.fv-r em.fv-ce.hi b{{color:#ffd66b}}
+.fv-learnd{{margin:8px 0 0}}
+.fv-learnd summary{{cursor:pointer;font-size:11px;font-weight:800;color:#e8c33a;list-style:none}}
+.fv-learnd summary::-webkit-details-marker{{display:none}}
+.fv-learnd summary:before{{content:"▸ "}}
+.fv-learnd[open] summary:before{{content:"▾ "}}
 .fv-sub{{margin:12px 0 2px;padding-top:9px;border-top:1px dashed #2a3446;font-size:11.5px;font-weight:800;color:#c9d0da}}
 .fv-sub span{{display:block;font-size:9.5px;font-weight:600;color:#6f7a8b;margin-top:1px}}
 .fv-bsay{{margin:6px 0 0;font-size:12px;line-height:1.65;color:#dfe3e8}}
@@ -22246,6 +22268,7 @@ html{{scroll-behavior:smooth}}
   var btns=[].slice.call(nav.querySelectorAll('.gtab-b'));
   var secs=[].slice.call(document.querySelectorAll('section.tabsec[data-tab]'));
   function show(key){{
+    window.CP_TAB=key;
     secs.forEach(function(s){{
       if(!s.getAttribute('data-tab')) return;
       s.hidden=(s.getAttribute('data-tab')!==key);
@@ -22263,6 +22286,23 @@ html{{scroll-behavior:smooth}}
   btns.forEach(function(b){{
     b.addEventListener('click',function(){{ show(b.getAttribute('data-go')); }});
   }});
+  /* 🆕 2026-09-29 HO — «지난 리포트를 누르면 그날의 같은 탭으로».
+     주소 끝 #tab=테마 를 읽어 그 탭을 연다. 지난 리포트 링크는 누르는 순간
+     «지금 보고 있는 탭»을 주소에 붙인다(아래 클릭 가로채기).
+     ⚠️ 이 코드가 없는 옛 리포트(9/29 이전 파일)는 #tab을 몰라서 첫 탭으로 열린다. */
+  try{{
+    var m=/[#&]tab=([^&]+)/.exec(location.hash||'');
+    if(m){{
+      var k=decodeURIComponent(m[1]);
+      if(btns.some(function(b){{return b.getAttribute('data-go')===k;}})) show(k);
+    }}
+  }}catch(e){{}}
+  document.addEventListener('click',function(e){{
+    var a=e.target&&e.target.closest?e.target.closest('a.arch-link'):null;
+    if(!a) return;
+    var k=window.CP_TAB, h=(a.getAttribute('href')||'').split('#')[0];
+    a.setAttribute('href', (k&&k!==btns[0].getAttribute('data-go'))?(h+'#tab='+encodeURIComponent(k)):h);
+  }},true);
 }})();
 /* 🆕 심층편 칩 네비 — 인라인 onclick을 쓰지 않는다.
    파이썬 f-string을 거치며 따옴표 이스케이프가 풀려 JS 전체가 죽은 사고가 있었다. */
