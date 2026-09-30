@@ -247,6 +247,43 @@ DATA_PATH = apath(f"data_{DATE}.json")
 REPORT_PATH = apath(f"report_{DATE}.json")
 OUT_PATH = f"report_{DATE}.html"
 
+
+# 🆕 2026-09-30 HO — «테마 탭에서 어제 리포트를 누르면 어제의 테마 탭으로.»
+#   새 리포트는 주소 끝 #tab=테마 를 읽지만, 9/30 이전 파일은 그 코드가 없어 첫 탭으로 열렸다.
+#   → 빌드할 때마다 폴더의 옛 report_*.html 중 «아직 없는 것»에만 작은 스크립트를 한 번 붙인다.
+#   ⚠️ 표시(CP_TABHASH)가 있으면 건너뛴다 — 두 번 붙지 않는다. 내용은 건드리지 않고 </body> 앞에 덧붙이기만.
+_TABHASH_JS = ('<script>/*CP_TABHASH*/(function(){try{var m=/[#&]tab=([^&]+)/.exec(location.hash||"");'
+               'if(!m)return;var k=decodeURIComponent(m[1]);function go(){var bs=document.querySelectorAll(".gtab-b");'
+               'for(var i=0;i<bs.length;i++){if(bs[i].getAttribute("data-go")===k){bs[i].click();break;}}}'
+               'if(document.readyState!=="loading")go();else document.addEventListener("DOMContentLoaded",go);'
+               '}catch(e){}})();</script>')
+
+
+def _patch_old_reports_tabhash():
+    n = 0
+    try:
+        for f in sorted(os.listdir(".")):
+            if not (f.startswith("report_") and f.endswith(".html")) or f == OUT_PATH:
+                continue
+            try:
+                with open(f, encoding="utf-8") as fp:
+                    t = fp.read()
+            except Exception:
+                continue
+            if "CP_TABHASH" in t or "[#&]tab=" in t or "gtab-b" not in t:
+                continue
+            i = t.rfind("</body>")
+            t = (t[:i] + _TABHASH_JS + t[i:]) if i >= 0 else (t + _TABHASH_JS)
+            with open(f, "w", encoding="utf-8") as fp:
+                fp.write(t)
+            n += 1
+    except Exception as e:
+        print(f"   ⚠️ 옛 리포트 탭 이동 패치 실패 — {type(e).__name__}: {e}")
+        return
+    if n:
+        print(f"   🔗 옛 리포트 {n}개에 «같은 탭으로 열기» 스크립트를 붙였습니다(한 번만).")
+
+
 # collect_data.py 와 동일한 사전(설명 붙이기용). 여기서도 참조.
 THEME_DICT = {
     "S7": "반도체 소부장 그룹", "자원개발": "해외 광물·에너지 자원", "LNG": "액화천연가스",
@@ -1589,13 +1626,17 @@ def find_past_reports():
         ymd = f[7:-5]
         if len(ymd) != 8 or not ymd.isdigit():
             continue
-        if ymd == DATE:          # 오늘 리포트는 목록에서 제외
-            continue
+        # 🔴 2026-09-30 HO — «지난 리포트에 오늘 날짜도 떠야 한다.» 제외하지 않고 «오늘» 칩으로 표시.
         try:
             d = datetime.strptime(ymd, "%Y%m%d")
         except ValueError:
             continue
         목록.append((ymd, d, f))
+    if not any(x[0] == DATE for x in 목록):          # 빌드 중엔 오늘 파일이 아직 없다
+        try:
+            목록.append((DATE, datetime.strptime(DATE, "%Y%m%d"), f"report_{DATE}.html"))
+        except ValueError:
+            pass
     목록.sort(key=lambda x: x[0], reverse=True)
     return 목록[:ARCHIVE_MAX]
 
@@ -1608,6 +1649,9 @@ def build_archive():
 
     def 칩(item):
         ymd, d, f = item
+        if ymd == DATE:
+            return (f'<a class="arch-link arch-today" href="{f}">오늘 {d.month}/{d.day}'
+                    f'({_WD[d.weekday()]})</a>')
         return f'<a class="arch-link" href="{f}">{d.month}/{d.day}({_WD[d.weekday()]})</a>'
 
     앞 = "".join(칩(x) for x in 목록[:ARCHIVE_FOLD])
@@ -4705,7 +4749,7 @@ def _zone_stat(일별, 시장, n):
 #  ⚠️ 설계 원칙: 입력값은 **브라우저에만** 저장한다(서버로 안 보낸다).
 #     계산도 전부 브라우저에서 한다 → 회원이 몇 명이든 서버 부담이 0이다.
 #     그래서 오늘 리포트 안에 '종목사전 20일치'를 미리 실어 보낸다.
-MYSTOCK_MAX = 10        # 입력 상한. 넘으면 화면이 길어져 오히려 안 읽힌다.
+MYSTOCK_MAX = 20        # 입력 상한. 🔴 2026-09-30 HO — 10 → 20.
 MYSTOCK_DAYS = 60       # 페이지에 실어 보낼 최대 거래일 수
 
 
@@ -6044,6 +6088,14 @@ def build_my_stocks(data):
   /* ② 공시 (오늘) */
   discs.forEach(function(g){
    var t=(g.t||'').replace(/ /g,''), hit=null;
+   /* 🔴 2026-09-30 — «유상증자결정(종속회사의주요경영사항)»은 자회사 증자다. 이 종목 주식 수는 그대로라
+      «기존 주주 몫이 줄어요»가 틀린 말이 된다(실측: 한화솔루션 9/30). → 🟡 «자회사 자금 조달»로 따로. */
+   if(t.indexOf('종속회사')>=0){
+    if(/유상증자|전환사채|신주인수권|교환사채|감자/.test(t)&&!seen['sub'+t]){ seen['sub'+t]=1;
+     add(1,'공시','자회사(종속회사) '+(t.match(/유상증자|전환사채|신주인수권부사채|교환사채|감자/)||[''])[0]+
+       ' — 이 종목 주식 수는 그대로예요. 자회사에 돈을 더 넣는지(부담) 확인해 보세요 <a href="'+g.u+'" target="_blank" rel="noopener">원문</a>'); }
+    return;
+   }
    SIG_DISC.forEach(function(r){ if(!hit&&t.indexOf(r[1])>=0) hit=r; });
    if(hit&&!seen['d'+hit[1]]){ seen['d'+hit[1]]=1; add(hit[0],'공시',hit[2]+' <a href="'+g.u+'" target="_blank" rel="noopener">원문</a>'); }
   });
@@ -11567,6 +11619,10 @@ def build_core(핵심편, data, 해석):
                f'🧲 오늘 매집 종목</p>'
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
+             # 🔴 2026-09-30 HO «포착 탭에서 종목 결과를 보는 챕터 어디 갔어?» — 9/12에 성적표 탭째 가렸던
+             #   「🛬 레이더는 잘 잡았나(포착 그 후)」를 포착 탭으로 옮겨 되살린다. (어제 채점표는 계속 숨김)
+             + f'<p class="sec-label"><small>포착 그 후 · 1차 포착만</small>🛬 레이더는 잘 잡았나</p>'
+             + build_catch_after(data)
              # 🔴 HO 지시 2026-09-12 — 공시는 「포착」 맨 아래.
              #    [왜] 공시도 «우리가 골라낸 것»이다. 내 종목(구독자가 담은 것)과
              #    성격이 다르다. 다만 매일 보는 것은 아니라 맨 아래에 둔다.
@@ -17484,9 +17540,13 @@ THEME_V17_CSS = """
 .sv-note b{color:#8b93a0}
 .tm-rd{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:4px 0 0}
 .tm-rd svg{width:100%;display:block}
-.tm-key{display:flex;flex-wrap:wrap;gap:9px;font-size:10px;color:#9aa3b2;
-  justify-content:center;margin:8px 0}
-.tm-key i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:3px}
+.tm-key{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:10px;color:#9aa3b2;
+  justify-content:center;align-items:center;margin:8px 0}
+/* 🔴 2026-09-30 HO — 모바일에서 «제자리» 글자가 떠 보이고, 첫 등장 원이 글자에 붙었다.
+   점과 글자를 같은 줄 높이의 flex로 세우고, 흰 테두리 원(첫 등장)은 테두리만큼 간격을 더 준다. */
+.tm-key span{display:inline-flex;align-items:center;line-height:1;white-space:nowrap}
+.tm-key i{display:inline-block;flex:none;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.tm-key span:first-child i{margin:0 7px 0 3px}
 /* 🔴 v18 — 테마 채점판 */
 .tsc-box{background:#10161f;border:1px solid #1d2634;border-radius:12px;padding:12px}
 .tsc-tbl{width:100%;border-collapse:collapse;font-size:11.5px}
@@ -20683,6 +20743,7 @@ a{{color:inherit;text-decoration:none}}
 .mf-sub-x{{font-size:9.5px;font-weight:600;color:#8a909a}}
 .news-foot{{font-size:10px;color:var(--sub);line-height:1.6;margin:-.2rem 0 1rem;padding:0 .2rem}}
 /* 지난 리포트 아카이브 */
+.arch-today{{border-color:#e0c060 !important;color:#ffd66b !important;font-weight:800}}
 .arch-wrap{{background:var(--bg2);border:.5px solid var(--line);border-radius:var(--rlg);padding:.85rem 1rem;margin:1.4rem 0 .4rem}}
 .arch-head{{font-size:11.5px;font-weight:800;color:var(--ink);margin-bottom:.6rem;letter-spacing:-.01em}}
 .arch-grid{{display:flex;flex-wrap:wrap;gap:6px}}
@@ -22851,3 +22912,4 @@ if __name__ == "__main__":
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"🎉 완료! → {OUT_PATH}  (build_html {SCRIPT_VERSION})")
+    _patch_old_reports_tabhash()
