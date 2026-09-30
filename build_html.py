@@ -6060,11 +6060,11 @@ def build_my_stocks(data):
    var fo=runX(function(r){return r[1]<0;}, function(r,sgn){return sgn?r[1]:Math.abs(r[1]);});
    var go=runX(function(r){return r[2]<0;}, function(r,sgn){return sgn?r[2]:Math.abs(r[2]);});
    var msg=function(who,n,x){ return who+' <b>'+n+'일 연속 매도</b> — 합계가 평소 하루 순매매 규모의 <b>'+x.toFixed(1)+'배</b>'; };
-   if(both.n>=3&&both.x>=5){ add(2,'수급',msg('외국인·기관 동반',both.n,both.x)); red=true; streak=true; }
-   else if(both.n>=2&&both.x>=3){ add(1,'수급',msg('외국인·기관 동반',both.n,both.x)); streak=true; }
+   if(both.n>=3&&both.x>=8){ add(2,'수급',msg('외국인·기관 동반',both.n,both.x)); red=true; streak=true; }
+   else if(both.n>=2&&both.x>=5){ add(1,'수급',msg('외국인·기관 동반',both.n,both.x)); streak=true; }
    else{
-    if(fo.n>=3&&fo.x>=4){ add(1,'수급',msg('외국인',fo.n,fo.x)); streak=true; }
-    if(go.n>=3&&go.x>=4){ add(1,'수급',msg('기관',go.n,go.x)); streak=true; }
+    if(fo.n>=3&&fo.x>=6){ add(1,'수급',msg('외국인',fo.n,fo.x)); streak=true; }
+    if(go.n>=3&&go.x>=6){ add(1,'수급',msg('기관',go.n,go.x)); streak=true; }
    }
   }
   if(sf&&sf.length){
@@ -6073,14 +6073,25 @@ def build_my_stocks(data):
    if(평>0&&금>0){
     var vx=금/평, net=L0[1]+L0[2], share=-net/평, bothS=(L0[1]<0&&L0[2]<0);
     var 억=function(v){var a=Math.abs(v);return (a>=10000?(a/10000).toFixed(1)+'조':Math.round(a).toLocaleString()+'억');};
-    if(bothS&&vx>=3){ add(2,'수급','거래대금이 평소의 <b>'+vx.toFixed(1)+'배</b> 터진 날 외국인·기관 <b>동반 매도</b>'); red=true; }
-    if(bothS&&share>=0.2){ add(2,'수급','외국인·기관이 평소 하루 거래대금('+억(평)+')의 <b>'+Math.round(share*100)+'%</b>어치를 팔았어요'); red=true; }
-    if(!red&&net<0&&vx>=2){
-     var who=(L0[1]<0&&L0[2]<0)?'외국인·기관':(L0[1]<L0[2]?'외국인':'기관');
-     add(1,'수급','거래대금 평소의 <b>'+vx.toFixed(1)+'배</b> + '+who+' 순매도');
+    /* 🔴 2026-09-30 (6차) HO «삼성SDI(22%)·대주전자재료(35%) 정도로 빨간불이면 안 된다 — 훨씬 높게».
+       9/30 실측(거래대금 상위 230종목): 외국인·기관 «동반 매도» 67종목의 중간값이 이미 22%였다
+       → 20% 문턱은 동반 매도 종목의 절반을 빨강으로 만든 셈. 문턱을 몇 배로 올린다.
+       새 기준으로 9/30을 다시 세면 🔴 1종목(HLB) · 🟡 7종목(전체의 3%).
+       🔴 동반 순매도 ≥ 평소 하루 거래대금의 100% + 거래대금 평소 2배+
+          또는 거래대금 평소 4배+ + 동반 순매도 50%+
+       🟡 동반 순매도 ≥ 평소 하루 거래대금의 60%   ·   순매도(합계) + 거래대금 평소 3배+ */
+    var 퍼=function(x){return Math.round(x*100)+'%';};
+    if(bothS&&share>=1.0&&vx>=2){ add(2,'수급','외국인·기관이 평소 하루 거래대금('+억(평)+')의 <b>'+퍼(share)+'</b>어치를 팔았고, 거래대금도 평소의 <b>'+vx.toFixed(1)+'배</b>'); red=true; }
+    else if(bothS&&vx>=4&&share>=0.5){ add(2,'수급','거래대금이 평소의 <b>'+vx.toFixed(1)+'배</b> 터진 날 외국인·기관 동반 매도 (평소 거래대금의 <b>'+퍼(share)+'</b>)'); red=true; }
+    if(!red){
+     if(bothS&&share>=0.6) add(1,'수급','외국인·기관 동반 매도가 평소 하루 거래대금의 <b>'+퍼(share)+'</b>');
+     else if(net<0&&vx>=3){
+      var who=(L0[1]<0&&L0[2]<0)?'외국인·기관':(L0[1]<L0[2]?'외국인':'기관');
+      add(1,'수급','거래대금 평소의 <b>'+vx.toFixed(1)+'배</b> + '+who+' 순매도');
+     }
     }
     var n5=0; sf.slice(-5).forEach(function(r){ n5+=r[1]+r[2]; });
-    if(!red&&!streak&&n5<0&&(-n5/평)>=0.5) add(1,'수급','최근 5일 외국인·기관이 평소 하루 거래대금의 <b>'+(-n5/평).toFixed(1)+'배</b>어치를 순매도');
+    if(!red&&!streak&&sf.length>=5&&n5<0&&(-n5/평)>=1.5) add(1,'수급','최근 5일 외국인·기관이 평소 하루 거래대금의 <b>'+(-n5/평).toFixed(1)+'배</b>어치를 순매도');
     if(L0[1]>0&&L0[2]>0&&vx>=2) good.push('거래대금 평소의 '+vx.toFixed(1)+'배 + 외국인·기관 동반 매수');
    }
   }
@@ -6135,7 +6146,10 @@ def build_my_stocks(data):
   var lv=function(a,l){return a.filter(function(r){return r[0]===l;}).map(function(r){return r[1];}).join(' · ');};
   return '<details class="mt-leg"><summary>🚦 신호등 기준 ▾</summary><div>'+
    '<p><b style="color:#ff5a4e">● 확인 필요</b> · <b style="color:#f5b93a">● 지켜볼 것</b> · <b style="color:#3ecf9a">● 신호 없음</b> — 종목 이름 앞 작은 점</p>'+
-   '<p><em>수급</em> 기준 = 그 종목의 <b>20일 평균 거래대금</b><br>🔴 외국인·기관 동반 순매도 + 거래대금 평소 <b>3배+</b> · 동반 순매도가 평균 거래대금의 <b>20%+</b><br>🔴 외국인·기관 <b>3일+ 연속 동반 매도</b> + 합계가 평소 하루 <b>순매매 규모의 5배+</b><br>🟡 외국인·기관 합계 순매도 + 거래대금 평소 <b>2배+</b> · <b>2일+ 연속 동반 매도</b> + 순매매 규모의 <b>3배+</b> · 외국인 또는 기관 <b>3일+ 연속 매도</b> + <b>4배+</b> · 최근 5일 누적 순매도가 평균 거래대금의 <b>50%+</b><br><span>평소 하루 거래대금 = 직전 20거래일 평균 · 평소 순매매 규모 = 연속 매도 이전 날들의 하루 평균(|외국인|+|기관|)</span><br><span>거래대금 기록이 있는 종목만 판정해요(거래대금 상위 약 200종목)</span></p>'+
+   '<p><em>수급</em> 기준 = 그 종목의 <b>20일 평균 거래대금</b>(평소 하루 거래대금)과 연속 매도 이전의 <b>평소 순매매 규모</b><br>'+
+   '🔴 외국인·기관 동반 순매도가 평소 하루 거래대금의 <b>100%+</b> + 거래대금 <b>2배+</b> · 거래대금 <b>4배+</b> + 동반 순매도 <b>50%+</b> · <b>3일+</b> 연속 동반 매도 + 평소 순매매의 <b>8배+</b><br>'+
+   '🟡 동반 순매도 <b>60%+</b> · 순매도 + 거래대금 <b>3배+</b> · <b>2일+</b> 연속 동반 매도 + <b>5배+</b> · 외국인 또는 기관 <b>3일+</b> 연속 + <b>6배+</b> · 5일 누적 순매도가 평소 거래대금의 <b>1.5배+</b><br>'+
+   '<span>9/30 기준으로 세면 거래대금 상위 230종목 중 🔴 1 · 🟡 7 정도가 걸리는 문턱이에요</span></p>'+
    '<p><em>공시</em> 🔴 '+lv(SIG_DISC,2)+'<br>🟡 '+lv(SIG_DISC,1)+'</p>'+
    '<p><em>뉴스</em> 최근 7일 · 제목에 종목명이 든 기사만<br>🔴 '+lv(SIG_NEWS,2)+'<br>🟡 '+lv(SIG_NEWS,1)+
    '<br><span>제목에 '+SIG_NEWS_OK.join('·')+'가 같이 있으면 뺍니다(«적자 탈출» 같은 좋은 소식)</span></p>'+
