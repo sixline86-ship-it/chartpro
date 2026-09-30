@@ -18520,16 +18520,71 @@ def _fv_cmp_txt(c, v):
     return f'<p class="fv-cmp{" hi" if 강 else ""}">{"🔥 " if 강 else ""}{말}</p>'
 
 
-def _fv_cmp_em(c, v, 앞=""):
-    """🔴 2026-09-29 (2차) HO — «20일 −15.00조» 자리에 «평소의 N배 · 20일 중 N번째»를.
-    막대 바로 밑 오른쪽(em 칸)에 한 줄로. 순위는 늘 적는다(5등 밖이어도)."""
-    if not c:
+def _fv_feat(hist, v):
+    """🔴 2026-09-29 (3차) HO — «늘 몇 번째가 아니라, 그날의 특징을 골라서».
+    hist = 오늘을 뺀 과거 값(오래된 → 최근 순). 후보를 모두 계산해 «가장 튀는 것» 하나를 고른다.
+      ① 연속 — 같은 방향 N일째(3일+)        ② 전환 — 3일+ 이어지던 방향이 오늘 뒤집힘
+      ③ 크기 — N일 중 같은 방향 1~3번째로 큼   ④ 조용 — N일 중 가장 작음(1~2번째로 작음)
+      ⑤ 배수 — 평소의 1.8배 이상 / 0.35배 이하
+    반환 (본문, 강조여부, 배수글) · 모르면 None. ⚠️ 지어내지 않는다 — 전부 기록에서 센 값."""
+    h = [x for x in hist if isinstance(x, (int, float))]
+    if v is None or len(h) < 5:
+        return None
+    n = len(h) + 1
+    avg = sum(abs(x) for x in h) / len(h) or 1
+    배 = abs(v) / avg
+    방 = "매수" if v >= 0 else "매도"
+    후보 = []                       # (점수, 글, 강조)
+    # ① 연속
+    k = 1
+    for x in reversed(h):
+        if x != 0 and (x >= 0) == (v >= 0):
+            k += 1
+        else:
+            break
+    if k >= 3:
+        후보.append((k / 2.0, f'<b>{k}일 연속</b> {방}', k >= 5))
+    # ② 전환
+    if k == 1:
+        m = 0
+        for x in reversed(h):
+            if x != 0 and (x >= 0) != (v >= 0):
+                m += 1
+            else:
+                break
+        if m >= 3:
+            후보.append((m / 1.5, f'{m}일 연속 {"매도" if v >= 0 else "매수"} 끝 → <b>{방} 전환</b>', True))
+    # ③ 크기 순위(같은 방향 중)
+    same = sorted([abs(x) for x in h if x != 0 and (x >= 0) == (v >= 0)] + [abs(v)], reverse=True)
+    r = same.index(abs(v)) + 1
+    if r <= 3:
+        후보.append((4.5 - r, f'{n}일 중 {방} <b>{"최대" if r == 1 else f"{r}번째로 큼"}</b>', r == 1))
+    # ④ 조용한 날
+    small = sorted([abs(x) for x in h] + [abs(v)])
+    rs = small.index(abs(v)) + 1
+    if rs <= 2:
+        후보.append((2.5 - rs * 0.5, f'{n}일 중 <b>{"가장" if rs == 1 else "두 번째로"} 작은</b> 금액', False))
+    # ⑤ 배수
+    if 배 >= 1.8:
+        후보.append((배, f'평소의 <b>{배:.1f}배</b>', True))
+    elif 배 <= 0.35:
+        후보.append((1.2, f'평소의 <b>{"0.1배 미만" if 배 < 0.1 else f"{배:.1f}배"}</b> — 조용', False))
+    배말 = "0.1배 미만" if 배 < 0.1 else f"{배:.1f}배"
+    배글 = f'평소의 {배말}'
+    if not 후보:
+        return (f'평소의 <b>{배:.1f}배</b>', False, "")
+    점, 글, 강 = max(후보, key=lambda t: t[0])
+    return (글, 강, "" if "평소의" in 글 else 배글)
+
+
+def _fv_cmp_em(hist, v, 앞=""):
+    """막대 바로 밑 오른쪽(em 칸) — 그날의 특징 한 줄(+ 평소 배수)."""
+    f = _fv_feat(hist, v)
+    if not f:
         return f'<em>{앞}</em>'
-    배, 순, n = c
-    강 = 배 >= 1.8 or 순 <= 2
-    말 = (f'{"🔥 " if 강 else ""}평소의 <b>{배:.1f}배</b> · {n}일 중 '
-          f'{"매수" if v >= 0 else "매도"} <b>{순}번째</b>')
-    return f'<em class="fv-ce{" hi" if 강 else ""}">{앞 + " · " if 앞 else ""}{말}</em>'
+    글, 강, 배글 = f
+    return (f'<em class="fv-ce{" hi" if 강 else ""}">{앞 + " · " if 앞 else ""}{"🔥 " if 강 else ""}{글}'
+            + (f' · {배글}' if 배글 else "") + '</em>')
 
 
 def _fv_bar(v, mx, color_pos=None, color_neg=None):
@@ -18610,7 +18665,7 @@ def _fv_who(data):
             _dim = " dim" if 키 == "그밖" else ""
             행.append(f'<div class="fv-r{_dim}"><span class="fv-n" style="color:{c}">{이름}</span>'
                       f'{막}<b style="color:{TM_HOT if v >= 0 else TM_DOWN}">{_fv_amt(v)}</b>'
-                      + _fv_cmp_em(_fv_cmp(과.get(키, []), v), v) + '</div>')
+                      + _fv_cmp_em(과.get(키, []), v) + '</div>')
         # 한 문장 — 판 쪽과 산 쪽을 크기 순으로
         파는 = sorted([(a, v) for a, v, _ in 줄 if v < 0], key=lambda x: x[1])
         사는 = sorted([(a, v) for a, v, _ in 줄 if v > 0], key=lambda x: -x[1])
@@ -18669,7 +18724,7 @@ def _fv_who(data):
                 파생행.append(
                     f'<div class="fv-r"><span class="fv-n" style="color:#f472b6">외국인 선물</span>'
                     f'{_fv_bar(_v, _mx)}<b style="color:{TM_HOT if _v >= 0 else TM_DOWN}">{_금}</b>'
-                    + (_fv_cmp_em(_fv_cmp(_이, _fv), _fv, _보) if _fv not in (None, 0.0) else f'<em>{_보}</em>')
+                    + (_fv_cmp_em(_이, _fv, _보) if _fv not in (None, 0.0) else f'<em>{_보}</em>')
                     + '</div>')
         _pg = ((data.get("파생") or {}).get("프로그램매매") or {})
         if 시장 == "코스닥":
@@ -18680,7 +18735,7 @@ def _fv_who(data):
             파생행.append(
                 f'<div class="fv-r"><span class="fv-n" style="color:#e8c33a">비차익</span>'
                 f'{_fv_bar(_bv, _mx)}<b style="color:{TM_HOT if _bv >= 0 else TM_DOWN}">{_fv_amt(_bv)}</b>'
-                + _fv_cmp_em(_fv_cmp(과["비차익"][-20:], _bv), _bv) + '</div>')
+                + _fv_cmp_em(과["비차익"][-20:], _bv) + '</div>')
         파생 = ""
         if 파생행:
             _지 = _fv_f(((수.get("지수") or {}).get(시장) or {}).get("등락률"))
@@ -18702,7 +18757,8 @@ def _fv_who(data):
                      '③ 선물 만기일 전후엔 포지션 정리로 크게 흔들리니 방향보다 «청산»으로 읽어요.</p>'
                      '<p><b>🛩️ 외국인 선물</b>은 «앞으로의 방향»에 거는 돈이에요. 현물(위 외국인 막대)과 '
                      '<b>같은 색</b>이면 방향을 한쪽으로 건 것, <b>다른 색</b>이면 한쪽을 가려 두는 헤지일 수 있어요.</p></div></details>')
-        판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행) + 파생 + 선행))
+        # 🔴 2026-09-29 HO — 맨 밑 «🛩️ 외국인 선물» 코너 삭제(파생·프로그램 막대와 중복). 선행은 계산만 남긴다.
+        판.append((시장, f'<p class="fv-say">{말}</p>' + "".join(행) + 파생))
     if not 판:
         return ""
     btn = "".join(f'<button class="fv-tb{" on" if i == 0 else ""}" '
