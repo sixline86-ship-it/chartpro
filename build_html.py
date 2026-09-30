@@ -3289,7 +3289,7 @@ def build_core_strong(강세레이더):
                 '<p style="margin:0 0 3px;font-size:11.5px;color:#ff6b4a;'
                 'font-weight:700">강세 레이더</p>'
                 '<p style="margin:0 0 8px;font-size:17.5px;font-weight:800;'
-                'color:#f2f4f7"><span class="cp-flame">🔥</span> 오늘 강한 종목</p>'
+                'color:#f2f4f7"><span class="cp-radar" aria-hidden="true"><i></i><b></b></span> 오늘 포착 종목</p>'
                 '<p style="margin:0;font-size:12.5px;color:#c9ced6;line-height:1.7">'
                 '오늘은 <b style="color:#e8eaee">조건을 통과한 종목이 없습니다.</b><br>'
                 '조건이 <b>코스피 4%↑ / 코스닥 5%↑ + 거래량 급증</b>으로 빡빡해서 '
@@ -3422,7 +3422,7 @@ def build_core_strong(강세레이더):
             f'<p style="margin:0 0 3px;font-size:11.5px;color:#ff6b4a;font-weight:700">'
             f'강세 레이더</p>'
             f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
-            f'<span class="cp-flame">🔥</span> 오늘 강한 종목</p>'
+            f'<span class="cp-radar" aria-hidden="true"><i></i><b></b></span> 오늘 포착 종목</p>'
             # 🆕 2026-08-22 HO 지시 — "2종목만 보여드려요" 배지 제거.
             #    유료판에서는 심층편이 바로 아래 있어 굳이 안내할 이유가 없다.
             f'{"".join(행들)}'
@@ -3532,8 +3532,8 @@ def build_core_accum(매집):
                 '<p style="margin:0 0 3px;font-size:11.5px;color:#74f0d4;'
                 'font-weight:700">매집 레이더</p>'
                 '<p style="margin:0 0 8px;font-size:17.5px;font-weight:800;'
-                'color:#f2f4f7"><span class="cp-turtle">🐢</span> '
-                '외국인, 기관이 조용히 매집하는 종목</p>'
+                'color:#f2f4f7"><span class="cp-mag" aria-hidden="true"><em>🧲</em><i></i><i></i><i></i></span> '
+                '오늘 매집 종목</p>'
                 '<p style="margin:0;font-size:12.5px;color:#c9ced6;line-height:1.7">'
                 '오늘은 <b style="color:#e8eaee">조건을 통과한 종목이 없습니다.</b><br>'
                 '외인·기관이 <b>며칠 연속</b>으로, 그것도 <b>시총 대비 크게</b> '
@@ -3588,7 +3588,7 @@ def build_core_accum(매집):
             f'<p style="margin:0 0 3px;font-size:11.5px;color:#74f0d4;font-weight:700">'
             f'매집 레이더</p>'
             f'<p style="margin:0 0 4px;font-size:17.5px;font-weight:800;color:#f2f4f7">'
-            f'<span class="cp-turtle">🐢</span> 외국인, 기관이 조용히 매집하는 종목</p>'
+            f'<span class="cp-mag" aria-hidden="true"><em>🧲</em><i></i><i></i><i></i></span> 오늘 매집 종목</p>'
             # 🆕 2026-08-22 — 회색이라 묻혀 보인다는 지적. 눈에 띄는 배지로.
             # 🆕 2026-08-22 HO 지시 — "2종목만 보여드려요" 배지 제거.
             f'{"".join(행들)}'
@@ -11561,10 +11561,10 @@ def build_core(핵심편, data, 해석):
                f' · 테마별 1종목</span></p>'
              + build_theme_leaders(data)
              + f'<p class="sec-label"><small>강세 레이더 상세</small>'
-               f'📡 오늘 잡힌 강한 종목</p>'
+               f'📡 오늘 포착 종목</p>'
              + build_radar(data.get("강세레이더"), data.get("설정"))
              + f'<p class="sec-label"><small>매집 레이더 상세</small>'
-               f'🧲 오늘 잡힌 매집 종목</p>'
+               f'🧲 오늘 매집 종목</p>'
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
              # 🔴 HO 지시 2026-09-12 — 공시는 「포착」 맨 아래.
@@ -20763,12 +20763,17 @@ html{{scroll-behavior:smooth}}
 .tabsec .sec-label{{color:#e8ecf1;margin:1.3rem 0 .6rem;font-size:15.5px}}
 .tabsec .sec-label small{{color:#7d848f}}
 .tabsec .sec-label::after{{background:rgba(255,255,255,.09)}}
-.tab-종합{{--tabc:#9aa2ae; --tabbg:rgba(154,162,174,.035)}}
-.tab-시황{{--tabc:#6ea8ff; --tabbg:rgba(110,168,255,.045)}}
-.tab-수급{{--tabc:#5fd39b; --tabbg:rgba(95,211,155,.045)}}
-.tab-테마{{--tabc:#b48cf0; --tabbg:rgba(180,140,240,.05)}}
-.tab-종목{{--tabc:#e0c060; --tabbg:rgba(224,192,96,.045)}}
-.tab-성적표{{--tabc:#74f0d4; --tabbg:rgba(116,240,212,.04)}}
+/* 🔴 2026-09-30 HO — «원색이라 촌스럽다 → 파스텔». 그리고 «포착·내 종목은 색이 안 바뀐다»:
+   섹션 색을 .tab-이름 클래스로 걸었는데 «내 종목»은 띄어쓰기 때문에 클래스가 두 개로 쪼개지고,
+   «포착»은 규칙 자체가 없었다 → 전부 [data-tab] 속성으로 건다(띄어쓰기 안전). */
+.tabsec[data-tab="종합"],.tab-종합{{--tabc:#cdd5e0; --tabbg:rgba(205,213,224,.045)}}
+.tabsec[data-tab="시황"],.tab-시황{{--tabc:#a3c8ff; --tabbg:rgba(163,200,255,.045)}}
+.tabsec[data-tab="수급"],.tab-수급{{--tabc:#a4e4c6; --tabbg:rgba(164,228,198,.045)}}
+.tabsec[data-tab="테마"],.tab-테마{{--tabc:#cfb8f4; --tabbg:rgba(207,184,244,.045)}}
+.tabsec[data-tab="포착"],.tab-포착{{--tabc:#ffbfa3; --tabbg:rgba(255,191,163,.045)}}
+.tabsec[data-tab="내 종목"],.tab-내종목{{--tabc:#f3dc9c; --tabbg:rgba(243,220,156,.045)}}
+.tabsec[data-tab="종목"],.tab-종목{{--tabc:#f3dc9c; --tabbg:rgba(243,220,156,.045)}}
+.tabsec[data-tab="성적표"],.tab-성적표{{--tabc:#a9eadf; --tabbg:rgba(169,234,223,.045)}}
 .tab-미분류{{--tabc:#6b7480; --tabbg:rgba(107,116,128,.03)}}
 @media (max-width:359px){{.tabsec{{padding:12px 10px 15px;border-radius:11px}}}}
 /* ══════════════════════════════════════════════════════════════
@@ -20811,12 +20816,15 @@ html{{scroll-behavior:smooth}}
 .gtab-b:focus-visible{{outline:2px solid var(--tabc,#9aa2ae);outline-offset:-3px;
   border-radius:8px}}
 /* 탭별 고유색 — 본문 섹션(.tab-종합 …)과 같은 값을 쓴다. */
-.gtab-b[data-go="종합"]{{--tabc:#9aa2ae}}
-.gtab-b[data-go="시황"]{{--tabc:#6ea8ff}}
-.gtab-b[data-go="수급"]{{--tabc:#5fd39b}}
-.gtab-b[data-go="테마"]{{--tabc:#b48cf0}}
-.gtab-b[data-go="종목"]{{--tabc:#e0c060}}
-.gtab-b[data-go="성적표"]{{--tabc:#74f0d4}}
+.gtab-b[data-go="종합"]{{--tabc:#cdd5e0}}
+/* 🔴 2026-09-30 HO — 종합·포착·내 종목이 같은 회색 조명이었다(포착·내 종목은 색 지정이 없어 기본값). 각자 색을 준다. */
+.gtab-b[data-go="포착"]{{--tabc:#ffbfa3}}
+.gtab-b[data-go="내 종목"]{{--tabc:#f3dc9c}}
+.gtab-b[data-go="시황"]{{--tabc:#a3c8ff}}
+.gtab-b[data-go="수급"]{{--tabc:#a4e4c6}}
+.gtab-b[data-go="테마"]{{--tabc:#cfb8f4}}
+.gtab-b[data-go="종목"]{{--tabc:#f3dc9c}}
+.gtab-b[data-go="성적표"]{{--tabc:#a9eadf}}
 /* 🔴 HO 지시 2026-09-12 — 왼쪽 색 띠를 걷어낸다.
    [왜] 3px 세로줄이 화면 왼쪽을 세로로 가로질러 «틀»처럼 보였다.
         탭을 눌러 들어온 이상 어느 탭인지는 이미 안다 — 띠가 할 일이 없다.
@@ -21141,7 +21149,33 @@ html{{scroll-behavior:smooth}}
   transform-origin:50% 92%}}
 .cp-turtle{{display:inline-block;animation:cpTurtle 5.2s ease-in-out infinite;
   transform-origin:50% 85%}}
-@media (prefers-reduced-motion:reduce){{.cp-flame,.cp-turtle{{animation:none}}}}
+/* 🆕 2026-09-30 HO «움직이는 이모티콘을 더 리얼하게».
+   📡 포착 = 진짜 레이더 화면: 동심원 + 도는 스윕 + 스윕이 지날 때 번쩍이는 표적
+   🧲 매집 = 자석 쪽으로 금화가 하나씩 빨려 들어간다 */
+.cp-radar{{position:relative;display:inline-block;width:22px;height:22px;border-radius:50%;
+  vertical-align:-4px;overflow:hidden;background:#1d0f0b;
+  background-image:repeating-radial-gradient(circle,transparent 0 4px,rgba(255,107,74,.38) 4.5px 5px),
+    linear-gradient(0deg,transparent 49%,rgba(255,107,74,.3) 50%,transparent 51%),
+    linear-gradient(90deg,transparent 49%,rgba(255,107,74,.3) 50%,transparent 51%);
+  border:1.5px solid rgba(255,122,80,.8);box-shadow:0 0 7px rgba(255,107,74,.45)}}
+.cp-radar i{{position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0 280deg,rgba(255,150,100,.15) 300deg,rgba(255,170,120,.9) 360deg);
+  animation:cpSweep 2.4s linear infinite}}
+.cp-radar b{{position:absolute;top:4px;left:13px;width:4px;height:4px;border-radius:50%;
+  background:#ffe0d2;box-shadow:0 0 5px 1px #ff8a5a;opacity:0;animation:cpBlip 2.4s linear infinite}}
+@keyframes cpSweep{{to{{transform:rotate(360deg)}}}}
+@keyframes cpBlip{{0%,9%{{opacity:0;transform:scale(.6)}} 12%{{opacity:1;transform:scale(1.25)}} 40%{{opacity:.55;transform:scale(1)}} 85%,100%{{opacity:0}}}}
+.cp-mag{{position:relative;display:inline-block;width:34px;height:20px;vertical-align:-3px}}
+.cp-mag em{{position:absolute;left:0;top:0;font-style:normal;font-size:17px;line-height:20px;
+  animation:cpMagPulse 1.8s ease-in-out infinite;filter:drop-shadow(0 0 3px rgba(116,240,212,.5))}}
+.cp-mag i{{position:absolute;top:8px;left:28px;width:5px;height:5px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%,#fff3b0,#e8b923 60%,#a8780a);box-shadow:0 0 3px rgba(255,210,80,.8);
+  opacity:0;animation:cpCoin 1.8s cubic-bezier(.55,0,.9,.4) infinite}}
+.cp-mag i:nth-of-type(2){{top:4px;animation-delay:.6s}}
+.cp-mag i:nth-of-type(3){{top:12px;animation-delay:1.2s}}
+@keyframes cpCoin{{0%{{opacity:0;transform:translateX(4px)}} 15%{{opacity:1}} 80%{{opacity:1;transform:translateX(-12px) scale(.9)}} 100%{{opacity:0;transform:translateX(-15px) scale(.5)}}}}
+@keyframes cpMagPulse{{0%,100%{{transform:rotate(-8deg) scale(1)}} 50%{{transform:rotate(-8deg) scale(1.08)}}}}
+@media (prefers-reduced-motion:reduce){{.cp-flame,.cp-turtle,.cp-radar i,.cp-radar b,.cp-mag em,.cp-mag i{{animation:none}}}}
 .hi-shield{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
 .hi-arrow{{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}}
 .hi-badge{{width:46px;height:46px;border-radius:11px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#20242b}}
