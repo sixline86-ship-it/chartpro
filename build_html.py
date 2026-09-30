@@ -4824,6 +4824,8 @@ def build_my_stocks(data):
     except Exception:
         _종목테마들 = {}
     이름배열JS += "window.CP_THEMES=" + json.dumps(_종목테마들, ensure_ascii=False) + ";"
+    # 🔴 2026-09-30 (3차) HO — «테마 위치는 일단 다 빼줘.» 내보내기(CP_TPOS·CP_TMEM)를 끈다.
+    #   화면 함수(_msTheme·_tA~_tE)는 JS에 남겨 두었다 — 다시 켤 때 여기만 되살리면 된다.
     # 종목 → 오늘 잡힌 레이더 이름 ('왜 움직였나' 판정에 쓴다)
     _핫 = {}
     try:
@@ -5342,8 +5344,12 @@ def build_my_stocks(data):
             for _d in _날들:
                 _v = _rec.get(_d)
                 if isinstance(_v, list) and len(_v) >= 2:
-                    _seq.append([f"{str(_d)[4:6]}/{str(_d)[6:]}",
-                                 round(float(_v[0] or 0), 1), round(float(_v[1] or 0), 1)])
+                    _row = [f"{str(_d)[4:6]}/{str(_d)[6:]}",
+                            round(float(_v[0] or 0), 1), round(float(_v[1] or 0), 1)]
+                    # 🆕 2026-09-30 — [3]=그날 거래대금, [4]=20일 평균 거래대금(억). 신호등 판정용.
+                    if len(_v) >= 4 and (_v[2] or _v[3]):
+                        _row += [_v[2], _v[3]]
+                    _seq.append(_row)
             if _seq:
                 _종목수급[_nm] = _seq
     except Exception as e:
@@ -5353,16 +5359,20 @@ def build_my_stocks(data):
     # 🆕 2026-09-29 — «오늘 한눈에» 카드 시안(A·B·C). 미리보기는 셋 다 + 예시 종목.
     이름배열JS += "window.CP_MS_STYLE=" + json.dumps(os.getenv("CP_MS_STYLE", "F")) + ";"
     if os.getenv("CP_MS_DEMO") == "1":
-        _예 = [n for n in ("삼성전기", "OCI홀딩스", "한화솔루션", "삼성전자") if n in payload["stocks"]][:3]
+        _예 = [n for n in ("삼성전기", "휴림로봇", "OCI홀딩스", "한화솔루션") if n in payload["stocks"]][:3]
         이름배열JS += "window.CP_MS_DEMO=" + json.dumps(_예, ensure_ascii=False) + ";window.CP_MS_DEMO_ALL=1;"
         # 🧪 미리보기 전용 — 이 환경의 종목수급 기록이 9/10에서 멈춰 있어 «오늘» 줄이 비어 보인다.
         #    모양 확인용 가짜 숫자를 오늘 날짜로 붙인다(실제 발행엔 CP_MS_DEMO가 없어 절대 안 들어감).
         _lab = f"{DATE[4:6]}/{DATE[6:]}"
-        _d5 = [f"{str(d).replace('-', '')[4:6]}/{str(d).replace('-', '')[6:8]}" for d in payload["days"][-5:]]
-        _가 = {"삼성전기": [(-120, 40), (85, -30), (140, 60), (-60, 95), (312.4, 188.0)],
-              "OCI홀딩스": [(20, -15), (-35, 10), (-50, 44), (12, 61), (-41.2, 96.5)],
-              "한화솔루션": [(60, 25), (-18, -40), (-75, -22), (-90, -51), (-120.8, -64.3)]}
-        _dm = {_n: [[_d5[i], *_가.get(_n, [(10, -5)] * 5)[i]] for i in range(len(_d5))] for _n in _예}
+        _d5 = [f"{str(d).replace('-', '')[4:6]}/{str(d).replace('-', '')[6:8]}" for d in payload["days"][-10:]]
+        _가 = {"삼성전기": [(40, -20), (-80, 15), (-30, -45), (65, 10), (22, 30), (-120, 40), (85, -30), (140, 60), (-60, 95), (312.4, 188.0)],
+              "OCI홀딩스": [(-12, 30), (8, -20), (25, 14), (-40, 5), (-18, 22), (20, -15), (-35, 10), (-50, 44), (12, 61), (-41.2, 96.5)],
+              "휴림로봇": [(5, 3), (-4, 2), (6, -1), (3, 4), (-2, 1), (4, -3), (-6, -2), (-9, -4), (-5, -7), (-21.5, -12.0)],
+              "한화솔루션": [(45, 12), (30, -8), (12, 20), (-25, 18), (18, -30), (60, 25), (-18, -40), (-75, -22), (-90, -51), (-120.8, -64.3)]}
+        _금 = {"삼성전기": (4200, 3900), "휴림로봇": (310, 95), "OCI홀딩스": (2100, 1300), "한화솔루션": (2600, 2400)}
+        _dm = {_n: [[_d5[i], *_가.get(_n, [(10, -5)] * 10)[i - len(_d5) + 10],
+                     (_금.get(_n, (100, 100))[0] if i == len(_d5) - 1 else _금.get(_n, (100, 100))[1]),
+                     _금.get(_n, (100, 100))[1]] for i in range(len(_d5))] for _n in _예}
         이름배열JS += "Object.assign(window.CP_SFLOW," + json.dumps(_dm, ensure_ascii=False) + ");"
     print(f"   💰 종목별 수급 {len(_종목수급)}종목 (쌓인 거래일 {len(_날들) if '_날들' in dir() else 0}일)")
 
@@ -5490,20 +5500,25 @@ def build_my_stocks(data):
     _일정 = []
     try:
         _본 = set()
-        for _ymd, _d in reversed(archive_days(5)):
+        # 🔴 2026-09-30 — 5거래일 → 60거래일. 보름 전에 나온 유증 공시의 납입일도
+        #   «아직 안 지났으면» 보여야 한다. D-day는 발행일 기준으로 다시 센다.
+        for _ymd, _d in reversed(archive_days(60)):
             for _s in (_d.get("공시날짜") or []):
                 _c = _s.get("회사명")
                 if not _c:
                     continue
                 for _lab, _ymd2 in (_s.get("날짜들") or {}).items():
-                    _dd = (_s.get("D데이") or {}).get(_lab)
-                    if not isinstance(_dd, int) or _dd < 0:
+                    try:
+                        _dd = (datetime.strptime(str(_ymd2), "%Y%m%d") - datetime.strptime(DATE, "%Y%m%d")).days
+                    except Exception:
+                        continue
+                    if _dd < 0 or _dd > 120:
                         continue
                     _key = (_c, _lab, _ymd2)
                     if _key in _본:
                         continue
                     _본.add(_key)
-                    _일정.append({"c": _c, "l": _lab,
+                    _일정.append({"c": _c, "l": _lab, "g": (_s.get("공시명") or "")[:40],
                                  "d": f"{str(_ymd2)[4:6]}/{str(_ymd2)[6:]}",
                                  "dd": _dd, "u": _s.get("링크", "")})
         print(f"   📅 일정(배당·유증 D-day) {len(_일정)}건 — 화면 연결")
@@ -5707,7 +5722,7 @@ def build_my_stocks(data):
     '<div style="font-size:14.5px;font-weight:800;color:#e8eaee">'+
     /* 🆕 2026-08-25 — 등록 목록에서는 뺐다(브리핑에만 둔다). 두 곳에 있으면
        같은 카드가 화면에 두 번 열려 중복이 된다. */
-    nm+
+    '<span class="mt-sigslot" data-nm="'+nm+'"></span>'+nm+
     /* 🆕 2026-08-29 HO 지시 — 순서 바꾸기 ▲▼.
        ⚠️ 맨 위/맨 아래에서는 눌러도 소용없으므로 흐리게(0.25) 표시해
           "왜 안 되지"를 미리 막는다. */
@@ -5774,7 +5789,7 @@ def build_my_stocks(data):
   if(discs.length) F.news={k:'공시', t:discs[0].t, u:discs[0].u, more:discs.length-1+g.length};
   else if(g.length) F.news={k:(g[0].n.o?'오늘':(g[0].n.k||'최근')), t:g[0].n.t, u:g[0].n.u, more:g.length-1};
   var sf=(window.CP_SFLOW||{})[nm];
-  F.sf5=(sf&&sf.length)?sf.slice(-5):null;
+  F.sf5=(sf&&sf.length)?sf.slice(-10):null;   /* 🔴 2026-09-30 HO — 5일 → 10일 (이름은 그대로 둔다) */
   if(sf&&sf.length){
    var td=String(P.days[di]).replace(/[^0-9]/g,''), lab=td.slice(4,6)+'/'+td.slice(6,8), L=sf[sf.length-1];
    if(L[0]===lab){
@@ -5788,6 +5803,7 @@ def build_my_stocks(data):
      4개 중 몇 위라는 뜻 없는 숫자가 된다. 순위는 종목 전체가 들어 있는 «섹터»로 매기고,
      오늘 주도 테마 상위에 이름이 올랐으면 그 사실만 따로 붙인다(F.th). */
   F.th=(window.CP_STOCK_THEME||{})[nm]||null;
+  F.sch=(window.CP_SCHEDULE||[]).filter(function(s){return s.c===nm;}).sort(function(a,b){return a.dd-b.dd;}).slice(0,6);
   var mem=[], gn='', gk='', gv=null, z=null, ST=(window.CP_SECT_TODAY||{});
   (m[0]||[]).forEach(function(zz){ var v=ST[zz]; if(v!==undefined&&v!==null&&(z===null||Math.abs(v)>Math.abs(z.v))) z={z:zz,v:v}; });
   if(!z&&(m[0]||[]).length) z={z:m[0][0], v:null};
@@ -5805,6 +5821,7 @@ def build_my_stocks(data):
  function _msC(v){ return v>0?'#ff6b4a':(v<0?'#5b9bff':'#9aa3b1'); }
  function _msPct(v){ return (v>=0?'+':'')+v.toFixed(1)+'%'; }
  function _msTop(r){ return Math.max(1,Math.round(r.rk/r.N*100)); }
+ function _msTopTxt(r){ var t=_msTop(r); return t<=50?('상위 '+t+'%'):('하위 '+Math.max(1,100-t+1)+'%'); }
  function _msTh(F){ return F.th?'<span class="mt-th">🔥 오늘 주도 테마 「'+F.th.split('(')[0]+'」 상위 종목</span>':''; }
  function _msTier(p){ return p>=0.8?'맨 앞줄':(p>=0.6?'앞쪽':(p>0.4?'중간':(p>0.2?'뒤쪽':'맨 뒷줄'))); }
  function _msNewsLine(F){
@@ -5822,7 +5839,7 @@ def build_my_stocks(data):
  function _msGrpLine(F){
   if(!F.gr) return '<span class="mt-no">비교할 섹터 없음</span>';
   var r=F.gr;
-  return r.n+' '+r.N+'종목 중 <b style="color:#ffc93c">'+r.rk+'위</b> <span class="mt-dim">(상위 '+_msTop(r)+'% · '+
+  return r.n+' '+r.N+'종목 중 <b style="color:#ffc93c">'+r.rk+'위</b> <span class="mt-dim">('+_msTopTxt(r)+' · '+
    '섹터 평균 '+_msPct(r.avg)+')</span>'+_msTh(F);
  }
  function _msVerdict(F){
@@ -5888,14 +5905,17 @@ def build_my_stocks(data):
   }
   /* ✅ 확정안(2026-09-29 HO) — A의 3칸 틀 + 📰 기존 기사 목록 + 💰 5일 외국인·기관 막대 + 🏁 C의 가로 게이지 */
   return '<div class="mt-t f">'+
-   '<div class="mt-s"><p class="mt-sh">💰 수급 <span>최근 5일 누적 순매수</span></p>'+_msFlowChart(F)+'</div>'+
+   /* 🔴 2026-09-30 HO — 초록(신호 없음)이면 칸 자체를 안 그린다. 노랑·빨강만. */
+   ((F.sig&&F.sig.L.length)?'<div class="mt-s"><p class="mt-sh">🚦 신호</p>'+_sigBlock(F.sig)+'</div>':'')+
+   '<div class="mt-s"><p class="mt-sh">💰 수급 <span>최근 '+(F.sf5?F.sf5.length:10)+'일 누적 순매수</span></p>'+_msFlowChart(F)+'</div>'+
+
    '<div class="mt-s"><p class="mt-sh">🏁 섹터 안 위치</p>'+_msGauge(F)+'</div></div>';
  }
  function _msGauge(F){
   if(!F.gr) return '<p class="mt-no">비교할 섹터 없음</p>';
   var r=F.gr, dots='', srt=r.all.slice().sort(function(a,b){return a-b;});
   srt.forEach(function(v,i){ dots+='<i style="left:'+((r.N>1?i/(r.N-1):1)*100).toFixed(1)+'%"></i>'; });
-  return '<div class="mt-g"><div class="mt-gh"><span>'+r.n+' '+r.N+'종목 중</span><b>'+r.rk+'위 <small>상위 '+_msTop(r)+'%</small></b></div>'+
+  return '<div class="mt-g"><div class="mt-gh"><span>'+r.n+' '+r.N+'종목 중</span><b>'+r.rk+'위 <small>'+_msTopTxt(r)+'</small></b></div>'+
    '<div class="mt-gb">'+dots+'<u style="left:'+(r.pos*100).toFixed(1)+'%"></u></div>'+
    '<div class="mt-gl"><span>꼴찌</span><span>섹터 평균 '+_msPct(r.avg)+'</span><span>1등</span></div>'+
    (F.th?'<p class="mt-thp">'+_msTh(F)+'</p>':'')+'</div>';
@@ -5929,6 +5949,7 @@ def build_my_stocks(data):
   svg+='<text x="'+(X1+8)+'" y="'+(yF+4).toFixed(1)+'" font-size="11.5" font-weight="800" fill="#f0c65a">'+_msAmt(cF[n-1])+'</text>'+
        '<text x="'+(X1+8)+'" y="'+(yG+4).toFixed(1)+'" font-size="11.5" font-weight="800" fill="#74f0d4">'+_msAmt(cG[n-1])+'</text>';
   sf.forEach(function(r,i){ var last=(i===n-1);
+   if((n-1-i)%2!==0) return;          /* 10일이면 날짜 글자가 겹친다 → 오늘부터 하루 걸러 하나씩 */
    svg+='<text x="'+X(i).toFixed(1)+'" y="'+(B+14)+'" text-anchor="middle" font-size="10" font-weight="'+(last?800:500)+'" fill="'+(last?'#ffc93c':'#6f7a8b')+'">'+(last&&F.fl?'오늘':r[0])+'</text>'; });
   var L=sf[n-1], who=F.fl?'오늘 하루':(L[0]+' 하루');
   return '<svg class="mt-fc" viewBox="0 0 '+W+' '+(B+18)+'">'+svg+'</svg>'+
@@ -5936,7 +5957,219 @@ def build_my_stocks(data):
    '<p class="mt-fl"><span><i style="background:#f0c65a"></i>외국인</span><span><i style="background:#74f0d4"></i>기관</span></p>'+
    '<p class="mt-fs">'+who+' — 외국인 <b style="color:'+_msC(L[1])+'">'+_msAmt(L[1])+'</b>'+(F.fl&&F.fl.sf?'<em>'+F.fl.sf+'</em>':'')+
    ' · 기관 <b style="color:'+_msC(L[2])+'">'+_msAmt(L[2])+'</b>'+(F.fl&&F.fl.sg?'<em>'+F.fl.sg+'</em>':'')+
-   (F.fl&&F.fl.x!==null&&F.fl.x>=1.8?' <i class="mt-big">평소의 '+F.fl.x.toFixed(1)+'배</i>':'')+'</p>';
+   (F.fl&&F.fl.x!==null&&F.fl.x>=1.8?' <i class="mt-big">수급 규모 평소의 '+F.fl.x.toFixed(1)+'배</i>':'')+'</p>';
+ }
+ /* ══ 🚦 신호등 (HO 2026-09-30) ══════════════════════════════════════
+    수급·공시·뉴스·일정에서 «종목에 악영향이 될 수 있는 것»만 골라 🔴/🟡로 가른다.
+    ⚠️ 제목·숫자 규칙일 뿐 «판단»이 아니다. 걸리면 «확인해 볼 것»이라는 뜻.
+    ⚠️ 규칙표는 화면(🚦 신호등 기준)과 이 배열이 «같은 원본»이다 — 따로 적지 않는다. */
+ var SIG_DISC=[
+  [2,'유상증자','유상증자 — 주식 수가 늘어 기존 주주 몫이 줄어요(희석)'],
+  [2,'전환사채','전환사채(CB) — 나중에 주식으로 바뀌어 물량 부담'],
+  [2,'신주인수권부사채','신주인수권부사채(BW) — 주식 전환 물량 부담'],
+  [2,'교환사채','교환사채(EB) — 회사가 가진 주식이 시장에 풀릴 수 있어요'],
+  [2,'감자','감자 — 자본을 줄이는 결정, 보통 재무가 어렵다는 신호'],
+  [2,'관리종목','관리종목 지정'],[2,'상장폐지','상장폐지 관련'],[2,'상장적격성','상장적격성 실질심사'],
+  [2,'거래정지','매매거래 정지'],[2,'불성실공시','불성실공시법인 지정'],
+  [2,'의견거절','감사의견 거절'],[2,'한정','감사의견 한정'],
+  [2,'횡령','횡령 관련'],[2,'배임','배임 관련'],[2,'회생','회생절차'],[2,'파산','파산'],[2,'부도','부도'],
+  [2,'영업정지','영업정지'],[2,'투자주의환기','투자주의환기종목'],
+  [1,'최대주주변경','최대주주 변경'],[1,'자기주식처분','자사주 처분 — 시장에 물량이 나와요'],
+  [1,'추가상장','추가상장 — 새 주식이 상장돼 물량이 늘어요'],
+  [1,'전환청구','전환청구권 행사 — 곧 주식으로 바뀌어 나와요'],[1,'행사','권리 행사(신주 발행)'],
+  [1,'소송','소송 제기·판결'],[1,'계약해지','공급계약 해지'],[1,'해지','계약 해지'],
+  [1,'조회공시','조회공시 요구 — 급등락 이유를 거래소가 물었어요'],[1,'풍문','풍문·보도 해명'],
+  [1,'손실발생','손실 발생'],[1,'영업손실','영업손실'],[1,'적자','적자']
+ ];
+ var SIG_NEWS=[
+  [2,'횡령'],[2,'배임'],[2,'압수수색'],[2,'검찰'],[2,'기소'],[2,'구속'],[2,'상장폐지'],[2,'거래정지'],
+  [2,'분식'],[2,'부도'],[2,'회생'],[2,'파산'],[2,'유상증자'],
+  [1,'소송'],[1,'리콜'],[1,'결함'],[1,'적자'],[1,'쇼크'],[1,'부진'],[1,'하향'],[1,'매도 의견'],
+  [1,'블록딜'],[1,'오버행'],[1,'공매도'],[1,'제재'],[1,'과징금'],[1,'해지'],[1,'철회'],[1,'연기'],[1,'급락']
+ ];
+ var SIG_NEWS_OK=['탈출','축소','개선','해소','벗어','흑자','상향','반등','철회 요구'];
+ function _sigScan(F, nm, hits, discs){
+  var L=[], good=[];
+  function add(lv,cat,txt){ L.push({lv:lv,cat:cat,t:txt}); }
+  /* ① 수급 — 🔴 2026-09-30 (3차) HO «연속 매도만으론 의미 없다 — 평균 거래대금의 몇 배 같은 조건을».
+     기준 = 그 종목의 «20일 평균 거래대금»(하루에 보통 오가는 돈).
+       배수   = 오늘 거래대금 ÷ 평균           → 오늘 거래가 얼마나 터졌나
+       매도비 = 외국인+기관 순매도 ÷ 평균     → 큰손이 «하루치 거래의 몇 %»를 팔았나
+     🔴 동반 순매도 + 거래대금 평소 3배+  ·  동반 순매도가 평균 거래대금의 20%+
+     🟡 순매도(합계) + 거래대금 평소 2배+  ·  5일 누적 순매도가 평균 거래대금의 50%+
+     ⚠️ 거래대금 기록이 없는 종목·날은 판정하지 않는다(침묵). */
+  var sf=F.sf5, red=false, streak=false;
+  /* ①-a 연속 매도 — 🔴 2026-09-30 (5차) HO «45%·18%는 너무 작아 보인다, 몇 배는 돼야».
+     순매도는 거래대금 «안에서» 나온 돈이라 거래대금의 몇 배가 될 수 없다 → 자를 바꾼다.
+     기준 = 연속 매도 «이전» 날들의 하루 평균 순매매 규모(|외국인|+|기관|, 한 주체면 그 주체만).
+     🔴 3일+ 연속 동반 매도 · 합계가 평소 하루 순매매 규모의 5배+
+     🟡 2일+ 연속 동반 매도 · 3배+   /   외국인 또는 기관 3일+ 연속 매도 · 4배+
+     ⚠️ 비교할 이전 날이 5일 미만이면 판정하지 않는다(침묵). 거래대금 기록은 필요 없다. */
+  if(sf&&sf.length>=6){
+   var runX=function(neg, abs){
+    var n=0,sum=0; for(var i=sf.length-1;i>=0;i--){ if(neg(sf[i])){ n++; sum+=abs(sf[i],1); } else break; }
+    var prev=sf.slice(0, sf.length-n), base=0, k=0;
+    prev.forEach(function(r){ base+=abs(r,0); k++; });
+    return {n:n, x:(k>=5&&base>0)?(-sum)/(base/k):0};
+   };
+   var both=runX(function(r){return r[1]<0&&r[2]<0;}, function(r,sgn){return sgn?(r[1]+r[2]):(Math.abs(r[1])+Math.abs(r[2]));});
+   var fo=runX(function(r){return r[1]<0;}, function(r,sgn){return sgn?r[1]:Math.abs(r[1]);});
+   var go=runX(function(r){return r[2]<0;}, function(r,sgn){return sgn?r[2]:Math.abs(r[2]);});
+   var msg=function(who,n,x){ return who+' <b>'+n+'일 연속 매도</b> — 합계가 평소 하루 순매매 규모의 <b>'+x.toFixed(1)+'배</b>'; };
+   if(both.n>=3&&both.x>=5){ add(2,'수급',msg('외국인·기관 동반',both.n,both.x)); red=true; streak=true; }
+   else if(both.n>=2&&both.x>=3){ add(1,'수급',msg('외국인·기관 동반',both.n,both.x)); streak=true; }
+   else{
+    if(fo.n>=3&&fo.x>=4){ add(1,'수급',msg('외국인',fo.n,fo.x)); streak=true; }
+    if(go.n>=3&&go.x>=4){ add(1,'수급',msg('기관',go.n,go.x)); streak=true; }
+   }
+  }
+  if(sf&&sf.length){
+   var L0=sf[sf.length-1], 금=L0[3], 평=L0[4];
+   if(!(평>0)){ var _a=[]; sf.slice(0,-1).forEach(function(r){ if(r[3]>0) _a.push(r[3]); }); if(_a.length>=5) 평=_a.reduce(function(x,y){return x+y;},0)/_a.length; }
+   if(평>0&&금>0){
+    var vx=금/평, net=L0[1]+L0[2], share=-net/평, bothS=(L0[1]<0&&L0[2]<0);
+    var 억=function(v){var a=Math.abs(v);return (a>=10000?(a/10000).toFixed(1)+'조':Math.round(a).toLocaleString()+'억');};
+    if(bothS&&vx>=3){ add(2,'수급','거래대금이 평소의 <b>'+vx.toFixed(1)+'배</b> 터진 날 외국인·기관 <b>동반 매도</b>'); red=true; }
+    if(bothS&&share>=0.2){ add(2,'수급','외국인·기관이 평소 하루 거래대금('+억(평)+')의 <b>'+Math.round(share*100)+'%</b>어치를 팔았어요'); red=true; }
+    if(!red&&net<0&&vx>=2){
+     var who=(L0[1]<0&&L0[2]<0)?'외국인·기관':(L0[1]<L0[2]?'외국인':'기관');
+     add(1,'수급','거래대금 평소의 <b>'+vx.toFixed(1)+'배</b> + '+who+' 순매도');
+    }
+    var n5=0; sf.slice(-5).forEach(function(r){ n5+=r[1]+r[2]; });
+    if(!red&&!streak&&n5<0&&(-n5/평)>=0.5) add(1,'수급','최근 5일 외국인·기관이 평소 하루 거래대금의 <b>'+(-n5/평).toFixed(1)+'배</b>어치를 순매도');
+    if(L0[1]>0&&L0[2]>0&&vx>=2) good.push('거래대금 평소의 '+vx.toFixed(1)+'배 + 외국인·기관 동반 매수');
+   }
+  }
+  var seen={};
+  /* ② 공시 (오늘) */
+  discs.forEach(function(g){
+   var t=(g.t||'').replace(/ /g,''), hit=null;
+   SIG_DISC.forEach(function(r){ if(!hit&&t.indexOf(r[1])>=0) hit=r; });
+   if(hit&&!seen['d'+hit[1]]){ seen['d'+hit[1]]=1; add(hit[0],'공시',hit[2]+' <a href="'+g.u+'" target="_blank" rel="noopener">원문</a>'); }
+  });
+  /* ③ 뉴스 (최근 7일 · 제목에 종목명) */
+  var fr=(window.CP_NEWS_FRESH||0);
+  hits.forEach(function(h){
+   if(h.w!==2) return;
+   if(fr&&!(h.n.o===1)&&((h.n.y||0)<fr)) return;
+   var t=h.n.t||'', hit=null;
+   if(SIG_NEWS_OK.some(function(w){return t.indexOf(w)>=0;})) return;
+   SIG_NEWS.forEach(function(r){ if(!hit&&t.indexOf(r[1])>=0) hit=r; });
+   if(hit&&!seen[hit[1]]){ seen[hit[1]]=1;
+    add(hit[0],'뉴스','«'+hit[1]+'» 기사 — <a href="'+h.n.u+'" target="_blank" rel="noopener">'+t.slice(0,34)+(t.length>34?'…':'')+'</a>'); }
+  });
+  /* ④ 일정 */
+  (F.sch||[]).forEach(function(s){
+   var g=s.g||'', 유=(g.indexOf('유상')>=0);
+   if(유&&(s.l==='상장예정일'||s.l==='납입일')&&s.dd<=7) add(1,'일정','유상증자 '+s.l+' D-'+s.dd+' — 새 주식 물량');
+   if(s.l==='전환청구시작일'&&s.dd<=14) add(1,'일정','전환사채 전환청구 시작 D-'+s.dd+' — 주식 전환 물량');
+  });
+  var lv=0; L.forEach(function(x){ if(x.lv>lv) lv=x.lv; });
+  L.sort(function(a,b){return b.lv-a.lv;});
+  return {lv:lv, L:L, good:good};
+ }
+ function _sigDot(S){
+  var c=['#3ecf9a','#f5b93a','#ff5a4e'][S.lv], t=['신호 없음','지켜볼 것','확인 필요'][S.lv];
+  return '<span class="mt-sig" style="background:'+c+'" title="'+t+'"></span>';
+ }
+ function _sigBlock(S){
+  if(!S.L.length) return '<p class="mt-sg0"><i style="background:#3ecf9a"></i>오늘 걸리는 악재 신호 없음'+
+    (S.good.length?' · <b>'+S.good[0]+'</b>':'')+'</p>';
+  return S.L.map(function(x){
+   return '<p class="mt-sgl"><i style="background:'+(x.lv===2?'#ff5a4e':'#f5b93a')+'"></i><em>'+x.cat+'</em>'+x.t+'</p>';
+  }).join('')+(S.good.length?'<p class="mt-sgl ok"><i style="background:#3ecf9a"></i><em>수급</em>'+S.good[0]+'</p>':'');
+ }
+ function _sigLegend(){
+  var lv=function(a,l){return a.filter(function(r){return r[0]===l;}).map(function(r){return r[1];}).join(' · ');};
+  return '<details class="mt-leg"><summary>🚦 신호등 기준 ▾</summary><div>'+
+   '<p><b style="color:#ff5a4e">● 확인 필요</b> · <b style="color:#f5b93a">● 지켜볼 것</b> · <b style="color:#3ecf9a">● 신호 없음</b> — 종목 이름 앞 작은 점</p>'+
+   '<p><em>수급</em> 기준 = 그 종목의 <b>20일 평균 거래대금</b><br>🔴 외국인·기관 동반 순매도 + 거래대금 평소 <b>3배+</b> · 동반 순매도가 평균 거래대금의 <b>20%+</b><br>🔴 외국인·기관 <b>3일+ 연속 동반 매도</b> + 합계가 평소 하루 <b>순매매 규모의 5배+</b><br>🟡 외국인·기관 합계 순매도 + 거래대금 평소 <b>2배+</b> · <b>2일+ 연속 동반 매도</b> + 순매매 규모의 <b>3배+</b> · 외국인 또는 기관 <b>3일+ 연속 매도</b> + <b>4배+</b> · 최근 5일 누적 순매도가 평균 거래대금의 <b>50%+</b><br><span>평소 하루 거래대금 = 직전 20거래일 평균 · 평소 순매매 규모 = 연속 매도 이전 날들의 하루 평균(|외국인|+|기관|)</span><br><span>거래대금 기록이 있는 종목만 판정해요(거래대금 상위 약 200종목)</span></p>'+
+   '<p><em>공시</em> 🔴 '+lv(SIG_DISC,2)+'<br>🟡 '+lv(SIG_DISC,1)+'</p>'+
+   '<p><em>뉴스</em> 최근 7일 · 제목에 종목명이 든 기사만<br>🔴 '+lv(SIG_NEWS,2)+'<br>🟡 '+lv(SIG_NEWS,1)+
+   '<br><span>제목에 '+SIG_NEWS_OK.join('·')+'가 같이 있으면 뺍니다(«적자 탈출» 같은 좋은 소식)</span></p>'+
+   '<p><em>일정</em> 🟡 유상증자 납입일·신주 상장일 D-7 이내 · 전환사채 전환청구 시작 D-14 이내</p>'+
+   '<p><span>⚠️ 제목·숫자 규칙으로 고른 «확인해 볼 것» 목록이에요. 매도 신호가 아니고, 좋은 공시·뉴스는 따로 판정하지 않아요.</span></p>'+
+   '</div></details>';
+ }
+ /* ══ 🔔 일정 ══ */
+ var SCH_CAT={'배당기준일':['💰','배당'],'신주배정기준일':['📄','신주배정'],'권리락일':['📄','권리락'],
+  '납입일':['📄','납입'],'상장예정일':['📄','신주상장'],'주주총회일':['🏛️','주총'],
+  'IR개최일':['📊','실적발표·IR'],'전환청구시작일':['⚠️','CB 전환청구']};
+ function _schName(s){ var c=SCH_CAT[s.l]||['📅',s.l]; var g=s.g||'';
+  var k=g.indexOf('무상')>=0?'무상증자 ':(g.indexOf('유상')>=0?'유상증자 ':'');
+  return c[0]+' '+(s.l==='배당기준일'||s.l==='주주총회일'||s.l==='IR개최일'||s.l==='전환청구시작일'?'':k)+c[1]; }
+ function _bell(F, bid){
+  var sc=F.sch||[]; if(!sc.length) return '';
+  var s0=sc[0];
+  return '<span class="mt-bell" onclick="event.stopPropagation();ztog(&quot;'+bid+'-sch&quot;)">🔔 '+
+   (s0.dd===0?'오늘':'D-'+s0.dd)+(sc.length>1?' +'+(sc.length-1):'')+' ▾</span>';
+ }
+ function _bellBox(F, bid){
+  var sc=F.sch||[]; if(!sc.length) return '';
+  return '<div id="'+bid+'-sch" class="mt-sch" style="display:none">'+sc.map(function(s){
+   return '<p><b>'+(s.dd===0?'오늘':'D-'+s.dd)+'</b><span>'+s.d+'</span>'+
+    (s.u?'<a href="'+s.u+'" target="_blank" rel="noopener">'+_schName(s)+'</a>':_schName(s))+'</p>';}).join('')+'</div>';
+ }
+ /* ══ 🧭 테마 위치 — 시안 A~E ══ */
+ function _msTheme(nm){
+  var M=window.CP_TMEM||{}, P2=window.CP_TPOS||{}, best=null, n=0;
+  Object.keys(M).forEach(function(t){ if((M[t]||[]).indexOf(nm)>=0){ n++; var p=P2[t];
+    if(p&&(!best||p.rk<best.rk)) best={n:t, rk:p.rk, y:p.y, h:p.h||[], age:p.age, med:p.med}; } });
+  if(best) best.more=n-1;
+  return best;
+ }
+ function _tStage(T){
+  if(T.rk>10) return 0;
+  var up=(T.y===null||T.y===undefined||T.y>T.rk);
+  if(T.age===1) return 1;
+  if((T.y&&T.rk-T.y>=3)||(T.age||0)>=5) return 4;
+  if((T.age||0)>=(T.med||3)&&T.rk<=3) return 3;
+  return up?2:3;
+ }
+ function _tShort(T){ return T.n.split('(')[0].trim(); }
+ function _tMove(T){ if(T.y===null||T.y===undefined) return '<span class="mt-tn">새로 진입</span>';
+  var d=T.y-T.rk; return d===0?'<span class="mt-tn">어제와 같음</span>':
+   '<span style="color:'+(d>0?'#ff6b4a':'#5b9bff')+'">어제 '+T.y+'위 '+(d>0?'▲':'▼')+Math.abs(d)+'</span>'; }
+ function _tAgeTxt(T){ if(T.rk>20) return '20위 밖 — 테마 바람 약함'; if(T.rk>10) return '10위 밖 대기 (11~20위)';
+  var a=T.age||1, m=T.med||3; return '10위권 '+a+'일째'+(a>=m?' · 평균 수명('+m+'일) '+(a===m?'도달':'넘음'):' · 평균 수명 '+m+'일'); }
+ function _tA(T){  /* 한 줄 문장 */
+  return '<p class="mt-tl"><b>'+_tShort(T)+'</b> <i class="mt-rk">'+T.rk+'위</i> '+_tMove(T)+'<br><span class="mt-tn">'+_tAgeTxt(T)+'</span></p>';
+ }
+ function _tB(T){  /* 1~20위 가로 막대 */
+  var x=function(r){return (3+(Math.min(r,21)-1)/20*94).toFixed(1);};
+  return '<p class="mt-tl"><b>'+_tShort(T)+'</b> '+_tMove(T)+'</p><div class="mt-tb"><s></s>'+
+   (T.y&&T.y<=20?'<u style="left:'+x(T.y)+'%"></u>':'')+'<i style="left:'+x(T.rk)+'%">'+T.rk+'</i></div>'+
+   '<div class="mt-gl"><span>1위</span><span>10위</span><span>20위 밖</span></div>';
+ }
+ function _tC(T){  /* 수명 게이지 */
+  var m=T.med||3, a=(T.rk>10)?0:(T.age||1), W=Math.max(6,a+1), seg='';
+  for(var d=1; d<=W; d++){ var c=d<m?'#3ecf9a':(d<5?'#ff9838':'#ff5a4e');
+   seg+='<i style="background:'+c+(d<=a?'':';opacity:.22')+'">'+(d===a?'<b>'+d+'</b>':'')+'</i>'; }
+  return '<p class="mt-tl"><b>'+_tShort(T)+'</b> <i class="mt-rk">'+T.rk+'위</i> <span class="mt-tn">'+_tAgeTxt(T)+'</span></p>'+
+   '<div class="mt-tc">'+seg+'</div><div class="mt-gl"><span>1일</span><span>평균 수명 '+m+'일</span><span>'+W+'일</span></div>';
+ }
+ function _tD(T){  /* 5일 순위 선 */
+  var h=T.h||[], n=h.length, W=240, svg='';
+  var X=function(i){return 14+i*(W-28)/Math.max(1,n-1);}, Y=function(v){return (v===null||v>20)?48:16+(v-1)/19*26;};
+  for(var i=1;i<n;i++){ var ok=h[i-1]&&h[i-1]<=20&&h[i]&&h[i]<=20;
+   svg+='<line x1="'+X(i-1)+'" y1="'+Y(h[i-1])+'" x2="'+X(i)+'" y2="'+Y(h[i])+'" stroke="#e8c33a" stroke-opacity="'+(ok?.8:.35)+'" stroke-width="1.5"'+(ok?'':' stroke-dasharray="2 2"')+'/>'; }
+  h.forEach(function(v,i){ var inn=v&&v<=20, last=i===n-1;
+   svg+=inn?('<circle cx="'+X(i)+'" cy="'+Y(v)+'" r="'+(last?3.2:2.2)+'" fill="'+(last?'#ffc93c':'#8b95a5')+'"/><text x="'+X(i)+'" y="'+(Y(v)-5)+'" text-anchor="middle" font-size="9.5" font-weight="'+(last?800:600)+'" fill="'+(last?'#ffc93c':'#a8b0bb')+'">'+v+'</text>')
+     :('<circle cx="'+X(i)+'" cy="48" r="2" fill="none" stroke="#5c6676"/><text x="'+X(i)+'" y="43" text-anchor="middle" font-size="8" fill="#5c6676">밖</text>'); });
+  return '<p class="mt-tl"><b>'+_tShort(T)+'</b> <span class="mt-tn">최근 5일 순위 · 오른쪽이 오늘</span></p><svg class="mt-td" viewBox="0 0 '+W+' 54">'+svg+'</svg>';
+ }
+ function _tE(T){  /* 사이클 단계 */
+  var st=_tStage(T), names=['진입','상승','정점','이탈 조짐'], cols=['#3ecf9a','#ff6b4a','#ff9838','#5b9bff'];
+  var chips=names.map(function(nm2,i){ var on=(st===i+1);
+   return '<span class="'+(on?'on':'')+'" style="'+(on?'background:'+cols[i]+';border-color:'+cols[i]:'')+'">'+nm2+'</span>'; }).join('<em>›</em>');
+  return '<p class="mt-tl"><b>'+_tShort(T)+'</b> <i class="mt-rk">'+T.rk+'위</i> '+_tMove(T)+'</p><div class="mt-te">'+
+   (st===0?'<span class="on" style="background:#556070;border-color:#556070">'+(T.rk>20?'20위 밖':'10위 밖 대기')+'</span><em>›</em>':'')+chips+'</div>'+
+   '<p class="mt-tn" style="margin:4px 0 0">'+_tAgeTxt(T)+'</p>';
+ }
+ function _tBlock(T, sty){
+  if(!T) return '<p class="mt-no">묶인 테마가 없는 종목이에요</p>';
+  var f={A:_tA,B:_tB,C:_tC,D:_tD,E:_tE}[sty]||_tA;
+  return f(T)+(T.rk>20?'<p class="mt-tn" style="margin:3px 0 0">순위가 매겨진 테마 '+(window.CP_TN||'')+'개 중 '+T.rk+'위</p>':'')+(T.more>0?'<p class="mt-tn" style="margin:2px 0 0">이 종목이 든 다른 테마 '+T.more+'개는 더 아래</p>':'');
  }
  var _scbSeq=1;
  function drawBrief(my){
@@ -6629,6 +6862,9 @@ def build_my_stocks(data):
             읽는 자리라, 기업분석도 여기 있어야 흐름이 안 끊긴다. */
    var _F=_msFacts(nm, m, hits, DISC.filter(function(g){return g.c===nm;}));
    _F.items=items;
+   _F.sig=_sigScan(_F, nm, hits, DISC.filter(function(g){return g.c===nm;}));
+   (window.CP_SIG=window.CP_SIG||{})[nm]=_F.sig;
+   _F.T=_msTheme(nm);
    var _bid='scb'+(_scbSeq++);
    /* 🆕 2026-08-29 HO 지시 — 종목명 옆에 **오늘 등락률**을 붙인다.
       [WHY] 브리핑을 읽는 첫 질문이 "그래서 오늘 얼마나 올랐나"인데,
@@ -6667,8 +6903,8 @@ def build_my_stocks(data):
        → .cp-sname «안», 기업분석 배지 바로 뒤에 넣는다. <a>는 자체 클릭이
          우선이라 sc_click(기업분석 펼침)과 충돌하지 않는다. */
     '<div class="mb-nameline" style="font-size:14.5px;font-weight:800;color:#e8eaee">'+
-    '<span class="cp-sname" id="'+_bid+'-n">'+nm+_tb+
-    '<span class="sc-tap"><i>▾</i>기업분석</span>'+_chart+'</span></div>'+
+    _sigDot(_F.sig)+'<span class="cp-sname" id="'+_bid+'-n">'+nm+_tb+
+    '<span class="sc-tap"><i>▾</i>기업분석</span>'+_chart+_bell(_F,_bid)+'</span></div>'+_bellBox(_F,_bid)+
     /* 🆕 2026-09-04 (2차) HO 지시 — 기업분석 펼침칸을 «기사·공시(items)» **위**로
        올린다. [WHY] 예전엔 이름 → 기사/공시 → 기업분석 → 오늘 분석 순서라,
        종목명 눌러 기업분석을 펼치면 방금 읽던 기사 밑으로 카드가 열려 시선이
@@ -6680,10 +6916,14 @@ def build_my_stocks(data):
     /* 🔴 2026-09-29 (2차) HO — «뉴스는 박스 안에 넣지 말고 기존과 똑같이» → 목록은 원래 자리(섹터 배지 밑). */
     /* 🔴 2026-09-29 HO — 옛 «오늘 분석»(원인 단정·섹터 비교·기간별 문장)을 빼고
        «오늘 한눈에» 카드로. 기사·공시·일정 전체 목록은 카드 아래 접어 둔다. */
-    (window.CP_MS_DEMO_ALL?'<p class="mt-demo">🧪 미리보기 — 수급 선 숫자는 모양 확인용 예시</p>':'')+
     _msCard(_F,(window.CP_MS_STYLE||'F'))+'</div>';
   });
-  host.innerHTML=out;
+  host.innerHTML=_sigLegend()+out;
+  /* 🆕 2026-09-30 HO — «내 종목 추적하기»(위 등록 목록)에도 같은 신호등 점.
+     신호는 여기(브리핑)에서만 계산하므로, 계산이 끝난 뒤 목록의 빈 자리에 채운다. */
+  [].forEach.call(document.querySelectorAll('.mt-sigslot'),function(el){
+   var S=(window.CP_SIG||{})[el.getAttribute('data-nm')]; el.innerHTML=S?_sigDot(S):'';
+  });
   /* 🆕 2026-08-25 — 클릭 핸들러는 **코드로** 붙인다.
      인라인 onclick에 따옴표를 넣으면 파이썬 문자열을 거치며 이스케이프가
      풀려 JS가 통째로 죽는다(2026-08-25에 이미 한 번 겪었다). */
@@ -8933,7 +9173,7 @@ def build_sector_scoreboard():
   var p=el.closest('.sb-panel'), h=p.querySelectorAll('.sb-more');
   var open=h.length&&h[0].style.display!=='none';
   h.forEach(function(r){r.style.display=open?'none':'flex';});
-  el.textContent=open?('▾ 나머지 '+h.length+'개 더보기'):'▴ 접기';
+  if(open) el.textContent='▾ 나머지 '+h.length+'개 더보기'; else el.innerHTML='<span class="cp-arw up">▾</span> 접기';
   apply();};
  function boot(){seed(); apply();}
  if(document.readyState!=='loading'){boot()}else{
@@ -21450,6 +21690,44 @@ html{{scroll-behavior:smooth}}
 .mt-fl i{{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}}
 .mt-fs{{margin:4px 0 0;font-size:10.5px;color:#7d8695}}
 .mt-gh small{{font-size:10px;color:#8b95a5;font-weight:700}}
+.mt-sig{{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 6px 1px 0;vertical-align:middle;box-shadow:0 0 0 2px rgba(0,0,0,.35)}}
+.mt-sg0{{margin:0;font-size:11.5px;color:#8b95a5}}
+.mt-sg0 b{{color:#c9d0da;font-weight:700}}
+.mt-sgl{{margin:0;padding:3px 0;font-size:12px;line-height:1.5;color:#d6dde6}}
+.mt-sgl.ok{{color:#9fdcc4}}
+.mt-sg0 i,.mt-sgl i{{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}}
+.mt-sgl em{{font-style:normal;font-size:9.5px;font-weight:800;color:#8b95a5;background:#18212c;border-radius:4px;padding:1px 5px;margin-right:5px}}
+.mt-sgl a{{color:#8fb4ee;text-decoration:none}}
+.mt-leg{{margin:4px 0 8px;padding:7px 10px;background:#0f141c;border:1px solid #1d2733;border-radius:9px}}
+.mt-leg summary{{cursor:pointer;list-style:none;font-size:11.5px;font-weight:800;color:#e0c060}}
+.mt-leg summary::-webkit-details-marker{{display:none}}
+.mt-leg p{{margin:7px 0 0;font-size:11px;line-height:1.65;color:#aab3c0}}
+.mt-leg em{{font-style:normal;font-size:10px;font-weight:800;color:#e0c060;margin-right:4px}}
+.mt-leg span{{color:#6f7a8b;font-size:10px}}
+.mt-bell{{display:inline-block;margin-left:5px;padding:1px 7px;border-radius:99px;font-size:10.5px;font-weight:800;color:#ffd66b;background:rgba(255,201,60,.12);border:1px solid rgba(255,201,60,.35);cursor:pointer;vertical-align:1px}}
+.mt-sch{{margin:5px 0 0;padding:6px 9px;background:#141a22;border-radius:8px}}
+.mt-sch p{{margin:0;padding:2px 0;font-size:11.5px;color:#c9d0da;display:flex;gap:7px;align-items:baseline}}
+.mt-sch b{{min-width:34px;color:#ffc93c;font-size:11px}}
+.mt-sch span{{color:#6f7a8b;font-size:10.5px}}
+.mt-sch a{{color:#8fe6d4;text-decoration:none}}
+.mt-tl{{margin:0;font-size:12px;line-height:1.6;color:#c9d0da}}
+.mt-tl b{{color:#eef1f5}}
+.mt-rk{{font-style:normal;font-weight:800;color:#ffc93c}}
+.mt-tn{{font-size:10.5px;color:#7d8695}}
+.mt-tb{{position:relative;height:16px;margin:6px 0 0}}
+.mt-tb s{{position:absolute;left:0;right:0;top:7px;height:3px;border-radius:2px;background:linear-gradient(90deg,#ff6b4a 0%,#ff9838 47%,#2a3446 47.5%,#2a3446 100%)}}
+.mt-tb u{{position:absolute;top:4px;width:9px;height:9px;margin-left:-4.5px;border-radius:50%;border:1.5px solid #8b95a5;background:#0f141c}}
+.mt-tb i{{position:absolute;top:0;min-width:18px;height:16px;margin-left:-9px;border-radius:8px;background:#ffc93c;color:#0b0e13;font-style:normal;font-size:10px;font-weight:800;text-align:center;line-height:16px}}
+.mt-tc{{display:flex;gap:3px;margin:6px 0 0}}
+.mt-tc i{{flex:1;height:12px;border-radius:3px;position:relative}}
+.mt-tc i b{{position:absolute;top:-1px;left:50%;transform:translateX(-50%);font-size:9.5px;color:#0b0e13}}
+.mt-td{{display:block;width:100%;height:auto;max-height:70px;margin-top:2px}}
+.mt-te{{display:flex;flex-wrap:wrap;align-items:center;gap:3px;margin:6px 0 0}}
+.mt-te span{{font-size:10.5px;font-weight:700;color:#7d8695;border:1px solid #2a3446;border-radius:99px;padding:2px 8px}}
+.mt-te span.on{{color:#0b0e13;font-weight:800}}
+.mt-te em{{font-style:normal;color:#3a4556;font-size:11px}}
+.cp-arw{{display:inline-block;transition:transform .15s}}
+.cp-arw.up{{transform:rotate(180deg)}}
 .mt-demo{{margin:10px 0 0;font-size:11px;font-weight:800;color:#e8c33a}}
 .mt-more{{margin:6px 0 0}}
 .mt-more span{{font-size:10.5px;font-weight:700;color:#7d8695;cursor:pointer}}
@@ -22396,10 +22674,77 @@ html{{scroll-behavior:smooth}}
   }},{{passive:true}});
   sync();
 }})();
+/* 🆕 2026-09-30 HO — «▾로 펼치는 곳은 전부, 펼치면 ▴로 바뀌고 다시 누르면 접히게».
+   코너마다 따로 고치지 않고 «한 곳»에서 처리한다:
+   ① ztog(…)을 부르는 모든 요소 — 누른 뒤 대상이 보이면 ▾→▴, «더보기»→«접기» (다시 누르면 되돌림)
+   ② <details> — 열고 닫힐 때 summary 안의 ▾/▴를 바꾼다
+   ③ 종목 이름(기업분석) — 펼침 칸이 보이는지로 판단
+   ⚠️ 정규식 백슬래시를 쓰지 않는다(파이썬 f-string을 거치며 깨진 전례). */
+(function(){{
+  /* 🔴 2026-09-30 (2차) HO — «위 화살표 모양이 이상하다». ▴(U+25B4)는 글꼴에 따라
+     크기·굵기가 ▾와 다르게 그려진다(다른 글꼴로 대체됨). → 글자를 바꾸지 않고
+     «같은 ▾를 180° 돌린다». 처음 누를 때 ▾를 <span class="cp-arw">로 감싼다. */
+  function flip(el,open){{
+    if(!el) return;
+    var a=el.querySelector('.cp-arw');
+    if(!a){{
+      var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n;
+      while((n=w.nextNode())){{
+        var t=n.nodeValue, k=t.indexOf('▾'); if(k<0) k=t.indexOf('▴');
+        if(k<0) continue;
+        var rest=n.splitText(k); rest.nodeValue=rest.nodeValue.slice(1);
+        a=document.createElement('span'); a.className='cp-arw'; a.textContent='▾';
+        n.parentNode.insertBefore(a,rest); break;
+      }}
+    }}
+    if(a) a.classList.toggle('up',!!open);
+    var w2=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),m;
+    while((m=w2.nextNode())){{
+      var u=m.nodeValue;
+      if(open&&u.indexOf('더보기')>=0){{ u=u.replace('더보기','접기'); el.setAttribute('data-more','1'); }}
+      else if(!open&&el.getAttribute('data-more')==='1'&&u.indexOf('접기')>=0){{ u=u.replace('접기','더보기'); }}
+      if(u!==m.nodeValue) m.nodeValue=u;
+    }}
+  }}
+  function shown(id){{ var b=document.getElementById(id); return !!b&&getComputedStyle(b).display!=='none'; }}
+  document.addEventListener('click',function(e){{
+    if(!e.target||!e.target.closest) return;
+    var el=e.target.closest('[onclick*="ztog("]');
+    if(el){{
+      var a=el.getAttribute('onclick'), i=a.indexOf('ztog('), r=a.slice(i+5), q=r.charAt(0);
+      var id=r.slice(1, r.indexOf(q,1));
+      if(id) flip(el, shown(id));
+      return;
+    }}
+    var st=e.target.closest('[onclick*="scToggle("]');
+    if(st){{
+      var sa=st.getAttribute('onclick'), j2=sa.lastIndexOf("'"), j1=sa.lastIndexOf("'", j2-1);
+      var sid=sa.slice(j1+1,j2);
+      if(sid) flip(st.querySelector('.sc-tap')||st, shown(sid));
+      return;
+    }}
+    var nm=e.target.closest('.cp-sname');
+    if(nm&&nm.id&&nm.id.slice(-2)==='-n'){{
+      var tap=nm.querySelector('.sc-tap'); if(tap) flip(tap, shown(nm.id.slice(0,-2)));
+    }}
+  }});
+  document.addEventListener('toggle',function(e){{
+    var d=e.target; if(!d||d.tagName!=='DETAILS') return;
+    var s=null; for(var k=0;k<d.children.length;k++){{ if(d.children[k].tagName==='SUMMARY'){{ s=d.children[k]; break; }} }}
+    flip(s, d.open);
+  }},true);
+  /* 처음부터 펼쳐 둔 <details open>은 ▴로 시작한다 */
+  function initOpen(){{
+    [].forEach.call(document.querySelectorAll('details[open]'),function(d){{
+      for(var k=0;k<d.children.length;k++){{ if(d.children[k].tagName==='SUMMARY'){{ flip(d.children[k],true); break; }} }}
+    }});
+  }}
+  if(document.readyState!=='loading') initOpen(); else document.addEventListener('DOMContentLoaded',initOpen);
+}})();
 function toggleMore(id,btn,label){{
   var el=document.getElementById(id);
   var open=el.classList.toggle('open');
-  btn.textContent=open?'▴ 접기':label;
+  if(open) btn.innerHTML='<span class="cp-arw up">▾</span> 접기'; else btn.textContent=label;
 }}
 function sortAcc(key,btn){{
   document.querySelectorAll('.sort-tab').forEach(function(t){{t.classList.remove('active')}});
@@ -22434,7 +22779,7 @@ function toggleTV(id,el){{
   var body=document.getElementById(id);
   var open=body.classList.toggle('open');
   var see=el.querySelector('.tv-see-sm');
-  if(see) see.textContent = open ? '접기 ▴' : '보기 ▾';
+  if(see) see.innerHTML = open ? '접기 <span class="cp-arw up">▾</span>' : '보기 ▾';
 }}
 </script>
 </body>
