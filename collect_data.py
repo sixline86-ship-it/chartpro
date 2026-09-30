@@ -179,7 +179,7 @@ DART_날짜_최대D = 400      # 이보다 먼 미래 날짜는 버린다.
 #   ⚠️ 왜 400일인가: 유상증자·배당·주총 일정은 아무리 멀어도 1년 안이다.
 #      그보다 먼 날짜가 나왔다면 만기일·소멸시효 같은 **다른 날짜를
 #      잘못 집은 것**이다. 틀린 D-day를 보여주느니 안 보여주는 게 낫다.
-DART_날짜_최대 = 8         # 하루에 원문을 열어볼 공시 수(요청 수 제한)
+DART_날짜_최대 = 20        # 하루에 원문을 열어볼 공시 수 (🆕 2026-09-30 8→20: 대상 유형이 늘었다. DART 하루 한도 2만 건 대비 여유)
 
 # 뽑을 항목 — 라벨: 원문에서 찾을 키워드들
 DART_날짜_항목 = [
@@ -189,10 +189,17 @@ DART_날짜_항목 = [
     ("납입일", ["납입일", "주금납입일"]),
     ("상장예정일", ["상장예정일", "신주의 상장 예정일", "신주상장예정일"]),
     ("주주총회일", ["주주총회", "주주총회일"]),
+    # 🆕 2026-09-30 HO — «실적발표·보호예수 등 날짜가 나오는 중요한 일정».
+    #   실적발표 = 기업설명회(IR) 개최 공시의 «개최일자».
+    #   CB 전환청구 = 전환사채 발행 공시의 «전환청구기간» 첫 날짜(물량이 풀리기 시작하는 날).
+    #   ⚠️ 보호예수(의무보유) 해제일은 DART 공시 제목·원문으로 안정적으로 안 잡혀 넣지 않는다.
+    ("IR개최일", ["개최일자", "개최일시"]),
+    ("전환청구시작일", ["전환청구기간", "전환청구 기간", "권리행사기간"]),
 ]
 # 이 유형의 공시만 원문을 연다(전부 열면 요청이 폭증한다)
 DART_날짜_대상 = ["유상증자", "무상증자", "배당", "주주총회", "사업보고서",
-                "분기보고서", "반기보고서", "자기주식", "전환사채"]
+                "분기보고서", "반기보고서", "자기주식", "전환사채",
+                "기업설명회", "신주인수권부사채", "교환사채"]   # 🆕 2026-09-30 IR·BW·EB
 
 
 def _dart_dates_from_text(본문):
@@ -3708,7 +3715,7 @@ def _fetch_investor_flow_api(code, days):
         print(f"  🔍 [수급 API] 첫 항목 키: {sorted(rows[0])}")
         _TREND_KEY_LOGGED["done"] = True
 
-    외, 기, 종가들 = [], [], []
+    외, 기, 종가들, 대금 = [], [], [], []
     for it in rows[:days]:
         종가 = to_num(_pick(it, "closePrice", "nowPrice", "price", "endPrice"))
         외량 = to_num(_pick(it, "foreignerPureBuyQuant", "foreignPureBuyQuant",
@@ -3729,6 +3736,13 @@ def _fetch_investor_flow_api(code, days):
             return v / 100_000_000 if abs(v) >= 1e9 else v * 종가 / 100_000_000
         외.append(_억(외량))
         기.append(_억(기량))
+        # 🆕 2026-09-30 HO — 신호등 «평균 거래대금의 몇 배» 판정용. 금액 필드가 있으면
+        #   그대로(원→억), 없으면 거래량×종가. 둘 다 없으면 None(지어내지 않는다).
+        _v금 = to_num(_pick(it, "accumulatedTradingValue", "tradingValue", "accTradeValue",
+                            "tradeAmount", "accumulatedTradingAmount"))
+        _v량 = to_num(_pick(it, "accumulatedTradingVolume", "tradingVolume", "accTradeVolume",
+                            "tradeVolume", "volume"))
+        대금.append(round(_v금 / 1e8, 1) if _v금 else (round(_v량 * 종가 / 1e8, 1) if _v량 else None))
     if not 외 or len(종가들) < ACC_DAYS:
         return None
     # 🔴 2026-09-21 — 이 새 경로는 «등락률을 아예 안 만들고» 있었다.
@@ -3741,9 +3755,18 @@ def _fetch_investor_flow_api(code, days):
             return None
         _s = 종가들[min(n, len(종가들)) - 1]
         return round((종가들[0] - _s) / _s * 100, 2) if _s else None
+    # 🔴 2026-09-30 — 🚨 이 새 경로는 «오늘외국인·오늘기관»을 안 돌려줬다.
+    #   그래서 9/16 이후 stock_flow_history.json에 종목이 «0개»씩 적재됐다
+    #   (날짜만 늘고 종목 줄은 9/10에서 멈춤 — 내 종목 수급·매집 차수가 전부 굶었다).
+    #   옛 HTML 경로와 같은 키를 붙인다.
+    _대 = [x for x in 대금[1:21] if isinstance(x, (int, float)) and x > 0]
     return {"외국인": 외, "기관": 기, "종가": 종가들[0],
             "5일등락률": _등락(ACC_DAYS), "장기등락률": _등락(ACC_LONG),
-            "최장기등락률": (_등락(ACC_LONGEST) if ACC_LONGEST else None)}
+            "최장기등락률": (_등락(ACC_LONGEST) if ACC_LONGEST else None),
+            "오늘외국인": round(외[0], 1), "오늘기관": round(기[0], 1),
+            "오늘대금": 대금[0] if 대금 else None,
+            "평균대금20": (round(sum(_대) / len(_대), 1) if len(_대) >= 5 else None),
+            "일수": len(외)}
 
 
 def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
@@ -3801,6 +3824,7 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
     종가열 = 열찾기("종가")
     기관열 = 열찾기("기관", "순매매")
     외인열 = 열찾기("외국인", "순매매")
+    량열 = 열찾기("거래량")
     if not (날짜열 and 종가열 and 기관열 and 외인열):
         return None
 
@@ -3809,7 +3833,7 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
         return None
 
     외 , 기 = [], []
-    종가들 = []
+    종가들, 대금 = [], []
     for _, row in df.iterrows():
         종가 = to_num(row.get(종가열))
         외량 = to_num(row.get(외인열))
@@ -3817,6 +3841,8 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
         if 종가 is None:
             continue
         종가들.append(종가)
+        _량 = to_num(row.get(량열)) if 량열 else None
+        대금.append(round(_량 * 종가 / 1e8, 1) if _량 else None)
         외.append((외량 or 0) * 종가 / 100_000_000)   # 원 → 억원
         기.append((기량 or 0) * 종가 / 100_000_000)
     if not 외 or len(종가들) < 2:
@@ -3858,6 +3884,9 @@ def _fetch_investor_flow(code, days=(ACC_LONGEST or ACC_LONG)):
             # 🆕 2026-08-24 — 오늘치 한 줄을 stock_flow_history.json에 적재하기 위해
             #    최신일(0번째) 값을 그대로 넘긴다. **추가 요청 0회**(이미 받은 값).
             "오늘외국인": round(외[0], 1), "오늘기관": round(기[0], 1),
+            "오늘대금": 대금[0] if 대금 else None,
+            "평균대금20": (lambda _d: round(sum(_d) / len(_d), 1) if len(_d) >= 5 else None)(
+                [x for x in 대금[1:21] if isinstance(x, (int, float)) and x > 0]),
             "일수": len(외)}
 
 
@@ -3895,10 +3924,15 @@ def update_stock_flow_history(유니버스결과):
         print(f"   ⚠️ stock_flow_history 읽기 실패({type(e).__name__}) — 새로 시작")
 
     적재 = 0
-    for nm, 외, 기 in 유니버스결과:
+    # 🆕 2026-09-30 — [외국인, 기관] → [외국인, 기관, 거래대금, 20일 평균 거래대금](억원).
+    #   뒤 두 칸은 없으면 null. 옛 줄(2칸)은 그대로 둔다 — 읽는 쪽이 길이를 보고 쓴다.
+    for _row in 유니버스결과:
+        nm, 외, 기 = _row[0], _row[1], _row[2]
         if not nm:
             continue
-        본체["종목"].setdefault(nm, {})[DATE] = [외, 기]
+        _금 = _row[3] if len(_row) > 3 else None
+        _평 = _row[4] if len(_row) > 4 else None
+        본체["종목"].setdefault(nm, {})[DATE] = ([외, 기, _금, _평] if (_금 or _평) else [외, 기])
         적재 += 1
 
     if DATE not in 본체["날짜들"]:
@@ -4036,7 +4070,8 @@ def collect_accumulation_radar():
             실패 += 1
             continue
         if isinstance(flow.get("오늘외국인"), (int, float)):
-            _수급적재.append((이름, flow["오늘외국인"], flow.get("오늘기관") or 0))
+            _수급적재.append((이름, flow["오늘외국인"], flow.get("오늘기관") or 0,
+                          flow.get("오늘대금"), flow.get("평균대금20")))
         외전체, 기전체 = flow["외국인"], flow["기관"]
         외, 기 = 외전체[:ACC_DAYS], 기전체[:ACC_DAYS]        # 단기 = 최근 5일
         외일수 = sum(1 for v in 외 if v > 0)
