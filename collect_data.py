@@ -5845,53 +5845,51 @@ def _naver_stock_news(코드, 회사명):
           → 표의 **행(<tr>) 단위**로 잘라 같은 행 안에서 제목·날짜·언론사를 묶는다
        ③ 연관기사(같은 사건 묶음)가 중복으로 들어왔다 → 제목 지문으로 제거
     """
+    # 🔴🔴 2026-10-01 HO «대주전자재료·엘앤에프 기사가 8~9월에 멈춰 있다.»
+    #   [원인 실측] 옛 페이지(finance.naver.com/item/news_news)가 **410 «더 이상 제공되지
+    #     않습니다»**로 죽었다(9/16 수급 페이지와 같은 개편). 그날 이후 받은 종목 0개 —
+    #     저장 파일의 마지막 수집일이 9/16이고, 실패기록만 607건(9/30) 쌓였다.
+    #   [고침] 9/24에 로그로 찾아 둔 모바일 API(m.stock.naver.com/api/news/stock/{code})로
+    #     바꾼다. 10/1 실측: 대주전자재료 20묶음, 최신 9/21. 결과 모양({"t","u","d","s","c"})은
+    #     예전과 똑같아서 build_html은 고칠 게 없다.
+    #   형식: [{"total":N, "items":[{officeName, datetime "YYYYMMDDHHMM", title, officeId, articleId,
+    #          mobileNewsUrl, ...}]}, ...] — 한 묶음 = 같은 사건 기사들. 묶음마다 첫 기사만 쓴다.
     try:
         r = requests.get(
-            "https://finance.naver.com/item/news_news.naver",
-            params={"code": 코드, "page": 1, "sm": "title_entity_id.basic"},
-            headers={"User-Agent": "Mozilla/5.0",
-                     "Referer": f"https://finance.naver.com/item/main.naver?code={코드}"},
+            f"https://m.stock.naver.com/api/news/stock/{코드}",
+            params={"pageSize": 20, "page": 1},
+            headers={"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+                     "Referer": f"https://m.stock.naver.com/domestic/stock/{코드}/news"},
             timeout=12)
         if r.status_code != 200:
             return None
-        # ⚠️ 네이버 금융은 EUC-KR이다. 다만 바뀔 수 있으니 한글이 많은 쪽을 고른다.
-        _best, _score = "", -1
-        for enc in ("euc-kr", "utf-8", "cp949"):
-            try:
-                _t = r.content.decode(enc, errors="ignore")
-            except Exception:
-                continue
-            _h = sum(1 for _c in _t[:20000] if "가" <= _c <= "힣")
-            if _h > _score:
-                _best, _score = _t, _h
-        html = _best
-
+        j = r.json()
+        if not isinstance(j, list):
+            return None
         기사, 지문 = [], set()
-        # 행 단위로 잘라야 제목과 날짜가 어긋나지 않는다.
-        for _tr in re.split(r"<tr[^>]*>", html):
-            _a = re.search(r'<a[^>]+href="([^"]*read[^"]*)"[^>]*>(.*?)</a>', _tr, re.S)
-            if not _a:
+        for _g in j:
+            _its = (_g or {}).get("items") or [] if isinstance(_g, dict) else []
+            if not _its:
                 continue
-            _t = _unescape(re.sub(r"<[^>]+>", " ", _a.group(2)))
+            _it = _its[0]
+            _t = _unescape(str(_it.get("titleFull") or _it.get("title") or ""))
             if len(_t) < 6:
                 continue
-            # 같은 사건을 다룬 기사가 여러 매체로 들어온다. 지문으로 하나만 남긴다.
             _k = re.sub(r"[^0-9A-Za-z가-힣]", "", _t)[:20]
             if not _k or _k in 지문:
                 continue
             지문.add(_k)
-            _d = re.search(r"(20\d{2}\.\d{2}\.\d{2})", _tr)
-            _s = re.search(r'class="info[^"]*"[^>]*>([^<]{1,20})<', _tr)
-            _u = _a.group(1)
-            if _u.startswith("/"):
-                _u = "https://finance.naver.com" + _u
-            기사.append({"t": _t, "u": _u,
-                        "d": _d.group(1) if _d else "",
-                        "s": _unescape(_s.group(1)) if _s else "",
-                        "c": _뉴스분류(_t, 회사명)})   # 🆕 홍/황/백 — 로그 집계 전용, 화면 미사용
+            _dt = str(_it.get("datetime") or "")
+            _d = f"{_dt[:4]}.{_dt[4:6]}.{_dt[6:8]}" if len(_dt) >= 8 and _dt[:8].isdigit() else ""
+            _o, _a = _it.get("officeId"), _it.get("articleId")
+            _u = (f"https://n.news.naver.com/mnews/article/{_o}/{_a}" if _o and _a
+                  else (_it.get("mobileNewsUrl") or ""))
+            기사.append({"t": _t, "u": _u, "d": _d,
+                        "s": _unescape(str(_it.get("officeName") or "")),
+                        "c": _뉴스분류(_t, 회사명)})
             if len(기사) >= 15:
                 break
-        return {"회사": 회사명, "코드": 코드, "원문길이": len(html),
+        return {"회사": 회사명, "코드": 코드, "원문길이": len(r.text),
                 "기사수": len(기사), "기사": 기사[:10]}
     except Exception as e:
         print(f"      ⚠️ {회사명} 종목뉴스 실패 — {type(e).__name__}")
@@ -5919,6 +5917,10 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
         return
     저장 = _load_json(SNEWS_FILE, {})
     실패기록 = _load_json(SNEWS_FAIL_FILE, {})
+    # 🔴 2026-10-01 — 9/16~10/1 실패기록은 «종목에 기사가 없어서»가 아니라 «옛 페이지가 죽어서»
+    #   생긴 것이다(410). 그대로 두면 180일 동안 재시도를 막는다 → 그 기간 기록은 없던 걸로 본다.
+    실패기록 = {k: v for k, v in (실패기록 or {}).items()
+               if not ("20260916" <= str(v) <= "20261001")}
 
     # 🔴 2026-08-29 수정 — 몰아 모으기는 레이더종목들=[]로 호출되는데,
     #    예전엔 여기서 대상이 그대로 빈 채로 끝나 매번 0건 처리됐다
@@ -6045,12 +6047,7 @@ def collect_stock_news_raw(레이더종목들, 코드지도):
     for nm in 정리[:SNEWS_하루할당 + len(_관심)]:
         time.sleep(PROFILE_SLEEP)
         res = _naver_stock_news(코드지도[nm], nm)
-        # 🆕 2026-09-24 — 오늘 처음 도는 종목 하나로 모바일 주소를 시험해 본다
-        #   (내부에서 1회 제한 — _MOBILE_NEWS_TRIED). 실패해도 위 res는 그대로 쓴다.
-        try:
-            _mobile_news_probe(코드지도[nm], nm)
-        except Exception as e:
-            print(f"   📱뉴스탐색 예외 {type(e).__name__} — 무시하고 진행")
+        # (2026-10-01) 모바일 주소 시험(_mobile_news_probe)은 끝났다 — 이제 본 수집이 그 주소를 쓴다.
         if not res:
             실패기록[nm] = DATE
             새실패 += 1
