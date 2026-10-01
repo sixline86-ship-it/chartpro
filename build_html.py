@@ -15952,6 +15952,189 @@ def _swap_card(rk, days, n=4):
             f'처음 보는 테마와는 무게가 다릅니다.</p></div>')
 
 
+# ══════════════════════════════════════════════════════════════
+# 🧩 2026-10-01 HO — 테마 레이더 목록을 «이야기 묶음»으로 (시안 P1 채택)
+#   [왜] ① 테마 이름만으로는 뭐 하는 곳인지·왜 떴는지 모른다.
+#        ② 이름이 달라도 «돈이 같은 종목에 있으면» 같은 이야기다. 10/1 실측: 레이더 8개 중
+#           5개(유리 기판·LED장비·반도체 기판·반도체 장비·콜드체인)가 사실상 반도체 한 이야기.
+#   [묶는 법] 두 테마의 겹치는 종목 거래대금이 «작은 쪽 테마 돈의 50% 이상»이거나,
+#             같은 섹터(_theme_zone_map)면 한 이야기. 겹친 종목은 돈 몫을 셀 때 한 번만.
+#   [왜 떴나] 이야기마다 «오늘 오른 대장 종목들»의 최근 3일 기사에서 고른다(collect가 받아 둔 것).
+#     · 기사 확인 — 대장 2곳 이상에 같은 기사 / 테마·섹터 말이 제목에 있음
+#     · 대장 기사 — 대장 종목 이름만 제목에 있음
+#     · 미확인   — 못 찾으면 그대로 «미확인»(지어내지 않는다)
+#   ⚠️ data["테마상세"]가 없으면(옛 데이터·수집 실패) 예전 «섹터 묶음»으로 돌아간다.
+RADAR_LIST_OPEN = 5          # 목록에서 처음부터 보여 줄 순위(나머지는 «더보기»)
+STORY_OVERLAP = 0.5
+
+
+def _desc_short(t, theme=""):
+    """네이버 테마 설명 → «뭐 하는 곳» 한 줄(규칙만, 지어내지 않는다)."""
+    import re as _re
+    t = _re.sub(r"\s+", " ", str(t or "")).strip()
+    if not t:
+        return ""
+    t = _re.sub(r"\([^)]*\)", "", t)                       # 괄호 풀이 빼기
+    t = _re.split(r"(?<=[다음함임됨])\.\s|\.\s|\.$", t)[0].strip()   # 첫 문장
+    head = theme.split("(")[0].strip()[:4]
+    m = _re.match(r"^(.{1,30}?)(?:이란|란|은|는)\s", t)        # «콜드체인이란 …» 앞머리 빼기
+    if m and head and m.group(1).startswith(head[:2]) and len(m.group(1)) <= len(theme.split("(")[0].strip()) + 3:
+        t = t[m.end():]
+    if len(t) > 46:
+        parts = _re.split(r"(?<=[가-힣])(?:으로|로|이며|며|으며)[,\s]", t)
+        if parts and 10 <= len(parts[0]) <= 46:
+            t = parts[0]
+        else:
+            cut = t[:44]
+            t = (cut[:cut.rfind(" ")] if " " in cut else cut) + "…"
+    t = _re.sub(r"\s+", " ", t).strip(" ,·")
+    return t
+
+
+def _story_kw(names, zm):
+    import re as _re
+    _넓 = {"AI", "반도체", "2차전지", "바이오", "대표주", "관련주", "관련", "테마", "등", "생산",
+          "부품", "장비", "소재", "기타", "업체", "국산화"}
+    kw = set()
+    for n in names:
+        kw |= {w for w in _re.split(r"[()/·,&＆\s]+", n) if len(w) >= 2 and w not in _넓}
+        z = zm.get(n)
+        if z:
+            kw |= {w for w in z.split("·") if len(w) >= 2 and w != "기타"}
+    return kw
+
+
+def _story_why(names, det, zm, data):
+    """이야기 하나의 «왜» → (제목, 링크, 등급 'ok'|'mid'|'no', 꼬리 글) 또는 None."""
+    import re as _re
+    T = (det or {}).get("테마") or {}
+    N = (det or {}).get("뉴스") or {}
+    대장 = {}
+    for n in names:
+        st = (T.get(n) or {}).get("종목") or []
+        오른 = [x for x in st if x[2] > 0] or st
+        for x in 오른[:3]:
+            대장[x[1]] = x[0]
+    kw = _story_kw(names, zm)
+    후보 = {}
+    for cd, sn in 대장.items():
+        for dt, t, u, src in (N.get(cd) or []):
+            if not t or any(z in t for z in _NEWS_NOISE):
+                continue
+            k = _re.sub(r"[^0-9A-Za-z가-힣]", "", t)[:16]
+            c = 후보.setdefault(k, {"t": t, "u": u, "d": dt, "who": set(), "nm": False})
+            c["who"].add(cd)
+            if sn in t:
+                c["nm"] = True
+    best = None
+    for c in 후보.values():
+        has_kw = any(w in c["t"] for w in kw)
+        wrap = any(w in c["t"] for w in ("코스피", "코스닥", "증시", "천피", "마감"))
+        if wrap and not has_kw:
+            continue
+        shared = len(c["who"])
+        if not (has_kw or c["nm"] or shared >= 2):
+            continue
+        sc = (3 if has_kw else 0) + (2 if c["nm"] else 0) + (shared - 1) * 2 + (2 if c["d"][:8] == DATE else 0)
+        if not best or sc > best[0] or (sc == best[0] and c["d"] > best[1]["d"]):
+            best = (sc, c, has_kw)
+    if best:
+        _, c, has_kw = best
+        등급 = "ok" if (has_kw or len(c["who"]) >= 2) else "mid"
+        꼬리 = "" if c["d"][:8] == DATE else f'{c["d"][4:6]}/{c["d"][6:8]} 기사'
+        return c["t"], c["u"], 등급, 꼬리
+    # 받아 둔 기사에 없으면 예전 방식(오늘 뉴스·공시·종목뉴스)으로 한 번 더 찾는다
+    try:
+        big = max(names, key=lambda n: sum(x[3] for x in ((T.get(n) or {}).get("종목") or [])))
+        x = _theme_issue(big, None, data, _theme_members(data).get(big) if data else None, None)
+    except Exception:
+        x = None
+    if x:
+        return x[0], x[1], ("ok" if x[2] == "오늘 뉴스" else "mid"), ("" if x[2] == "오늘 뉴스" else x[2])
+    return None
+
+
+def _theme_stories(names, det, zm):
+    """레이더 테마들 → 이야기 목록(돈 몫 큰 순). 테마상세가 모자라면 None."""
+    T = (det or {}).get("테마") or {}
+    if not names or sum(1 for n in names if T.get(n)) < max(2, len(names) // 2):
+        return None
+    money = {}
+    S = {}
+    for n in names:
+        st = (T.get(n) or {}).get("종목") or []
+        S[n] = {x[1] for x in st}
+        for x in st:
+            money[x[1]] = x
+    m = lambda cs: sum(money[c][3] for c in cs)
+    par = {n: n for n in names}
+    def f(x):
+        while par[x] != x:
+            par[x] = par[par[x]]
+            x = par[x]
+        return x
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            inter = S[a] & S[b]
+            small = min(m(S[a]), m(S[b]))
+            if (inter and small > 0 and m(inter) / small >= STORY_OVERLAP) or (zm.get(a) and zm.get(a) == zm.get(b)):
+                par[f(a)] = f(b)
+    grp = {}
+    for n in names:
+        grp.setdefault(f(n), []).append(n)
+    allc = set().union(*S.values()) if S else set()
+    tot = m(allc) or 1
+    out = []
+    for ns in grp.values():
+        cs = set().union(*(S[n] for n in ns))
+        big = max(ns, key=lambda n: m(S[n]))
+        z = next((zm.get(n) for n in sorted(ns, key=lambda n: -m(S[n])) if zm.get(n)), None)
+        up = sum(1 for c in cs if money[c][2] > 0)
+        out.append({"themes": ns, "label": z or big.split("(")[0].strip(),
+                    "share": m(cs) / tot * 100, "n": len(cs),
+                    "up": (up / len(cs) * 100) if cs else 0})
+    out.sort(key=lambda s: -s["share"])
+    return out
+
+
+def _theme_tags(nm, det, story_names):
+    """테마 한 줄 밑 꼬리표 — 돈 주인 쏠림(자회사) · 식는 중 · 돈 없음."""
+    T = (det or {}).get("테마") or {}
+    x = T.get(nm) or {}
+    st = x.get("종목") or []
+    if not st:
+        return ""
+    tot = sum(s[3] for s in st) or 0
+    tags = []
+    if tot > 0:
+        top = st[0]
+        sh = top[3] / tot * 100
+        사유 = (x.get("편입") or {}).get(top[1]) or ""
+        if sh >= 60 and any(w in 사유 for w in ("종속회사", "자회사", "투자한 이력")):
+            other = [o for o in story_names if o != nm and top[1] in {s[1] for s in ((T.get(o) or {}).get("종목") or [])}]
+            tags.append(f'<span class="tm-tg mask">⚠️ 돈 {sh:.0f}%가 {top[0]} — 자회사 사업으로 들어간 종목'
+                        + (f' ({other[0].split("(")[0].strip()}에도 속함)' if other else "") + '</span>')
+        elif sh >= 60:
+            tags.append(f'<span class="tm-tg own">돈 {sh:.0f}%가 {top[0]}</span>')
+    avg = sum(s[2] for s in st) / len(st)
+    up = sum(1 for s in st if s[2] > 0) / len(st) * 100
+    if avg < 0 and up < 40:
+        tags.append(f'<span class="tm-tg cold">❄️ 오늘 {avg:+.1f}% · 오른 종목 {up:.0f}% — 식는 중</span>')
+    if 0 < tot < 50:
+        tags.append(f'<span class="tm-tg thin">💧 거래대금 {tot:.0f}억 — 순위에 비해 돈이 적어요</span>')
+    return "".join(tags)
+
+
+def _why_html(w, cls="tm-why"):
+    if not w:
+        return f'<p class="{cls}"><span class="tm-ev no">미확인</span><span>관련 기사를 못 찾았어요</span></p>'
+    t, u, g, tail = w
+    lab = {"ok": "기사 확인", "mid": "대장 기사"}.get(g, "미확인")
+    body = (f'<a href="{esc_url(u)}" target="_blank" rel="noopener">{t}</a>' if u else t)
+    return (f'<p class="{cls}"><span class="tm-ev {g}">{lab}</span><span>{body}'
+            + (f'<em>{tail}</em>' if tail else "") + '</span></p>')
+
+
 def build_theme_radar(data):
     """각도=업종 · 중심거리=순위 · 점 크기=머문 일수 · 꼬리=5일 전 자리.
 
@@ -16316,6 +16499,26 @@ def build_theme_radar(data):
     _대금 = _theme_amt_map()
     _오늘d, _어제d = days[-1], (days[-2] if len(days) >= 2 else None)
 
+    # 🧩 2026-10-01 — 이야기 묶음(테마상세가 있을 때만). 없으면 아래에서 예전 섹터 묶음.
+    _det = (data or {}).get("테마상세") or {}
+    _zm0 = _theme_zone_map()
+    try:
+        _stories = _theme_stories([r["n"] for r in rows], _det, _zm0)
+    except Exception as _e:
+        print(f"   ⚠️ 이야기 묶음 실패 — {type(_e).__name__}: {_e}")
+        _stories = None
+    _story_of = {}
+    for _si, _s in enumerate(_stories or []):
+        for _n in _s["themes"]:
+            _story_of[_n] = _si
+    _why_of = {}
+    for _si, _s in enumerate(_stories or []):
+        try:
+            _why_of[_si] = _story_why(_s["themes"], _det, _zm0, data)
+        except Exception:
+            _why_of[_si] = None
+    _lis_of = {}
+
     def _money_badge(nm):
         """어제 대비 거래대금 변화 배지. 둘 중 하나라도 없으면 침묵."""
         if not _어제d:
@@ -16408,14 +16611,30 @@ def build_theme_radar(data):
                           f'<text x="{x}" y="{y - 4.5:.1f}" text-anchor="middle" font-size="7.5" fill="#5c6676">밖</text>')
         _trail = (f'<svg class="tm-tr" viewBox="0 0 {_W} {_H}" width="{_W}" height="{_H}">'
                   f'{_seg}{_dots}</svg>')
+        _what, _tags, _solo = "", "", ""
+        if _stories:
+            _ds = _desc_short(((_det.get("테마") or {}).get(r["n"]) or {}).get("설명"), r["n"])
+            if _ds:
+                _what = f'<p class="tm-what">{_ds}</p>'
+            _si = _story_of.get(r["n"])
+            _sn = _stories[_si]["themes"] if _si is not None else [r["n"]]
+            _tg = _theme_tags(r["n"], _det, _sn)
+            if _si is not None and len(_sn) == 1:
+                _solo = _why_html(_why_of.get(_si), "tm-why solo")
+                _s1 = _stories[_si]
+                _tg = (f'<span class="tm-tg own">돈 몫 {_s1["share"]:.0f}% · {_s1["n"]}종목 중 {_s1["up"]:.0f}% 상승</span>'
+                       + _tg)
+            _tags = f'<div class="tm-tgs">{_tg}</div>' if _tg else ""
         lis.append(
             f'<div class="tm-lg"{click}>'
             f'<div class="tm-l1">'
             f'<span class="tm-dot" style="background:{c}">{r["r"]}</span>'
             f'<span class="tm-nm">{r["n"]}</span>{arw}</div>'
-            f'<div class="tm-l2">{_trail}{_ydy}'
+            f'{_what}'
+            f'<div class="tm-l2">{_trail}'
             f'{_money_badge(r["n"])}{_twin_chip(r["n"])}'
-            f'</div></div>{pan}')
+            f'</div>{_tags}{_solo}</div>{pan}')
+        _lis_of[r["n"]] = (r["r"], lis[-1])
 
     prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
     cur = {k for k, _ in rk[last][:10]}
@@ -16431,6 +16650,42 @@ def build_theme_radar(data):
     #      «같은 편끼리 모으는 것»이다. 순위를 잃으면 안 된다.
     #   ⚠️ 섹터를 모르는 테마는 버리지 않고 «기타»로 맨 뒤에 둔다.
     _zm = _theme_zone_map()
+    _story_html = ""
+    if _stories:
+        # 🧩 2026-10-01 HO — «5위까지 보여주고 나머지는 더보기».
+        #   이야기 순서(돈 몫 큰 순)는 지키고, 그 안에서 6위 이하 줄만 접는다.
+        #   줄이 전부 접힌 이야기는 머리까지 같이 접힌다.
+        _blk = []
+        _hid = 0
+        for _si, _s in enumerate(_stories):
+            _its = sorted((_lis_of[n] for n in _s["themes"] if n in _lis_of), key=lambda v: v[0])
+            if not _its:
+                continue
+            _vis = [h for rr, h in _its if rr <= RADAR_LIST_OPEN]
+            _all_hidden = not _vis
+            _rows_html = "".join(
+                (h if rr <= RADAR_LIST_OPEN else f'<div class="tm-x">{h}</div>') for rr, h in _its)
+            _hid += sum(1 for rr, _h in _its if rr > RADAR_LIST_OPEN)
+            _sc = TM_HOT if _s["share"] >= 50 else (TM_WARM if _s["share"] >= 15 else TM_FLAT)
+            if len(_s["themes"]) >= 2:
+                _head = (f'<div class="tm-soh" style="border-color:{_sc}55">'
+                         f'<p class="tm-soh1"><b style="color:{_sc}">{_s["label"]}</b>'
+                         f'<span>테마 {len(_s["themes"])}개 · {_s["n"]}종목 중 {_s["up"]:.0f}% 상승</span>'
+                         f'<i style="color:{_sc}">{_s["share"]:.0f}%</i></p>'
+                         f'{_why_html(_why_of.get(_si))}</div>')
+            else:
+                _head = ""          # 테마 하나짜리 이야기는 머리 없이 줄만(이름이 두 번 나오지 않게)
+            _blk.append(f'<div class="tm-sto{" tm-x" if _all_hidden else ""}">{_head}{_rows_html}</div>')
+        _top = _stories[0]
+        _say = (f'<p class="tm-say">레이더 {len(rows)}개 테마는 사실상 <b>{len(_stories)}개 이야기</b>예요'
+                + (f'. <b>{_top["label"]}</b> 하나가 돈의 <b>{_top["share"]:.0f}%</b>를 가져갔어요'
+                   + (f'(테마 {len(_top["themes"])}개)' if len(_top["themes"]) >= 2 else "")
+                   if _top["share"] >= 40 else " — 돈이 여러 이야기에 나뉘었어요")
+                + '.<br><span>오른쪽 % = 레이더 테마들에 들어온 돈 중 그 이야기의 몫(겹친 종목은 한 번만)</span></p>')
+        _btn = (f'<button type="button" class="tm-mb" onclick="this.parentNode.classList.toggle(\'open\')">'
+                f'<span class="o1">6~{len(rows)}위 {_hid}개 더보기</span><span class="o2">접기</span> '
+                f'<span class="cp-arw">▾</span></button>' if _hid else "")
+        _story_html = f'<div class="tm-list">{_say}{"".join(_blk)}{_btn}</div>'
     _그룹 = {}
     for _i, _r in enumerate(rows):
         _그룹.setdefault(_zm.get(_r["n"]) or "기타", []).append(lis[_i])
@@ -16458,7 +16713,7 @@ def build_theme_radar(data):
             f'{move_key()}'
             f'<p class="tm-trk">작은 그래프 = 최근 5일 순위 · 점 위 숫자가 그날 순위(위로 갈수록 높은 순위) · '
             f'<b>밖</b> = 20위 밖 · 맨 오른쪽 큰 점이 오늘</p>'
-            f'{"".join(_묶음)}{_twin_note([r["n"] for r in rows])}{_chapter_note("레이더")}'
+            f'{_story_html or "".join(_묶음)}{_twin_note([r["n"] for r in rows])}{_chapter_note("레이더")}'
             f'{_chapter_block(build_theme_survival((_나이맵.get(rows[0]["n"]) if rows else None)), "생존", ("sv-note",))}'
             # 🔴🔴 HO 지시 2026-09-19 — 한 줄짜리 각주를 «교체 카드»로 승격.
             #   [왜] 순환매는 «돈이 옮겨다니는 것»이다. 그런데 화면은
@@ -17074,6 +17329,45 @@ THEME_V17_CSS = """
   padding:0 0 5px;border-bottom:1px solid;font-size:11.5px;font-weight:800}
 .tm-clh b{font-size:10px;font-weight:800;opacity:.9}
 .tm-clh span{margin-left:auto;font-size:9.5px;font-weight:700;color:#6f7784}
+/* 🧩 2026-10-01 — 이야기 묶음(P1) */
+.tm-say{margin:8px 0 4px;padding:9px 10px;background:#0c131b;border-radius:8px;
+  font-size:12px;line-height:1.7;color:#c3cad4}
+.tm-say b{color:#eef1f5}
+.tm-say span{font-size:10px;color:#6f7a8b}
+.tm-sto{margin:12px 0 4px}
+.tm-soh{border-bottom:1px solid;padding:0 0 7px;margin-bottom:2px}
+.tm-soh1{display:flex;align-items:baseline;gap:7px;margin:0;flex-wrap:wrap}
+.tm-soh1 b{font-size:13.5px;font-weight:900;letter-spacing:-.02em}
+.tm-soh1 span{font-size:10px;color:#8b93a0;font-variant-numeric:tabular-nums}
+.tm-soh1 i{margin-left:auto;font-style:normal;font-size:12px;font-weight:900;
+  font-variant-numeric:tabular-nums}
+.tm-why{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px;align-items:start;
+  margin:6px 0 0;font-size:11.5px;line-height:1.6;color:#c3cad4}
+.tm-why.solo{margin:6px 0 0 26px}
+.tm-why a{color:#e2e7ee;text-decoration:none;border-bottom:1px dotted #4a5666}
+.tm-why em{font-style:normal;color:#8b93a0;font-size:10px;margin-left:5px}
+.tm-ev{font-size:9.5px;font-weight:800;border-radius:4px;padding:1px 5px;white-space:nowrap;margin-top:2px}
+.tm-ev.ok{background:rgba(62,207,154,.14);color:#3ecf9a}
+.tm-ev.mid{background:rgba(255,201,60,.13);color:#ffc93c}
+.tm-ev.no{background:#1e2733;color:#8b93a0}
+.tm-what{margin:3px 0 0 26px;font-size:11px;line-height:1.55;color:#9aa3b1}
+.tm-tgs{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0 26px}
+.tm-tg{font-size:10px;font-weight:700;border-radius:5px;padding:1px 6px;line-height:1.5}
+.tm-tg.mask{background:rgba(255,152,56,.12);color:#ffb877}
+.tm-tg.own{background:#1a2230;color:#aeb6c1}
+.tm-tg.cold{background:rgba(91,155,255,.12);color:#9cc2ff}
+.tm-tg.thin{background:#1e2733;color:#8b93a0}
+.tm-list .tm-x{display:none}
+.tm-why>span,.tm-why a,.tm-tg,.tm-what{white-space:normal;overflow-wrap:anywhere;min-width:0}
+.tm-tgs{min-width:0}
+.tm-list.open .tm-x{display:block}
+.tm-mb{display:block;width:100%;margin:10px 0 2px;padding:7px 0;border-radius:99px;
+  border:1px solid #232f3d;background:#101720;color:#aeb6c1;font:inherit;font-size:11.5px;
+  font-weight:700;cursor:pointer}
+.tm-mb .o2{display:none}
+.tm-list.open .tm-mb .o1{display:none}
+.tm-list.open .tm-mb .o2{display:inline}
+.tm-list.open .tm-mb .cp-arw{transform:rotate(180deg)}
 /* 어제 대비 · 돈 배지 */
 .tm-tr{flex:none;display:block}
 .tm-trk{margin:4px 0 6px;font-size:10px;color:#6f7a8b}
