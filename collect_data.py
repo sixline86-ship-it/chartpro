@@ -6769,6 +6769,125 @@ def _섹터거래대금(계좌격자):
         return None
 
 
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-01 HO — 테마 레이더 «이야기 묶음»의 재료 (P1 시안 채택)
+#   [왜] 테마 이름만으로는 «뭐 하는 테마인지», «왜 떴는지»를 모른다. 그리고 실측(10/1)으로
+#     10위권 10개 중 7개가 «구성 종목이 겹치는 같은 이야기»(반도체)였다 — 이름은 달라도 돈은 같다.
+#   [무엇을 받나] 4일 누적 상위 테마마다 네이버 테마 상세 API 1번:
+#     · 테마 설명(themeDescription) → 화면 «뭐 하는 곳» 한 줄
+#     · 전체 구성 종목 + 오늘 등락·거래대금 → 테마끼리 «돈이 얼마나 겹치나»(이야기 묶기)
+#     · 편입 사유(themeItemInfoMap) — 돈 많은 상위 3종목만(나중에 «왜 이 테마에?»용)
+#     + 테마마다 «오늘 오른 종목 중 돈 많은 3개»의 종목뉴스(최근 3일) → «왜 떴나»의 근거
+#   ⚠️ 이름 → 번호는 테마 목록 API(약 264개)로 맞춘다. 못 맞추면 그 테마만 빠진다(지어내지 않음).
+#   ⚠️ 실패해도 리포트는 그대로 나간다 — 화면은 이 칸이 없으면 예전 «섹터 묶음»으로 돌아간다.
+THEME_DETAIL_N = int(os.environ.get("CP_THEME_DETAIL_N", "12"))   # 4일 누적 상위 몇 개
+THEME_DETAIL_DAYS = 4                                            # build_html THEME_CUM_DAYS와 같게
+_M_UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
+         "Referer": "https://m.stock.naver.com/"}
+
+
+def collect_theme_detail():
+    h = _load_json(THEME_HISTORY_FILE, {}) or {}
+    일별 = h.get("일별") or {}
+    days = sorted(일별)[-THEME_DETAIL_DAYS:]
+    if not days:
+        print("   ⚠️ 테마상세 — 테마 이력이 없어 건너뜁니다")
+        return None
+    sc = {}
+    for dd in days:
+        for x in (일별.get(dd) or []):
+            nm = x.get("테마명")
+            if nm:
+                sc[nm] = sc.get(nm, 0) + (x.get("점수") or 0)
+    대상 = [n for n, _ in sorted(sc.items(), key=lambda v: -v[1])][:THEME_DETAIL_N]
+
+    번호 = {}
+    for p in (1, 2, 3):
+        try:
+            j = requests.get("https://m.stock.naver.com/api/stocks/theme",
+                             params={"page": p, "pageSize": 100}, headers=_M_UA, timeout=10).json()
+            for g in (j.get("groups") or []):
+                if g.get("name") and g.get("no"):
+                    번호[g["name"]] = g["no"]
+            if len(j.get("groups") or []) < 100:
+                break
+        except Exception as e:
+            print(f"   ⚠️ 테마 목록 API 실패 — {type(e).__name__}")
+            break
+    if not 번호:
+        return None
+
+    테마, 뉴스대상 = {}, {}
+    for nm in 대상:
+        no = 번호.get(nm)
+        if not no:
+            print(f"   ⚠️ 테마상세 — «{nm}» 번호를 못 찾음(이름 불일치)")
+            continue
+        try:
+            time.sleep(0.15)
+            j = requests.get(f"https://m.stock.naver.com/api/stocks/theme/{no}",
+                             params={"page": 1, "pageSize": 100}, headers=_M_UA, timeout=10).json()
+        except Exception as e:
+            print(f"   ⚠️ 테마상세 «{nm}» 실패 — {type(e).__name__}")
+            continue
+        종목 = []
+        for s in (j.get("stocks") or []):
+            try:
+                r = float(str(s.get("fluctuationsRatio") or "0").replace(",", ""))
+            except ValueError:
+                r = 0.0
+            v = s.get("accumulatedTradingValueRaw") or 0
+            try:
+                v = round(float(v) / 1e8, 1)          # 원 → 억 (⚠️ 항상 ÷1e8)
+            except (TypeError, ValueError):
+                v = 0.0
+            if s.get("stockName") and s.get("itemCode"):
+                종목.append([s["stockName"], str(s["itemCode"]), r, v])
+        if not 종목:
+            continue
+        종목.sort(key=lambda x: -x[3])
+        사유 = j.get("themeItemInfoMap") or {}
+        테마[nm] = {"번호": no, "설명": (j.get("themeDescription") or "").strip(),
+                   "종목": 종목,
+                   "편입": {x[1]: str(사유.get(x[1]) or "")[:200] for x in 종목[:3] if 사유.get(x[1])}}
+        오른 = [x for x in 종목 if x[2] > 0] or 종목
+        for x in 오른[:3]:
+            뉴스대상[x[1]] = x[0]
+
+    뉴스 = {}
+    try:
+        _기준 = datetime.strptime(DATE, "%Y%m%d")
+    except ValueError:
+        _기준 = datetime.now()
+    for cd, sn in 뉴스대상.items():
+        try:
+            time.sleep(0.12)
+            j = requests.get(f"https://m.stock.naver.com/api/news/stock/{cd}",
+                             params={"pageSize": 10, "page": 1}, headers=_M_UA, timeout=10).json()
+        except Exception:
+            continue
+        out = []
+        for g in (j if isinstance(j, list) else []):
+            its = (g or {}).get("items") or []
+            if not its:
+                continue
+            it = its[0]
+            dt = str(it.get("datetime") or "")
+            try:
+                if (_기준 - datetime.strptime(dt[:8], "%Y%m%d")).days > 3:
+                    continue
+            except ValueError:
+                continue
+            o, a = it.get("officeId"), it.get("articleId")
+            out.append([dt[:12], _unescape(str(it.get("titleFull") or it.get("title") or "")),
+                        (f"https://n.news.naver.com/mnews/article/{o}/{a}" if o and a else ""),
+                        _unescape(str(it.get("officeName") or ""))])
+        if out:
+            뉴스[cd] = out[:6]
+    print(f"   🧩 테마상세 {len(테마)}/{len(대상)}개 · 대장 뉴스 {len(뉴스)}/{len(뉴스대상)}종목")
+    return {"기준일": days, "테마": 테마, "뉴스": 뉴스}
+
+
 def collect_account_grid(테마후보):
     """테마 10칸(+기타) × 시총 3층 격자를 만든다.
 
@@ -7088,6 +7207,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+    # 🆕 2026-10-01 — 테마 레이더 «이야기 묶음» 재료. 테마 이력(오늘 줄)이 저장된 «뒤»여야 한다.
+    try:
+        테마상세 = collect_theme_detail()
+    except Exception as e:
+        print(f"   ⚠️ 테마상세 수집 실패({type(e).__name__}) — 레이더는 예전 묶음으로 나갑니다")
+        테마상세 = None
     # 🔴🔴 2026-09-21 — 등락종목수를 «종목사전»으로 센다.
     #   [사고 1] 옛 경로(finance.naver.com/sise/, sise_index)가 9/12 개편으로
     #     죽어 9/12부터 매일 None이었다.
@@ -7251,6 +7376,7 @@ if __name__ == "__main__":
                      "가중치": "강도40 + 거래대금35 + 확산도25"},
         },
         "마감브리핑": 마감브리핑,
+        "테마상세": 테마상세,
         "섹터거래대금": _섹터거래대금(계좌격자),
     }
 
