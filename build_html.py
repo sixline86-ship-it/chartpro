@@ -284,6 +284,68 @@ def _patch_old_reports_tabhash():
         print(f"   🔗 옛 리포트 {n}개에 «같은 탭으로 열기» 스크립트를 붙였습니다(한 번만).")
 
 
+# 🆕 2026-10-01 HO — «어제 리포트로 가면 오늘 날짜가 없어서 돌아올 수가 없다.»
+#   [원인] 지난 리포트 목록은 «그 리포트를 만든 날» 굳어 버린다. 9/30 리포트의 목록엔
+#          10/1이 영영 없다(그날엔 10/1이 없었으니까).
+#   [해법] 페이지가 열릴 때 index.html(= 항상 최신 리포트, 목록도 최신)을 한 번 읽어
+#          «내 목록에 없는 더 새 날짜»를 맨 앞에 끼워 넣는다. 새 파일·daily.yml 변경 없음.
+#          · 가장 새 날짜 칩 = «최신 10/1(목)» (노란 테두리)
+#          · 지금 보는 날 칩 = «보는 중 9/30(수)» (점선)
+#   ⚠️ 읽기 실패(오프라인·미리보기)면 아무것도 안 바꾼다 — 원래 목록 그대로.
+#   ⚠️ 9/29 이전 리포트엔 «같은 탭으로» 클릭 코드가 없어서 여기서 같이 붙인다(CP_TAB 없을 때만).
+_ARCHLIVE_JS = r"""<script>/*CP_ARCHLIVE*/(function(){try{
+var WD=["일","월","화","수","목","금","토"];
+var grid=document.querySelector(".arch-grid");if(!grid||!window.fetch)return;
+var me=(/report_(\d{8})\.html/.exec(location.pathname)||[])[1]||"";
+function lab(d){var x=new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6,8));return (x.getMonth()+1)+"/"+x.getDate()+"("+WD[x.getDay()]+")";}
+document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a.arch-link"):null;
+ if(!a||typeof window.CP_TAB!=="undefined")return;var G=".gtab"+"-b",b=document.querySelector(G+".on"),f=document.querySelector(G);
+ var h=(a.getAttribute("href")||"").split("#")[0];
+ if(b&&f&&b!==f)a.setAttribute("href",h+"#tab="+encodeURIComponent(b.getAttribute("data-go")||""));},true);
+fetch("index.html?cparch="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.text():"";}).then(function(t){
+ if(!t)return;var re=/report_(\d{8})\.html/g,m,s={};while((m=re.exec(t)))s[m[1]]=1;
+ var all=Object.keys(s).sort().reverse();if(!all.length)return;var newest=all[0];
+ var have={},top="";[].forEach.call(document.querySelectorAll("a.arch-link"),function(a){
+  var k=(/report_(\d{8})/.exec(a.getAttribute("href")||"")||[])[1];if(k&&!have[k]){have[k]=a;if(k>top)top=k;}});
+ var add=all.filter(function(d){return !have[d]&&d>top;});
+ for(var i=add.length-1;i>=0;i--){var a=document.createElement("a");a.className="arch-link";
+  a.href="report_"+add[i]+".html";a.textContent=lab(add[i]);have[add[i]]=a;grid.insertBefore(a,grid.firstChild);}
+ Object.keys(have).forEach(function(k){var a=have[k];
+  if(k===newest){a.classList.add("arch-today");a.style.borderColor="#e0c060";a.style.color="#ffd66b";a.style.fontWeight="800";
+   if(k!==me)a.textContent="최신 "+lab(k);}
+  else if(k===me){a.classList.remove("arch-today");a.textContent="보는 중 "+lab(k);a.style.borderStyle="dashed";a.style.fontWeight="800";}
+  else if(a.classList.contains("arch-today")){a.classList.remove("arch-today");a.textContent=lab(k);}});
+ var hd=document.querySelector(".arch-head");
+ if(hd&&add.length)hd.innerHTML=hd.innerHTML.replace(/지난 리포트 \d+개/,"지난 리포트 "+Object.keys(have).length+"개");
+}).catch(function(){});
+}catch(e){}})();</script>"""
+
+
+def _patch_old_reports_archlive():
+    n = 0
+    try:
+        for f in sorted(os.listdir(".")):
+            if not (f.startswith("report_") and f.endswith(".html")) or f == OUT_PATH:
+                continue
+            try:
+                with open(f, encoding="utf-8") as fp:
+                    t = fp.read()
+            except Exception:
+                continue
+            if "CP_ARCHLIVE" in t or "arch-grid" not in t:
+                continue
+            i = t.rfind("</body>")
+            t = (t[:i] + _ARCHLIVE_JS + t[i:]) if i >= 0 else (t + _ARCHLIVE_JS)
+            with open(f, "w", encoding="utf-8") as fp:
+                fp.write(t)
+            n += 1
+    except Exception as e:
+        print(f"   ⚠️ 옛 리포트 «최신 날짜 칩» 패치 실패 — {type(e).__name__}: {e}")
+        return
+    if n:
+        print(f"   🗂️ 옛 리포트 {n}개에 «최신 날짜 자동 추가» 스크립트를 붙였습니다(한 번만).")
+
+
 # collect_data.py 와 동일한 사전(설명 붙이기용). 여기서도 참조.
 THEME_DICT = {
     "S7": "반도체 소부장 그룹", "자원개발": "해외 광물·에너지 자원", "LNG": "액화천연가스",
@@ -5160,7 +5222,8 @@ def build_my_stocks(data):
                     if _n in _t and _t not in _본제목[_n]:
                         _본제목[_n].add(_t)
                         _snews.setdefault(_n, []).append(
-                            {"t": _t, "u": _x.get("링크", ""), "k": _라벨})
+                            {"t": _t, "u": _x.get("링크", ""), "k": _라벨,
+                             "y": int(str(_ymd)) if str(_ymd).isdigit() else 0})
             for _g in (_d.get("공시") or []):
                 _c = _g.get("회사명")
                 if _c in _대상:
@@ -5168,7 +5231,8 @@ def build_my_stocks(data):
                     if _t and _t not in _본제목[_c]:
                         _본제목[_c].add(_t)
                         _snews.setdefault(_c, []).insert(
-                            0, {"t": _t, "u": _g.get("링크", ""), "k": _라벨 + " 공시"})
+                            0, {"t": _t, "u": _g.get("링크", ""), "k": _라벨 + " 공시",
+                                "y": int(str(_ymd)) if str(_ymd).isdigit() else 0})
 
         # 🔴 2026-09-01 (2차) HO 지시 — "뉴스를 찾지 말고, 해당종목을 검색해서
         #    최근에 뜨는 이슈를 보여주는거야." archive 뉴스원본(RSS, 하루 몇 개
@@ -5255,10 +5319,11 @@ def build_my_stocks(data):
                     _p += 20
                 elif _pos > 20:
                     _p -= 5
-                if any(_w in _t for _w in _잡음):
+                _jk = any(_w in _t for _w in _잡음)
+                if _jk:
                     _p -= 30
                 _p += (len(_lst) - _i) * 0.01          # 동점이면 최신 우선
-                _sc.append((_p, _i, _it))
+                _sc.append((_p, _i, _it, _jk))
             # 🔴 2026-09-07 HO 지적 — "OCI홀딩스는 네이버에 9월 기사가
             #    있는데 «없음»이라고 뜬다. 모든 종목이 다 그렇다."
             #    [실측] 이 «0점 미만 제외»가 **670종목(23%)을 통째로** 지우고
@@ -5276,13 +5341,19 @@ def build_my_stocks(data):
             _sc.sort(key=lambda x: (-x[0], x[1]))
             # ⚠️ 점수 상위 3 + 최신 3을 합쳐 최대 4건. 점수순만 남기면
             #    브리핑에 정작 «가장 최근 기사»가 빠진다.
+            # 🔴 2026-10-01 HO «기사가 다 8~9월 것» — 고르는 법을 바꾼다.
+            #   ① 예전 «최신 3»은 x[1](뒤집은 목록의 순번)으로 골랐는데, 네이버 종목뉴스는
+            #      최신→과거 순으로 들어와서 뒤집으면 오히려 **가장 오래된 것**이 뽑혔다.
+            #      → 실제 날짜(y)로 최신을 고른다.
+            #   ② 점수 상위 3 → 2, 최신 → 2. «왜 주목받나»가 몇 달 전 기사로 차는 걸 막는다.
+            #   ③ 시황 나열·홍보(잡음단어) 기사는 최신 자리에도 안 넣는다.
             _고른, _본 = [], set()
-            for _x in _sc[:3]:
+            for _x in _sc[:2]:
                 _고른.append(_x); _본.add(_x[1])
-            for _x in sorted(_sc, key=lambda x: x[1]):
+            for _x in sorted(_sc, key=lambda x: (-(x[2].get("y") or 0), x[1])):
                 if len(_고른) >= 4:
                     break
-                if _x[1] not in _본:
+                if _x[1] not in _본 and not _x[3]:
                     _고른.append(_x); _본.add(_x[1])
             # ⚠️ 용량 — 이 데이터는 2,891종목분이라 필드 하나가 곧 수백 KB다.
             #    필터가 알아야 하는 건 «품질 미달인가»뿐이므로 점수는
@@ -5291,7 +5362,13 @@ def build_my_stocks(data):
                 _o = dict(_x[2])
                 if _x[0] < 0:
                     _o["p"] = int(_x[0])
+                if _x[3]:
+                    _o["j"] = 1          # 🆕 2026-10-01 — 잡음(시황 나열·홍보) 표시
                 return _o
+            # 🔴 2026-10-01 HO «요즘 왜 주목받냐면요에서 최신 뉴스가 맨 밑에 있다 → 맨 위로.»
+            #   고르는 기준(점수 상위 3 + 최신)은 그대로, **보여주는 순서만** 날짜 최신순.
+            #   같은 날이면 점수 높은 것 먼저(sort는 안정 정렬 → 고른 순서 유지).
+            _고른.sort(key=lambda x: -(x[2].get("y") or 0))
             _snews[_n] = [_slim(_x) for _x in _고른]
     except Exception as e:
         print(f"   ⚠️ 종목별 뉴스 수집 실패 — {type(e).__name__}")
@@ -6280,7 +6357,10 @@ def build_my_stocks(data):
       ⚠️ 토론방과 같은 규칙 — 코드가 없으면 알약을 «아예 안 붙인다».
          죽은 링크를 놓느니 없는 게 낫다(전체 종목의 약 93%가 코드를 가진다). */
    /* 차트 알약은 «기업분석 옆»으로 옮겼다(2026-09-12) — 여기서는 안 붙인다. */
-   if(_cd) zones+='<a href="https://finance.naver.com/item/board.naver?code='+_cd+'" '+
+   /* 🔴 2026-10-01 HO «토론방 링크가 잘못됐다» — 옛 주소(finance.naver.com/item/board)는
+      휴대폰에서 종목코드를 잃고 네이버페이 증권 «첫 화면»으로 떨어진다(실측).
+      새 주소(m.stock…/discussion)는 휴대폰·PC 둘 다 그 종목 토론방으로 바로 간다. */
+   if(_cd) zones+='<a href="https://m.stock.naver.com/domestic/stock/'+_cd+'/discussion" '+
      'target="_blank" rel="noopener" style="display:inline-block;font-size:10px;'+
      'padding:2px 8px;margin:0 4px 4px 0;border-radius:99px;background:#2a2233;'+
      'color:#c4a8f7;text-decoration:none;font-weight:700;font-size:11px">💬 실시간 토론방</a>';
@@ -7342,14 +7422,17 @@ def build_my_stocks(data):
       기준(p >= 0)을 그대로 지킨다 — 홍보성 기사를 억지로 1등에 올리느니
       «없었어요»가 낫다(원칙14). p가 없는 옛 데이터는 통과시킨다. */
    var _뉴전체=(window.CP_STOCK_NEWS||{})[nm]||[];
-   var _뉴=_뉴전체.filter(function(n){ return (n.p===undefined)||(n.p>=0); });
+   /* 🔴 2026-10-01 HO «최신 기사가 안 나온다» — 네이버 «종목 뉴스»는 네이버가 이미 그 종목
+      기사로 분류한 것이라, 제목에 종목명이 없다는 이유(-40)만으로 빼면 최근 기사가 다 사라졌다
+      (대주전자재료: 9/21 기사 3건이 전부 탈락, 8/21 한 건만 남음). 이제 **잡음(j)만** 뺀다. */
+   var _뉴=_뉴전체.filter(function(n){ return !n.j; });
    var _왜='';
    if(_뉴.length){
     var _lst='';
     _뉴.slice(0,4).forEach(function(n){
      _lst+='<p class="sc-news">'+(n.k?'<span class="sc-kind">'+n.k+'</span> ':'')+
       '<a href="'+n.u+'" target="_blank">'+n.t+'</a></p>';});
-    _lst+='<p class="sc-note">이 종목 이름이 들어간 <b>최근 기사·공시</b>예요.</p>';
+    _lst+='<p class="sc-note">이 종목 관련 <b>최근 기사·공시</b>예요(최신순).</p>';
    }else{
     _lst='<p class="sc-note">기록에 남은 기간 안에 이 종목 이름이 들어간 '+
      '기사·공시가 <b>없었어요</b>.</p>';
@@ -7367,7 +7450,7 @@ def build_my_stocks(data):
        두 가지만 나와야 해." 재무 요약(_fin)을 요약 카드에서 뺐다.
        매출·영업이익·부채비율·영업이익률은 이제 «자세히 보기»에서만
        (매출 막대그래프와 같이) 보여준다. */
-    '<p class="sc-more" id="'+id+'-m">자세히 보기 ↓</p>'+
+    '<p class="sc-more" id="'+id+'-m">자세히 보기 <span class="cp-arw">▼</span></p>'+
     '<div id="'+id+'-d" style="display:none"></div></div>';
    box.dataset.built='1';
    /* ⚠️ 인라인 onclick에 따옴표를 넣으면 이 JS가 파이썬 문자열을 거치며
@@ -7381,7 +7464,11 @@ def build_my_stocks(data):
  function scMore(nm, id){
   var d=document.getElementById(id+'-d');
   if(!d) return;
-  if(d.dataset.open==='1'){ d.style.display='none'; d.dataset.open='0'; return; }
+  /* 🆕 2026-10-01 HO — 펼치면 화살표 ▲, 접으면 ▼(전역 규칙 .cp-arw.up과 같은 모양). */
+  var _ma=document.querySelector('#'+id+'-m .cp-arw');
+  if(d.dataset.open==='1'){ d.style.display='none'; d.dataset.open='0';
+   if(_ma) _ma.classList.remove('up'); return; }
+  if(_ma) _ma.classList.add('up');
   if(!d.dataset.built){
    /* 🔴 2026-09-01 HO 지시 — 자세히 보기 순서를 다시 정리했다.
       [순서] 매출은 여기서 나와요(막대) → 매출/영업이익/영업이익률/부채비율
@@ -22923,7 +23010,12 @@ if __name__ == "__main__":
     if report is None:
         print(f"⚠️ {REPORT_PATH} 없음 (해석글 미생성) — '오늘의 시장'은 안내문으로 채움.")
     html = build_html(data, report)
+    # 🆕 2026-10-01 — 이 리포트도 내일이면 «옛 리포트». 처음부터 최신 날짜 자동 추가 스크립트를 싣는다.
+    if "CP_ARCHLIVE" not in html:
+        _bi = html.rfind("</body>")
+        html = (html[:_bi] + _ARCHLIVE_JS + html[_bi:]) if _bi >= 0 else (html + _ARCHLIVE_JS)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"🎉 완료! → {OUT_PATH}  (build_html {SCRIPT_VERSION})")
     _patch_old_reports_tabhash()
+    _patch_old_reports_archlive()
