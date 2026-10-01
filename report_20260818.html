@@ -2419,5 +2419,30 @@ function toggleTV(id,el){
   if(see) see.textContent = open ? '접기 ▴' : '보기 ▾';
 }
 </script>
-</body>
+<script>/*CP_ARCHLIVE*/(function(){try{
+var WD=["일","월","화","수","목","금","토"];
+var grid=document.querySelector(".arch-grid");if(!grid||!window.fetch)return;
+var me=(/report_(\d{8})\.html/.exec(location.pathname)||[])[1]||"";
+function lab(d){var x=new Date(+d.slice(0,4),+d.slice(4,6)-1,+d.slice(6,8));return (x.getMonth()+1)+"/"+x.getDate()+"("+WD[x.getDay()]+")";}
+document.addEventListener("click",function(e){var a=e.target&&e.target.closest?e.target.closest("a.arch-link"):null;
+ if(!a||typeof window.CP_TAB!=="undefined")return;var G=".gtab"+"-b",b=document.querySelector(G+".on"),f=document.querySelector(G);
+ var h=(a.getAttribute("href")||"").split("#")[0];
+ if(b&&f&&b!==f)a.setAttribute("href",h+"#tab="+encodeURIComponent(b.getAttribute("data-go")||""));},true);
+fetch("index.html?cparch="+Date.now(),{cache:"no-store"}).then(function(r){return r.ok?r.text():"";}).then(function(t){
+ if(!t)return;var re=/report_(\d{8})\.html/g,m,s={};while((m=re.exec(t)))s[m[1]]=1;
+ var all=Object.keys(s).sort().reverse();if(!all.length)return;var newest=all[0];
+ var have={},top="";[].forEach.call(document.querySelectorAll("a.arch-link"),function(a){
+  var k=(/report_(\d{8})/.exec(a.getAttribute("href")||"")||[])[1];if(k&&!have[k]){have[k]=a;if(k>top)top=k;}});
+ var add=all.filter(function(d){return !have[d]&&d>top;});
+ for(var i=add.length-1;i>=0;i--){var a=document.createElement("a");a.className="arch-link";
+  a.href="report_"+add[i]+".html";a.textContent=lab(add[i]);have[add[i]]=a;grid.insertBefore(a,grid.firstChild);}
+ Object.keys(have).forEach(function(k){var a=have[k];
+  if(k===newest){a.classList.add("arch-today");a.style.borderColor="#e0c060";a.style.color="#ffd66b";a.style.fontWeight="800";
+   if(k!==me)a.textContent="최신 "+lab(k);}
+  else if(k===me){a.classList.remove("arch-today");a.textContent="보는 중 "+lab(k);a.style.borderStyle="dashed";a.style.fontWeight="800";}
+  else if(a.classList.contains("arch-today")){a.classList.remove("arch-today");a.textContent=lab(k);}});
+ var hd=document.querySelector(".arch-head");
+ if(hd&&add.length)hd.innerHTML=hd.innerHTML.replace(/지난 리포트 \d+개/,"지난 리포트 "+Object.keys(have).length+"개");
+}).catch(function(){});
+}catch(e){}})();</script></body>
 </html>
