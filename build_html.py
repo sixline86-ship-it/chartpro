@@ -3699,8 +3699,9 @@ def build_core_accum(매집):
             f'<div class="cs-nl" style="display:flex;align-items:baseline;'
             f'gap:7px;flex-wrap:wrap">'
             f'<span style="font-size:10.5px;color:#8b93a0">{s.get("시장","")}</span>'
-            f'{_이름}'
-            f'<span style="font-size:10.5px;color:#8b93a0">{유형}</span></div>'
+            f'{_이름}</div>'
+            # 🔴 2026-10-04 HO «외국인 단독 같은 문구는 기업분석·차트·뉴스 다음 줄에» — 폭이 넓으면 같은 줄에 붙던 것을 강제로 내린다
+            f'<div style="margin-top:4px;font-size:10.5px;color:#8b93a0">{유형}</div>'
             f'<p style="margin:4px 0 0;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             f'외국인·기관이 {기간}일간 <b style="color:#e8eaee">'
             f'{_flow_amt(s.get("합산"))}</b>'
@@ -21078,7 +21079,7 @@ def _fv_bichaik_easy(이력):
     늦음 = ("" if rows[-1]["날짜"] == DATE else
             f'<p class="fv-bk-n">※ 오늘 비차익은 아직 안 들어왔어요 — {d(rows[-1])}까지 기준</p>')
     # 🔴 2026-10-03 HO «비차익 쉽게 읽기는 접어줘» — 접힌 제목줄에 오늘 판정 한 마디만 남긴다.
-    _요 = 판.split(" — ")[0]
+    _요 = re.sub(r"<[^>]+>", "", 판.split(" — ")[0])   # 한 줄(…)로 잘리게 태그는 벗긴다
     return ('<details class="fv-bk fv-fold"><summary><span class="fv-bk-h">💡 비차익, 쉽게 읽기</span>'
             f'<span class="fv-sumt">{_요}</span><i class="fv-sumr">▾</i></summary>'
             '<p class="fv-bk-d" style="margin-top:8px">비차익은 종목을 하나씩 고르지 않고 <b>«코스피 바구니»를 통째로</b> 사고파는 '
@@ -21185,34 +21186,89 @@ def _fv_clock(이력):
         _c += rows[_i]["외현"] if _i >= w["s"] else 0
         _cs.append(_c)
     _N = len(_cs)
+    # 🔴 2026-10-04 HO «국면에서 중요한 건 해당 구간의 외인 누적 금액 — 전체 누적 매도 금액과
+    #   빨간 반등 구간 금액을 확실히 시각적으로.» → 작은 옆 그림을 «한 줄 전체 폭» 차트로 키우고
+    #   ① 금액 눈금(조 단위 가로줄) ② 오늘 끝점에 «누적 −X조» 라벨 ③ 빨간 구간마다 «되삼 +X» 금액 상자
+    #   ④ 바닥 이후 지금 되사는 중이면 점선 빨강 + 금액 을 직접 그린다.
     _lo, _hi = min(_cs + [0]), max(_cs + [0])
     _sp = (_hi - _lo) or 1
-    _W, _H, _L, _R, _T, _Bt = 150, 84, 4, 146, 10, 66
+    _W, _H, _L, _R, _T, _Bt = 340, 180, 8, 292, 30, 140
     _X = lambda i: _L + (_R - _L) * i / max(1, _N - 1)
     _Y = lambda v: _T + (_Bt - _T) * (_hi - v) / _sp
     _pts = " ".join(f"{_X(i):.1f},{_Y(v):.1f}" for i, v in enumerate(_cs))
     _col = C(-1 if sell else 1)
-    _svg = (f'<line x1="{_L}" y1="{_Y(0):.1f}" x2="{_R}" y2="{_Y(0):.1f}" stroke="#3a4556" stroke-dasharray="3 3"/>'
-            f'<polygon points="{_X(0):.1f},{_Y(0):.1f} {_pts} {_X(_N-1):.1f},{_Y(0):.1f}" fill="{_col}" opacity=".12"/>'
-            f'<polyline points="{_pts}" fill="none" stroke="{_col}" stroke-width="2" stroke-linejoin="round"/>')
+    _rc = TM_HOT if sell else TM_DOWN
+    # 금액 눈금 — 가로줄이 2~4개 나오게 1·2·5·10·20·50조 중에서 고른다
+    _st = next((s for s in (5000, 10000, 20000, 50000, 100000, 200000, 500000) if _sp / s <= 4), 1000000)
+    _svg = ""
+    _g = (int(_lo // _st) + 1) * _st
+    while _g < _hi:
+        if _g != 0 and abs(_Y(_g) - _Y(0)) > 9:
+            _svg += (f'<line x1="{_L}" y1="{_Y(_g):.1f}" x2="{_R}" y2="{_Y(_g):.1f}" stroke="#1f2836" stroke-width="1"/>'
+                     f'<text x="{_R + 4}" y="{_Y(_g) + 3:.1f}" font-size="8.5" fill="#5c6676">{_g / 10000:+.0f}조</text>')
+        _g += _st
+    _svg += (f'<line x1="{_L}" y1="{_Y(0):.1f}" x2="{_R}" y2="{_Y(0):.1f}" stroke="#3a4556" stroke-dasharray="3 3"/>'
+             f'<text x="{_R + 4}" y="{_Y(0) + 3:.1f}" font-size="8.5" fill="#8b95a5">0</text>'
+             f'<polygon points="{_X(0):.1f},{_Y(0):.1f} {_pts} {_X(_N-1):.1f},{_Y(0):.1f}" fill="{_col}" opacity=".13"/>'
+             f'<polyline points="{_pts}" fill="none" stroke="{_col}" stroke-width="2.2" stroke-linejoin="round"/>')
+    _boxes = []
+    def _tag(i0, i1, txt, sub, dash=False):
+        _svg_l = (f'<polyline points="{" ".join(f"{_X(i):.1f},{_Y(_cs[i]):.1f}" for i in range(i0, i1 + 1))}" '
+                  f'fill="none" stroke="{_rc}" stroke-width="3.2" stroke-linejoin="round"'
+                  + (' stroke-dasharray="4 3"' if dash else '') + '/>')
+        mx_ = (_X(i0) + _X(i1)) / 2
+        top = min(_Y(_cs[i]) for i in range(i0, i1 + 1))
+        bw = max(len(txt) * 6.4, len(sub) * 5.2) + 10
+        bx = min(max(mx_ - bw / 2, _L), _R - bw)
+        by = top - 34
+        if by < 1:
+            by = max(_Y(_cs[i0]), _Y(_cs[i1])) + 6
+        for (ox, oy, ow) in _boxes:                       # 겹치면 아래로 비킨다
+            if abs(by - oy) < 26 and bx < ox + ow and ox < bx + bw:
+                by = oy + 28
+        _boxes.append((bx, by, bw))
+        return (_svg_l
+                + f'<line x1="{mx_:.1f}" y1="{by + 24:.1f}" x2="{mx_:.1f}" y2="{top - 2:.1f}" stroke="{_rc}" stroke-width=".8" opacity=".7"/>'
+                if by < top else _svg_l) + (
+                f'<rect x="{bx:.1f}" y="{by:.1f}" width="{bw:.1f}" height="24" rx="5" fill="#140c0c" stroke="{_rc}" stroke-width="1"/>'
+                f'<text x="{bx + bw / 2:.1f}" y="{by + 10.5:.1f}" font-size="10" font-weight="800" fill="{_rc}" text-anchor="middle">{txt}</text>'
+                f'<text x="{bx + bw / 2:.1f}" y="{by + 20:.1f}" font-size="8" fill="#9aa3b1" text-anchor="middle">{sub}</text>')
+    _bsum = 0.0
     for x in w["bounces"]:
         a, b2 = x["a"] - _s0, x["b"] - _s0
         if 0 <= a < b2 < _N:
-            _svg += (f'<polyline points="{" ".join(f"{_X(i):.1f},{_Y(_cs[i]):.1f}" for i in range(a, b2 + 1))}" '
-                     f'fill="none" stroke="{TM_HOT if sell else TM_DOWN}" stroke-width="2.4" stroke-linejoin="round"/>')
-    _svg += (f'<circle cx="{_X(_N-1):.1f}" cy="{_Y(_cs[-1]):.1f}" r="3.2" fill="#ffc93c"/>'
-             f'<text x="{_L}" y="{_H-4}" font-size="9" fill="#6f7a8b">{d(rows[w["s"]])}</text>'
-             f'<text x="{_R}" y="{_H-4}" font-size="9" fill="#ffc93c" font-weight="800" text-anchor="end">오늘</text>'
-             f'<text x="{_L}" y="{_Y(0)-3:.1f}" font-size="8.5" fill="#5c6676">0</text>')
-    _범 = ((f'<p class="fc-lg"><span><i style="background:{_col}"></i>누적 순매수</span>'
-            + (f'<span><i style="background:{TM_HOT if sell else TM_DOWN}"></i>{"되사러 왔던" if sell else "팔고 갔던"} 구간</span>'
+            _bsum += abs(x["mv"])
+            _svg += _tag(a, b2, f'{"되삼" if sell else "되팜"} {_fv_amt(x["mv"])}', f'{d(rows[x["a"]])}→{d(rows[x["b"]])}')
+    _now_reb = ""
+    _ex = w.get("ext")
+    if isinstance(_ex, int) and w.get("reb") and _ex - _s0 < _N - 1 and w["reb"] > 0:
+        _svg += _tag(_ex - _s0, _N - 1, f'지금 {"되사는" if sell else "되파는"} 중 {_fv_amt(w["reb"] if sell else -w["reb"])}',
+                     f'{d(rows[_ex])} 바닥 이후', dash=True)
+        _now_reb = w["reb"]
+    _ey = _Y(_cs[-1])
+    _svg += (f'<circle cx="{_X(_N-1):.1f}" cy="{_ey:.1f}" r="3.6" fill="#ffc93c"/>'
+             f'<text x="{_X(_N-1) - 6:.1f}" y="{_ey + (16 if _ey + 16 <= _H - 16 else -9):.1f}" font-size="11" font-weight="800" '
+             f'fill="{_col}" text-anchor="end">누적 {_fv_amt(_cs[-1])}</text>'
+             f'<text x="{_L}" y="{_H - 4}" font-size="9" fill="#6f7a8b">{d(rows[w["s"]])} 시작</text>'
+             f'<text x="{_R}" y="{_H - 4}" font-size="9" fill="#ffc93c" font-weight="800" text-anchor="end">오늘 {d(rows[-1])}</text>')
+    _범 = ((f'<p class="fc-lg"><span><i style="background:{_col}"></i>누적 {"순매도" if sell else "순매수"}(왼쪽 0에서 시작)</span>'
+            + (f'<span><i style="background:{_rc}"></i>{"되사러 왔다가 다시 판" if sell else "팔고 갔다가 다시 산"} 구간</span>'
                if w["bounces"] else "") + '</p>'))
+    # 금액 요약 3칸 — 숫자로 한 번 더 못 박는다
+    _칸 = [(f'{"누적 순매도" if sell else "누적 순매수"}', B(net), f'{n}거래일')]
+    if w["bounces"]:
+        _칸.append((f'{"되사러 온" if sell else "팔고 간"} 돈', f'<b style="color:{_rc}">{_fv_amt(_bsum if sell else -_bsum)}</b>',
+                   f'{len(w["bounces"])}번 · 전부 다시 {"팔았음" if sell else "샀음"}'))
+    if _now_reb:
+        _칸.append(('바닥 이후', f'<b style="color:{_rc}">{_fv_amt(_now_reb if sell else -_now_reb)}</b>', '지금 진행 중'))
+    _sum = '<div class="fc-sum">' + "".join(
+        f'<div><span>{a}</span>{b}<em>{c}</em></div>' for a, b, c in _칸) + '</div>'
     q1 = (f'<div class="fc-q"><p class="fc-qh"><i>1</i>지금 어느 국면인가</p>'
-          f'<div class="fc-q1"><div class="fc-q1t">'
-          f'<p class="fc-big" style="color:{_col}">{국면}<br><b>{n}일째</b></p>'
-          f'<p class="fc-t">{d(wr[0])}부터 누적<br>{B(net)}'
-          f'{"<br>(기록 시작일 — 그 전부터 이어졌을 수 있음)" if w["from_start"] else ""}</p></div>'
-          f'<div class="fc-q1g"><svg viewBox="0 0 {_W} {_H}">{_svg}</svg>{_범}</div></div>'
+          f'<p class="fc-big" style="color:{_col}">{국면} <b>{n}일째</b> '
+          f'<span class="fc-bs">{d(wr[0])}부터'
+          f'{" · 기록 시작일(그 전부터 이어졌을 수 있음)" if w["from_start"] else ""}</span></p>'
+          + _sum +
+          f'<div class="fc-q1g"><svg viewBox="0 0 {_W} {_H}">{_svg}</svg>{_범}</div>'
           + (f'<p class="fc-t">{가격}</p>' if 가격 else "") + '</div>')
     # ② 감속 게이지 — 파도 방향 쪽 하루 평균 대비 오늘
     평 = abs(net) / n if n else 0
@@ -24084,6 +24140,13 @@ html{{scroll-behavior:smooth}}
 .fc-q1t{{flex:0 0 auto;min-width:0;max-width:44%}}
 .fc-q1g{{flex:1;min-width:0}}
 .fc-q1g svg{{display:block;width:100%;height:auto}}
+.fc-q1g{{margin:6px 0 4px}}
+.fc-bs{{font-size:11px;font-weight:600;color:#8b95a5;margin-left:4px}}
+.fc-sum{{display:flex;gap:6px;margin:6px 0 2px}}
+.fc-sum>div{{flex:1;min-width:0;padding:6px 7px;background:#0b1118;border:1px solid #1d2734;border-radius:8px;display:flex;flex-direction:column;gap:1px}}
+.fc-sum span{{font-size:10px;color:#8b95a5}}
+.fc-sum b{{font-size:14px;font-weight:800;white-space:nowrap}}
+.fc-sum em{{font-style:normal;font-size:9.5px;color:#6f7784}}
 .fc-lg{{margin:2px 0 0;display:flex;flex-wrap:wrap;gap:2px 8px;font-size:9.5px;color:#8b93a0}}
 .fc-lg i{{display:inline-block;width:8px;height:3px;border-radius:2px;margin-right:3px;vertical-align:middle}}
 .fc-t{{margin:4px 0 0;font-size:12px;line-height:1.7;color:#c9d0d9;overflow-wrap:anywhere}}
@@ -24107,9 +24170,11 @@ html{{scroll-behavior:smooth}}
 .fv-fold>summary{{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;flex-wrap:wrap}}
 .fv-fold>summary::-webkit-details-marker{{display:none}}
 .fv-fold>summary .fv-bk-h{{margin:0}}
-.fv-sumt{{order:3;flex-basis:100%;font-size:11px;color:#aab3c0;font-weight:600;min-width:0;margin-top:2px}}
+.fv-sumt{{order:2;flex:1 1 0;font-size:11px;color:#aab3c0;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.fv-sumt::before{{content:"·";margin-right:5px;color:#5c6676}}
+/* 🔴 2026-10-04 HO «비차익 쉽게 읽기 / 파는 힘이 빠지는 중 — 왜 두 줄?» → 제목 옆 한 줄로(넘치면 …) */
 .fv-sumt b{{color:#e8eaee}}
-.fv-sumr{{order:2;margin-left:auto;font-style:normal;color:#e0c060;font-size:12px;transition:transform .15s}}
+.fv-sumr{{order:3;margin-left:auto;font-style:normal;color:#e0c060;font-size:12px;transition:transform .15s}}
 .fv-fold[open]>summary .fv-sumr{{transform:rotate(180deg)}}
 .fv-bk-h span{{font-size:10px;font-weight:600;color:#7d848f;margin-left:4px}}
 .fv-bk-d{{margin:0 0 8px;font-size:11.5px;line-height:1.65;color:#aab3c0}}
