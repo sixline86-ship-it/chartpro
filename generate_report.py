@@ -2102,3 +2102,13 @@ if __name__ == "__main__":
         print(f"[{key}]\n{value}\n")
 
     print(f"🎉 완료! → {REPORT_PATH}")
+
+    # 🧠 2026-10-04 — 테마 탭 챕터 해설 + 종합 해설(theme_notes.py).
+    #   [왜 여기서] «새로 생성(과금)» 실행에서만 돌아야 하고, API 키가 이 단계에만 있다.
+    #   ⚠️ 실패해도 해석글은 이미 저장됐다 → 경고만 남기고 넘어간다(리포트는 해설 없이 나간다).
+    try:
+        import theme_notes
+        theme_notes.run(client, MODEL)
+    except Exception as e:
+        print(f"⚠️ 테마 해설 생성 실패 — {type(e).__name__}: {str(e)[:160]}")
+        print("   → 테마 탭은 챕터 해설 없이 나갑니다(다른 칸은 정상).")
