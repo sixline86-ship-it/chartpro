@@ -12694,14 +12694,97 @@ def _note_md(txt):
     return "".join(out)
 
 
+# 🔴 2026-10-04 HO «챕터들 결과를 놓고 분석해 주기로 했는데 다 없어졌다» — 점검 결과:
+#   9/23에 theme_notes.json을 «한 번» 손으로 만든 뒤로 매일 만드는 장치가 없었다.
+#   (날짜가 오늘이 아니면 안 보이게 해 둬서, 9/24부터 조용히 사라졌다)
+#   [고침] generate_report.py가 해석글을 만든 직후 theme_notes.py를 불러
+#          archive/theme_notes_YYYYMMDD.json을 매일 새로 쓴다(archive는 통째로 커밋된다).
+THEME_NOTES_FILE = f"theme_notes_{DATE}.json"
+
+
+def _notes_all():
+    if "all" not in _NOTES_CACHE:
+        d = {}
+        for f in (apath(THEME_NOTES_FILE), "theme_notes.json"):
+            try:
+                x = load_json(f) or {}
+            except Exception:
+                x = {}
+            if str(x.get("날짜")) == DATE:
+                d = x
+                break
+        _NOTES_CACHE["all"] = d
+    return _NOTES_CACHE["all"]
+
+
 def _note_for(key):
     if "d" not in _NOTES_CACHE:
-        try:
-            d = load_json("theme_notes.json") or {}
-            _NOTES_CACHE["d"] = (d.get("노트") or {}) if str(d.get("날짜")) == DATE else {}
-        except Exception:
-            _NOTES_CACHE["d"] = {}
+        _NOTES_CACHE["d"] = _notes_all().get("노트") or {}
     return (_NOTES_CACHE["d"] or {}).get(key)
+
+
+# ── 🆕 2026-10-04 — 테마 해설 재료: 챕터마다 «화면에 실제로 보이는 글자»를 모은다 ──
+#   theme_notes.py가 부른다. 해설이 화면과 다른 말을 하지 않게, 재료 = 화면 그대로.
+NOTE_KEYS = ["레이더", "생존", "돈의이동", "다가오는", "거꾸로", "섹터테마", "짝꿍",
+             "오늘뜬", "채점판", "판단-순환", "판단-성과", "판단-엇갈림"]
+
+
+def _plain(h, limit=3200):
+    import re as _re, html as _h
+    h = _re.sub(r"<(script|style)\b.*?</\1>", " ", h or "", flags=_re.S)
+    h = _re.sub(r"<br\s*/?>|</p>|</div>|</li>|</summary>", "\n", h)
+    t = _h.unescape(_re.sub(r"<[^>]+>", " ", h))
+    t = _re.sub(r"[ \t\u00a0]+", " ", t)
+    t = _re.sub(r"\s*\n\s*", "\n", t).strip()
+    # 종목 패널마다 붙는 같은 범례 줄은 재료에서 뺀다(같은 말 반복 = 토큰 낭비)
+    t = "\n".join(x for x in t.split("\n")
+                  if "후발 대장 등락률의 40%" not in x and not x.startswith("첫 등장 빠르게"))
+    return t[:limit]
+
+
+def theme_chapter_texts(data, report=None):
+    """테마 탭(읽기·판단)을 한 번 그려 보면서 챕터별 본문 글자를 가로챈다.
+    반환 {챕터키: 글자}. ⚠️ 판정 기록 저장 같은 부수효과는 «같은 날 덮어쓰기»라 두 번 돌아도 안전."""
+    g = globals()
+    cap = {}
+    o_blk, o_rad = g["_chapter_block"], g["build_theme_radar"]
+
+    def _blk(html, key, classes=()):
+        if key in NOTE_KEYS:
+            cap[key] = _plain(html)
+        return o_blk(html, key, classes)
+
+    def _rad(*a, **k):
+        h = o_rad(*a, **k)
+        cap["레이더"] = _plain(h, 4500)
+        return h
+    g["_chapter_block"], g["build_theme_radar"] = _blk, _rad
+    # ⚠️ 몇몇 코너(build_accumulation 등)가 __main__의 전역 data·report를 직접 읽는다 → 같이 세팅
+    g.setdefault("data", data)
+    g.setdefault("report", report)
+    try:
+        build_html(data, report)
+    finally:
+        g["_chapter_block"], g["build_theme_radar"] = o_blk, o_rad
+    return {k: cap[k] for k in NOTE_KEYS if cap.get(k)}
+
+
+def prep_data(data):
+    """__main__과 theme_notes.py가 같은 데이터를 보도록 손질을 한 곳에 모은다."""
+    data["주도섹터"] = [t for t in (data.get("주도섹터") or [])
+                       if _theme_ok(t.get("테마명"))]
+    for _t in data["주도섹터"]:
+        _t["종목"] = [x for x in (_t.get("종목") or [])
+                     if not _is_pref((x or {}).get("종목명") if isinstance(x, dict) else x)]
+        if _t.get("쏠림") is None:
+            _tot = _t.get("거래대금합") or 0
+            _am = [((x or {}).get("거래대금") or 0) for x in _t["종목"] if isinstance(x, dict)]
+            if _tot > 0 and _am:
+                _i = max(range(len(_am)), key=lambda k: _am[k])
+                _t["쏠림"] = round(_am[_i] / _tot * 100, 1)
+                _t["쏠림종목"] = _t["종목"][_i].get("종목명")
+                _t["_쏠림감점"] = False
+    return data
 
 
 def _chapter_note(key, guides=""):
@@ -13111,6 +13194,26 @@ def _lead_pack(scores):
     return best, s[best - 1], gap
 
 
+def _lead_gap_txt(lp, sc, slope, solo=False):
+    """🆕 2026-10-04 HO «선두 무리까지 74점 — 이게 무슨 의미?»
+    점수 차(4일 합산 점수의 차)를 «지금 속도로 며칠 거리인가»로 바꿔 말한다."""
+    if not lp:
+        return ""
+    import math
+    gap = lp[1] - sc
+    if gap <= 0:
+        return ""
+    head = ("" if solo else "<br>") + f"🏁 선두 무리(1~{lp[0]}위 · {lp[0]}위 {lp[1]:.0f}점)와 <b>{gap:.0f}점</b> 차"
+    if slope and slope > 0:
+        d = math.ceil(gap / slope)
+        if d <= 3:
+            return head + f" → 이 속도면 <b>{d}거래일</b>, 선두 다툼까지 가능한 거리예요"
+        if d <= 10:
+            return head + f" → 이 속도면 <b>{d}거래일</b> · 10위 안착이 먼저예요"
+        return head + f" → 이 속도면 <b>{d}거래일</b> 넘게 걸려요 · 지금은 «10위 안에 들까»만 보면 돼요"
+    return head + " → 점수가 안 오르는 중이라 거리가 좁혀지지 않아요"
+
+
 def _theme_amt_map():
     """테마명 → {날짜: 거래대금}. «순위는 올랐는데 돈은?»을 가르는 값."""
     일별 = _theme_hist_all()
@@ -13506,6 +13609,11 @@ def _judge_conflicts(rows, 메타):
     숨기지 말고 그대로 보여준다.
     ⚠️ 어느 쪽이 맞는지는 말하지 않는다. 엇갈린다는 사실까지만.
     """
+    # 🔴 2026-10-04 HO «엇갈리는 신호 — 이 정보로 뭘 어떻게 하라는 거야?»
+    #   [고침] 엇갈림마다 ① 내일 «하나만» 볼 것 ② 그게 어느 쪽으로 나오면 무슨 뜻인지(✅/❌)
+    #          ③ 지난 기록에서 같은 경우가 다음 날 어떻게 됐는지 — 를 붙인다.
+    #   ⚠️ 여전히 «사라/팔라»는 말하지 않는다. «어느 쪽인지 갈리는 조건»까지만.
+    #   반환: [(테마, 왼쪽, 오른쪽, 한 줄, 유형키), ...]  — 유형키로 CF_GUIDE·지난 기록을 찾는다.
     생존중앙 = 메타.get("생존중앙")
     out = []
     for t in rows:
@@ -13514,25 +13622,109 @@ def _judge_conflicts(rows, 메타):
             out.append((t["n"],
                         f'순위 <b>{t["rk"]}위</b>', f'나이 <b>{t["age"]}일째</b>'
                         f'(평균 수명 {생존중앙}일 넘김)',
-                        "자리는 최고인데 시간이 늦었습니다"))
+                        "자리는 최고인데, 보통 테마가 떠나는 시점을 넘겼어요", "late"))
         # ② 돈이 순위보다 먼저 왔다
         if (t["돈"] is not None and t["돈"] >= 40 and t["rk"] >= 4):
             out.append((t["n"],
                         f'순위 <b>{t["rk"]}위</b>', f'돈 <b>{t["돈"]:+.0f}%</b>',
-                        "순위보다 돈이 먼저 왔습니다 — 순위가 따라올 자리일 수 있어요"))
+                        "순위는 중간인데 돈이 하루 새 크게 붙었어요", "cash"))
         # ③ 순위는 남았는데 돈이 먼저 빠졌다
         if (t["돈"] is not None and t["돈"] <= -30 and t["rk"] <= 8):
             out.append((t["n"],
                         f'아직 <b>{t["rk"]}위</b>', f'돈 <b>{t["돈"]:.0f}%</b>',
-                        "순위는 관성입니다. 돈이 먼저 빠졌어요"))
+                        "순위는 4일 합산이라 늦게 움직여요. 돈이 먼저 빠졌어요", "drain"))
         # ④ 어제 크게 올라왔는데 5일 창으로는 제자리
         if (t["y"] and t["from5"] and (t["y"] - t["rk"]) >= 5
                 and abs(t["from5"] - t["rk"]) < MOVE_SLOW):
             out.append((t["n"],
                         f'어제 <b>{t["y"]}위 → {t["rk"]}위</b>',
                         f'5일 전과는 <b>제자리</b>',
-                        "하루만 튄 걸 수도, 되돌아온 걸 수도 있어요"))
+                        "하루 새 크게 올랐지만, 5일 전 자리로 돌아온 것뿐이에요", "jump"))
     return out
+
+
+# 🆕 2026-10-04 — 엇갈림 유형별 «내일 하나만 볼 것»과 갈림길.
+#   (유형키: (라벨, 볼 것, ✅ 이렇게 되면, ❌ 이렇게 되면, 지난 기록 문구))
+CF_GUIDE = {
+    "late":  ("⏰ 자리 좋은데 늦음",
+              "내일 이 테마로 들어오는 <b>돈(거래대금)</b>이 오늘보다 느는가",
+              "돈이 늘면 → 아직 힘이 남은 «오래 가는 테마»예요",
+              "돈이 줄면 → «늦었다» 쪽이 맞아요. 새로 들어가기보다, 가진 사람은 이익 지킬 선부터 정할 때",
+              "다음 날도 3위 안을 지킨 경우"),
+    "cash":  ("💰 돈이 순위보다 먼저",
+              "내일 <b>순위</b>가 오늘보다 올라오는가",
+              "순위가 오르면 → 돈이 먼저 알려 준 게 맞아요. 순위가 따라오는 중",
+              "순위가 그대로거나 밀리면 → 하루 반짝 돈이었을 가능성이 커요",
+              "다음 날 순위가 올라온 경우"),
+    "drain": ("💸 순위는 남았는데 돈이 빠짐",
+              "내일도 <b>돈이 줄어드는가</b>",
+              "돈이 다시 늘면 → 하루 쉬어 간 것이에요",
+              "또 줄면 → 순위가 곧 따라 내려가요. 새로 들어가기엔 늦은 자리",
+              "다음 날 순위가 밀린 경우"),
+    "jump":  ("↩️ 하루 튐인가, 복귀인가",
+              "내일도 <b>이 순위(±1)</b>를 지키는가",
+              "지키면 → 진짜 복귀예요",
+              "다시 밀리면 → 하루 튄 것이에요. 뒤늦게 따라붙는 건 조심",
+              "다음 날 순위를 지킨 경우"),
+}
+_CF_TRACK = {}
+
+
+def _cf_track():
+    """엇갈림 유형별 «다음 날 실제로 어떻게 됐나» 집계 — 지금까지 쌓인 테마 기록 전체.
+    반환 {유형: (건수, 맞은 수)}.  ⚠️ 오늘은 다음 날이 없으니 빼고 센다.
+    · late  : 3위 안 + 10위권 연속 체류가 그날까지의 평균 수명 초과 → 다음 날 3위 안 유지
+    · cash  : 4위 밖(10위 안) + 거래대금 +40% 이상 → 다음 날 순위 상승
+    · drain : 8위 안 + 거래대금 -30% 이하 → 다음 날 순위 하락
+    · jump  : 어제보다 5칸 이상 상승 → 다음 날 ±1칸 안 유지
+    """
+    if "v" in _CF_TRACK:
+        return _CF_TRACK["v"]
+    res = {k: [0, 0] for k in CF_GUIDE}
+    try:
+        rk = _theme_cum_rank(topn=200)
+        am = _theme_amt_map()
+        ds = sorted(rk)
+        R = [{n: k + 1 for k, (n, _s) in enumerate(rk.get(d) or [])} for d in ds]
+        나이 = []
+        for i in range(len(ds)):          # 10위권 연속 체류(하루 빠짐은 잇는다)
+            a = {}
+            for n, p in R[i].items():
+                if p > 10:
+                    continue
+                c, j, miss = 0, i, 0
+                while j >= 0:
+                    if R[j].get(n, 999) <= 10:
+                        c += 1; miss = 0
+                    else:
+                        miss += 1
+                        if miss > 1:
+                            break
+                    j -= 1
+                a[n] = c
+            나이.append(a)
+        med = (theme_survival() or {}).get("중앙값") or 3
+        for i in range(1, len(ds) - 1):
+            d0, d = ds[i - 1], ds[i]
+            for n, p in R[i].items():
+                if p > 10:
+                    continue
+                nx = R[i + 1].get(n, 999)
+                a0 = (am.get(n) or {}).get(d0); a1 = (am.get(n) or {}).get(d)
+                m = ((a1 / a0 - 1) * 100) if (a0 and a1) else None
+                if p <= 3 and 나이[i].get(n, 0) > med:
+                    res["late"][0] += 1; res["late"][1] += nx <= 3
+                if m is not None and m >= 40 and p >= 4:
+                    res["cash"][0] += 1; res["cash"][1] += nx < p
+                if m is not None and m <= -30 and p <= 8:
+                    res["drain"][0] += 1; res["drain"][1] += nx > p
+                y = R[i - 1].get(n)
+                if y and y - p >= 5:
+                    res["jump"][0] += 1; res["jump"][1] += nx <= p + 1
+    except Exception:
+        pass
+    _CF_TRACK["v"] = {k: tuple(v) for k, v in res.items()}
+    return _CF_TRACK["v"]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -14117,7 +14309,7 @@ def _spot_v3(data=None):
             # 🔴 2026-09-29 HO — «이모티콘 오류» → 🪜(유니코드 13, 2020)는 옛 폰·PC
             #   글꼴에 없어 네모(□)로 깨진다. ⏳(1990년대부터 있는 기호)로 바꾸고,
             #   이름도 «테마 수명표»로 — 위 «테마들 평균 수명» 카드와 한 쌍으로 읽힌다.
-            '<p style="margin:0 0 9px;font-size:12.5px;font-weight:800;color:#e8c33a">'
+            '<p class="jd-ttl" style="margin:0 0 9px;font-size:15.5px;font-weight:800;color:#e8c33a">'
             '⏳ 테마 수명표</p>'
             # 🔴 2026-09-29 HO — «읽는 방법과 해석이 없다.» 범례 한 줄을 «읽는 방법»으로
             #   키워서 챕터 아래 📖 읽는 방법 칸으로 보낸다(_chapter_block이 sv3-how를 떼어 감).
@@ -14772,12 +14964,18 @@ def spot_perf():
     except Exception:
         R = {}
 
-    def 누적(nm, i0, n):
-        if i0 + n >= len(days):
+    # 🔴 2026-10-04 점검 — D+N을 judge_log 날짜로 세면, 판정 기록이 하루라도 빠진 날
+    #   (빌드 실패 등) 그 날의 등락이 통째로 건너뛰어진다. 날짜축은 «archive 거래일»로 센다.
+    T = sorted(R)
+    tix = {d: i for i, d in enumerate(T)}
+
+    def 누적(nm, d0, n):
+        i0 = tix.get(d0)
+        if i0 is None or i0 + n >= len(T):
             return None
         c = 1.0
         for j in range(i0 + 1, i0 + n + 1):
-            v = (R.get(days[j]) or {}).get(nm)
+            v = (R.get(T[j]) or {}).get(nm)
             if not isinstance(v, (int, float)):
                 return None
             c *= 1 + v / 100
@@ -14796,10 +14994,9 @@ def spot_perf():
                 for x in (log.get(d) or []):
                     if x.get("typ") != typ or not x.get("대장"):
                         continue
-                    i0 = idx[d]
                     r = {}
                     for n in (1, 5, 10):
-                        _v = 누적(x["대장"], i0, n)
+                        _v = 누적(x["대장"], d, n)
                         if _v is not None:
                             r[n] = _v
                     if r:
@@ -14886,8 +15083,8 @@ def build_judge_tab(data=None):
         return ""
     b = market_breadth()
 
-    # ── 1층: 오늘 한 줄 ──────────────────────────────
-    if b:
+    # ── 1층: 오늘 한 줄 — 🔴 2026-10-04 HO 지시로 삭제(화면에서 뺐다. 아래 계산은 꺼 둠) ──
+    if False:
         좁 = b["섹터수"] <= 4
         한줄 = (f'<b>{b["최대섹터"]}</b> 한 곳으로 좁아진 장입니다. '
                f'여기서 골라야 하고, 여기가 꺾이면 같이 꺾입니다.'
@@ -14996,19 +15193,38 @@ def build_judge_tab(data=None):
         #   [해법] 두 값을 좌우로 갈라 놓고 가운데 ↔ 를 둔다. 왼쪽은
         #   «좋게 읽히는 쪽», 오른쪽은 «나쁘게 읽히는 쪽»으로 색을 준다.
         #   글을 읽기 전에 «둘이 반대다»가 먼저 눈에 들어와야 한다.
+        # 🔴 2026-10-04 HO «이 정보로 뭘 어떻게 하라는 거야?» — 엇갈림마다 «내일 볼 것 하나 + 갈림길 + 지난 기록».
+        _tr = _cf_track()
+        def _trk(k):
+            n, ok = _tr.get(k, (0, 0))
+            if not n:
+                return '<p class="jd-ctr">📊 지난 기록: 아직 같은 경우가 없어요</p>'
+            return (f'<p class="jd-ctr">📊 지난 기록: 같은 경우 <b>{n}번</b> 중 '
+                    f'{CF_GUIDE[k][4]} <b>{ok}번</b>'
+                    + (' <span>(아직 적어서 참고만)</span>' if n < 8 else '') + '</p>')
         층4 = ('<div class="jd-4"><p class="jd-h">⚡ 엇갈리는 신호'
-               '<span>둘이 반대로 말해요</span></p>'
+               '<span>내일 하나만 보면 갈려요</span></p>'
+               '<p class="jd-cl">🧭 <b>이렇게 쓰세요</b> — 엇갈린 테마는 «한쪽으로 확인되기 전엔 크게 싣지 않는» 자리예요. '
+               '아래 <b>👀 하나</b>만 내일 확인하면 어느 쪽인지 갈려요.</p>'
+               # 같은 유형이 여러 테마면 «내일 볼 것»은 유형마다 한 번만(같은 글 반복 방지)
                + "".join(
-                   f'<div class="jd-cf"><p class="jd-cn">{nm}</p>'
-                   f'<div class="jd-sc">'
-                   f'<span class="jd-sl">{a}</span>'
-                   f'<i class="jd-sx">↔</i>'
-                   f'<span class="jd-sr">{bb}</span></div>'
-                   f'<p class="jd-cs">{말}</p></div>'
-                   for nm, a, bb, 말 in cf)
-               + '<p class="jd-note">두 값이 <b>서로 다른 말</b>을 하는 자리만 '
-                 '모았어요. <b>어느 쪽이 맞는지는 말하지 않습니다</b> — '
-                 '엇갈린다는 사실까지가 우리가 아는 전부예요.</p></div>')
+                   f'<div class="jd-cf"><p class="jd-cty">{CF_GUIDE[k][0]}</p>'
+                   + "".join(
+                       f'<p class="jd-cn">{nm}</p>'
+                       f'<div class="jd-sc">'
+                       f'<span class="jd-sl">{a}</span>'
+                       f'<i class="jd-sx">↔</i>'
+                       f'<span class="jd-sr">{bb}</span></div>'
+                       for nm, a, bb, _말, kk in cf if kk == k)
+                   + f'<p class="jd-cs">{next(m for _n, _a, _b, m, kk in cf if kk == k)}</p>'
+                   f'<div class="jd-cx"><p class="jd-cq">👀 내일 볼 것 — {CF_GUIDE[k][1]}</p>'
+                   f'<p class="jd-co">✅ {CF_GUIDE[k][2]}</p>'
+                   f'<p class="jd-cg">❌ {CF_GUIDE[k][3]}</p>'
+                   f'{_trk(k)}</div></div>'
+                   for k in dict.fromkeys(kk for *_x, kk in cf))
+               + '<p class="jd-note">두 값이 <b>서로 다른 말</b>을 하는 자리만 모았어요. '
+                 '오늘 어느 쪽이 맞는지는 아무도 몰라요 — 그래서 <b>«내일 무엇을 보면 갈리는지»</b>를 붙였어요. '
+                 '📊 지난 기록은 지금까지 쌓인 테마 기록에서 같은 조건을 다음 날 확인한 결과예요.</p></div>')
     else:
         층4 = ('<div class="jd-4"><p class="jd-h">⚡ 엇갈리는 신호</p>'
                '<p class="jd-none">오늘은 지표끼리 부딪치는 자리가 없습니다.</p></div>')
@@ -15050,7 +15266,6 @@ def build_judge_tab(data=None):
     # 🔴 2026-09-24 HO — «잠금탭에서도 읽는 방법과 해석과 판단을 다 동일하게.»
     #   블록마다 [본문] → 📖 읽는 방법(⚠️ 안내 포함) → 💡 해석과 판단.
     return (f'<div class="jd-wrap">'
-            + _chapter_block(층1, "판단-한줄")
             + _chapter_block(_순환본문, "판단-순환", _순환안내)
             + _chapter_block(build_spot_perf(), "판단-성과", ("jd-warn",))
             + _chapter_block(build_my_themes(data), "판단-내종목")
@@ -17349,8 +17564,11 @@ def build_theme_radar(data):
             #   근거는 주장 바로 옆에 있어야 한다.
             #   ⚠️ 오늘 1위 테마의 나이를 넘겨 «내 자리»를 표시한다.
             f'{move_key()}'
-            + (f'<p class="tm-trk">🟡 금색 점선 = <b>선두 무리</b>(1~{_lp[0]}위) — {_lp[0]}위와 {_lp[0]+1}위 사이에서 '
-               f'점수가 <b>{_lp[2]:.0f}점</b> 뚝 끊겨요. 10위 선보다 이 선이 «진짜 경계»예요.</p>' if (_lp and _lp[0] < 10) else '')
+            # 🔴 2026-10-04 HO «금색 원을 안이 비어있는 금색 점선으로» — 범례 기호를 실제 고리 모양 그대로
+            + (f'<p class="tm-trk"><svg width="13" height="13" viewBox="0 0 14 14" style="vertical-align:-2px;margin-right:3px">'
+               f'<circle cx="7" cy="7" r="5.6" fill="none" stroke="#e0c060" stroke-width="1.5" stroke-dasharray="2.6 1.9"/></svg>'
+               f'금색 점선 = <b>선두 무리</b>(1~{_lp[0]}위) — {_lp[0]}위와 {_lp[0]+1}위 사이에서 '
+               f'힘이 <b>크게</b> 벌어져요. 10위 선보다 이 선이 «진짜 경계»예요.</p>' if (_lp and _lp[0] < 10) else '')
             + f'<p class="tm-trk">작은 그래프 = 최근 5일 순위 · 점 위 숫자가 그날 순위(위로 갈수록 높은 순위) · '
             f'<b>밖</b> = 20위 밖 · 맨 오른쪽 큰 점이 오늘</p>'
             f'{_story_html or "".join(_묶음)}{_twin_note([r["n"] for r in rows])}{_chapter_note("레이더")}'
@@ -17615,16 +17833,16 @@ def build_coming_themes(data):
             f'<span class="tm-cdd" style="color:{c}">{lab}</span></span></div>'
             f'<div class="tm-cb"><div class="tm-cf" style="width:{w:.0f}%;'
             f'background:linear-gradient(90deg,{c}33,{c})"></div></div>'
-            f'<div class="tm-csub">{기준} · 점수 {sc:.0f} · 하루 {slope:+.1f}</div>'
+            f'<div class="tm-csub">{기준}</div>'   # 🔴 2026-10-04 HO «점수·하루 +3.5는 구독자가 알 수 없다» → 순위만
             # 🆕 2026-10-04 HO «D-1이 무슨 뜻?» — 카드마다 한 줄로 풀어 준다.
-            + (f'<div class="tm-cdx">⏱ 이 속도(하루 {slope:+.1f}점)면 <b>{eta}거래일 뒤</b> 10위 안'
-               + (f' · 선두 무리(1~{_lp[0]}위)까지는 <b>{_lp[1] - sc:.0f}점</b>' if _lp else '')
-               + '</div>'
+            # 🔴 2026-10-04 HO «74점이 뭐 어떻다는 거야?» — 점수 차만 던지지 말고 «며칠 거리인가»로 번역한다.
+            # 🔴 2026-10-04 HO (2차) «74점·3.5점은 구독자에게 도움이 안 된다» → 점수 숫자를 빼고 «언제 들어오나»만 말로.
+            #   선두 무리까지 거리(_lead_gap_txt)는 화면에서 뺐다 — 함수는 남겨 둔다(원칙3).
+            + (f'<div class="tm-cdx">⏱ 지금 속도면 <b>{"내일" if eta == 1 else f"{eta}거래일 뒤"}</b> 10위 안에 들어와요</div>'
                if eta else
-               (f'<div class="tm-cdx">⏱ 10위와는 거의 붙어 있어요'
-                + (f' · 선두 무리(1~{_lp[0]}위)까지는 <b>{_lp[1] - sc:.0f}점</b>' if _lp else '') + '</div>'
+               ('<div class="tm-cdx">⏱ 10위와 사실상 같은 힘 — <b>하루 사이에</b> 자리가 바뀔 수 있어요</div>'
                 if eta == 0 else
-                (f'<div class="tm-cdx">선두 무리(1~{_lp[0]}위)까지 <b>{_lp[1] - sc:.0f}점</b></div>' if _lp else "")))
+                ('<div class="tm-cdx">⏱ 아직 올라오는 힘이 없어요</div>' if (old is not None and slope <= 0) else "")))
             + (f'<div class="tm-l2" style="margin-top:3px">{_twin_chip(nm)}</div>' if _twin_chip(nm) else "")
             + f'{pan}</div>')
 
@@ -18492,6 +18710,9 @@ THEME_V17_CSS = """
 .jd-h{margin:0 0 8px;font-size:13px;font-weight:800;color:#e2e7ee;
   display:flex;align-items:baseline;gap:7px}
 .jd-h span{margin-left:auto;font-size:9.5px;font-weight:700;color:#6f7784}
+/* 🔴 2026-10-04 HO «판단 탭 챕터명이 작다 — 다른 챕터(15.5px)와 같게». 접힌 칸 안 소제목은 그대로 */
+.jd-wrap .jd-h,.jd-wrap .my-h{font-size:15.5px;line-height:1.35}
+.jd-wrap details .jd-h{font-size:13px}
 /* 1층 — 오늘 한 줄 */
 .jd-1{background:linear-gradient(160deg,#16202c,#111823);
   border:1.5px solid #2f4356;border-radius:12px;padding:13px 14px 12px;
@@ -18552,6 +18773,21 @@ THEME_V17_CSS = """
 .jd-cv i{font-style:normal;color:#e0c060;font-weight:800;margin:0 5px}
 .jd-cv b{color:#dfe4ea}
 .jd-cs{margin:0;font-size:11px;color:#8fd0e8;line-height:1.6}
+/* 🆕 2026-10-04 — 엇갈림 «내일 볼 것» */
+.jd-cl{margin:0 0 6px;padding:8px 10px;font-size:11.5px;line-height:1.65;color:#c9d0d9;background:#0c131c;border:1px solid #1f2b3a;border-radius:9px}
+.jd-cl b{color:#f0c65a}
+.jd-cty{margin:2px 0 7px;font-size:12.5px;font-weight:800;color:#f0c65a}
+.jd-cf .jd-cn{margin-top:4px}
+.jd-ct{margin-left:7px;font-size:10px;font-weight:700;color:#9aa3b1;padding:1px 6px;border:1px solid #2b3648;border-radius:99px;white-space:nowrap}
+.jd-cx{margin-top:6px;padding:7px 9px;background:#0b1118;border-left:2px solid #e0c060;border-radius:0 8px 8px 0}
+.jd-cx p{margin:0;font-size:11.2px;line-height:1.6;color:#a8b0ba}
+.jd-cx .jd-cq{color:#e8ecf1;margin-bottom:3px}
+.jd-cx .jd-cq b{color:#f0c65a}
+.jd-cx .jd-co{color:#ff8f75}
+.jd-cx .jd-cg{color:#8fb8ff}
+.jd-cx .jd-ctr{margin-top:4px;font-size:10.5px;color:#8b95a5}
+.jd-cx .jd-ctr b{color:#dfe4ea}
+.jd-cx .jd-ctr span{color:#6f7784}
 .jd-none{margin:0;font-size:11.5px;color:#7d8695}
 /* ⏳ 테마 생존곡선 */
 .sv-card{background:#101720;border:1px solid #1e2937;border-radius:11px;
@@ -24398,23 +24634,9 @@ if __name__ == "__main__":
         exit(1)
     # 🔴 HO 지시 2026-09-23 — 신규상장은 «테마에서 뺀다». 새 collect_data는 수집에서
     #   이미 빼지만, 그 전에 쌓인 날(과 오늘 재수집 전 데이터)도 여기서 거른다.
-    data["주도섹터"] = [t for t in (data.get("주도섹터") or [])
-                       if _theme_ok(t.get("테마명"))]
-    # 🆕 2026-09-23 HO 지시 — «오늘 뜬 테마에서 우선주는 빼줘.»
-    #   새 collect_data는 수집에서 뺀다. 그 전 데이터도 여기서 거른다.
-    #   + 쏠림 값이 없는 옛 데이터는 담긴 종목으로 «최소한»을 계산한다
-    #     (담긴 게 등락률 상위 4개뿐이라 실제 쏠림보다 작거나 같다 → 감점은 안 한다).
-    for _t in data["주도섹터"]:
-        _t["종목"] = [x for x in (_t.get("종목") or [])
-                     if not _is_pref((x or {}).get("종목명") if isinstance(x, dict) else x)]
-        if _t.get("쏠림") is None:
-            _tot = _t.get("거래대금합") or 0
-            _am = [((x or {}).get("거래대금") or 0) for x in _t["종목"] if isinstance(x, dict)]
-            if _tot > 0 and _am:
-                _i = max(range(len(_am)), key=lambda k: _am[k])
-                _t["쏠림"] = round(_am[_i] / _tot * 100, 1)
-                _t["쏠림종목"] = _t["종목"][_i].get("종목명")
-                _t["_쏠림감점"] = False
+    # 🆕 2026-09-23 HO 지시 — «오늘 뜬 테마에서 우선주는 빼줘.» + 신규상장 제외 + 옛 데이터 쏠림 보정
+    #   🔴 2026-10-04 — theme_notes.py도 같은 손질을 쓰도록 prep_data()로 옮겼다.
+    prep_data(data)
     report = load_json(REPORT_PATH)
     if report is None:
         print(f"⚠️ {REPORT_PATH} 없음 (해석글 미생성) — '오늘의 시장'은 안내문으로 채움.")
