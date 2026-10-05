@@ -7176,9 +7176,9 @@ def update_strata_history(격자):
 #     · 이격도는 «단기선 ÷ 장기선 ≤ 93»과 같은 말(보편적 이격도 = 단기÷장기×100).
 #   [클리어(정리)] 신호일 «이전 20봉»(신호일 제외)의 최저가를 «종가»로 깨면 손절 클리어,
 #                 아니면 신호 뒤 30봉째 종가로 클리어. 진입 = 신호일 종가.
-#   [참고 규칙 — 성적만 같이 잰다] «+10% 닿으면 절반 익절 + 나머지는 손절선을 본전으로».
-#     2024~2026 백테스트(시총 1조↑ 309종목)에서 원칙 대비 승률 48→60%, 중앙값 −1.3→+3.9%,
-#     대신 평균은 +3.5→+2.3%(큰 수익 꼬리를 덜 먹음). 둘 다 공개해 비교한다.
+#   [성적 — HO 2026-10-05] 우리는 «종목»만 보여 준다(매매 관리는 독자 몫) → 익절 규칙은 두지 않는다.
+#     성적표 = 신호일 종가 기준 D+5·10·20·30 기간별 수익 + 시장 대비. 클리어가 먼저 와도 기간 끝까지 잰다.
+#     승률 = 그 기간 뒤 종가가 신호일 종가보다 높았던 비율.
 #   [재신호] 진행 중인 종목에 다시 신호가 나도 새 거래로 세지 않는다(같은 반등의 연장).
 #   [데이터] 네이버 일봉(fchart) 200봉. 매일 전 대상을 «처음부터 다시» 계산한다(같은 날 여러 번 돌아도 같은 결과).
 #   [기록] archive/first_rebound_log.json — 첫 실행 때 최근 60거래일 신호를 차트로 되짚어 «백필»로 채운다.
@@ -7189,7 +7189,7 @@ FR_VOL_X = 2.0
 FR_GAP = 0.07
 FR_STOP_LOOKBACK = 20
 FR_HOLD = 30
-FR_REF_TP = 0.10            # 참고 규칙: +10%에서 절반 익절 → 본전 손절
+FR_PERIODS = (5, 10, 20, 30)   # 성적표 기간(봉). 🔴 2026-10-05 HO — 익절 규칙 대신 기간별 수익으로 공개
 FR_BACKFILL = 60
 FR_LOG = "first_rebound_log.json"
 
@@ -7246,42 +7246,36 @@ def _fr_signal(O, H, L, C, V, i):
     return hit, det
 
 
-def _fr_walk(D, H, L, C, i):
-    """신호 i 이후를 걸으며 성적을 계산한다(원칙 + 참고)."""
+def _fr_walk(D, H, L, C, i, IX=None):
+    """신호 i 이후 성적 — 🔴 2026-10-05 HO «종목만 보여주니 익절은 필요 없다. 성적표는 기간별 수익.»
+    · 기간별 수익 = 신호일 종가 → D+5·10·20·30 종가. 클리어가 먼저 와도 끝까지 잰다(생존 편향 금지).
+    · 시장 대비 = 같은 기간 그 종목 시장 지수(코스피/코스닥) 수익을 뺀 값.
+    · 상태 = HO 클리어 규칙(손절선 종가 이탈 / 30봉 경과) — 수익 계산이 아니라 «신호가 아직 살아 있나» 표시."""
     ent = C[i]
     stop = min(L[i - FR_STOP_LOOKBACK:i])
-    hi = lo = 0.0
     out = {"진입가": ent, "손절선": round(stop), "손절거리": round((ent - stop) / ent * 100, 1)}
+    hi = lo = 0.0
     ex = None
-    half, ref = False, None
     for j in range(i + 1, min(i + FR_HOLD + 1, len(C))):
         hi = max(hi, H[j] / ent - 1)
         lo = min(lo, L[j] / ent - 1)
-        # 참고 규칙(절반 익절 + 본전)
-        if ref is None:
-            if not half and H[j] >= ent * (1 + FR_REF_TP):
-                half = True
-            st_ = max(stop, ent) if half else stop
-            if C[j] < st_:
-                r2 = C[j] / ent - 1
-                ref = (0.5 * FR_REF_TP + 0.5 * r2) if half else r2
         if C[j] < stop:
-            ex = (j, "손절", C[j] / ent - 1)
+            ex = (j, "손절선 이탈")
             break
     n_after = len(C) - 1 - i
     if ex is None and n_after >= FR_HOLD:
-        j = i + FR_HOLD
-        ex = (j, "30봉", C[j] / ent - 1)
-    if ex is not None and ref is None:
-        ref = (0.5 * FR_REF_TP + 0.5 * ex[2]) if half else ex[2]
-    out.update({"최고": round(hi * 100, 1), "최저": round(lo * 100, 1),
-                "경과": min(n_after, FR_HOLD), "절반익절": half})
-    if ex:
-        out.update({"상태": ex[1], "종료일": D[ex[0]], "수익": round(ex[2] * 100, 2),
-                    "참고수익": round(ref * 100, 2)})
-    else:
-        out.update({"상태": "진행", "수익": round((C[-1] / ent - 1) * 100, 2),
-                    "참고수익": None})
+        ex = (i + FR_HOLD, "30봉 경과")
+    기간 = {}
+    for n in FR_PERIODS:
+        if i + n < len(C):
+            r = (C[i + n] / ent - 1) * 100
+            x = {"수익": round(r, 2)}
+            if IX and D[i] in IX and D[i + n] in IX:
+                x["시장대비"] = round(r - (IX[D[i + n]] / IX[D[i]] - 1) * 100, 2)
+            기간[str(n)] = x
+    out.update({"최고": round(hi * 100, 1), "최저": round(lo * 100, 1), "경과": n_after,
+                "현재수익": round((C[-1] / ent - 1) * 100, 2), "기간": 기간,
+                "상태": ex[1] if ex else "유지", "종료일": D[ex[0]] if ex else None})
     return out
 
 
@@ -7301,8 +7295,8 @@ def collect_first_rebound(계좌격자):
     except Exception:
         log = {}
     거래 = log.get("거래") or {}
-    for t in 거래.values():                       # 진행 중인 종목은 시총이 줄어도 계속 본다
-        if t.get("상태") == "진행" and t["코드"] not in 대상:
+    for t in 거래.values():                       # D+30까지 다 못 잰 종목은 시총이 줄어도 계속 본다
+        if len(t.get("기간") or {}) < len(FR_PERIODS) and t["코드"] not in 대상:
             대상[t["코드"]] = {"종목명": t["종목명"], "시장": t.get("시장"), "시총": None}
     if not 대상:
         print("  ⚠️ [첫 반등] 대상 종목이 없습니다(종목사전 비어 있음) — 건너뜀")
@@ -7310,6 +7304,7 @@ def collect_first_rebound(계좌격자):
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(6) as ex:
         봉 = dict(zip(대상, ex.map(_fr_candles, 대상)))
+    지수 = {m: {r[0]: r[4] for r in _fr_candles(sym)} for m, sym in (("코스피", "KOSPI"), ("코스닥", "KOSDAQ"))}
     받음 = sum(1 for v in 봉.values() if v)
     오늘봉 = sum(1 for v in 봉.values() if v and v[-1][0] == DATE)
     if 받음 and 오늘봉 < 받음 * 0.5:
@@ -7326,14 +7321,16 @@ def collect_first_rebound(계좌격자):
         # 이 종목의 기존 거래를 다시 계산(같은 날 여러 번 돌아도 같은 값)
         for key, t in 거래.items():
             if t["코드"] == code and t["신호일"] in D:
-                t.update(_fr_walk(D, H, L, C, D.index(t["신호일"])))
+                t.update(_fr_walk(D, H, L, C, D.index(t["신호일"]), 지수.get(info.get("시장") or t.get("시장"))))
+                for _k in ("수익", "참고수익", "절반익절"):      # 옛 칸 정리
+                    t.pop(_k, None)
         시작 = len(C) - 1 - (FR_BACKFILL if 백필 else 3)   # 하루 빠진 날(실행 실패)도 3봉까지 되짚는다
         for i in range(max(시작, 125), len(C)):
             hit, det = _fr_signal(O, H, L, C, V, i)
             if not hit:
                 continue
             진행중 = any(t["코드"] == code and t["신호일"] < D[i] and
-                       (t.get("종료일") or "99999999") >= D[i] for t in 거래.values())
+                       (t.get("종료일") or "99999999") >= D[i] for t in 거래.values())   # 신호 유지 중 재신호
             key = f"{code}_{D[i]}"
             if i == len(C) - 1 and D[i] == DATE:
                 오늘.append({"종목명": info["종목명"], "코드": code, "시장": info["시장"],
@@ -7346,30 +7343,34 @@ def collect_first_rebound(계좌격자):
                 continue
             거래[key] = {"코드": code, "종목명": info["종목명"], "시장": info["시장"],
                        "시총": info["시총"], "신호일": D[i], "유형": hit,
-                       "백필": i < len(C) - 1 or D[i] != DATE, **_fr_walk(D, H, L, C, i)}
-    끝 = [t for t in 거래.values() if t.get("상태") in ("손절", "30봉")]
-    def _요약(xs, k="수익"):
-        r = [x[k] for x in xs if isinstance(x.get(k), (int, float))]
+                       "백필": i < len(C) - 1 or D[i] != DATE,
+                       **_fr_walk(D, H, L, C, i, 지수.get(info.get("시장")))}
+    def _요약(xs, n):
+        r = [x["기간"][str(n)] for x in xs if str(n) in (x.get("기간") or {})]
         if not r:
             return None
-        r.sort()
-        return {"건수": len(r), "승률": round(sum(1 for v in r if v > 0) / len(r) * 100),
-                "평균": round(sum(r) / len(r), 2), "중앙": round(r[len(r) // 2], 2)}
-    성적 = {"원칙": _요약(끝), "참고": _요약(끝, "참고수익"),
-           "원칙_실시간": _요약([x for x in 끝 if not x.get("백필")]),
-           "진행": sum(1 for t in 거래.values() if t.get("상태") == "진행")}
+        v = sorted(y["수익"] for y in r)
+        e = [y["시장대비"] for y in r if isinstance(y.get("시장대비"), (int, float))]
+        return {"건수": len(v), "승률": round(sum(1 for y in v if y > 0) / len(v) * 100),
+                "평균": round(sum(v) / len(v), 2), "중앙": round(v[len(v) // 2], 2),
+                "시장대비": round(sum(e) / len(e), 2) if e else None}
+    모두 = list(거래.values())
+    성적 = {"기간": {str(n): _요약(모두, n) for n in FR_PERIODS},
+           "실시간": {str(n): _요약([x for x in 모두 if not x.get("백필")], n) for n in FR_PERIODS},
+           "유지": sum(1 for t in 모두 if t.get("상태") == "유지"), "전체": len(모두)}
+    끝 = [t for t in 모두 if t.get("상태") != "유지"]
     log = {"거래": 거래, "백필완료": True, "갱신": DATE, "백필기준": log.get("백필기준") or DATE}
     with open(asave(FR_LOG), "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
     오늘.sort(key=lambda x: -(x["시총"] or 0))
     print(f"  🌅 [첫 반등] 대상 {len(대상)}종목 · 일봉 {받음}개 받음 · 오늘 신호 {len(오늘)}개 · "
-          f"기록 {len(거래)}건(진행 {성적['진행']})" + (" · 첫 실행 백필 완료" if 백필 else ""))
-    진행 = sorted([t for t in 거래.values() if t.get("상태") == "진행"], key=lambda t: t["신호일"], reverse=True)
+          f"기록 {len(거래)}건(신호 유지 {성적['유지']})" + (" · 첫 실행 백필 완료" if 백필 else ""))
+    진행 = sorted([t for t in 거래.values() if t.get("상태") == "유지"], key=lambda t: t["신호일"], reverse=True)
     최근끝 = sorted(끝, key=lambda t: t.get("종료일") or "", reverse=True)[:8]
     return {"오늘": 오늘, "성적": 성적, "진행": 진행[:50], "최근종료": 최근끝,
             "대상수": len(대상), "백필기준": log["백필기준"],
             "설정": {"시총": FR_MIN_CAP, "거래량배수": FR_VOL_X, "이격": FR_GAP * 100,
-                    "손절창": FR_STOP_LOOKBACK, "보유": FR_HOLD, "참고익절": FR_REF_TP * 100}}
+                    "손절창": FR_STOP_LOOKBACK, "보유": FR_HOLD, "기간": list(FR_PERIODS)}}
 
 
 if __name__ == "__main__":
