@@ -10606,39 +10606,49 @@ def build_first_rebound(data):
             f'<div class="fr-tg"><span>🌅 {태그}</span>'
             + (f'<span>거래량 {_배:.1f}배</span>' if _배 else '')
             + (f'<span>시총 {s["시총"]/10000:,.1f}조</span>' if s.get("시총") else '')
-            + ('<span class="re">↻ 진행 중 재신호</span>' if s.get("재신호") else '') + '</div>'
+            + ('<span class="re">↻ 신호 유지 중 재신호</span>' if s.get("재신호") else '') + '</div>'
             f'<p class="fr-st">🛑 손절선 <b>{s["손절선"]:,}</b> — 지금보다 <b>{s["손절거리"]:.1f}%</b> 아래'
-            f' (이 아래로 종가가 내려가면 클리어)</p>{_칸}</div>')
+            f' (종가가 이 아래로 가면 신호 끝)</p>{_칸}</div>')
     오늘 = ("".join(행) if 행 else '<p class="fr-none">오늘은 조건에 맞는 종목이 없어요.</p>')
+    # 🔴 2026-10-05 HO «종목만 보여주니 익절은 필요 없다 — 성적표는 기간별 수익» → 신호일 종가 기준 D+N 수익.
     성 = fr.get("성적") or {}
-    def 칸(nm, sub, x):
-        if not x:
-            return f'<div><span>{nm}</span><b>–</b><em>{sub}</em></div>'
-        return (f'<div><span>{nm}</span><b>승률 {x["승률"]}%</b>'
-                f'<i>평균 {pc(x["평균"])} · 중앙 {pc(x["중앙"])}</i><em>{sub}</em></div>')
-    원 = 성.get("원칙") or {}
-    성적 = ('<div class="fr-sc"><p class="fr-h">📊 지금까지 성적'
-            f'<span>정리된 거래 {원.get("건수", 0)}건 · 진행 중 {성.get("진행", 0)}건</span></p>'
-            '<div class="fr-sg">'
-            + 칸("원칙대로", "20봉 최저 이탈 손절 · 30봉 정리", 원)
-            + 칸("참고: 절반 익절", "+10%에서 절반 익절 → 나머지 본전 손절", 성.get("참고"))
-            + '</div>'
-            f'<p class="fr-n">※ {md(fr.get("백필기준"))} 이전 60거래일 신호는 과거 차트로 «되짚어 본» 기록이에요. '
-            + (f'실시간으로 쌓인 것만 보면 {성["원칙_실시간"]["건수"]}건 · 승률 {성["원칙_실시간"]["승률"]}%.'
-               if 성.get("원칙_실시간") else '실시간 기록은 오늘부터 쌓여요.') + '</p></div>')
-    def 줄(t, live=True):
-        끝 = t.get("상태") != "진행"
+    기간 = 성.get("기간") or {}
+    def 셀(v, sign=True):
+        return pc(v) if isinstance(v, (int, float)) else "–"
+    줄들 = "".join(
+        f'<tr><td>D+{n}</td><td>{x["건수"]}</td><td><b>{x["승률"]}%</b></td><td>{셀(x["평균"])}</td>'
+        f'<td>{셀(x["중앙"])}</td><td>{셀(x.get("시장대비"))}</td></tr>' if x else
+        f'<tr><td>D+{n}</td><td colspan="5" class="w">아직 {n}거래일이 안 지났어요</td></tr>'
+        for n, x in ((k, 기간.get(k)) for k in ("5", "10", "20", "30")))
+    실 = (성.get("실시간") or {}).get("5")
+    성적 = ('<div class="fr-sc"><p class="fr-h">📊 신호 뒤 기간별 수익'
+            f'<span>신호 {성.get("전체", 0)}건 · 지금 신호 유지 {성.get("유지", 0)}건</span></p>'
+            '<table class="fr-tb"><tr><th>기간</th><th>건수</th><th>승률</th><th>평균</th><th>중앙</th><th>시장 대비</th></tr>'
+            + 줄들 + '</table>'
+            '<p class="fr-n">· 기준 = <b>신호일 종가</b>에서 N거래일 뒤 종가까지 · <b>승률</b> = 그때 종가가 신호일 종가보다 높았던 비율 · '
+            '<b>시장 대비</b> = 같은 기간 코스피/코스닥 수익을 뺀 값<br>'
+            '· 손절선을 깨서 신호가 끝난 종목도 D+30까지 끝까지 셉니다(좋은 것만 남기지 않아요).<br>'
+            f'· {md(fr.get("백필기준"))} 이전 60거래일 신호는 과거 차트로 «되짚어 본» 기록이에요. '
+            + (f'실시간 기록만 보면 D+5 {실["건수"]}건 · 승률 {실["승률"]}%.' if 실 else '실시간 기록은 오늘부터 쌓여요.')
+            + '</p></div>')
+    def 줄(t):
+        끝 = t.get("상태") != "유지"
+        g = t.get("기간") or {}
+        last = max((int(k) for k in g), default=None)
         return ('<div class="fr-tr">'
                 f'<span class="n">{t["종목명"]}</span>'
-                f'<span class="d">{md(t["신호일"])}' + (f'→{md(t.get("종료일"))}' if 끝 else f' · {t.get("경과", 0)}/30봉') + '</span>'
-                f'<span class="r">{pc(t.get("수익"))}</span>'
-                + (f'<span class="x">{"🛑손절" if t["상태"] == "손절" else "⏱30봉"} · 참고 {pc(t.get("참고수익"))}</span>' if 끝
+                f'<span class="d">{md(t["신호일"])} · {min(t.get("경과", 0), 30)}봉째</span>'
+                f'<span class="r">{pc(t.get("현재수익"))}</span>'
+                + (f'<span class="x">{"🛑 손절선 이탈 " + md(t.get("종료일")) if t["상태"] == "손절선 이탈" else "⏱ 30봉 경과"}'
+                   + (f' · D+{last} {pc(g[str(last)]["수익"])}' if last else '') + '</span>' if 끝
                    else f'<span class="x">최고 {pc(t.get("최고"))} · 손절선까지 {t.get("손절거리", 0):.0f}%</span>')
                 + '</div>')
     진 = fr.get("진행") or []
     종 = fr.get("최근종료") or []
-    목록 = ((f'<details class="fr-fd"><summary>⏳ 진행 중 {len(진)}건 보기 ▾</summary>'
-            + "".join(줄(t) for t in 진) + '</details>') if 진 else "") +            ((f'<details class="fr-fd"><summary>✅ 최근 정리된 {len(종)}건 보기 ▾</summary>'
+    목록 = ((f'<details class="fr-fd"><summary>⏳ 신호 유지 중 {len(진)}건 보기 ▾</summary>'
+            '<p class="fr-n" style="margin:4px 0">오른쪽 % = 신호일 종가 → 오늘 종가</p>'
+            + "".join(줄(t) for t in 진) + '</details>') if 진 else "") + \
+           ((f'<details class="fr-fd"><summary>✅ 최근 신호가 끝난 {len(종)}건 보기 ▾</summary>'
             + "".join(줄(t) for t in 종) + '</details>') if 종 else "")
     조건 = ('<details class="fr-fd"><summary>📖 조건 보기 ▾</summary><div class="fr-cd">'
            '<p>둘 중 <b>하나만</b> 맞아도 신호예요 · 공통: <b>시총 1조↑</b>, ETF·스팩·우선주 제외</p>'
@@ -10649,7 +10659,7 @@ def build_first_rebound(data):
            '<tr><td>배열</td><td>60선 &gt; 30선·10선</td><td>120선 &gt; 60선·20선</td></tr>'
            '<tr><td>기울기</td><td>30선 ↓ · 10선 ↑</td><td>60선 ↓ · 20선 ↑</td></tr>'
            '<tr><td>이격</td><td>10선이 60선보다 7%↓</td><td>20선이 120선보다 7%↓</td></tr></table>'
-           '<p>🛑 <b>클리어</b> — 신호 전 20봉의 최저가를 종가로 깨면 정리, 아니면 30봉째 종가로 정리.</p>'
+           '<p>🛑 <b>신호 끝(클리어)</b> — 신호 전 20봉의 최저가를 종가로 깨면 끝, 아니면 30봉 뒤 끝.</p>'
            '<p>⚠️ 추천이 아니에요. 같은 규칙으로 모든 신호를 끝까지 추적해 성적을 그대로 공개해요.</p>'
            '</div></details>')
     return ('<div class="fr">'
@@ -18808,6 +18818,12 @@ THEME_V17_CSS = """
 .fr-sc{margin-top:11px;padding-top:9px;border-top:1px solid #3a2f1d}
 .fr-h{margin:0 0 7px;font-size:13px;font-weight:800;color:#f2e6cf;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
 .fr-h span{margin-left:auto;font-size:10px;font-weight:600;color:#9a8f7b}
+.fr-tb{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+.fr-tb th{font-size:10px;color:#9a8f7b;font-weight:700;padding:3px 2px;text-align:right;border-bottom:1px solid #3a2f1d}
+.fr-tb td{padding:5px 2px;text-align:right;color:#c9ced6;border-bottom:1px solid #2a2418;white-space:nowrap}
+.fr-tb th:first-child,.fr-tb td:first-child{text-align:left;color:#ffc979;font-weight:800}
+.fr-tb td b{color:#f2f4f7}
+.fr-tb td.w{text-align:center;color:#8b8475;font-size:10.5px}
 .fr-sg{display:flex;gap:6px}
 .fr-sg>div{flex:1;min-width:0;padding:7px 8px;background:rgba(10,8,5,.55);border:1px solid #3a2f1d;border-radius:9px;display:flex;flex-direction:column;gap:2px}
 .fr-sg span{font-size:10.5px;color:#ffc979;font-weight:800}
