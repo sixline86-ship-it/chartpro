@@ -7154,6 +7154,224 @@ def update_strata_history(격자):
 # ============================================================
 # 메인
 # ============================================================
+# ══════════════════════════════════════════════════════════════
+# 🌅 오늘 첫 반등 — HO 기법(구 이름 «우돌마» 1·2), 2026-10-05 신설
+#
+#   [무엇] 오래 눌린(역배열) 대형주가 거래량을 싣고 «처음으로» 고개를 드는 날을 잡는다.
+#   [조건 — HO 확정 2026-10-05]  (둘 중 하나만 맞아도 신호)
+#     공통  시총 1조 이상 · ETF/ETN/스팩/우선주 제외
+#     ┌──────────┬──────────────────────────┬──────────────────────────┐
+#     │          │ 첫반등 1 (단기)            │ 첫반등 2 (중기)            │
+#     ├──────────┼──────────────────────────┼──────────────────────────┤
+#     │ 캔들     │ 양봉 · 종가가 직전 9봉 종가 │ 양봉 · 종가가 직전 19봉 종가│
+#     │          │ 전부와 같거나 높음(10봉 최고)│ 전부와 같거나 높음(20봉 최고)│
+#     │          │ · 종가 ≥ (고가+저가)÷2      │ · 종가 ≥ (고가+저가)÷2      │
+#     │ 거래량   │ 직전 10봉 평균의 2배 이상   │ 직전 20봉 평균의 2배 이상   │
+#     │          │ (평균에 오늘은 넣지 않음)   │ (평균에 오늘은 넣지 않음)   │
+#     │ 배열     │ 60선 > 30선 · 60선 > 10선   │ 120선 > 60선 · 120선 > 20선 │
+#     │ 기울기   │ 30선 하락 · 10선 상승       │ 60선 하락 · 20선 상승       │
+#     │ 이격도   │ (60선−10선)÷60선 ≥ 7%      │ (120선−20선)÷120선 ≥ 7%    │
+#     └──────────┴──────────────────────────┴──────────────────────────┘
+#     · 이동평균 = 종가 단순평균. 기울기 = 오늘 값 vs 어제 값.
+#     · 이격도는 «단기선 ÷ 장기선 ≤ 93»과 같은 말(보편적 이격도 = 단기÷장기×100).
+#   [클리어(정리)] 신호일 «이전 20봉»(신호일 제외)의 최저가를 «종가»로 깨면 손절 클리어,
+#                 아니면 신호 뒤 30봉째 종가로 클리어. 진입 = 신호일 종가.
+#   [참고 규칙 — 성적만 같이 잰다] «+10% 닿으면 절반 익절 + 나머지는 손절선을 본전으로».
+#     2024~2026 백테스트(시총 1조↑ 309종목)에서 원칙 대비 승률 48→60%, 중앙값 −1.3→+3.9%,
+#     대신 평균은 +3.5→+2.3%(큰 수익 꼬리를 덜 먹음). 둘 다 공개해 비교한다.
+#   [재신호] 진행 중인 종목에 다시 신호가 나도 새 거래로 세지 않는다(같은 반등의 연장).
+#   [데이터] 네이버 일봉(fchart) 200봉. 매일 전 대상을 «처음부터 다시» 계산한다(같은 날 여러 번 돌아도 같은 결과).
+#   [기록] archive/first_rebound_log.json — 첫 실행 때 최근 60거래일 신호를 차트로 되짚어 «백필»로 채운다.
+# ══════════════════════════════════════════════════════════════
+FR_MIN_CAP = 10000          # 억원 = 1조
+FR_RULES = (("1", 10, 10, 30, 60), ("2", 20, 20, 60, 120))   # (이름, 창, 단기, 중기, 장기)
+FR_VOL_X = 2.0
+FR_GAP = 0.07
+FR_STOP_LOOKBACK = 20
+FR_HOLD = 30
+FR_REF_TP = 0.10            # 참고 규칙: +10%에서 절반 익절 → 본전 손절
+FR_BACKFILL = 60
+FR_LOG = "first_rebound_log.json"
+
+
+def _fr_candles(code, count=200):
+    """네이버 일봉 → (날짜, 시, 고, 저, 종, 거래량) 리스트. 0원 줄(거래정지)은 뺀다."""
+    try:
+        r = requests.get("https://fchart.stock.naver.com/sise.nhn",
+                         params={"symbol": code, "timeframe": "day", "count": count, "requestType": 0},
+                         headers={"User-Agent": "Mozilla/5.0"}, timeout=12)
+        t = r.content.decode("euc-kr", "ignore")
+        out = []
+        for row in re.findall(r'data="([^"]+)"', t):
+            p = row.split("|")
+            if len(p) < 6:
+                continue
+            try:
+                d, o, h, l, c, v = p[0], float(p[1]), float(p[2]), float(p[3]), float(p[4]), float(p[5])
+            except ValueError:
+                continue
+            if min(o, h, l, c) <= 0:
+                continue
+            out.append((d, o, h, l, c, v))
+        return out
+    except Exception:
+        return []
+
+
+def _fr_ma(C, n, i):
+    return sum(C[i - n + 1:i + 1]) / n if i >= n - 1 else None
+
+
+def _fr_signal(O, H, L, C, V, i):
+    """i번째 봉이 신호인가 → (맞은 유형 목록, 세부값)"""
+    hit, det = [], {}
+    for k, nb, S, M, Lg in FR_RULES:
+        if i < Lg or i < nb:
+            continue
+        if not (C[i] > O[i] and C[i] >= max(C[i - nb + 1:i]) and C[i] >= (H[i] + L[i]) / 2):
+            continue
+        av = sum(V[i - nb:i]) / nb
+        if not (av > 0 and V[i] >= FR_VOL_X * av):
+            continue
+        s, m, l = _fr_ma(C, S, i), _fr_ma(C, M, i), _fr_ma(C, Lg, i)
+        if not (l > m and l > s):
+            continue
+        if not (m < _fr_ma(C, M, i - 1) and s > _fr_ma(C, S, i - 1)):
+            continue
+        gap = (l - s) / l
+        if gap < FR_GAP:
+            continue
+        hit.append(k)
+        det[k] = {"거래량배수": round(V[i] / av, 1), "이격": round(gap * 100, 1)}
+    return hit, det
+
+
+def _fr_walk(D, H, L, C, i):
+    """신호 i 이후를 걸으며 성적을 계산한다(원칙 + 참고)."""
+    ent = C[i]
+    stop = min(L[i - FR_STOP_LOOKBACK:i])
+    hi = lo = 0.0
+    out = {"진입가": ent, "손절선": round(stop), "손절거리": round((ent - stop) / ent * 100, 1)}
+    ex = None
+    half, ref = False, None
+    for j in range(i + 1, min(i + FR_HOLD + 1, len(C))):
+        hi = max(hi, H[j] / ent - 1)
+        lo = min(lo, L[j] / ent - 1)
+        # 참고 규칙(절반 익절 + 본전)
+        if ref is None:
+            if not half and H[j] >= ent * (1 + FR_REF_TP):
+                half = True
+            st_ = max(stop, ent) if half else stop
+            if C[j] < st_:
+                r2 = C[j] / ent - 1
+                ref = (0.5 * FR_REF_TP + 0.5 * r2) if half else r2
+        if C[j] < stop:
+            ex = (j, "손절", C[j] / ent - 1)
+            break
+    n_after = len(C) - 1 - i
+    if ex is None and n_after >= FR_HOLD:
+        j = i + FR_HOLD
+        ex = (j, "30봉", C[j] / ent - 1)
+    if ex is not None and ref is None:
+        ref = (0.5 * FR_REF_TP + 0.5 * ex[2]) if half else ex[2]
+    out.update({"최고": round(hi * 100, 1), "최저": round(lo * 100, 1),
+                "경과": min(n_after, FR_HOLD), "절반익절": half})
+    if ex:
+        out.update({"상태": ex[1], "종료일": D[ex[0]], "수익": round(ex[2] * 100, 2),
+                    "참고수익": round(ref * 100, 2)})
+    else:
+        out.update({"상태": "진행", "수익": round((C[-1] / ent - 1) * 100, 2),
+                    "참고수익": None})
+    return out
+
+
+def collect_first_rebound(계좌격자):
+    사전 = (계좌격자 or {}).get("종목사전") or {}
+    대상 = {}
+    for nm, v in 사전.items():
+        if not isinstance(v, list) or len(v) < 7:
+            continue
+        if not isinstance(v[6], (int, float)) or v[6] < FR_MIN_CAP or not v[5]:
+            continue
+        if _str_excluded(nm):
+            continue
+        대상[v[5]] = {"종목명": nm, "시장": v[4], "시총": v[6]}
+    try:
+        log = json.load(open(apath(FR_LOG), encoding="utf-8"))
+    except Exception:
+        log = {}
+    거래 = log.get("거래") or {}
+    for t in 거래.values():                       # 진행 중인 종목은 시총이 줄어도 계속 본다
+        if t.get("상태") == "진행" and t["코드"] not in 대상:
+            대상[t["코드"]] = {"종목명": t["종목명"], "시장": t.get("시장"), "시총": None}
+    if not 대상:
+        print("  ⚠️ [첫 반등] 대상 종목이 없습니다(종목사전 비어 있음) — 건너뜀")
+        return None
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(6) as ex:
+        봉 = dict(zip(대상, ex.map(_fr_candles, 대상)))
+    받음 = sum(1 for v in 봉.values() if v)
+    오늘봉 = sum(1 for v in 봉.values() if v and v[-1][0] == DATE)
+    if 받음 and 오늘봉 < 받음 * 0.5:
+        print(f"  ⚠️ [첫 반등] 일봉에 오늘({DATE}) 봉이 있는 종목이 {오늘봉}/{받음}뿐 — 장 마감 전이거나 "
+              f"휴장일입니다. 오늘 신호는 비고, 성적은 어제 봉까지로 계산됩니다.")
+    백필 = not log.get("백필완료")
+    오늘 = []
+    for code, rows in 봉.items():
+        if len(rows) < 130:
+            continue
+        D = [r[0] for r in rows]; O = [r[1] for r in rows]; H = [r[2] for r in rows]
+        L = [r[3] for r in rows]; C = [r[4] for r in rows]; V = [r[5] for r in rows]
+        info = 대상[code]
+        # 이 종목의 기존 거래를 다시 계산(같은 날 여러 번 돌아도 같은 값)
+        for key, t in 거래.items():
+            if t["코드"] == code and t["신호일"] in D:
+                t.update(_fr_walk(D, H, L, C, D.index(t["신호일"])))
+        시작 = len(C) - 1 - (FR_BACKFILL if 백필 else 3)   # 하루 빠진 날(실행 실패)도 3봉까지 되짚는다
+        for i in range(max(시작, 125), len(C)):
+            hit, det = _fr_signal(O, H, L, C, V, i)
+            if not hit:
+                continue
+            진행중 = any(t["코드"] == code and t["신호일"] < D[i] and
+                       (t.get("종료일") or "99999999") >= D[i] for t in 거래.values())
+            key = f"{code}_{D[i]}"
+            if i == len(C) - 1 and D[i] == DATE:
+                오늘.append({"종목명": info["종목명"], "코드": code, "시장": info["시장"],
+                           "시총": info["시총"], "유형": hit, "세부": det,
+                           "등락률": round((C[i] / C[i - 1] - 1) * 100, 2), "종가": C[i],
+                           "손절선": round(min(L[i - FR_STOP_LOOKBACK:i])),
+                           "손절거리": round((C[i] - min(L[i - FR_STOP_LOOKBACK:i])) / C[i] * 100, 1),
+                           "재신호": 진행중})
+            if 진행중 or key in 거래:
+                continue
+            거래[key] = {"코드": code, "종목명": info["종목명"], "시장": info["시장"],
+                       "시총": info["시총"], "신호일": D[i], "유형": hit,
+                       "백필": i < len(C) - 1 or D[i] != DATE, **_fr_walk(D, H, L, C, i)}
+    끝 = [t for t in 거래.values() if t.get("상태") in ("손절", "30봉")]
+    def _요약(xs, k="수익"):
+        r = [x[k] for x in xs if isinstance(x.get(k), (int, float))]
+        if not r:
+            return None
+        r.sort()
+        return {"건수": len(r), "승률": round(sum(1 for v in r if v > 0) / len(r) * 100),
+                "평균": round(sum(r) / len(r), 2), "중앙": round(r[len(r) // 2], 2)}
+    성적 = {"원칙": _요약(끝), "참고": _요약(끝, "참고수익"),
+           "원칙_실시간": _요약([x for x in 끝 if not x.get("백필")]),
+           "진행": sum(1 for t in 거래.values() if t.get("상태") == "진행")}
+    log = {"거래": 거래, "백필완료": True, "갱신": DATE, "백필기준": log.get("백필기준") or DATE}
+    with open(asave(FR_LOG), "w", encoding="utf-8") as f:
+        json.dump(log, f, ensure_ascii=False, indent=1)
+    오늘.sort(key=lambda x: -(x["시총"] or 0))
+    print(f"  🌅 [첫 반등] 대상 {len(대상)}종목 · 일봉 {받음}개 받음 · 오늘 신호 {len(오늘)}개 · "
+          f"기록 {len(거래)}건(진행 {성적['진행']})" + (" · 첫 실행 백필 완료" if 백필 else ""))
+    진행 = sorted([t for t in 거래.values() if t.get("상태") == "진행"], key=lambda t: t["신호일"], reverse=True)
+    최근끝 = sorted(끝, key=lambda t: t.get("종료일") or "", reverse=True)[:8]
+    return {"오늘": 오늘, "성적": 성적, "진행": 진행[:50], "최근종료": 최근끝,
+            "대상수": len(대상), "백필기준": log["백필기준"],
+            "설정": {"시총": FR_MIN_CAP, "거래량배수": FR_VOL_X, "이격": FR_GAP * 100,
+                    "손절창": FR_STOP_LOOKBACK, "보유": FR_HOLD, "참고익절": FR_REF_TP * 100}}
+
+
 if __name__ == "__main__":
     print(f"=== {DATE} 데이터 수집 시작 | collect_data {SCRIPT_VERSION} ===\n")
     # 🧹 2026-09-28 — 이미 섞인 휴장일 줄(9/24 추석 등)을 먼저 걷어낸다
@@ -7207,6 +7425,12 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+    # 🌅 2026-10-05 — 오늘 첫 반등(HO 기법). 종목사전(시총)이 있어야 대상을 고른다.
+    try:
+        첫반등 = collect_first_rebound(계좌격자)
+    except Exception as e:
+        print(f"   ⚠️ 첫 반등 수집 실패({type(e).__name__}: {str(e)[:120]}) — 이번 회차는 건너뜁니다")
+        첫반등 = None
     # 🆕 2026-10-01 — 테마 레이더 «이야기 묶음» 재료. 테마 이력(오늘 줄)이 저장된 «뒤»여야 한다.
     try:
         테마상세 = collect_theme_detail()
@@ -7348,6 +7572,7 @@ if __name__ == "__main__":
         "파생": 파생,
         "강세레이더": 강세레이더,
         "매집레이더": 매집레이더,
+        "첫반등": 첫반등,
         "등락종목수": 등락수,
         "계좌격자": 계좌격자,
         "군중나침반": 군중나침반,
