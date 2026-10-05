@@ -10578,6 +10578,86 @@ def _cap_card(일수, 시장):
 
 
 # ══════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
+# 🌅 오늘 첫 반등 — HO 반등 기법(구 «우돌마» 1·2), 2026-10-05 신설
+#   조건·클리어 규칙의 원본은 collect_data.py «FR_» 블록(같은 내용을 화면 📖에도 적는다).
+#   화면: 오늘 신호 → 성적(원칙 vs 참고) → 진행 중 → 최근 정리 → 📖 조건
+#   ⚠️ 추천이 아니다. 성적은 «클리어된 거래»만 센다(진행 중은 따로).
+# ══════════════════════════════════════════════════════════════
+def build_first_rebound(data):
+    fr = (data or {}).get("첫반등")
+    if not isinstance(fr, dict):
+        return ('<div class="fr"><p class="fr-none">🌅 첫 반등 기록은 다음 거래일 수집부터 쌓여요.</p></div>')
+    md = lambda d: f"{d[4:6]}/{d[6:]}" if d else ""
+    pc = lambda v: (f'<b style="color:{"#ff6b4a" if v >= 0 else "#5b9bff"}">{v:+.1f}%</b>'
+                    if isinstance(v, (int, float)) else "–")
+    TY = {"1": "단기형", "2": "중기형"}
+    행 = []
+    for s in fr.get("오늘") or []:
+        _끼움 = (f'<span style="font-size:12.5px;font-weight:800;color:{"#ff6b4a" if s["등락률"] >= 0 else "#5b9bff"};'
+               f'margin:0 4px 0 6px">{s["등락률"]:+.2f}%</span>')
+        _이름, _칸 = sc_click(s["종목명"], "#ffc979", 15, _끼움, 코드=s.get("코드"))
+        _배 = max((d.get("거래량배수") or 0) for d in (s.get("세부") or {}).values()) if s.get("세부") else None
+        태그 = " · ".join(TY.get(k, k) for k in s.get("유형") or [])
+        행.append(
+            '<div class="fr-row">'
+            f'<div class="cs-nl" style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">'
+            f'<span style="font-size:10.5px;color:#8b93a0">{s.get("시장") or ""}</span>{_이름}</div>'
+            f'<div class="fr-tg"><span>🌅 {태그}</span>'
+            + (f'<span>거래량 {_배:.1f}배</span>' if _배 else '')
+            + (f'<span>시총 {s["시총"]/10000:,.1f}조</span>' if s.get("시총") else '')
+            + ('<span class="re">↻ 진행 중 재신호</span>' if s.get("재신호") else '') + '</div>'
+            f'<p class="fr-st">🛑 손절선 <b>{s["손절선"]:,}</b> — 지금보다 <b>{s["손절거리"]:.1f}%</b> 아래'
+            f' (이 아래로 종가가 내려가면 클리어)</p>{_칸}</div>')
+    오늘 = ("".join(행) if 행 else '<p class="fr-none">오늘은 조건에 맞는 종목이 없어요.</p>')
+    성 = fr.get("성적") or {}
+    def 칸(nm, sub, x):
+        if not x:
+            return f'<div><span>{nm}</span><b>–</b><em>{sub}</em></div>'
+        return (f'<div><span>{nm}</span><b>승률 {x["승률"]}%</b>'
+                f'<i>평균 {pc(x["평균"])} · 중앙 {pc(x["중앙"])}</i><em>{sub}</em></div>')
+    원 = 성.get("원칙") or {}
+    성적 = ('<div class="fr-sc"><p class="fr-h">📊 지금까지 성적'
+            f'<span>정리된 거래 {원.get("건수", 0)}건 · 진행 중 {성.get("진행", 0)}건</span></p>'
+            '<div class="fr-sg">'
+            + 칸("원칙대로", "20봉 최저 이탈 손절 · 30봉 정리", 원)
+            + 칸("참고: 절반 익절", "+10%에서 절반 익절 → 나머지 본전 손절", 성.get("참고"))
+            + '</div>'
+            f'<p class="fr-n">※ {md(fr.get("백필기준"))} 이전 60거래일 신호는 과거 차트로 «되짚어 본» 기록이에요. '
+            + (f'실시간으로 쌓인 것만 보면 {성["원칙_실시간"]["건수"]}건 · 승률 {성["원칙_실시간"]["승률"]}%.'
+               if 성.get("원칙_실시간") else '실시간 기록은 오늘부터 쌓여요.') + '</p></div>')
+    def 줄(t, live=True):
+        끝 = t.get("상태") != "진행"
+        return ('<div class="fr-tr">'
+                f'<span class="n">{t["종목명"]}</span>'
+                f'<span class="d">{md(t["신호일"])}' + (f'→{md(t.get("종료일"))}' if 끝 else f' · {t.get("경과", 0)}/30봉') + '</span>'
+                f'<span class="r">{pc(t.get("수익"))}</span>'
+                + (f'<span class="x">{"🛑손절" if t["상태"] == "손절" else "⏱30봉"} · 참고 {pc(t.get("참고수익"))}</span>' if 끝
+                   else f'<span class="x">최고 {pc(t.get("최고"))} · 손절선까지 {t.get("손절거리", 0):.0f}%</span>')
+                + '</div>')
+    진 = fr.get("진행") or []
+    종 = fr.get("최근종료") or []
+    목록 = ((f'<details class="fr-fd"><summary>⏳ 진행 중 {len(진)}건 보기 ▾</summary>'
+            + "".join(줄(t) for t in 진) + '</details>') if 진 else "") +            ((f'<details class="fr-fd"><summary>✅ 최근 정리된 {len(종)}건 보기 ▾</summary>'
+            + "".join(줄(t) for t in 종) + '</details>') if 종 else "")
+    조건 = ('<details class="fr-fd"><summary>📖 조건 보기 ▾</summary><div class="fr-cd">'
+           '<p>둘 중 <b>하나만</b> 맞아도 신호예요 · 공통: <b>시총 1조↑</b>, ETF·스팩·우선주 제외</p>'
+           '<table><tr><th></th><th>단기형</th><th>중기형</th></tr>'
+           '<tr><td>캔들</td><td>양봉 · 종가가 10봉 중 최고(같아도 됨) · 종가가 그날 고저 중간 위</td>'
+           '<td>양봉 · 종가가 20봉 중 최고(같아도 됨) · 종가가 그날 고저 중간 위</td></tr>'
+           '<tr><td>거래량</td><td>직전 10봉 평균의 2배↑</td><td>직전 20봉 평균의 2배↑</td></tr>'
+           '<tr><td>배열</td><td>60선 &gt; 30선·10선</td><td>120선 &gt; 60선·20선</td></tr>'
+           '<tr><td>기울기</td><td>30선 ↓ · 10선 ↑</td><td>60선 ↓ · 20선 ↑</td></tr>'
+           '<tr><td>이격</td><td>10선이 60선보다 7%↓</td><td>20선이 120선보다 7%↓</td></tr></table>'
+           '<p>🛑 <b>클리어</b> — 신호 전 20봉의 최저가를 종가로 깨면 정리, 아니면 30봉째 종가로 정리.</p>'
+           '<p>⚠️ 추천이 아니에요. 같은 규칙으로 모든 신호를 끝까지 추적해 성적을 그대로 공개해요.</p>'
+           '</div></details>')
+    return ('<div class="fr">'
+            '<p class="fr-ld">오래 눌려 있던 대형주가 <b>거래량을 싣고 처음 고개를 든 날</b>을 잡아요. '
+            '바닥을 맞히려는 게 아니라, <b>내려가던 흐름이 꺾이는 첫날</b>이에요.</p>'
+            + 오늘 + 성적 + 목록 + 조건 + '</div>')
+
+
 # 🛬 포착 그 후 — 레이더 성능 공시 (2026-08-24 신설, HO 지시)
 # ══════════════════════════════════════════════════════════════
 #  왜 만드나 — 종목을 골라주는 서비스는 널렸지만 **자기 성적을 매일 공개하는
@@ -11919,6 +11999,9 @@ def build_core(핵심편, data, 해석):
                f'🧲 오늘 매집 종목</p>'
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
+             # 🌅 2026-10-05 HO — 새 기법 «오늘 첫 반등»: 매집 종목 밑 · 포착 그 후 위
+             + f'<p class="sec-label"><small>반등 기법 · 시총 1조↑</small>🌅 오늘 첫 반등</p>'
+             + build_first_rebound(data)
              # 🔴 2026-09-30 HO «포착 탭에서 종목 결과를 보는 챕터 어디 갔어?» — 9/12에 성적표 탭째 가렸던
              #   「🛬 레이더는 잘 잡았나(포착 그 후)」를 포착 탭으로 옮겨 되살린다. (어제 채점표는 계속 숨김)
              + f'<p class="sec-label"><small>포착 그 후 · 1차 포착만</small>🛬 레이더는 잘 잡았나</p>'
@@ -18711,6 +18794,41 @@ THEME_V17_CSS = """
 .jd-h{margin:0 0 8px;font-size:13px;font-weight:800;color:#e2e7ee;
   display:flex;align-items:baseline;gap:7px}
 .jd-h span{margin-left:auto;font-size:9.5px;font-weight:700;color:#6f7784}
+/* 🌅 오늘 첫 반등 (2026-10-05) */
+.fr{background:linear-gradient(160deg,#2a2013,#17130d);border:1.5px solid #5a4523;border-radius:14px;padding:13px 13px 11px;margin:6px 0 14px}
+.fr-ld{margin:0 0 8px;font-size:12px;line-height:1.65;color:#cfc6b6}
+.fr-ld b{color:#ffc979}
+.fr-row{padding:10px 11px;margin-top:7px;background:rgba(14,10,6,.6);border-radius:9px;border-left:3px solid #ffc979}
+.fr-tg{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font-size:10.5px;color:#b9ad97}
+.fr-tg span{white-space:nowrap}
+.fr-tg .re{color:#8fd0e8}
+.fr-st{margin:4px 0 0;font-size:11.3px;color:#c9ced6;line-height:1.6}
+.fr-st b{color:#e8eaee}
+.fr-none{margin:4px 0;font-size:12px;color:#9aa3b1}
+.fr-sc{margin-top:11px;padding-top:9px;border-top:1px solid #3a2f1d}
+.fr-h{margin:0 0 7px;font-size:13px;font-weight:800;color:#f2e6cf;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+.fr-h span{margin-left:auto;font-size:10px;font-weight:600;color:#9a8f7b}
+.fr-sg{display:flex;gap:6px}
+.fr-sg>div{flex:1;min-width:0;padding:7px 8px;background:rgba(10,8,5,.55);border:1px solid #3a2f1d;border-radius:9px;display:flex;flex-direction:column;gap:2px}
+.fr-sg span{font-size:10.5px;color:#ffc979;font-weight:800}
+.fr-sg b{font-size:15px;color:#f2f4f7}
+.fr-sg i{font-style:normal;font-size:10.5px;color:#c9ced6}
+.fr-sg em{font-style:normal;font-size:9.5px;color:#8b8475;line-height:1.4}
+.fr-n{margin:6px 0 0;font-size:10px;color:#8b8475;line-height:1.55}
+.fr-fd{margin-top:8px}
+.fr-fd>summary{cursor:pointer;font-size:11.5px;font-weight:700;color:#e0c890;list-style:none}
+.fr-fd>summary::-webkit-details-marker{display:none}
+.fr-tr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"n r" "d x";gap:1px 8px;padding:6px 2px;border-bottom:1px solid #2a2418;font-size:11px}
+.fr-tr .n{grid-area:n;font-weight:800;color:#eef1f5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fr-tr .r{grid-area:r;text-align:right}
+.fr-tr .d{grid-area:d;color:#8b93a0}
+.fr-tr .x{grid-area:x;color:#9aa3b1;text-align:right;font-size:10px}
+.fr-cd{margin-top:6px;font-size:11px;color:#c9ced6;line-height:1.6}
+.fr-cd p{margin:4px 0}
+.fr-cd table{width:100%;border-collapse:collapse;font-size:10.5px;table-layout:fixed}
+.fr-cd th,.fr-cd td{border:1px solid #3a2f1d;padding:4px 5px;vertical-align:top;text-align:left}
+.fr-cd th{color:#ffc979}
+.fr-cd td:first-child{width:46px;color:#9a8f7b;font-weight:700}
 /* 🔴 2026-10-04 HO «판단 탭 챕터명이 작다 — 다른 챕터(15.5px)와 같게». 접힌 칸 안 소제목은 그대로 */
 .jd-wrap .jd-h,.jd-wrap .my-h{font-size:15.5px;line-height:1.35}
 .jd-wrap details .jd-h{font-size:13px}
