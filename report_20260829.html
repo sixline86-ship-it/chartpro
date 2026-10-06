@@ -3727,7 +3727,7 @@ function toggleTV(id,el){
   if(see) see.textContent = open ? '접기 ▴' : '보기 ▾';
 }
 </script>
-<script>/*CP_ARCHLIVE*/(function(){try{
+<script>/*CP_ARCHLIVE2*/(function(){try{
 var WD=["일","월","화","수","목","금","토"];
 var grid=document.querySelector(".arch-grid");if(!grid||!window.fetch)return;
 var me=(/report_(\d{8})\.html/.exec(location.pathname)||[])[1]||"";
@@ -3744,11 +3744,14 @@ fetch("index.html?cparch="+Date.now(),{cache:"no-store"}).then(function(r){retur
  var add=all.filter(function(d){return !have[d]&&d>top;});
  for(var i=add.length-1;i>=0;i--){var a=document.createElement("a");a.className="arch-link";
   a.href="report_"+add[i]+".html";a.textContent=lab(add[i]);have[add[i]]=a;grid.insertBefore(a,grid.firstChild);}
- Object.keys(have).forEach(function(k){var a=have[k];
-  if(k===newest){a.classList.add("arch-today");a.style.borderColor="#e0c060";a.style.color="#ffd66b";a.style.fontWeight="800";
-   if(k!==me)a.textContent="최신 "+lab(k);}
-  else if(k===me){a.classList.remove("arch-today");a.textContent="보는 중 "+lab(k);a.style.borderStyle="dashed";a.style.fontWeight="800";}
-  else if(a.classList.contains("arch-today")){a.classList.remove("arch-today");a.textContent=lab(k);}});
+ if(!me||!have[me])me=newest;
+ Object.keys(have).forEach(function(k){var a=have[k];a.classList.remove("arch-today");a.removeAttribute("aria-current");
+  a.style.borderColor="";a.style.borderStyle="";a.style.color="";a.style.fontWeight="";a.style.background="";
+  if(k===me){a.classList.add("arch-today");a.setAttribute("aria-current","page");
+   a.style.borderColor="#e0c060";a.style.color="#ffd66b";a.style.fontWeight="800";a.style.background="rgba(255,214,107,.16)";
+   a.textContent=(k===newest?"최신 ":"보는 중 ")+lab(k);}
+  else if(k===newest){a.textContent="최신 "+lab(k);a.style.fontWeight="800";}
+  else a.textContent=lab(k);});
  var hd=document.querySelector(".arch-head");
  if(hd&&add.length)hd.innerHTML=hd.innerHTML.replace(/지난 리포트 \d+개/,"지난 리포트 "+Object.keys(have).length+"개");
 }).catch(function(){});
