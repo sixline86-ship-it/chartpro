@@ -10584,9 +10584,11 @@ def _cap_card(일수, 시장):
 #   화면: 오늘 신호 → 성적(원칙 vs 참고) → 진행 중 → 최근 정리 → 📖 조건
 #   ⚠️ 추천이 아니다. 성적은 «클리어된 거래»만 센다(진행 중은 따로).
 # ══════════════════════════════════════════════════════════════
-def build_first_rebound(data):
+def build_first_rebound(data, part="main"):
     fr = (data or {}).get("첫반등")
     if not isinstance(fr, dict):
+        if part == "score":
+            return ""
         return ('<div class="fr"><p class="fr-none">🌅 첫 반등 기록은 다음 거래일 수집부터 쌓여요.</p></div>')
     md = lambda d: f"{d[4:6]}/{d[6:]}" if d else ""
     pc = lambda v: (f'<b style="color:{"#ff6b4a" if v >= 0 else "#5b9bff"}">{v:+.1f}%</b>'
@@ -10631,6 +10633,8 @@ def build_first_rebound(data):
             f'· {md(fr.get("백필기준"))} 이전 60거래일 신호는 과거 차트로 «되짚어 본» 기록이에요. '
             + (f'실시간 기록만 보면 D+5 {실["건수"]}건 · 승률 {실["승률"]}%.' if 실 else '실시간 기록은 오늘부터 쌓여요.')
             + '</p></div>')
+    if part == "score":
+        return f'<div class="fr fr-scw">{성적.replace("📊 신호 뒤 기간별 수익", "🌅 오늘 첫 반등 — 신호 뒤 기간별 수익", 1)}</div>'
     def 줄(t):
         끝 = t.get("상태") != "유지"
         g = t.get("기간") or {}
@@ -10665,7 +10669,8 @@ def build_first_rebound(data):
     return ('<div class="fr">'
             '<p class="fr-ld">오래 눌려 있던 대형주가 <b>거래량을 싣고 처음 고개를 든 날</b>을 잡아요. '
             '바닥을 맞히려는 게 아니라, <b>내려가던 흐름이 꺾이는 첫날</b>이에요.</p>'
-            + 오늘 + 성적 + 목록 + 조건 + '</div>')
+            + 오늘 + 목록 + 조건 + '</div>')
+    # 🔴 2026-10-06 HO «첫 반등 밑 결과표는 '레이더는 잘 잡았나'로 내려줘» — part="score"면 성적표만 따로 낸다.
 
 
 # 🛬 포착 그 후 — 레이더 성능 공시 (2026-08-24 신설, HO 지시)
@@ -10808,7 +10813,7 @@ def _catch_card(rows, lo, hi, 이름):
             f'<p class="cg-ext">🏆 {hn} {hv:+.1f}% · 💀 {ln} {lv:+.1f}%</p></div>')
 
 
-def _catch_compare(돈몰림, V반등, 매집, lo, hi):
+def _catch_compare(돈몰림, V반등, 매집, lo, hi, 첫반등=None):
     """세 기법의 **시장 대비 성적**을 한 그래프에 나란히.
 
     🆕 2026-08-26 HO 지시 — "두 개의 데이터를 쌓아주고 시장 대비 그래프로 그려줘".
@@ -10821,7 +10826,8 @@ def _catch_compare(돈몰림, V반등, 매집, lo, hi):
     항목 = []
     for rows, 이름, 색 in ((돈몰림, "돈이 몰림", "#f0c65a"),
                           (V반등, "V자 반등", "#74f0d4"),
-                          (매집, "조용히 모으는 손", "#8fd0e8")):
+                          (매집, "조용히 모으는 손", "#8fd0e8"),
+                          (첫반등 or [], "오늘 첫 반등", "#ffc979")):
         st = _catch_stat(rows, lo, hi)
         if st["부족"] or st.get("초과") is None:
             continue
@@ -10857,7 +10863,7 @@ def _catch_compare(돈몰림, V반등, 매집, lo, hi):
               f'fill="#6f7784">{n}종목</text>')
     최고 = max(항목, key=lambda x: x[2])
     _최고색 = "#ff6b4a" if 최고[2] >= 0 else "#5b9bff"
-    return (f'<div class="cg-cmp"><p class="cg-cmp-h">📊 세 기법, 시장 대비로 비교하면</p>'
+    return (f'<div class="cg-cmp"><p class="cg-cmp-h">📊 기법별, 시장 대비로 비교하면</p>'
             f'<svg viewBox="0 0 {W} {H}" style="width:100%;height:auto">{g}</svg>'
             f'<p class="cg-cmp-n">'
             f'<b style="color:#ff6b4a">빨강(오른쪽)</b>은 같은 기간 시장보다 나았다는 뜻이고, '
@@ -10880,6 +10886,9 @@ def build_catch_after(data):
         return [t for t in rows if 키 in (t.get("유형들") or [])]
     돈몰림 = _유형필터(_강세전체, "돈이 몰린 종목")
     V반등 = _유형필터(_강세전체, "V자 반등 종목")
+    # 🆕 2026-10-06 HO «레이더는 잘 잡았나에 '첫 반등'도 넣어줘» — 같은 칸(경과 구간·현재 수익·코스피 대비)으로 잰다.
+    첫반등 = [t for t in (((data or {}).get("첫반등") or {}).get("추적") or [])
+             if isinstance(t.get("이후등락"), (int, float)) and isinstance(t.get("경과"), int)]
     if not 매집 and not _강세전체:
         return ""
     탭, 패널 = "", ""
@@ -10898,7 +10907,8 @@ def build_catch_after(data):
         본문 = (_catch_card(돈몰림, lo, hi, "💰 돈이 몰림(강세)")
               + _catch_card(V반등, lo, hi, "📈 V자 반등(전환)")
               + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)")
-              + _catch_compare(돈몰림, V반등, 매집, lo, hi))
+              + _catch_card(첫반등, lo, hi, "🌅 오늘 첫 반등(반등)")
+              + _catch_compare(돈몰림, V반등, 매집, lo, hi, 첫반등))
         패널 += (f'<div class="cg-panel" data-n="{n}" '
                  f'style="display:{"block" if i == 0 else "none"}">{본문}</div>')
     # 🆕 2026-08-25 HO 지시 — 탭 라벨은 «5일»인데 실제로는 5~10일 구간이다.
@@ -12019,6 +12029,7 @@ def build_core(핵심편, data, 해석):
              #   「🛬 레이더는 잘 잡았나(포착 그 후)」를 포착 탭으로 옮겨 되살린다. (어제 채점표는 계속 숨김)
              + f'<p class="sec-label"><small>포착 그 후 · 1차 포착만</small>🛬 레이더는 잘 잡았나</p>'
              + build_catch_after(data)
+             + build_first_rebound(data, "score")      # 🌅 2026-10-06 — 첫 반등 기간별 수익표는 여기(포착 그 후)로
              # 🔴 HO 지시 2026-09-12 — 공시는 「포착」 맨 아래.
              #    [왜] 공시도 «우리가 골라낸 것»이다. 내 종목(구독자가 담은 것)과
              #    성격이 다르다. 다만 매일 보는 것은 아니라 맨 아래에 둔다.
@@ -15753,7 +15764,7 @@ def build_money_flow_theme():
     #     · ▲ = 문턱을 넘은 날(선 아래) · ▼ = 문턱 아래로 떨어진 날(선 위)
     S = [{n: s for n, s in (rk.get(d) or [])} for d in ds]
     thr = [((rk.get(d) or [])[9][1] if len(rk.get(d) or []) >= 10 else None) for d in ds]
-    W, L, Rr, T, B_ = 340, 6, 228, 10, 190
+    W, L, Rr, T, B_ = 340, 6, 222, 10, 170
     vals = [v for i in range(len(ds)) for n in top + out for v in [S[i].get(n)] if v is not None] + [t for t in thr if t]
     lo, hi = (min(vals), max(vals)) if vals else (0, 1)
     lo = max(0, lo - (hi - lo) * .04); sp = (hi - lo) or 1
@@ -15794,43 +15805,121 @@ def build_money_flow_theme():
     _g = lambda n: (S[-1].get(n) or 0) - (S[-4].get(n) or 0) if len(ds) >= 4 else 0
     hot = dict(sorted(hot.items(), key=lambda kv: -_g(kv[0]))[:3])
     out_all = list(out)
-    out = sorted(out, key=lambda n: _g(n))[:2]
-    order = [n for n in top if n not in hot] + list(out) + list(hot)
+    out = sorted(out, key=lambda n: _g(n))[:3]
+    # 🔴 2026-10-06 (5차) HO «선 그래프 하나로, 돈이 들어오고 나간 테마만 — 화살표로.»
+    #   → 그림에는 «들어온 테마(빨강 ↗)»와 «빠진 테마(파랑 ↘)»만 남긴다. 나머지 10위권은 그리지 않는다.
+    #   눈금도 이 선들에 맞춰 다시 잡는다(안 그리는 테마 때문에 공간을 낭비하지 않게).
+    _shown = list(hot) + list(out)
+    vals = [v for i in range(len(ds)) for n in _shown for v in [S[i].get(n)] if v is not None] + [t for t in thr if t]
+    lo, hi = (min(vals), max(vals)) if vals else (0, 1)
+    _pad = (hi - lo) * .06
+    lo, hi = lo - _pad, hi + _pad
+    sp = (hi - lo) or 1
+    sv = [f'<defs>'
+          f'<marker id="mfa-in" viewBox="0 0 8 8" refX="5" refY="4" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">'
+          f'<path d="M0,0 L8,4 L0,8 z" fill="{TM_HOT}"/></marker>'
+          f'<marker id="mfa-out" viewBox="0 0 8 8" refX="5" refY="4" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">'
+          f'<path d="M0,0 L8,4 L0,8 z" fill="{TM_DOWN}"/></marker></defs>']
+    _tp = " ".join(f"{X(i):.1f},{Y(t):.1f}" for i, t in enumerate(thr) if t)
+    sv.append(f'<polyline points="{_tp}" fill="none" stroke="#e0c060" stroke-width="1.2" stroke-dasharray="4 3" opacity=".85"/>')
+    if thr and thr[0]:
+        sv.append(f'<text x="{L + 2}" y="{Y(thr[0]) - 4:.1f}" font-size="8.5" fill="#e0c060">10위 문턱</text>')
+    for i, d in enumerate(ds):
+        if i in (0, len(ds) - 1) or i % 3 == 0:
+            sv.append(f'<text x="{X(i):.1f}" y="{B_ + 16}" font-size="8.5" fill="{"#ffc93c" if i == len(ds) - 1 else "#6f7a8b"}" '
+                      f'text-anchor="{"start" if i == 0 else "middle"}">{md(d)}</text>')
+    order = list(out) + list(hot)
     for n in order:
-        c = TM_HOT if n in hot else (TM_DOWN if n in out else "#5d6878")
-        w_ = 2.2 if (n in hot or n in out) else 1.1
-        op = 1 if (n in hot or n in out) else .55
-        for sg in segs(n):
+        c = TM_HOT if n in hot else TM_DOWN
+        _sg = segs(n)
+        for k_, sg in enumerate(_sg):
+            _mk = (f' marker-end="url(#{"mfa-in" if n in hot else "mfa-out"})"' if k_ == len(_sg) - 1 else "")
             sv.append(f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in sg)}" fill="none" stroke="{c}" '
-                      f'stroke-width="{w_}" stroke-opacity="{op}" stroke-linejoin="round"/>')
+                      f'stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"{_mk}/>')
         if n in hot:
             i = hot[n]; y = Y(S[i][n])
-            sv.append(f'<text x="{X(i):.1f}" y="{y + 12:.1f}" font-size="9" fill="{TM_HOT}" text-anchor="middle">▲</text>')
-        if n in out and S[-1].get(n) is not None:
-            y = Y(S[-1][n])
-            sv.append(f'<text x="{X(len(ds) - 1):.1f}" y="{y - 5:.1f}" font-size="9" fill="{TM_DOWN}" text-anchor="middle">▼</text>')
+            sv.append(f'<circle cx="{X(i):.1f}" cy="{y:.1f}" r="3" fill="{TM_HOT}" stroke="#0d141c" stroke-width="1"/>')
+    # 🔴 2026-10-06 (4차) HO «선은 유지하되 너무 정신없다 — 가장 좋은 방법을 찾아줘.»
+    #   [진단] 선 12개를 한 판에 겹치면 색을 줄여도 «어느 선이 어느 테마인지»를 눈으로 따라가야 한다.
+    #   [해법] «작은 그림 여러 장»(스파크라인 표). 테마마다 자기 줄에 자기 선 하나 — 겹침 0.
+    #     · 모든 줄이 «같은 눈금»이라 줄끼리 높이를 그대로 비교할 수 있다.
+    #     · 노란 점선(10위 문턱)이 줄마다 있어, 선이 점선 위로 올라온 날 = 10위 안.
+    #     · 이름은 줄 왼쪽에 고정 — 선을 따라가며 이름을 찾을 필요가 없다.
+    SW, SH, SP = 200, 34, 3
+    def sx(i):
+        return SP + (SW - 2 * SP) * i / (len(ds) - 1)
+    def sy(v):
+        return SP + (SH - 2 * SP) * (hi - v) / sp
+    def spark(n, c, w_):
+        g = ""
+        tp = " ".join(f"{sx(i):.1f},{sy(t):.1f}" for i, t in enumerate(thr) if t)
+        g += f'<polyline points="{tp}" fill="none" stroke="#e0c060" stroke-width=".9" stroke-dasharray="3 2" opacity=".7"/>'
+        cur = []
+        for i in range(len(ds) + 1):
+            v = S[i].get(n) if i < len(ds) else None
+            if v is None:
+                if len(cur) > 1:
+                    g += (f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in cur)}" fill="none" '
+                          f'stroke="{c}" stroke-width="{w_}" stroke-linejoin="round" stroke-linecap="round"/>')
+                cur = []
+            else:
+                cur.append((sx(i), sy(v)))
+        if n in hot:
+            i = hot[n]
+            g += f'<circle cx="{sx(i):.1f}" cy="{sy(S[i][n]):.1f}" r="2.4" fill="{TM_HOT}"/>'
+        v = S[-1].get(n)
+        if v is not None:
+            g += f'<circle cx="{sx(len(ds) - 1):.1f}" cy="{sy(v):.1f}" r="2.6" fill="{c}" stroke="#0d141c" stroke-width="1"/>'
+        return f'<svg viewBox="0 0 {SW} {SH}" preserveAspectRatio="none" class="mfs-g">{g}</svg>'
+    def srow(n, kind):
+        r_ = next((k + 1 for k, (m, _s) in enumerate(rk.get(ds[-1]) or []) if m == n), None)
+        y_ = R[-2].get(n)
+        if kind == "out":
+            c, w_ = TM_DOWN, 1.8
+        elif n in hot:
+            c, w_ = TM_HOT, 2
+        else:
+            c, w_ = "#8b95a5", 1.4
+        nm = n.split("(")[0].strip()
+        mv = ""
+        if y_ and r_ and y_ != r_:
+            d_ = y_ - r_
+            mv = f'<em style="color:{TM_HOT if d_ > 0 else TM_DOWN}">{"▲" if d_ > 0 else "▼"}{abs(d_)}</em>'
+        elif r_ and not y_:
+            mv = f'<em style="color:{TM_NEW}">새로</em>'
+        return (f'<div class="mfs-r {kind}{" hot" if n in hot else ""}"><span class="mfs-n">{nm}</span>{spark(n, c, w_)}'
+                f'<span class="mfs-k"><b>{r_ if r_ else "–"}위</b>{mv}</span></div>')
+    grid = ('<div class="mfs"><div class="mfs-r hd"><span class="mfs-n"></span>'
+            f'<span class="mfs-d"><i>{md(ds[0])}</i><i>{md(ds[len(ds) // 2])}</i><i class="t">{md(ds[-1])}</i></span>'
+            '<span class="mfs-k">오늘</span></div>'
+            + "".join(srow(n, "in") for n in top)
+            + (('<p class="mfg-sep">오늘 10위권에서 빠진 테마</p>' + "".join(srow(n, "out") for n in out_all)) if out_all else "")
+            + '</div>')
     labs = []
-    for n in top + out:
+    for n in list(hot) + list(out):
         v = S[-1].get(n)
         if v is None:
             continue
         r_ = next((k + 1 for k, (m, _s) in enumerate(rk.get(ds[-1]) or []) if m == n), None)
-        c = TM_HOT if n in hot else (TM_DOWN if n in out else "#9aa3b1")
-        labs.append([Y(v), n, c, r_])
+        labs.append([Y(v), n, TM_HOT if n in hot else TM_DOWN, r_])
     labs.sort()
     for i in range(1, len(labs)):
-        if labs[i][0] - labs[i - 1][0] < 10.5:
-            labs[i][0] = labs[i - 1][0] + 10.5
+        if labs[i][0] - labs[i - 1][0] < 12:
+            labs[i][0] = labs[i - 1][0] + 12
     for y, n, c, r_ in labs:
         y0 = Y(S[-1][n])
-        if abs(y - y0) > 2:                       # 이름이 밀려났으면 선 끝과 짧은 줄로 잇는다
-            sv.append(f'<line x1="{Rr + 1}" y1="{y0:.1f}" x2="{Rr + 5}" y2="{y:.1f}" stroke="{c}" stroke-width=".6" opacity=".7"/>')
+        if abs(y - y0) > 2:
+            sv.append(f'<line x1="{Rr + 4}" y1="{y0:.1f}" x2="{Rr + 9}" y2="{y:.1f}" stroke="{c}" stroke-width=".7" opacity=".8"/>')
         nm = n.split("(")[0].strip()
-        nm = nm if len(nm) <= 8 else nm[:7] + "…"
-        sv.append(f'<text x="{Rr + 6}" y="{y + 3:.1f}" font-size="8.8" font-weight="{800 if c != "#9aa3b1" else 500}" '
-                  f'fill="{c}">{r_}위 {nm}</text>')
-    _H = max(B_ + 22, (labs[-1][0] + 8) if labs else 0)
-    grid = f'<svg viewBox="0 0 {W} {_H:.0f}" style="width:100%;height:auto;display:block;margin:4px 0">{"".join(sv)}</svg>'
+        nm = nm if len(nm) <= 7 else nm[:6] + "…"
+        sv.append(f'<text x="{Rr + 11}" y="{y + 3.5:.1f}" font-size="9.6" font-weight="800" fill="{c}">'
+                  f'{"↗" if c == TM_HOT else "↘"} {nm} {r_}위</text>')
+    _H = max(B_ + 22, (labs[-1][0] + 9) if labs else 0)
+    # 🔴 5차 — 스파크라인 표(grid 위)는 접어 두지 않고 버린다: HO가 «원래 선 그래프 하나»를 골랐다.
+    grid = (f'<svg viewBox="0 0 {W} {_H:.0f}" style="width:100%;height:auto;display:block;margin:4px 0">{"".join(sv)}</svg>'
+            f'<p class="mf3-lg2"><span style="color:{TM_HOT}">↗ 돈이 들어온 테마</span> — 최근 3일 안에 10위 문턱을 넘음 · '
+            f'<span style="color:{TM_DOWN}">↘ 돈이 빠진 테마</span> — 오늘 10위권에서 빠짐 · '
+            f'<span style="color:#e0c060">점선</span> = 10위 문턱</p>')
     # 한 줄 요약 — 5일 새 가장 크게 올라온 테마 + 오늘 손바뀜
     mv = []
     for n in top:
@@ -15854,15 +15943,15 @@ def build_money_flow_theme():
           + (f'<br><span style="color:{TM_DOWN}">빠짐</span> {" · ".join(sh(n) for n in out_all)}'
              f' → <span style="color:{TM_HOT}">들어옴</span> {" · ".join(sh(n) for n in 들)}' if (out_all or 들) else ''))
     return ('<div class="mf3"><p class="mf3-h">🌊 돈의 이동 경로 · 테마 10일<span>선 = 테마의 힘 · 점선 = 10위 문턱</span></p>'
-            + (f'<p class="mf3-sum">🚀 최근 3일 안에 10위 문턱을 넘은 테마 — {올}</p>' if 올 else '')
+            + (f'<p class="mf3-sum">↗ 돈이 들어온 테마 — {올}</p>' if 올 else '')
             + f'<p class="mf3-sw">{sw}</p>'
             + grid
             + '<details class="mf3-leg"><summary><b>표시 설명</b> ▾</summary>'
-              '· 선 하나 = 테마 하나의 <b>힘</b> — 레이더 순위를 정하는 값(최근 4일 합산)이에요. 위로 갈수록 세요<br>'
-              '· <b style="color:#e0c060">노란 점선</b> = 그날 <b>10위 문턱</b>(10위 테마의 힘). 선이 이 위면 10위 안이에요<br>'
-              f'· <b style="color:{TM_HOT}">빨강</b> = 최근 3일 안에 문턱을 넘어 들어온 테마(▲ = 넘은 날) · '
-              f'<b style="color:{TM_DOWN}">파랑</b> = 오늘 문턱 아래로 빠진 테마(▼) · 회색 = 원래 10위 안<br>'
-              '· 오른쪽 = 오늘 순위와 테마 이름</details></div>')
+              '· 선 = 테마의 <b>힘</b>(레이더 순위를 정하는 값, 최근 4일 합산). 위로 갈수록 세요<br>'
+              '· <b style="color:#e0c060">노란 점선</b> = 그날 <b>10위 문턱</b>. 선이 점선 위면 그날 10위 안이에요<br>'
+              f'· <b style="color:{TM_HOT}">↗ 빨간 선</b> = 돈이 들어온 테마 — 최근 3일 안에 문턱을 넘은 것 중 힘이 가장 크게 는 3개(빨간 점 = 넘은 날)<br>'
+              f'· <b style="color:{TM_DOWN}">↘ 파란 선</b> = 돈이 빠진 테마 — 오늘 10위권에서 빠진 것 중 힘이 가장 크게 준 3개<br>'
+              '· 나머지 10위권 테마는 그리지 않아요(레이더에 있어요)</details></div>')
 
 
 def build_money_flow_v3():
@@ -18209,6 +18298,45 @@ def _sector_themes_by_score(data):
     return out
 
 
+_SEC_UP_CACHE = {}
+
+
+def _sec_up_spark(sec, up_today, n_today):
+    """🆕 2026-10-06 HO «섹터 안 오른 종목 수가 느는지 주는지 5일 선으로 간단하게.»
+    archive 계좌격자.행(섹터별 확산도·종목수)에서 최근 5거래일 «오른 종목 수»를 꺼내 작은 선으로."""
+    if "m" not in _SEC_UP_CACHE:
+        m = {}
+        try:
+            for ymd, d in archive_days(5):
+                for rr in ((d.get("계좌격자") or {}).get("행") or []):
+                    s = rr.get("테마"); n = rr.get("종목수") or 0
+                    if s and n:
+                        m.setdefault(s, {})[str(ymd)] = (round(n * (rr.get("확산도") or 0) / 100), n)
+        except Exception:
+            m = {}
+        _SEC_UP_CACHE["m"] = m
+    h = _SEC_UP_CACHE["m"].get(sec) or {}
+    ds = sorted(h)[-5:]
+    pts = [h[d][0] / h[d][1] * 100 for d in ds if h[d][1]]
+    if len(pts) < 3:
+        return ""
+    W, H, P = 96, 26, 3
+    lo, hi = 0, 100
+    X = lambda i: P + (W - 2 * P) * i / (len(pts) - 1)
+    Y = lambda v: P + (H - 2 * P) * (hi - v) / (hi - lo)
+    up = pts[-1] >= pts[0] + 5
+    dn = pts[-1] <= pts[0] - 5
+    c = TM_HOT if up else (TM_DOWN if dn else "#9aa3b1")
+    poly = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(pts))
+    dots = "".join(f'<circle cx="{X(i):.1f}" cy="{Y(v):.1f}" r="{2.6 if i == len(pts) - 1 else 1.6}" fill="{c}"/>'
+                   for i, v in enumerate(pts))
+    말 = ("늘어나는 중" if up else ("줄어드는 중 — 끝물 신호일 수 있어요" if dn else "비슷"))
+    return (f'<div class="tm-s5"><svg viewBox="0 0 {W} {H}" width="{W}" height="{H}">'
+            f'<line x1="{P}" x2="{W - P}" y1="{Y(50):.1f}" y2="{Y(50):.1f}" stroke="#56647a" stroke-width="1.1" stroke-dasharray="3 3"/>'
+            f'<polyline points="{poly}" fill="none" stroke="{c}" stroke-width="1.8" stroke-linejoin="round"/>{dots}</svg>'
+            f'<span>종목 상승 추이</span></div>')   # 🔴 2026-10-06 HO — 글은 이것만
+
+
 def build_sector_theme(data):
     """섹터 순위(중앙값) × 그 안의 강한 테마 — 2축 분류.
 
@@ -18315,10 +18443,11 @@ def build_sector_theme(data):
     def 섹터줄(r):
         ts = "".join(테마줄(t) for t in r["ts"]) or \
              '<div class="tm-tnone">상위 20위 내 소속 테마 없음</div>'
+        _sp5 = _sec_up_spark(r["sec"], r["up"], r["n"])
         _rk = (f'<span class="tm-srk"><em>섹터</em>{r["_i"]}위</span>' if r["_i"]
                else '<span class="tm-srk sm"><em>섹터</em>참고</span>')
         return (f'<div class="tm-row"><div class="tm-sh">{_rk}'
-                f'<span class="tm-snm">{r["sec"]}</span></div>'
+                f'<span class="tm-snm">{r["sec"]}</span>{_sp5}</div>'
                 + (f'<div class="tm-smw">⚠️ {r["n"]}종목뿐이라 순위에서 뺐어요 — 몇 종목만 올라도 1등처럼 보여요</div>'
                    if not r["_i"] else '')
                 + f'<div class="tm-cyw">{주기문(r)}</div>'
@@ -18331,9 +18460,13 @@ def build_sector_theme(data):
     # ⚠️ 이모지는 «Emoji 12.0 이하»만 쓴다.
     #    🪨(U+1FAA8)는 Emoji 14.0(2021)이라 구형 안드로이드에서 두부(□)로 뜬다.
     #    같은 이유로 🫧 🩵 🪄 같은 최신 이모지도 쓰지 않는다.
-    GM = [("주도", "🔥 주도 섹터", TM_HOT,  "섹터가 통째로 오르고 10위권 테마 보유 — 스윙 가능"),
-          ("단타", "⚡ 단타 섹터", "#e0c060", "섹터는 약한데 테마만 강하다 — 짧게만"),
-          ("추격", "🌱 추격 섹터", TM_COOL, "섹터는 오르는데 테마가 아직 — 다음 후보"),
+    # 🔴 2026-10-06 HO 승인 — 이름·순서를 데이터에 맞춘다(8/31~10/2 실측: 테마가 먼저 뜨면 3일 안에
+    #   섹터가 따라온 비율 67% vs 기준 40% / 섹터가 먼저 올라도 테마가 따라온 비율은 기준과 같은 24%).
+    #   → «단타(짧게만)»는 실제로 가장 이른 자리 = 🔥 불씨. «추격(다음 후보)»은 근거 없음 = 🌫 덩달아.
+    #   읽는 순서: 불씨 → 주도 → 덩달아 → 눌림 → 대기. (내부 키 단타/추격은 그대로 둔다)
+    GM = [("단타", "🔥 불씨 섹터", "#e0c060", "테마가 먼저 떴다 — 섹터가 따라오는지 보세요"),
+          ("주도", "👑 주도 섹터", TM_HOT,  "섹터가 통째로 오르고 10위권 테마도 있다 — 불이 번진 자리"),
+          ("추격", "🚶 따라 오른 섹터", TM_COOL, "섹터만 올랐다 — 이끄는 테마는 아직 없어요"),   # 2026-10-06 HO 확정
           ("눌림", "⏸️ 눌림 섹터", "#c9a227", "뜰 때가 지났는데 잠잠하다"),
           ("대기", "😴 대기 섹터", "#5f6b7d", "움직임 없음")]
     # 🔴 HO 지적 2026-09-17 — "단타 섹터는 어디갔어?"
@@ -18345,8 +18478,8 @@ def build_sector_theme(data):
     #   ⚠️ 빈 구역은 한 줄로 접는다. 자리는 지키되 폭은 안 먹게.
     빈문구 = {
         "주도": "오늘은 섹터와 테마가 같이 뜬 곳이 없습니다",
-        "단타": "오늘은 섹터는 눌렸는데 테마만 뜬 곳이 없습니다",
-        "추격": "오늘은 섹터만 오르고 테마는 아직인 곳이 없습니다",
+        "단타": "오늘은 테마만 먼저 뜬 섹터가 없습니다",
+        "추격": "오늘은 테마 없이 섹터만 오른 곳이 없습니다",
         "눌림": "오늘은 주기가 지났는데 잠잠한 곳이 없습니다",
         "대기": "오늘은 조용한 섹터가 없습니다",
     }
@@ -18360,8 +18493,8 @@ def build_sector_theme(data):
             continue
         if k == "대기":
             inner = ('<div class="tm-wg">' + "".join(
-                f'<span class="tm-wc"><b>{r["_i"]}위</b> {r["sec"][:9]}'
-                f' <i>{r["score"]:.0f}점</i></span>' for r in v) + '</div>')
+                f'<span class="tm-wc"><b>{(str(r["_i"]) + "위") if r["_i"] else "참고"}</b> {r["sec"][:9]}'
+                f' <i>{r["up"]}/{r["n"]}</i></span>' for r in v) + '</div>')
         else:
             # 🔴 HO 지시 2026-09-17 — 소속 테마가 없는 섹터는 «더보기»로 접는다.
             #   [왜] 추격 섹터는 「섹터는 오르는데 테마가 아직」인 자리다.
@@ -18967,12 +19100,33 @@ THEME_V17_CSS = """
 .jd-h span{margin-left:auto;font-size:9.5px;font-weight:700;color:#6f7784}
 /* 2026-10-06 — 레이더 목록: 기사 먼저, 설명은 접힘 · 그림 설명 접힘 */
 .tm-srk.sm{opacity:.75}
+.tm-s5{display:flex;flex-direction:column;align-items:flex-end;gap:0;margin-left:auto;flex:none;align-self:flex-end;margin-top:6px;position:relative;top:10px}
+.tm-sh{flex-wrap:nowrap}
+.tm-s5 svg{flex:none}
+.tm-s5 span{font-size:9.5px;color:#8b95a5;line-height:1.2}
+.tm-s5 i{font-style:normal;color:#6f7784;font-size:9.5px}
 .tm-smw{margin:2px 0 4px;font-size:10.5px;color:#e0c060;line-height:1.5}
 .tm-ssc b{color:#eef1f5}
 .tm-pdsc{margin:2px 0 8px !important;font-size:11.5px;color:#b6bec9;line-height:1.6}
 .tm-dsc{margin:3px 0 2px}
 /* 🌊 돈의 이동 경로 · 테마 순위 칸 표 (2026-10-06) */
 .mfg{margin:6px 0 4px;font-variant-numeric:tabular-nums}
+/* 🌊 테마 스파크라인 표 (2026-10-06 4차) */
+.mfs{margin:6px 0 4px}
+.mf3-lg2{margin:2px 0 6px;font-size:10.5px;color:#8b95a5;line-height:1.55}
+.mfs-r{display:grid;grid-template-columns:minmax(0,82px) minmax(0,1fr) 46px;gap:6px;align-items:center;padding:3px 0;border-bottom:1px solid #151c26}
+.mfs-n{font-size:11px;font-weight:700;color:#dfe4ea;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mfs-r.hot .mfs-n{color:#ff8f75}
+.mfs-r.out .mfs-n{color:#8fb8ff}
+.mfs-g{display:block;width:100%;height:34px}
+.mfs-k{text-align:right;font-size:10.5px;line-height:1.15;color:#aab3c0;font-variant-numeric:tabular-nums}
+.mfs-k b{display:block;font-size:11px;color:#eef1f5}
+.mfs-k em{font-style:normal;font-size:9.5px;font-weight:700}
+.mfs-r.hd{border-bottom:1px solid #263142;padding:0 0 3px}
+.mfs-r.hd .mfs-k{font-size:9px;color:#6f7a8b}
+.mfs-d{display:flex;justify-content:space-between;font-size:8.5px;color:#6f7a8b}
+.mfs-d i{font-style:normal}
+.mfs-d i.t{color:#ffc93c;font-weight:800}
 .mfg-r{display:grid;grid-template-columns:minmax(0,78px) repeat(10,minmax(0,1fr));gap:2px;align-items:center;margin-bottom:2px}
 .mfg-n{font-size:10.5px;font-weight:700;color:#dfe4ea;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:3px}
 .mfg-r.out .mfg-n{color:#8fb8ff}
@@ -19004,6 +19158,7 @@ THEME_V17_CSS = """
 .fr-st b{color:#e8eaee}
 .fr-none{margin:4px 0;font-size:12px;color:#9aa3b1}
 .fr-sc{margin-top:11px;padding-top:9px;border-top:1px solid #3a2f1d}
+.fr-scw .fr-sc{margin-top:0;padding-top:0;border-top:0}
 .fr-h{margin:0 0 7px;font-size:13px;font-weight:800;color:#f2e6cf;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
 .fr-h span{margin-left:auto;font-size:10px;font-weight:600;color:#9a8f7b}
 .fr-tb{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
