@@ -7295,8 +7295,8 @@ def collect_first_rebound(계좌격자):
     except Exception:
         log = {}
     거래 = log.get("거래") or {}
-    for t in 거래.values():                       # D+30까지 다 못 잰 종목은 시총이 줄어도 계속 본다
-        if len(t.get("기간") or {}) < len(FR_PERIODS) and t["코드"] not in 대상:
+    for t in 거래.values():                       # 신호 뒤 80봉까지는 시총이 줄어도 계속 본다(포착 그 후 60~80일 칸까지)
+        if (t.get("경과") or 0) < 80 and t["코드"] not in 대상:
             대상[t["코드"]] = {"종목명": t["종목명"], "시장": t.get("시장"), "시총": None}
     if not 대상:
         print("  ⚠️ [첫 반등] 대상 종목이 없습니다(종목사전 비어 있음) — 건너뜀")
@@ -7322,6 +7322,7 @@ def collect_first_rebound(계좌격자):
         for key, t in 거래.items():
             if t["코드"] == code and t["신호일"] in D:
                 t.update(_fr_walk(D, H, L, C, D.index(t["신호일"]), 지수.get(info.get("시장") or t.get("시장"))))
+                t["갱신"] = DATE
                 for _k in ("수익", "참고수익", "절반익절"):      # 옛 칸 정리
                     t.pop(_k, None)
         시작 = len(C) - 1 - (FR_BACKFILL if 백필 else 3)   # 하루 빠진 날(실행 실패)도 3봉까지 되짚는다
@@ -7343,7 +7344,7 @@ def collect_first_rebound(계좌격자):
                 continue
             거래[key] = {"코드": code, "종목명": info["종목명"], "시장": info["시장"],
                        "시총": info["시총"], "신호일": D[i], "유형": hit,
-                       "백필": i < len(C) - 1 or D[i] != DATE,
+                       "백필": i < len(C) - 1 or D[i] != DATE, "갱신": DATE,
                        **_fr_walk(D, H, L, C, i, 지수.get(info.get("시장")))}
     def _요약(xs, n):
         r = [x["기간"][str(n)] for x in xs if str(n) in (x.get("기간") or {})]
@@ -7367,7 +7368,10 @@ def collect_first_rebound(계좌격자):
           f"기록 {len(거래)}건(신호 유지 {성적['유지']})" + (" · 첫 실행 백필 완료" if 백필 else ""))
     진행 = sorted([t for t in 거래.values() if t.get("상태") == "유지"], key=lambda t: t["신호일"], reverse=True)
     최근끝 = sorted(끝, key=lambda t: t.get("종료일") or "", reverse=True)[:8]
-    return {"오늘": 오늘, "성적": 성적, "진행": 진행[:50], "최근종료": 최근끝,
+    # 🆕 2026-10-06 HO «포착 그 후(레이더는 잘 잡았나)에 첫 반등도 넣어줘» — 강세·매집 추적과 같은 모양으로 넘긴다.
+    추적 = [{"종목명": t["종목명"], "포착일": t["신호일"], "경과": t.get("경과"), "이후등락": t.get("현재수익")}
+           for t in 거래.values() if t.get("갱신") == DATE and isinstance(t.get("현재수익"), (int, float))]
+    return {"오늘": 오늘, "성적": 성적, "진행": 진행[:50], "최근종료": 최근끝, "추적": 추적,
             "대상수": len(대상), "백필기준": log["백필기준"],
             "설정": {"시총": FR_MIN_CAP, "거래량배수": FR_VOL_X, "이격": FR_GAP * 100,
                     "손절창": FR_STOP_LOOKBACK, "보유": FR_HOLD, "기간": list(FR_PERIODS)}}
