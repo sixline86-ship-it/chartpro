@@ -7328,6 +7328,61 @@ def _fr_candles(code, count=200):
         return []
 
 
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-07 HO «물밑 테마도 흐름을 · 금액과 순위도» / «돈의 이동 그래프가 왜 끊어져?»
+#   종목별 하루 거래대금(억)을 날짜별로 한 파일에 쌓는다 → 테마 돈 = 구성종목 합(모든 테마·모든 날 같은 잣대).
+#   [오늘 값] 강세 레이더가 이미 받은 유니버스(약 1,200종목)의 거래대금 — 새 요청 0회.
+#   [지난 값] 기록이 STOCK_MONEY_MIN일보다 적으면 «한 번만» 일봉(종가×거래량)으로 지난 날을 채운다.
+#            ⚠️ 지난 값은 종가×거래량 근사(실제 거래대금과 몇 % 차이). 오늘부터는 실제 값이 쌓인다.
+#            요청 = 유니버스 종목 수(약 1,200회, 8갈래 동시) · 1~2분. 한 번 채우면 다시 안 돈다.
+# ══════════════════════════════════════════════════════════════
+STOCK_MONEY_FILE = "stock_money_hist.json"
+STOCK_MONEY_MIN = 10       # 이보다 적게 쌓였으면 일봉으로 채운다
+STOCK_MONEY_KEEP = 80      # 이만큼만 남긴다(거래일)
+
+
+def update_stock_money_hist(계좌격자):
+    if _휴장일() or not _장마감후():
+        return
+    try:
+        h = _load_json(STOCK_MONEY_FILE, {}) or {}
+    except Exception:
+        h = {}
+    일별 = h.setdefault("일별", {})
+    오늘 = {n: round(float(s.get("거래대금")), 1) for n, s in (_대금유니버스_캐시 or {}).items()
+           if isinstance(s.get("거래대금"), (int, float)) and s.get("거래대금") > 0}
+    if len(오늘) >= 500:
+        일별[DATE] = 오늘
+    if len(일별) < STOCK_MONEY_MIN and 오늘:
+        사전 = (계좌격자 or {}).get("종목사전") or {}
+        codes = {n: (사전.get(n) or [None] * 6)[5] for n in 오늘}
+        codes = {n: c for n, c in codes.items() if c}
+        from concurrent.futures import ThreadPoolExecutor
+        t0 = time.time()
+        def _one(item):
+            n, c = item
+            return n, _fr_candles(c, count=STOCK_MONEY_MIN + 6)
+        with ThreadPoolExecutor(12) as ex:
+            got = dict(ex.map(_one, codes.items()))
+        채움 = 0
+        for n, rows in got.items():
+            for (d, _o, _h, _l, c, v) in rows:
+                if d >= DATE:
+                    continue                      # 오늘은 실제 값(위)을 쓴다
+                if n not in 일별.setdefault(d, {}):
+                    일별[d][n] = round(c * v / 1e8, 1)
+                    채움 += 1
+        print(f"   💰 종목 거래대금 지난 기록 채움 — {len(got)}종목 · {채움:,}칸 ({time.time()-t0:.0f}초, 일봉 근사)")
+    for d in sorted(일별)[:-STOCK_MONEY_KEEP]:
+        del 일별[d]
+    try:
+        with io.open(STOCK_MONEY_FILE, "w", encoding="utf-8") as f:
+            json.dump(h, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   💰 종목 거래대금 기록 {len(일별)}거래일")
+    except Exception as e:
+        print(f"   ⚠️ 종목 거래대금 기록 저장 실패 — {type(e).__name__}")
+
+
 def _fr_ma(C, n, i):
     return sum(C[i - n + 1:i + 1]) / n if i >= n - 1 else None
 
@@ -7540,6 +7595,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"   ⚠️ 매집 추적 실패({type(e).__name__}: {e}) — 이번 회차는 건너뜁니다")
     계좌격자 = collect_account_grid(테마결과.get("테마후보"))
+    try:                                       # 🆕 2026-10-07 — 종목 거래대금 날짜별 기록(테마 돈 흐름 재료)
+        update_stock_money_hist(계좌격자)
+    except Exception as e:
+        print(f"   ⚠️ 종목 거래대금 기록 실패({type(e).__name__}: {str(e)[:100]})")
     # 🌅 2026-10-05 — 오늘 첫 반등(HO 기법). 종목사전(시총)이 있어야 대상을 고른다.
     try:
         첫반등 = collect_first_rebound(계좌격자)
