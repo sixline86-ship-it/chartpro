@@ -17797,7 +17797,7 @@ def build_money_lines():
     hi, lo = max(allv), min(allv)
     pad = (hi - lo) * 0.08 or 100
     hi, lo = hi + pad, lo - pad
-    W, L, R, T0, B0 = 360, 48, 212, 10, 176
+    W, L, R, T0, B0 = 360, 48, 212, 12, 236      # 🔴 10/7 HO «위아래 간격을 조금 더» — 높이 176 → 236
     X = lambda i: L + (R - L) * i / max(len(win) - 1, 1)
     Y = lambda v: T0 + (B0 - T0) * (hi - v) / ((hi - lo) or 1)
     _HL = 'stroke="#0d1420" stroke-width="3" paint-order="stroke"'
@@ -17843,7 +17843,7 @@ def build_money_lines():
     #   (순서는 오늘 값 순서 그대로) 오늘 점과 가는 선으로 잇는다.
     # 🔴 10/7 (2차) HO «너무 벌어졌다» — 고르게 펼치기 대신: 자기 높이 근처에 두되 최소 16px 간격,
     #   묶음 전체를 원래 높이들의 가운데에 맞추고 그림 안으로 가둔다.
-    _GAP = 16
+    _GAP = 18
     for lb in labs:
         lb.append(lb[0])
     for i in range(1, len(labs)):
