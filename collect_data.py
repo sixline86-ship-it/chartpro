@@ -861,6 +861,11 @@ THEME_DETAIL_CANDIDATES = [
     "https://m.stock.naver.com/api/theme/{code}/stocks",
 ]
 _DETAIL_WINNER = {"url": None, "tried": False}
+# 🆕 2026-10-06 HO «테마 종목에서 관리종목·아주 작은 종목은 빼줘».
+#   테마 종목 API가 종목마다 관리·거래정지 표시를 같이 준다(실측: manageStatusGb·tradeStopYn).
+#   수집하면서 걸린 종목을 여기 모아 data["주의종목"]으로 내보낸다 → build_html이 펼침 목록에서 뺀다.
+#   ⚠️ 오늘 받아 본 테마(후보 20 + 테마상세)의 종목만 안다 — 나머지는 시총 하한으로 거른다.
+_주의종목 = {}
 
 
 # ── 🔴 2026-09-15 — 진짜 정답. 「종목 API」는 따로 없다.
@@ -1030,6 +1035,19 @@ def _norm_stocks(rows):
             "코드": (str(_pick(it, "itemcode", "itemCode", "stockCode", "code"))
                    if _pick(it, "itemcode", "itemCode", "stockCode", "code") else None),
         })
+        # 🆕 2026-10-06 — 관리·거래정지 표시(키가 없으면 조용히 넘어간다)
+        try:
+            _ms = str(_pick(it, "manageStatusGb") or "0")
+            _ts = str(_pick(it, "tradeStopYn") or "N").upper()
+            _al = str(_pick(it, "marketAlertType") or "00")
+            # 실측 10/6: 대부분 0/N/00. manageStatusGb 1·2가 섞여 나왔다(1=관리, 2=투자주의환기로 추정 — 확인 필요).
+            #   marketAlertType 01·02(투자주의·경고)는 테마 대장주에도 흔해서 빼지 않는다. 03(위험 추정)만 뺀다.
+            _why = ("관리종목" if _ms == "1" else "투자주의환기" if _ms not in ("0", "", "None") else
+                    "거래정지" if _ts == "Y" else "투자위험" if _al == "03" else None)
+            if _why:
+                _주의종목[clean_name(str(nm))] = _why
+        except Exception:
+            pass
     if out and all(x["현재가"] is None for x in out) and rows:
         print(f"  ⚠️ [테마 종목] 현재가 키 못 찾음 — 첫 항목 키: {sorted(rows[0])[:25]}")
     return out or None
@@ -1435,8 +1453,31 @@ def collect_themes_and_gauge():
             return [50.0] * len(vals)
         return [(v - lo) / (hi - lo) * 100 for v in vals]
 
-    강도 = 순위점수([a["테마등락"] for a in 분석])
-    폭 = 순위점수([a["확산도"] for a in 분석])
+    # 🔴🔴 2026-10-06 HO 승인 — 등락·확산도도 «순위 백분위»로(거래 점수와 같은 방식).
+    #   [문제] 위 순위점수()는 이름과 달리 «최솟값 0·최댓값 100으로 늘리기»였다.
+    #     10/6 실측: 딥페이크 +14.8%(중앙 3.1%) 하나가 100점을 가져가 2~6위가
+    #     60.3~64.7점에 몰렸다 → 순위가 소수점으로 갈렸다.
+    #   [고침] 값의 «크기»가 아니라 «몇 등인가»로 0~100. 튀는 값 하나가 나머지를 못 누른다.
+    #   [확산도 보정] 종목이 적은 테마는 100%가 쉽다(5종목 중 5개). 종목 수를 알면
+    #     (오른 수 + 1) ÷ (전체 + 2)로 끌어당긴다 — 5/5 → 86%, 40/40 → 98%.
+    #   ⚠️ 기준 변경일 2026-10-07 발행부터. 4일 합산 순위는 며칠간 옛·새 점수가 섞인다.
+    def _백분위목록(값리스트):
+        vals = [v if v is not None else 0 for v in 값리스트]
+        n = len(vals)
+        if n < 2:
+            return [50.0] * n
+        s = sorted(vals)
+        return [(sum(1 for b in s if b < v) + (sum(1 for b in s if b == v) - 1) / 2) / (n - 1) * 100
+                for v in vals]
+
+    def _폭보정(a):
+        n = len(_테마행.get(a["테마명"]) or [])
+        p = a["확산도"] or 0
+        if n >= 1:
+            return ((p / 100 * n) + 1) / (n + 2) * 100
+        return p
+    강도 = _백분위목록([a["테마등락"] for a in 분석])
+    폭 = _백분위목록([_폭보정(a) for a in 분석])
 
     # 🔴🔴 2026-09-23 HO 지시 — 거래대금을 «크기»가 아니라 «평소 대비 몇 배»로.
     #   [문제] 9/23 실측: S7·CXL·소캠·온디바이스 AI·전력반도체 다섯 테마의
@@ -1498,10 +1539,14 @@ def collect_themes_and_gauge():
 
     for i, a in enumerate(분석):
         a["주도력점수"] = round(강도[i] * 0.40 + 거래[i] * 0.35 + 폭[i] * 0.25, 1)
-        if (a.get("쏠림") or 0) >= THEME_SOLO_PCT:
-            a["주도력점수"] = round(a["주도력점수"] * THEME_SOLO_PENALTY, 1)
+        # 🔴 2026-10-06 HO 승인 — 쏠림 감점을 2단계로(60%↑ ×0.9 · 80%↑ ×0.8).
+        #   [전] 80%부터만 감점 → 면역항암제(HLB 72%)는 감점 없음.
+        _배 = (THEME_SOLO_PENALTY if (a.get("쏠림") or 0) >= THEME_SOLO_PCT else
+              THEME_SOLO_PENALTY2 if (a.get("쏠림") or 0) >= THEME_SOLO_PCT2 else 1.0)
+        if _배 < 1.0:
+            a["주도력점수"] = round(a["주도력점수"] * _배, 1)
             print(f"  ⚠️ 쏠림 감점 [{a['테마명']}] {a['쏠림종목']} {a['쏠림']:.0f}% "
-                  f"→ 점수 ×{THEME_SOLO_PENALTY}")
+                  f"→ 점수 ×{_배}")
 
     분석.sort(key=lambda x: x["주도력점수"], reverse=True)
 
@@ -1566,6 +1611,10 @@ def collect_themes_and_gauge():
     #    🆕 2026-08-29 (2차) — 화면(주도6)이 아니라 **주도N(최대 10개)**을
     #    저장한다. 화면 6개보다 넓게 담아 순환 통계의 경계 노이즈를 줄인다.
     _save_theme_history(주도N)
+    try:                                   # 🆕 2026-10-07 — 돈의 이동용 «거래대금 전체판»(요청 +2회)
+        _save_theme_money(collect_theme_money())
+    except Exception as _e:
+        print(f"   ⚠️ 테마 거래대금판 건너뜀 — {type(_e).__name__}")
 
     return {"주도섹터": 주도6, "확산도_시장평균": round(시장확산, 1),
             "테마후보": 유효}   # 격자(collect_account_grid)가 재활용한다
@@ -1574,6 +1623,60 @@ def collect_themes_and_gauge():
 THEME_HISTORY_FILE = "theme_history.json"
 THEME_SOLO_PCT = 80        # 한 종목이 테마 거래대금의 이 % 이상 = 쏠림 (2026-09-23)
 THEME_SOLO_PENALTY = 0.8   # 쏠림 테마 점수 배율 — 판단값, 표본 쌓이면 조정
+THEME_SOLO_PCT2 = 60       # 🆕 2026-10-06 — 2단계 쏠림(60~80%)
+THEME_SOLO_PENALTY2 = 0.9
+
+
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-07 HO «돈의 이동 — 돈의 크기와 방향이 직관적으로 보여야» → 테마 «거래대금 전체판» 적재.
+#   [문제] theme_history 일별은 «등락률 상위 후보»만 남아(하루 50~60개), 돈이 «빠진» 테마는
+#          그날 기록이 아예 없다(10/6: 순위 밖 133개 중 이틀 치가 다 있는 건 19개).
+#          → 돈이 들어온 쪽만 보이고 빠진 쪽 크기는 잴 수가 없었다.
+#   [고침] 같은 테마 목록 API를 «거래대금 순»으로 한 번 더 받는다(요청 +1회).
+#          등락률 상위 100 + 거래대금 상위 100의 합집합(약 170개)을 매일 남긴다.
+#          테마마다 [거래대금(백만원), 1위 종목, 1위 종목 몫 %] — 1위 몫 = 그림자 테마 판정 재료.
+#   ⚠️ 테마 거래대금은 종목이 여러 테마에 겹쳐 «중복 합»이다. 화면은 «평소 대비 변화»만 쓴다.
+#   ⚠️ 소급 불가 — 오늘부터 쌓인다. 5거래일 쌓이면(평소 계산) 화면이 이 재료로 바뀐다.
+# ══════════════════════════════════════════════════════════════
+def collect_theme_money():
+    out = {}
+    for sort in ("tradingValue", "changeRate"):
+        try:
+            r = requests.get(THEME_API, headers=THEME_API_HEADERS, timeout=15,
+                             params={"sortType": sort, "size": 100, "period": "daily"})
+            if r.status_code != 200:
+                print(f"   ⚠️ 테마 거래대금판({sort}) HTTP {r.status_code}")
+                continue
+            for it in (_dig_list(r.json()) or []):
+                nm = _pick(it, "name", "themeName")
+                v = to_num(_pick(it, "totalTradingValue"))
+                if not nm or not v:
+                    continue
+                amt = v / 1_000_000                       # 원 → 백만원(일별 거래대금과 같은 단위)
+                tops = it.get("topByTradingValue") or []
+                t1 = tops[0] if (tops and isinstance(tops[0], dict)) else {}
+                t1v = to_num(t1.get("value"))
+                share = round(t1v / v * 100, 1) if (t1v and v) else None
+                out[clean_name(str(nm))] = [round(amt, 1), (clean_name(str(t1.get("name"))) if t1.get("name") else None), share]
+        except Exception as e:
+            print(f"   ⚠️ 테마 거래대금판({sort}) 실패 — {type(e).__name__}")
+    print(f"   💰 테마 거래대금판 {len(out)}개")
+    return out
+
+
+def _save_theme_money(판):
+    if not 판 or _휴장일() or not _장마감후():
+        return
+    try:
+        이력 = _load_json(THEME_HISTORY_FILE, {}) or {}
+    except Exception:
+        이력 = {}
+    이력.setdefault("대금", {})[DATE] = 판
+    try:
+        with io.open(THEME_HISTORY_FILE, "w", encoding="utf-8") as _f:
+            json.dump(이력, _f, ensure_ascii=False, separators=(",", ":"))
+    except Exception as e:
+        print(f"   ⚠️ 테마 거래대금판 저장 실패 — {type(e).__name__}")
 
 
 def _save_theme_history(주도N):
@@ -6843,6 +6946,13 @@ def collect_theme_detail():
                 v = 0.0
             if s.get("stockName") and s.get("itemCode"):
                 종목.append([s["stockName"], str(s["itemCode"]), r, v])
+                # 🆕 2026-10-06 — 거래정지(이 API는 관리 표시가 없고 거래 상태만 준다)
+                try:
+                    if (str((s.get("tradeStopType") or {}).get("name") or "TRADING") != "TRADING"
+                            or str(s.get("tradableStatus") or "tradable") != "tradable"):
+                        _주의종목.setdefault(s["stockName"], "거래정지")
+                except Exception:
+                    pass
         if not 종목:
             continue
         종목.sort(key=lambda x: -x[3])
@@ -7603,11 +7713,14 @@ if __name__ == "__main__":
                    "하락선": ACC_DROP_LINE, "횡보선": ACC_FLAT_LINE,
                    "풀크기": ACC_POOL or "제한없음"},
             "주도섹터": {"1차후보": 20, "선정수": 6, "중복제외기준": 2,
-                     "가중치": "강도40 + 거래대금35 + 확산도25"},
+                     "가중치": "강도40 + 거래대금35 + 확산도25",
+                     "방식": "순위백분위 · 쏠림 60%↑×0.9 80%↑×0.8", "기준변경일": "20261007"},
         },
         "마감브리핑": 마감브리핑,
         "테마상세": 테마상세,
         "섹터거래대금": _섹터거래대금(계좌격자),
+        # 🆕 2026-10-06 — {종목명: "관리종목"|"거래정지"} · 화면 펼침 목록에서 뺀다
+        "주의종목": dict(_주의종목),
     }
 
     # ══════════════════════════════════════════════════════════
