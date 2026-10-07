@@ -11957,9 +11957,10 @@ def build_core(핵심편, data, 해석):
              + _chapter_block(build_coming_themes(data), "다가오는", ("tm-foot",))
              + _chapter_block(build_reverse_look(data) + _ax_coming(), "거꾸로", ("rv2-f", "rv2-note"))
              # ⑥ 이 규칙들, 맞았나
-             + _q("⑥", "위 «👉 그래서»의 규칙들, 맞았나", "📊 규칙 성적표", "다음 날 · 이틀째")
-             + _chapter_block(build_rule_board()
-                              + hide("채점판옛", build_theme_scorecard()), "채점판", ("tsc-foot",))
+             # 🔴 2026-10-07 HO «규칙 성적표는 뭐야? 삭제해» → 가림(되살리려면 HIDDEN_CHAPTERS에서 키만 뺀다)
+             + hide("규칙성적표", _q("⑥", "위 «👉 그래서»의 규칙들, 맞았나", "📊 규칙 성적표", "다음 날 · 이틀째")
+                    + _chapter_block(build_rule_board()
+                                     + hide("채점판옛", build_theme_scorecard()), "채점판", ("tsc-foot",)))
              # 참고
              + _q("참고", "섹터가 달라도 같이 움직이는 짝", "🔗 테마 짝꿍", "같은 날 함께 10위권")
              + _chapter_block(build_theme_pairs(data=data), "짝꿍", ("pp-w", "pp-f")))
@@ -17629,6 +17630,33 @@ def _theme_money_days():
     """{날짜: {테마: (거래대금 백만원, 1위 종목 몫 %)}} — «대금» 우선, 없으면 «일별»."""
     if "MB" in _FOLLOW_CACHE:
         return _FOLLOW_CACHE["MB"]
+    # 🆕 2026-10-07 — 1순위 재료: archive «종목대금»(종목별 거래대금, 10/7~). 테마 돈 = 구성종목 합.
+    #   모든 테마·모든 날을 같은 잣대로 재서 선이 안 끊긴다. 4거래일 이상 쌓였을 때만 이것만 쓴다
+    #   (재료를 날마다 섞으면 잣대가 달라져 «평소» 비교가 틀어진다).
+    try:
+        G = _theme_groups()
+        S = {}
+        for ymd, dt in archive_days(15):
+            m = dt.get("종목대금") or {}
+            if len(m) >= 500:
+                S[str(ymd)] = m
+        if len(S) >= 4 and G:
+            out = {}
+            for dd, m in S.items():
+                for nm, mem in G.items():
+                    if not _theme_ok(nm):
+                        continue
+                    xs = [m[x] for x in mem if x in m and x not in _IDX_JUNK2]
+                    if len(xs) < 3:
+                        continue
+                    tot = sum(xs)
+                    if tot > 0:
+                        out.setdefault(dd, {})[nm] = (tot * 100, max(xs) / tot * 100)   # 억 → 백만원
+            _FOLLOW_CACHE["MB"] = out
+            _FOLLOW_CACHE["MB_SRC"] = "종목대금"
+            return out
+    except Exception as e:
+        print(f"   ⚠️ 종목대금 재료 실패 — {type(e).__name__}: {e}")
     out = {}
     try:
         for dd, xs in (_theme_hist_all() or {}).items():
@@ -17798,9 +17826,9 @@ def build_money_lines():
     for nm, (pts, c, r) in series.items():
         # 🔴 10/7 HO «반도체 장비 하락 구간이 왜 점선?» — 기록 없는 날을 건너 잇던 점선이 «움직임»처럼 보였다.
         #   이제 기록이 이어진 날끼리만 선으로 잇는다(빈 날은 선이 끊긴다). 테마 거래대금판이 쌓이면 빈 날이 사라진다.
+        # 🔴 10/7 (2차) HO «그래프가 왜 다 끊어져 있어?» — 빈 날은 앞뒤 기록을 곧게 잇고(점은 안 찍음),
+        #   기록이 있는 날에만 점을 찍는다. 종목대금 재료가 4거래일 쌓이면 빈 날 자체가 없어진다.
         for (i0, v0), (i1, v1) in zip(pts, pts[1:]):
-            if i1 != i0 + 1:
-                continue
             sv.append(f'<line x1="{X(i0):.1f}" y1="{Y(v0):.1f}" x2="{X(i1):.1f}" y2="{Y(v1):.1f}" stroke="{c}" '
                       f'stroke-width="1.6" stroke-linecap="round"/>')
         for i, v in pts:
@@ -17813,10 +17841,20 @@ def build_money_lines():
         pass
     # 🔴 10/7 HO «테마명이 가운데 몰렸다 — 위아래로 펼쳐» — 이름표를 그림 높이 전체에 고르게 나눠 놓고
     #   (순서는 오늘 값 순서 그대로) 오늘 점과 가는 선으로 잇는다.
-    _k = len(labs)
-    for i, lb in enumerate(labs):
+    # 🔴 10/7 (2차) HO «너무 벌어졌다» — 고르게 펼치기 대신: 자기 높이 근처에 두되 최소 16px 간격,
+    #   묶음 전체를 원래 높이들의 가운데에 맞추고 그림 안으로 가둔다.
+    _GAP = 16
+    for lb in labs:
         lb.append(lb[0])
-        lb[0] = (T0 + 6 + (B0 - T0 - 12) * i / (_k - 1)) if _k > 1 else lb[0]
+    for i in range(1, len(labs)):
+        if labs[i][0] - labs[i - 1][0] < _GAP:
+            labs[i][0] = labs[i - 1][0] + _GAP
+    if labs:
+        _sh = (sum(lb[4] for lb in labs) - sum(lb[0] for lb in labs)) / len(labs)
+        _sh = max(_sh, T0 + 4 - labs[0][0])
+        _sh = min(_sh, B0 + 4 - labs[-1][0])
+        for lb in labs:
+            lb[0] += _sh
     for y, nm, c, v, y0 in labs:
         sv.append(f'<line x1="{R + 1}" y1="{y0:.1f}" x2="{R + 7}" y2="{y:.1f}" stroke="{c}" stroke-width=".8" opacity=".8"/>')
         sv.append(f'<text x="{R + 9}" y="{y + 3.5:.1f}" font-size="9.4" font-weight="800" fill="{c}" {_HL}>'
@@ -17829,7 +17867,7 @@ def build_money_lines():
             '<details class="mb-fold"><summary>📖 그림 읽는 법 ▾</summary><p class="mb-n">'
             '· 선 = 평소(회색 점선)보다 <b>얼마나 더/덜 들어왔나</b><br>'
             '· 빨강 계열 = 오늘 더 들어온 3개 · 파랑 계열 = 오늘 빠진 3개<br>'
-            '· 맨 오른쪽 큰 점이 오늘 · 선이 끊긴 날 = 그 테마 기록이 없는 날<br>'
+            '· 맨 오른쪽 큰 점이 오늘 · 점이 없는 날 = 그 테마 기록이 없어 앞뒤를 곧게 이은 구간<br>'
             '· 테마마다 가장 큰 한 종목과, 날마다 시장 전체가 늘고 준 만큼은 빼고 셌어요</p></details></div>')
 
 
@@ -20648,6 +20686,7 @@ HIDDEN_CHAPTERS = {
     "관제레이더",         # 「테마 레이더」와 같은 그림을 두 번 보여줌
     "돈의이동순위",       # 🔴 2026-10-07 HO — 돈의 이동은 «돈 선»으로. 순위 선 그림은 가림
     "테마수명",           # 🔴 2026-10-07 HO — 테마 수명은 레이더 «N일째»·한 줄 안내로 합침
+    "규칙성적표",         # 🔴 2026-10-07 HO «규칙 성적표는 뭐야? 삭제해»
     "채점판옛",           # 🔴 2026-10-07 — 3관문 카운터(«21/50»)를 «규칙 성적표»로 교체
     "테마읽는순서",       # 🔴 2026-10-03 HO 지시 — «테마 탭은 이 순서로 읽습니다» 삭제
     "돈의이동섹터",       # 🔴 2026-10-06 HO 지시 — 돈의 이동 경로를 섹터 → 테마로 교체
