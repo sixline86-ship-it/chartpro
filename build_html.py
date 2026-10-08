@@ -705,21 +705,27 @@ def _mkt_ammo_spark(시장="코스피", W=140, H=64):
     vals = [v for _, v in 시리즈]
     날 = [f"{d[4:6]}/{d[6:]}" for d, _ in 시리즈]
     mx = max(abs(v) for v in vals) or 1
-    z = H * 0.40
+    z = H * 0.42
     n = len(vals)
     pad = 4
     간격 = (W - pad * 2) / max(1, n)
     bw = max(5, 간격 * 0.55)
+    H_ = H                                       # 글자 자리(위·아래 9px)를 빼고 막대를 그린다
     g = [f'<line x1="{pad}" y1="{z:.1f}" x2="{W-pad}" y2="{z:.1f}" '
          f'stroke="#fff" stroke-opacity=".16"/>']
     for i, v in enumerate(vals):
         cx = pad + i * 간격 + 간격 / 2      # ⚠️ 캔들(_mkt_index_spark)과 동일 공식
         x = cx - bw / 2
-        y = z - (v / mx) * ((z - 2) if v >= 0 else (H - 11 - z))
+        y = z - (v / mx) * ((z - 13) if v >= 0 else (H - 13 - z))
         c = FS_BUY if v >= 0 else FS_SELL
         g.append(f'<rect x="{x:.1f}" y="{min(z,y):.1f}" width="{bw:.1f}" '
                  f'height="{max(1.5,abs(y-z)):.1f}" rx="2" fill="{c}" '
                  f'opacity="{1 if i==n-1 else .45}"/>')
+        # 🔴 2026-10-07 HO (2차) «금액은 오늘만 · 날짜와 안 겹치게» — 오늘 금액(조)을 그림 맨 위에, 날짜는 맨 아래.
+        if i == n - 1:
+            _lab = (f"+{v/10000:.1f}조" if v >= 0 else f"{v/10000:.1f}조")
+            _lx = min(max(cx, 16), W - 16)                    # 🔴 10/7 (3차) HO «막대 바로 위, 왼쪽 쏠림 X» — 막대 중심에 가운데 정렬
+            g.append(f'<text x="{_lx:.1f}" y="9" font-size="10.5" font-weight="900" fill="{c}" text-anchor="middle">{_lab}</text>')
         if i == n - 1:
             # 🆕 2026-09-07 HO 지시 — "날짜가 너무 작다." 7px → 10px로 확대.
             g.append(f'<text x="{cx:.0f}" y="{H-1.5:.0f}" font-size="10" '
@@ -734,7 +740,7 @@ def _mkt_ammo_spark(시장="코스피", W=140, H=64):
     # 가로·세로 배율이 항상 1:1이라 글자 크기도 그대로 나오고, 캔들과
     # 정확히 같은 배율로 그려져 같은 날짜가 항상 같은 x에 온다.
     return (f'<div class="sc2-spark"><p class="sc2-spark-t">최근 {n}일 실탄'
-            f'<span class="sc2-spark-def">실탄=외국인+기관</span></p>'
+            f'<span class="sc2-spark-def">외국인+기관</span></p>'
             f'<svg viewBox="0 0 {W} {H}" style="display:block;width:100%;height:{H}px">'
             f'{"".join(g)}</svg></div>')
 
@@ -1812,7 +1818,7 @@ def _sh_issues(해석):
             f'<a class="sh-ln" href="{esc_url(l.get("링크",""))}" target="_blank">'
             f'📎 {l.get("제목","")}</a>'
             for l in (it.get("관련링크") or [])[:2] if l.get("링크"))
-        펼침 = (f'<details class="sh-d"><summary>▾ 왜 지금 · 어디까지 닿나</summary>'
+        펼침 = (f'<details class="sh-d"><summary>▾ 배경과 파장</summary>'   # 🔴 2026-10-07 HO «와닿지 않는다» — 제목 교체
                f'<p>{_sh_breath(상세)}</p>{링크}</details>') if (상세 or 링크) else ""
         _tc = {"반도체": "t-semi", "산업": "t-ind", "정책": "t-pol", "수급": "t-sup",
                "글로벌": "t-glo", "금리": "t-pol", "환율": "t-glo"}.get(태그, "")
@@ -1844,6 +1850,28 @@ def _sh_theme(해석):
     #   시황 탭은 «오늘 시장 이야기에서 테마가 한 역할» 한 문장이면 된다.
     import re as _re
     한줄 = (_re.split(r"(?<=[.!?])\s+", 말.strip())[0] if 말 else "")
+    # 🔴 2026-10-07 HO «어느 테마로 돈이 몰리고 있는지 직관적으로 핵심만 — 테마탭과 안 겹치게».
+    #   테마탭 = 흐름(며칠·순위·종목). 여기 = «오늘 하루, 돈이 어디로 얼마나» 세 줄 막대. 재료는 돈의 이동과 같다(평소 대비 더 들어온 돈).
+    try:
+        build_money_bars()
+    except Exception:
+        pass
+    _mb = _FOLLOW_CACHE.get("MBR")
+    if _mb and _mb[0]:
+        ins = _mb[0][:3]
+        mx = max(r["chg"] for r in ins) or 1
+        줄 = "".join(
+            f'<div class="sh-mb"><span class="sh-mbn">{_lab_nm(r["n"])}</span>'
+            f'<span class="sh-mbb"><i style="width:{max(6, r["chg"] / mx * 100):.0f}%"></i></span>'
+            f'<b>+{r["chg"]:,.0f}억</b></div>' for r in ins)
+        outs = (_mb[1] or [])[:2]
+        빠 = (' · '.join(f'{_lab_nm(r["n"])} <b>−{abs(r["chg"]):,.0f}억</b>' for r in outs))
+        return (f'<div class="sh-box sh-theme"><p class="sh-h">💰 오늘 돈이 몰린 테마'
+                f'<span>평소보다 더 들어온 돈</span></p>{줄}'
+                + (f'<p class="sh-cm sh-mbo">💸 빠진 곳 — {빠}</p>' if 빠 else "")
+                + (f'<p class="sh-cm">{한줄}</p>' if 한줄 else "")
+                + '<p class="sh-go" data-tab="테마" data-sel="#cp-picks" onclick="cpGo(this)">'
+                  '며칠째 이어지는지·어느 종목인지는 테마 탭에서 →</p></div>')
     칸 = [("🧲 몰린 섹터", f"{top[0][0]} {top[0][1]}/10")] if top else []
     줄 = "".join(f'<div class="sh-tr"><span>{a}</span><b>{b}</b></div>' for a, b in 칸)
     return (f'<div class="sh-box sh-theme"><p class="sh-h">🔥 오늘 테마는 이렇게 돌았다'
@@ -1857,7 +1885,7 @@ def _sh_theme(해석):
 def _sh_amt(v, 단위):
     """막대 옆 숫자 — 억이 1만을 넘으면 조로 읽기 쉽게."""
     if 단위 == "억" and abs(v) >= 10000:
-        return f"{v/10000:+.1f}조".replace("+", "") if v >= 0 else f"{v/10000:.1f}조"
+        return f"{v/10000:.2f}조"                 # 🔴 10/7 — 외국인 시계와 같은 소수 둘째 자리(3.71조)
     if 단위 in ("억", "개"):
         return f"{v:,.0f}{단위}"
     return f"{v:g}{단위}"
@@ -1894,9 +1922,62 @@ def _sh_progress(pg):
             f'<span>기준 <b>{_sh_amt(g, u)}</b></span></p></div>')
 
 
+def _fx_wave_now():
+    """🆕 2026-10-07 HO «숫자는 외국인 시계 것을 코드가 그대로» — 시황·종합에서 쓰는 외국인 파도 숫자.
+    _fv_clock과 같은 재료·같은 거름(flow_history, 날짜 ≤ DATE, 외현·종가 있음)·같은 함수(_fv_wave).
+    반환: {sell, lv1, reb, lv2, ext_d, lv2_d, 연속, 연속방향} — 못 구하면 None."""
+    try:
+        rows = [r for r in (load_json("flow_history.json") or []) if isinstance(r, dict)
+                and r.get("날짜", "") <= DATE and r.get("외현") is not None and r.get("종가")]
+        w = _fv_wave(rows)
+        if not w:
+            return None
+        d = lambda i: f'{rows[i]["날짜"][4:6]}/{rows[i]["날짜"][6:]}'
+        v = [r["외현"] for r in rows]
+        k = 0
+        while k < len(v) and v[-1 - k] != 0 and (v[-1 - k] < 0) == (v[-1] < 0):
+            k += 1
+        return {"sell": w["dir"] < 0, "lv1": w.get("lv1"), "reb": w.get("reb") or 0,
+                "lv2": w.get("lv2"), "ext_d": d(w["ext"]),
+                "lv2_d": d(w["lv2_idx"]) if isinstance(w.get("lv2_idx"), int) else "",
+                "연속": k, "연속방향": -1 if v and v[-1] < 0 else 1}
+    except Exception as e:
+        print(f"   ⚠️ 외국인 파도(시황용) 실패 — {type(e).__name__}: {e}")
+        return None
+
+
+def _sh_flow_fill(x):
+    """수급 칸 — '무엇'·'기준'·'진행'은 코드가 외국인 시계 숫자로 채운다(AI 숫자 불일치 근본 해결).
+    AI 글('근거'·'맞으면'·'아니면')은 1단계 주제로 쓴 날만 그대로 쓰고, 아니면 규칙 문장으로 바꾼다
+    (10/7처럼 AI가 다른 주제 «속도 150%»로 쓴 날 — 숫자와 글이 어긋나지 않게)."""
+    w = _fx_wave_now()
+    if not w or not w["lv1"]:
+        return x
+    s = w["sell"]
+    되 = "되산" if s else "되판"
+    y = dict(x)
+    y["무엇"] = (f'외국인이 {"되사기" if s else "되팔기"} 시작하나 — '
+               f'{"매도" if s else "매수"} 파도의 1단계 신호')
+    y["기준"] = (f'바닥({w["ext_d"]}) 이후 {되} 돈 {_fv_amt(w["lv1"]).lstrip("+")} 넘기'
+               + (f' <span class="sh-kb2">· 확정(2단계)은 직전 {"고점" if s else "저점"} {w["lv2_d"]} '
+                  f'{"돌파" if s else "이탈"} {_fv_amt(w["lv2"]).lstrip("+")}</span>' if w.get("lv2") else ""))
+    y["진행"] = {"시작": 0, "현재": round(w["reb"]), "목표": round(w["lv1"]), "단위": "억"}
+    ai = " ".join(str(x.get(k) or "") for k in ("무엇", "근거"))
+    if "1단계" not in ai and "가장 큰 반등" not in ai:
+        y["근거"] = (f'이 파도 안에서 외국인이 가장 크게 {되} 게 <b>{_fv_amt(w["lv1"]).lstrip("+")}</b>예요. '
+                   f'그보다 크게 {"되사야" if s else "되팔아야"} «지난번 반등과 다르다»고 말할 수 있거든요. '
+                   f'숫자는 수급 탭 외국인 시계와 같아요.')
+        y["맞으면"] = (f'파도에 처음 금이 간 것 — 다만 확정은 직전 {"고점" if s else "저점"}'
+                     f'{"(" + w["lv2_d"] + ")" if w["lv2_d"] else ""}을 넘는 2단계까지 기다려요.')
+        y["아니면"] = (f'{"반등" if s else "되밀림"}이 나와도 아직 {"매도" if s else "매수"} 파도 안의 숨 고르기예요.')
+    return y
+
+
 def _sh_tomorrow(해석):
     """내일 확인할 것 — 기준만 던지지 않는다. «왜 그 기준인가»를 같이 둔다."""
     xs = [x for x in (해석.get("내일확인") or []) if isinstance(x, dict)][:3]
+    # 🆕 2026-10-07 HO — 수급 칸 숫자는 외국인 시계 그대로(시황 탭 = 수급 탭)
+    xs = [_sh_flow_fill(x) if str(x.get("영역", "")).strip() == "수급" else x for x in xs]
     # 🧪 미리보기 전용(CP_NEXT_DEMO=1) — 옛 해석글엔 '진행'이 없어서 막대 모양을
     #   볼 수 없다. 9/23 글 1번(외국인 1단계: 162억 / 3.7조)을 그대로 넣어 본다.
     if os.getenv("CP_NEXT_DEMO") == "1" and xs and not xs[0].get("진행"):
@@ -1989,7 +2070,7 @@ def news_title(핵심뉴스):
     # 🔴 HO 지시 2026-09-21 — 「놓치기 쉬운 것들」 → 「오늘 핵심 뉴스」.
     #   코너 성격도 바꿨다(generate_report.py): «이슈 밖 뉴스»가 아니라
     #   «시장을 움직인 뉴스 + 오늘 화제가 된 뉴스»를 고른다.
-    return "오늘 핵심 뉴스"
+    return "시장을 움직인 뉴스"   # 🔴 2026-10-07 HO «시장을 움직인 뉴스 하나로 통일»
 
 
 
@@ -3748,6 +3829,55 @@ def build_core_accum(매집):
             f'</p></div>')
 
 
+def build_premarket3(data, 해석, 날짜표기=""):
+    """🌅 내일 개장 전 3초 — 종합 탭 마지막(2026-10-07 HO 승인, «교신 마침» 대체).
+    맨 위 = 오늘의_한문장(공감 한 줄) / 아래 = 내일 아침 확인할 것 3줄(전부 코드 숫자).
+      ① 이벤트 — 해석글 내일확인 «이슈» 칸의 '무엇'(없으면 줄을 뺀다)
+      ② 외국인 — flow_history 연속일수 + 외국인 시계 1단계 진행(_fx_wave_now — 시황·수급과 같은 숫자)
+      ③ 테마   — 평소보다 돈이 더 들어온 상위 3개(테마 돈 막대와 같은 재료)
+    재료가 하나도 없으면 옛 마무리(build_closing)로 돌아간다."""
+    ln = []
+    try:
+        nx = [x for x in ((해석 or {}).get("내일확인") or []) if isinstance(x, dict)
+              and str(x.get("영역", "")).strip() == "이슈" and x.get("무엇")]
+        if nx:
+            ln.append(("📅", "이벤트", _plain(str(nx[0]["무엇"]))))
+    except Exception:
+        pass
+    try:
+        w = _fx_wave_now()
+        if w:
+            s = w["sell"]
+            k = w["연속"]
+            쪽 = "순매도" if w["연속방향"] < 0 else "순매수"
+            반대 = "순매수" if w["연속방향"] < 0 else "순매도"
+            t = (f'{k}일째 {쪽}' if k >= 2 else f'오늘 {쪽}') + f' — <b>{반대}가 이틀 이어지는지</b>가 첫 신호'
+            if w["lv1"]:
+                t += (f' <span>(바닥 이후 {"되산" if s else "되판"} 돈 {_fv_amt(w["reb"]).lstrip("+")}'
+                      f' · 1단계 기준 {_fv_amt(w["lv1"]).lstrip("+")})</span>')
+            ln.append(("🌊", "외국인", t))
+    except Exception as e:
+        print(f"   ⚠️ 개장 전 3초(외국인) 실패 — {type(e).__name__}: {e}")
+    try:
+        build_money_bars()
+        mb = _FOLLOW_CACHE.get("MBR")
+        if mb and mb[0]:
+            nm = "·".join(_lab_nm(r["n"]) for r in mb[0][:3])
+            ln.append(("💰", "테마", f'오늘 돈이 들어온 <b>{nm}</b> — 내일도 평소보다 많이 들어오나'))
+    except Exception as e:
+        print(f"   ⚠️ 개장 전 3초(테마) 실패 — {type(e).__name__}: {e}")
+    if not ln:
+        return build_closing(해석, 날짜표기)
+    문장 = (해석.get("오늘의_한문장") or "").strip()
+    return ('<p class="sec-label"><small>내일 아침</small>🌅 내일 개장 전 3초</p>'
+            '<div class="pm3">'
+            + (f'<p class="pm3-q">“{문장}”</p>' if 문장 else "")
+            + '<p class="pm3-h">장 열리기 전에 이 세 줄만 보세요</p>'
+            + "".join(f'<p class="pm3-l"><i>{ic}</i><span><b>{k}</b> {t}</span></p>' for ic, k, t in ln)
+            + (f'<p class="pm3-s">— 차트프로 관제탑, {날짜표기}</p>' if 날짜표기 else "")
+            + '</div>')
+
+
 def build_closing(해석, 날짜표기=""):
     """🗼 관제탑에서 내려다본 오늘 — 리포트를 닫는 마지막 교신.
 
@@ -3777,7 +3907,7 @@ def build_closing(해석, 날짜표기=""):
                 f'line-height:1.7;font-style:italic">{인사}</p>')
 
     return f'''
-  <p class="sec-label"><small>마지막 교신</small>🗼 관제탑에서 내려다본 오늘</p>
+  <p class="sec-label"><small>마지막 교신</small>🌙 장이 끝난 뒤, 당신에게</p>
   <div class="quote-box">
     <div class="quote-mark">“</div>
     <p class="quote-text">{문장}</p>
@@ -6090,6 +6220,11 @@ def build_my_stocks(data):
   ((window.CP_STOCK_NEWS||{})[nm]||[]).forEach(function(a2){
    if(a2&&a2.t&&!a2.j&&(a2.p===undefined||a2.p>=0)&&String(a2.y||'')>prev&&!seen[a2.t]){ seen[a2.t]=1; nw2.push(a2); } });
   NEWS.forEach(function(n){ if(n.o===1&&(n.t||'').indexOf(nm)>=0&&!seen[n.t]){ seen[n.t]=1; nw2.push(n); } });
+  /* 🔴 2026-10-07 HO «종목이 너무 많다 — 조건 점검» — 📰 새 기사·📅 일정은 «그 자체로는» 띄우지 않는다.
+     [실측 10/7] 기사는 거의 매일 한 건씩 새로 붙어서, 이 둘만으로도 추적 종목 대부분이 매일 떴다.
+     이제 💰 수급·📈 주가·🌊 출렁임·📡 레이더·🏁 섹터 자리 중 하나가 걸린 종목만 올라오고, 기사·일정은 그 밑에 덧붙는다. */
+  var strong=out.length;
+  if(strong===0) return [];
   if(nw2.length) out.push(['📰','새 기사 '+nw2.length+'건 · <a href="'+nw2[0].u+'" target="_blank" rel="noopener">'+nw2[0].t+'</a>']);
   /* ⑦ 일정 오늘·내일 */
   (window.CP_SCHEDULE||[]).filter(function(s){return s.c===nm&&s.dd<=1;}).slice(0,2).forEach(function(s){
@@ -11557,11 +11692,16 @@ def build_core(핵심편, data, 해석):
                        ("WTI유가", "유가"), ("국제금", "금")))
     _macro_grid = (f'<div class="macro-grid2">{_macro_cards}</div>'
                    if _macro_cards else "")
+    # 🔴 2026-10-07 HO «수급 문장은 매크로 카드 밑이 아니라 코스피 카드 밑으로»
+    _kospi_card = build_score_card("KOSPI", _코, 코수)
+    _fc = _flow_comment()
+    if _fc and _kospi_card.rstrip().endswith("</div>"):      # 코스피 카드 «안» 맨 밑에 붙인다(2열 격자가 안 깨지게)
+        _kospi_card = _kospi_card.rstrip()[:-6] + _fc + "</div>"
     지수스트립 = (f'<div class="idx-grid" id="score">'
-                f'{build_score_card("KOSPI", _코, 코수)}'
+                f'{_kospi_card}'
                 f'{build_score_card("KOSDAQ", _닥, _닥수)}</div>'
-                + _macro_grid
-                + _flow_comment())
+                + build_today_action(data, 해석, data.get("관제지수"))     # 🆕 2026-10-07 HO «👉 오늘의 대응 박스만 추가, 지수 카드 밑»
+                + _macro_grid)
 
     def _f(v):
         try:
@@ -11838,7 +11978,7 @@ def build_core(핵심편, data, 해석):
                 f'{내용}</section>')
 
     _종합 = (신호등블록 + 정의블록 + 지수스트립
-             + (f'<p class="sec-label"><small>시장을 움직인 뉴스</small>'
+             + (f'<p class="sec-label">'
                 f'🔥 {news_title(해석.get("핵심뉴스"))}</p>'
                 f'{build_news(해석.get("핵심뉴스"))}' if 해석.get("핵심뉴스") else '')
              # 🔴 2026-09-07 HO 지시 — 「마지막 교신」을 종합 탭으로.
@@ -11847,11 +11987,13 @@ def build_core(핵심편, data, 해석):
              #    (마지막 교신) 한 덩어리가 된다.
              # ⚠️ build_core 안에는 «날짜»(표기용 문자열) 변수가 없다.
              #    data["날짜"]에서 직접 만들어 넘긴다(없으면 DATE).
-             + build_closing(해석, _closing_date_label(data))
+             # 🔴 2026-10-07 HO «🌅 내일 개장 전 3초로 해줘» — «교신을 마친다»는 첫 탭 끝에 어색했다.
+             #    하루를 닫는 대신 «내일 아침 볼 것 3줄»로 넘긴다. build_closing은 지우지 않고 남겨 둔다.
+             + build_premarket3(data, 해석, _closing_date_label(data))
              # 🔴 HO 지시 2026-09-21 — 「오늘 하나만 배운다면」을 «마지막 교신
              #    아래»로. 하루를 닫은 뒤 «그래서 오늘 배울 것 하나»로 끝낸다.
-             + f'<p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>'
-             + build_study(해석.get('오늘의_공부','')))
+             + hide("오늘의공부", f'<p class="sec-label"><small>오늘의 공부</small>📚 오늘 하나만 배운다면</p>'
+             + build_study(해석.get('오늘의_공부',''))))
 
     # 🔴 HO 지시 2026-09-19 — 「지금까지의 줄거리」를 시황 탭 «맨 앞»으로.
     #   [왜] 전에는 「내 종목」 탭 바로 앞에 끼어 있어 아무 맥락도 없었다.
@@ -19774,6 +19916,20 @@ THEME_V17_CSS = """
 .ax-l b{color:#fff}
 .ax-r{margin:8px 0 0;padding-top:7px;border-top:1px solid rgba(224,192,96,.18);font-size:11.5px;line-height:1.6;color:#9aa3b1}
 .ax-r span{color:#6f7784}
+.ax.ta{margin:4px 0 14px}
+.ta-l{display:flex;gap:8px}
+.ta-l i{font-style:normal;flex:none;width:20px;text-align:center}
+.ta-l span span{color:#6f7784;font-size:11.5px}
+/* 🆕 2026-10-07 — 🌅 내일 개장 전 3초 */
+.pm3{margin:0 0 1rem;padding:14px 14px 12px;border-radius:12px;background:linear-gradient(135deg,#1c1f24,#2a2f38);border:1px solid rgba(255,170,90,.28)}
+.pm3-q{margin:0 0 11px;padding-bottom:11px;border-bottom:1px solid rgba(255,255,255,.08);font-size:14.5px;font-weight:700;color:#fff;line-height:1.7;text-align:center;word-break:keep-all}
+.pm3-h{margin:0 0 6px;font-size:11.5px;font-weight:800;color:#ffb36b}
+.pm3-l{display:flex;gap:8px;margin:6px 0 0;font-size:13px;line-height:1.6;color:#d5d9e0;word-break:keep-all}
+.pm3-l i{font-style:normal;flex:none;width:20px;text-align:center}
+.pm3-l b{color:#fff}
+.pm3-l span span{color:#8b95a5;font-size:11.5px}
+.pm3-s{margin:10px 0 0;font-size:11px;color:#9aa0a8;text-align:right}
+.sh-kb2{color:#8b95a5;font-size:.92em;font-weight:500}
 .rb-w{overflow-x:auto}
 .rb table{border-collapse:collapse;width:100%;min-width:330px;font-size:12px;font-variant-numeric:tabular-nums}
 .rb th,.rb td{padding:7px 6px;border-bottom:1px solid #1f2a38;text-align:right;white-space:nowrap}
@@ -20906,6 +21062,7 @@ HIDDEN_CHAPTERS = {
     "돈의이동순위",       # 🔴 2026-10-07 HO — 돈의 이동은 «돈 선»으로. 순위 선 그림은 가림
     "테마수명",           # 🔴 2026-10-07 HO — 테마 수명은 레이더 «N일째»·한 줄 안내로 합침
     "규칙성적표",         # 🔴 2026-10-07 HO «규칙 성적표는 뭐야? 삭제해»
+    "오늘의공부",         # 🔴 2026-10-07 HO «오늘의 공부는 일단 숨겨줘»
     "채점판옛",           # 🔴 2026-10-07 — 3관문 카운터(«21/50»)를 «규칙 성적표»로 교체
     "테마읽는순서",       # 🔴 2026-10-03 HO 지시 — «테마 탭은 이 순서로 읽습니다» 삭제
     "돈의이동섹터",       # 🔴 2026-10-06 HO 지시 — 돈의 이동 경로를 섹터 → 테마로 교체
@@ -21449,6 +21606,77 @@ def _fs_timeline_svg(이력, p, W=380):
     return f'<svg viewBox="0 0 {W} {H}">{"".join(g)}</svg>'
 
 
+def _fs_streak_evidence(h, min_n=5):
+    """실탄이 오늘까지 k일 연속 같은 방향일 때, 과거에 «k일 연속» 뒤 다음 날 코스피 등락(연속 방향 기준) 평균.
+    k는 1·2·3·4+(4 이상은 한 묶음). 표본 min_n 미만이면 None. flow_history 그대로, 지어내지 않는다."""
+    try:
+        rows = [r for r in h if isinstance(r, dict) and r.get("실탄") is not None]
+        if len(rows) < 12:
+            return None
+        s = [1 if r["실탄"] > 0 else -1 for r in rows]
+        k_now = _fs_streak([r["실탄"] for r in rows])
+        kb = min(k_now, 4)
+        out = []
+        k = 1
+        for i in range(1, len(rows) - 1):
+            k = k + 1 if s[i] == s[i - 1] else 1
+            if min(k, 4) == kb:
+                nxt = rows[i + 1].get("코스피등락")
+                if isinstance(nxt, (int, float)):
+                    out.append(nxt * s[i])
+        if len(out) < min_n:
+            return None
+        return {"k": f"{kb}{'+' if kb == 4 else ''}", "r": sum(out) / len(out), "n": len(out)}
+    except Exception:
+        return None
+
+
+def build_today_action(data, 해석, gauge=None):
+    """👉 오늘의 대응 — 종합 탭 지수 카드 밑 한 칸(2026-10-07 HO «이 박스만 추가»).
+    세 줄 전부 «정해진 규칙»으로 쓴다(AI 문장 없음):
+      🧊/🔥 시장   — 실탄(외국인+기관) 방향·크기·연속일수(flow_history) + 관제 구간
+      💰 돈이 간 곳 — 평소보다 더 들어온 돈 상위 3개(테마 돈 막대와 같은 재료·같은 숫자)
+      ⏰ 내일 갈림길 — 해석글 «내일확인» 1번째의 «무엇»(AI가 고른 내일 볼 것) — 없으면 줄을 뺀다
+    ⚠️ 종합 탭 다른 부분은 손대지 않는다. 재료가 하나도 없으면 빈 문자열."""
+    ln = []
+    try:
+        h = [r for r in (load_json("flow_history.json") or []) if isinstance(r, dict) and r.get("실탄") is not None]
+        st = _fs_stat([r["실탄"] for r in h]) if h else None
+        if st:
+            sell = st["v"] < 0
+            연속 = _fs_streak([r["실탄"] for r in h]) if len(h) >= 3 else 0
+            구간 = (gauge or {}).get("구간") or ""
+            who = "외국인·기관이"
+            amt = _flow_amt(abs(st["v"])).lstrip("+")
+            if sell:
+                act = ("지수 따라 사는 건 쉬어가고, 들고 있는 건 <b>버틸 선</b>부터 정하는 날이에요."
+                       if st["배수"] >= 1.5 else "큰손이 파는 날이라 지수 추종 매수는 급하지 않아요.")
+                head = f'{who} <b>{amt}</b>를 뺀 날' + (f'(<b>{연속}일째</b>)' if 연속 >= 2 else '') + '. '
+            else:
+                act = ("큰손이 함께 사는 날 — 지수 쪽 비중을 지켜도 되는 자리예요."
+                       if st["배수"] >= 1.5 else "큰손이 사는 쪽이지만 크지 않아요 — 방향만 확인하는 날.")
+                head = f'{who} <b>{amt}</b>를 넣은 날' + (f'(<b>{연속}일째</b>)' if 연속 >= 2 else '') + '. '
+            ln.append(('🧊' if sell else '🔥', '시장', head + act + (f' <span>관제 {구간}</span>' if 구간 else '')))
+    except Exception as e:
+        print(f"   ⚠️ 오늘의 대응(시장) 실패 — {type(e).__name__}: {e}")
+    try:
+        build_money_bars()
+        mb = _FOLLOW_CACHE.get("MBR")
+        if mb and mb[0]:
+            ins = mb[0][:3]
+            ln.append(('💰', '돈이 간 곳',
+                       " · ".join(f'<b>{_lab_nm(r["n"])}</b> +{r["chg"]:,.0f}억' for r in ins)
+                       + '. 지수와 따로 움직인 자리 — 종목을 고른다면 여기부터 보세요.'))
+    except Exception as e:
+        print(f"   ⚠️ 오늘의 대응(돈) 실패 — {type(e).__name__}: {e}")
+    # 🔴 2026-10-07 HO — ⏰ 내일 갈림길 줄은 뺐다(종합 맨 끝 «🌅 내일 개장 전 3초»가 맡는다).
+    if not ln:
+        return ""
+    return ('<div class="ax ta"><p class="ax-h">👉 오늘의 대응</p>'
+            + "".join(f'<p class="ax-l ta-l"><i>{ic}</i><span><b>{k}</b> — {t}</span></p>' for ic, k, t in ln)
+            + '</div>')
+
+
 def _flow_comment():
     """계기판 밑 한 줄 코멘트 — 오늘 수급의 특징을 짧게 짚는다.
 
@@ -21498,11 +21726,17 @@ def _flow_comment():
     #       (외현·기관·외선·비차익·실탄만 있다). 없는 값을 추정해 쓰면
     #       "개인이 밀어올렸다" 류의 오발화가 또 나온다 → 연속일수만 쓴다.
     연속 = _fs_streak([r["실탄"] for r in h]) if len(h) >= 3 else 0
+    # 🔴 2026-10-07 HO «'하루 더 이어지면 흐름으로 볼 만해요'는 근거 있는 말이야?» — 없었다.
+    #   실측(7/23~10/6, 48거래일): 이틀 연속 뒤 사흘째도 같은 방향 57% — 평소(64%)보다 오히려 낮다.
+    #   대신 «연속 N일 뒤 다음 날 코스피가 같은 쪽으로 얼마나 갔나»는 기록으로 말할 수 있다 → 매일 다시 센다.
+    _ev = _fs_streak_evidence(h)
+    _evt = (f' 지금까지 기록에서 {_ev["k"]}일 연속 뒤 다음 날 코스피는 같은 쪽으로 평균 <b>{_ev["r"]:+.1f}%</b>'
+            f'<span style="color:#6f7784">({_ev["n"]}번 · 방향만 참고)</span>.' if _ev else '')
+    # 🔴 2026-10-07 (2차) HO «딱 이슈만, 더 길게 넣지 마» — 기록 문장(_evt)은 붙이지 않는다(계산은 남겨 둔다).
     if 연속 >= 3:
-        조각.append(f'<b>{연속}일째 같은 방향</b>이라 흐름이 굳어지는 중이에요.')
+        조각.append(f'<b>{연속}일째 같은 방향</b>이에요.')
     elif 연속 == 2:
-        조각.append(f'어제에 이어 <b>이틀째 같은 방향</b>이에요 — '
-                    f'하루 더 이어지면 흐름으로 볼 만해요.')
+        조각.append(f'어제에 이어 <b>이틀째 같은 방향</b>이에요.')
     elif 연속 == 1 and len(h) >= 2:
         조각.append(f'어제와 <b>방향이 바뀐</b> 날이에요 — 하루짜리인지 '
                     f'시작인지는 내일 봐야 알겠죠.')
@@ -22676,7 +22910,8 @@ def _fv_bichaik_easy(이력):
             '<details class="fv-why"><summary>▾ 이렇게 활용해요</summary>'
             '<p>① <b>지수 ↑ + 비차익 ↑</b> — 시장 전체가 오른 날이라 내 종목도 같이 오를 확률이 큰 날이에요.</p>'
             '<p>② <b>지수 ↑ + 비차익 ↓</b> — 몇 종목이 지수를 끈 날. 지수만 보고 «시장이 좋다»고 읽으면 내 계좌와 어긋나요.</p>'
-            '<p>③ <b>연속 매도 → 크기 감소 → 첫 순매수</b> — 바구니 돈이 돌아오는 순서예요. 순매수가 <b>이틀 이어지면</b> 한 번 짚어 볼 자리.</p>'
+            # 🔴 2026-10-07 HO «흐름상 맞나?» — ①②는 «지수와 비차익을 같이 읽는 법», ③은 갑자기 «매수 타이밍»이라 결이 달랐고
+            #   근거도 없었다(실측: 3일+ 연속 매도 뒤 첫 순매수 4건, 그 뒤 사흘 코스피 +4.4/−3.5/−2.1/−3.5%). → 뺀다.
             '<p class="fv-why-w">⚠️ 선물 만기일(매달 둘째 목요일) 전후엔 포지션 정리로 크게 흔들려요 — 그날 숫자는 방향보다 «청산»으로 읽어요.</p>'
             '</details><p class="fv-bk-n">최근 5일 · 기록 있는 날만</p></details>')
 
@@ -22831,6 +23066,16 @@ def _fv_clock(이력):
         _svg += _tag(_ex - _s0, _N - 1, f'지금 {"되사는" if sell else "되파는"} 중 {_fv_amt(w["reb"] if sell else -w["reb"])}',
                      f'{d(rows[_ex])} 바닥 이후', dash=True)
         _now_reb = w["reb"]
+    # 🆕 2026-10-07 HO «직전 고점이 어디인지 국면 그래프에 표시» — 2단계(전환 확정) 기준선.
+    #   lv2_idx = 파도 안 «직전 고점» 행 번호. 이 선을 누적선이 넘으면 전환 확정.
+    _l2 = w.get("lv2_idx")
+    if isinstance(_l2, int) and 0 <= _l2 - _s0 < _N and w.get("lv2"):
+        _i2 = _l2 - _s0
+        _y2 = _Y(_cs[_i2])
+        _svg += (f'<line x1="{_X(_i2):.1f}" y1="{_y2:.1f}" x2="{_R}" y2="{_y2:.1f}" stroke="#e0c060" stroke-width="1.2" stroke-dasharray="5 3" opacity=".9"/>'
+                 f'<circle cx="{_X(_i2):.1f}" cy="{_y2:.1f}" r="4" fill="none" stroke="#e0c060" stroke-width="1.6"/>'
+                 f'<text x="{min(_X(_i2) + 6, _R - 120):.1f}" y="{_y2 - 6:.1f}" font-size="9" font-weight="800" fill="#e0c060" '
+                 f'stroke="#0d1420" stroke-width="3" paint-order="stroke">직전 고점 {d(rows[_l2])} · 넘으면 2단계</text>')
     _ey = _Y(_cs[-1])
     _svg += (f'<circle cx="{_X(_N-1):.1f}" cy="{_ey:.1f}" r="3.6" fill="#ffc93c"/>'
              f'<text x="{_X(_N-1) - 6:.1f}" y="{_ey + (16 if _ey + 16 <= _H - 16 else -9):.1f}" font-size="11" font-weight="800" '
@@ -22937,7 +23182,7 @@ def _fv_clock(이력):
         f'<i>❌ 다시 {"팔았음" if sell else "샀음"}</i></div>' for x in w["bounces"])
     근거 = ('<details class="fv-why"><summary>▾ 이 기준은 어디서 나왔나</summary>'
            '<p>외국인 <b>누적 순매수 선</b>을 차트처럼 읽습니다(다우 이론). 고점·저점이 함께 낮아지는 동안이 '
-           '«매도 파도», 함께 높아지는 동안이 «매수 파도»예요. 기준 숫자는 제가 정하지 않고 '
+           '«매도 파도», 함께 높아지는 동안이 «매수 파도»예요. 기준 숫자는 우리 관제탑에서 판단하지 않고 '
            '<b>파도 자신의 고점·저점</b>에서 나와, 새 꼭짓점이 생길 때마다 저절로 바뀝니다.</p>'
            + (f'<p>이 파도에서 외국인은 <b>{len(w["bounces"])}번</b> 되돌렸다가 모두 원래 방향으로 돌아갔어요:</p>'
               f'<div class="fv-bt">{_bt}</div>' if w["bounces"] else "")
@@ -22965,7 +23210,8 @@ def build_flow_v2(data, 해석):
     #   (그 «위험 신호» 칸은 _fv_credit_note의 ①로 옮겼다).
     # 🔴 2026-10-03 HO 승인 — «외국인이 판 가격대»+«파도 나란히» → «외국인 시계» 한 장.
     #   두 함수는 지우지 않고 남겨 둔다(되살리려면 이 줄만 바꾸면 된다).
-    return (_fv_who(data) + _fv_clock(이력) + tl
+    # 🔴 2026-10-07 HO «외국인 시계 밑에 오늘 돈은 누가 — 순서만 바꿔» (첫 질문은 «지금 어느 국면»)
+    return (_fv_clock(이력) + _fv_who(data) + tl
             + _fv_trust(해석, data, 이력))
 
 
@@ -25286,6 +25532,7 @@ html{{scroll-behavior:smooth}}
 .q90-why-b b{{color:#fff;font-weight:800}}
 /* 계기판 밑 한 줄 코멘트 */
 .mny-cmt{{font-size:11.5px;color:#9aa0aa;line-height:1.75;margin:9px 0 0;padding-top:9px;border-top:1px solid rgba(255,255,255,.08)}}
+.idx-card2 .mny-cmt{{margin:8px 10px 10px;font-size:11.5px}}
 .mny-cmt b{{color:#e8eaee}}
 /* 🆕 어디에도 안 걸린 새 테마 */
 .nt-box{{background:#141922;border:1px solid #2a3342;border-left:3px solid #ef4444;border-radius:12px;padding:12px 14px;margin:10px 0 0}}
@@ -25333,9 +25580,9 @@ html{{scroll-behavior:smooth}}
    래퍼 div를 한 겹 더 거치며 폭이 미묘하게 달라질 수 있었다). width:100%를
    명시해 캔들이 들어있는 .sc4-c2와 똑같은 폭을 쓰도록 고정한다. */
 .sc2-spark{{flex:0 0 auto;text-align:center;width:100%}}
-.sc2-spark-t{{margin:0 0 .15rem;font-size:9.5px;color:#6f7784;font-weight:700;
-  white-space:nowrap}}
-.sc2-spark-def{{display:block;font-size:7.5px;color:#5b6270;font-weight:600;
+.sc2-spark-t{{margin:0 0 .15rem;font-size:10.5px;color:#c9d0d9;font-weight:800;
+  white-space:nowrap}}   /* 🔴 2026-10-07 HO «글자가 너무 흐려» — 제목·설명 밝게·키움 */
+.sc2-spark-def{{display:block;font-size:9px;color:#9aa3b1;font-weight:600;
   margin-top:1px;white-space:nowrap}}
 /* 🔴 2026-09-07 (2차) — max-width:150px·height:52px 강제를 없앤다.
    이제 svg 자체 inline style(width:100%;height:Hpx)이 크기를 정확히
@@ -25387,7 +25634,7 @@ html{{scroll-behavior:smooth}}
 .sc3{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;
   width:100%}}
 .sc3-c{{text-align:center}}
-.sc3-k{{margin:0;font-size:9.5px;color:#7d848f}}
+.sc3-k{{margin:0;font-size:10.5px;color:#8b95a5}}   /* 🔴 10/7 HO «흰색이네?» — 이름은 회색으로 낮추고 숫자 색만 눈에 들어오게 */
 /* 🆕 2026-09-07 HO 지시 — 외국인·기관·개인 숫자에 살짝 테두리를 둘러
    달라는 요청. display:inline-block으로 글자 크기만큼만 테두리가
    붙게 하고(부모 .sc3-c가 text-align:center라 가운데 정렬은 그대로
@@ -25572,10 +25819,17 @@ html{{scroll-behavior:smooth}}
 .pk-bar i{{height:9px;border-radius:3px}}
 .pk-al{{margin:4px 0 0;display:flex;gap:10px;font-size:10px}}
 .pk-go{{margin:4px 0 0;font-size:11px;font-weight:700;color:#e0c060;cursor:pointer;text-align:right}}
-.sh-d summary{{cursor:pointer;font-size:11px;font-weight:800;color:#e0c060;list-style:none}}
+.sh-d summary{{cursor:pointer;font-size:11px;font-weight:800;color:#e0c060;list-style:none}}   /* 🔴 10/7 (2차) HO — 테두리 원래대로 */
+.sh-mb{{display:grid;grid-template-columns:minmax(72px,auto) 1fr auto;gap:8px;align-items:center;margin:6px 0;font-size:13px}}
+.sh-mbn{{font-weight:800;color:#e6ebf1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.sh-mbb{{height:10px;background:#141b26;border-radius:5px;overflow:hidden}}
+.sh-mbb i{{display:block;height:100%;background:#ff5a4e;border-radius:5px}}
+.sh-mb b{{color:#ff5a4e;font-variant-numeric:tabular-nums;white-space:nowrap}}
+.sh-mbo{{margin-top:8px;color:#8fb7ff}}
+.sh-mbo b{{color:#5b9bff}}
 .sh-d summary::-webkit-details-marker{{display:none}}
-.sh-d p{{margin:6px 0 0;font-size:13px;line-height:1.75;color:#d6e6f0;
-  padding:9px 11px;background:#13202c;border-radius:8px;border-left:3px solid #4f86a6}}
+.sh-d p{{margin:8px 0 0;font-size:13px;line-height:1.75;color:#eaf3f9;
+  padding:10px 12px;background:#17273a;border-radius:8px;border-left:3px solid #e0c060}}
 .sh-ln{{display:block;margin:5px 0 0;font-size:11px;color:#7fb0d8;text-decoration:none;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .sh-tr{{display:flex;gap:8px;align-items:baseline;padding:6px 0;border-top:1px solid #172130;
