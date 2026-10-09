@@ -2289,18 +2289,61 @@ def _acc_star_names(매집):
        숫자가 나온 적이 있다 — 화면엔 각 5개씩만 보이는데도).
     """
     매집 = 매집 or {}
-    def top5(리스트, 시장):
-        후보 = [x for x in (리스트 or []) if x.get("시장") == 시장]
-        후보 = sorted(후보, key=lambda x: x.get("시총대비") or 0, reverse=True)[:5]
-        return {x["종목명"] for x in 후보}
-    단기 = 매집.get("종목") or []
-    중기 = 매집.get("중기종목") or []
-    단기TOP = top5(단기, "코스피") | top5(단기, "코스닥")
-    중기TOP = top5(중기, "코스피") | top5(중기, "코스닥")
+    # 🔴 2026-10-09 — 화면(시장별 TOP5)과 같은 기준으로 비교한다.
+    단기TOP = {x["종목명"] for m in ("코스피", "코스닥") for x in _ac_top([y for y in (매집.get("종목") or []) if y.get("시장") == m])}
+    중기TOP = {x["종목명"] for m in ("코스피", "코스닥") for x in _ac_top([y for y in (매집.get("중기종목") or []) if y.get("시장") == m])}
     return 단기TOP & 중기TOP
 
 
 _AC_SEQ = [0]
+_AC_MK = [0]
+AC_SHOW_N = 5      # 🔴 2026-10-09 HO — 매집 탭마다 화면에 보일 종목 수(시장 합쳐서)
+
+
+def _ac_top(목록, n=None):
+    """매집 목록 → 시총대비 높은 순 n개(코스피·코스닥 합쳐서). 상세 표와 무료 2종목이 같은 순위를 쓴다."""
+    return sorted([x for x in (목록 or []) if isinstance(x, dict) and x.get("종목명")],
+                  key=lambda x: x.get("시총대비") or 0, reverse=True)[:(n or AC_SHOW_N)]
+
+
+def _ac_pills(s, 별=None):
+    """매집 행의 알약 — 📡 오늘 포착 종목의 «💰 돈이 몰림» 알약과 같은 모양(배경 없이 같은 색 테두리)."""
+    out = []
+    yu = (s.get("유형") or "").strip()
+    if yu == "쌍끌이":
+        out.append(("🤝 쌍끌이", "#ff8a6e"))
+    elif yu:
+        out.append((f"💼 {yu}", "#8fd0e8"))
+    for t in re.findall(r">([^<>]+)<", accum_badge(s.get("종목명")) or ""):
+        t = t.strip()
+        if t:
+            out.append((t, "#e0c060" if "차 매집" in t else "#9aa3b1"))
+    if 별 and s.get("종목명") in 별:
+        out.append(("⭐ 5일에도 등재", "#e0c060"))
+    return "".join(f'<span class="rd-tag" style="background:none;border:1px solid {c}66;'
+                   f'color:{c};font-weight:700">{t}</span>' for t, c in out)
+
+
+def _ac_rd_row(i, s, 일수, 사전, 별=None):
+    """매집 한 줄 — 순서: 순위 | 이름·오늘 등락·기업분석·차트·뉴스 | 알약 | 숫자 줄 | 오른쪽 시총 대비(=순위 기준)."""
+    nm = s["종목명"]
+    v = (사전 or {}).get(nm) or []
+    오늘 = v[3] if len(v) > 3 and isinstance(v[3], (int, float)) else None
+    끼 = (f'<span style="font-size:12.5px;font-weight:800;color:{"#c1432b" if 오늘 >= 0 else "#2e6bd6"};'
+          f'margin:0 4px 0 6px">{오늘:+.2f}%</span>' if 오늘 is not None else "")
+    이름, 칸 = sc_click(nm, None, 13, 끼, 코드=s.get("코드"))
+    기등 = next((s.get(k) for k in ("기간등락률", "5일등락률", "장기등락률", "최장기등락률")
+                if isinstance(s.get(k), (int, float))), None)
+    기문 = (f' · {일수}일간 주가 <b style="color:{"#c1432b" if 기등 >= 0 else "#2e6bd6"}">{기등:+.1f}%</b>'
+           if 기등 is not None else "")
+    pills = _ac_pills(s, 별)
+    return (f'<div class="rd-row"><span class="rd-rank">{i}</span><div class="rd-info">'
+            f'<p class="rd-name">{이름}</p>'
+            + (f'<p class="rd-badges">{pills}</p>' if pills else "")
+            + f'<p class="rd-meta">{s.get("시장", "")} · 외 {s.get("외인일수", 0)}일 · 기 {s.get("기관일수", 0)}일'
+              f' · 누적 +{_fmt_eok(s.get("합산"))}{기문}</p>{칸}</div>'
+            f'<div class="rd-nums"><span class="rd-score">{(s.get("시총대비") or 0):.2f}%</span>'
+            f'<span class="rd-chg ac-lab">시총 대비</span></div></div>')
 
 
 # ══════════════════════════════════════════════════════════════
@@ -2539,7 +2582,7 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
         f"ETF·ETN·스팩·우선주 제외 · "
         f"관찰 {cfg.get('기간','?')}거래일 │ "
         f"🤝쌍끌이 = 외국인·기관 <b>둘 다</b> {cfg.get('쌍끌이일수','?')}일↑ 순매수 & 각자 누적 + · "
-        f"조건 통과 종목 전부를 후보 풀에 담은 뒤 <b>코스피·코스닥으로 나눠</b> 각 시장에서 TOP5<br>"
+        f"조건 통과 종목 전부를 후보 풀에 담은 뒤 <b>코스피·코스닥으로 나눠</b> 각 시장에서 시총대비 TOP5<br>"
         f"<b>시총대비</b> = 5일 누적 순매수 ÷ 시가총액 × 100 (내림차순 정렬)"
         f"💼단독 = 한쪽만 {cfg.get('단독일수','?')}일↑<br>"
         # 🔴 2026-09-19 — 3중 조건을 «자세히» 적는다(HO 지시).
@@ -2675,7 +2718,26 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
           {값HTML}
         </div>"""
 
-    # ── 시장별 시총 대비 TOP5 ──
+    # 🔴 2026-10-09 HO «코스피·코스닥 나누지 말고 점수 높은 순으로 탭마다 5개 · 디자인은 오늘 포착 종목과 동일»
+    #   점수 = 시총대비(그 기간 외국인+기관 누적 순매수 ÷ 시가총액 × 100) — 세 탭 모두 같은 기준.
+    #   ⚠️ 화면만 5개다. 수집·archive에는 조건 통과 종목이 전부 그대로 쌓인다(나중에 늘릴 수 있게).
+    # 🔴 2026-10-09 (2차) HO «거의 코스닥이다 → 코스피·코스닥 탭으로 기존처럼, 보여주는 것만 5종목씩»
+    def _rk(목록, 일수, 별=None):
+        _AC_MK[0] += 1
+        g = f"acm{_AC_MK[0]}"
+        칩, 몸 = "", ""
+        for j, mk in enumerate(("코스피", "코스닥")):
+            전 = [x for x in (목록 or []) if isinstance(x, dict) and x.get("시장") == mk]
+            top = _ac_top(전)
+            칩 += (f'<button class="acm-b{" on" if j == 0 else ""}" data-g="{g}" data-m="{j}" '
+                   f'onclick="acMk(this)">{mk} <span>후보 {len(전)}</span></button>')
+            본 = ("".join(_ac_rd_row(i, s, 일수, _사전2, 별) for i, s in enumerate(top, 1))
+                  if top else f'<p class="rd-empty">{mk} — 오늘 조건을 만족한 종목이 없습니다.</p>')
+            몸 += (f'<div class="rd-market acm-p" data-g="{g}" data-m="{j}"'
+                   f'{"" if j == 0 else " hidden"}>{본}</div>')
+        return f'<div class="acm-tabs">{칩}</div>{몸}'
+
+    # ── (옛) 시장별 시총 대비 TOP5 — 2026-10-09부터 화면에선 안 쓴다(숫자 세기용으로만 남김) ──
     #   예전엔 '시총대비 / 매집갭' 두 랭킹이었는데, 매집갭은 해석 부담이 커서 뺐다.
     #   대신 같은 기준(시총대비)을 코스피·코스닥으로 나눠 비교 가능성을 높였다.
     def 시장랭킹(시장):
@@ -2715,10 +2777,7 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
         하루 이틀 산 게 아니라 <b>한 달 내내 같은 방향</b>이었다는 뜻이라, 단기보다 되돌림이 적습니다.<br>
         🤝쌍끌이 = 둘 다 {매집.get("중기쌍끌이",12)}일↑ · 💼단독 = 한쪽 {매집.get("중기단독",14)}일↑ ·
         <b>⭐ = 5일 랭킹에도 동시 등재</b>(가장 강한 신호)</p>
-      <div class="ac-two">
-        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {중기간}일 매집</p>{중기랭킹("코스피")}</div>
-        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {중기간}일 매집</p>{중기랭킹("코스닥")}</div>
-      </div>'''
+      {_rk(중기, 중기간, 별명단)}'''
 
     # ── 🆕 2026-08-22 장기(60일) 매집 — 20일과 같은 규칙, 기간만 확장 ──
     #    ⚠️ 데이터가 없으면 블록이 비고, 아래 탭도 자동으로 꺼진다(off).
@@ -2751,20 +2810,17 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
       <p class="ac-long-s">{장기간}일은 <b>"분기 내내 이어진 방향"</b>입니다. {_기준안내}<br>
         세 달을 같은 쪽으로 담았다면 단기 이벤트가 아니라 <b>구조적인 판단</b>일 가능성이 큽니다.<br>
         🤝쌍끌이 = 둘 다 {매집.get("장기쌍끌이",36)}일↑ · 💼단독 = 한쪽 {매집.get("장기단독",42)}일↑ ·
-        정렬은 <b>매집강도</b>(많이 담겼는데 덜 오른 순)</p>
-      <div class="ac-two">''' + f'''
-        <div class="ac-col"><p class="ac-col-t">📊 코스피 · {장기간}일 매집</p>{장기랭킹("코스피")}</div>
-        <div class="ac-col"><p class="ac-col-t">📊 코스닥 · {장기간}일 매집</p>{장기랭킹("코스닥")}</div>
-      </div>'''
+        정렬은 <b>시총 대비</b>(그 회사 크기에 비해 많이 담긴 순)</p>
+      {_rk(장기, 장기간)}'''
 
     보충 = (f'<p class="ac-note">※ 오늘 후보 풀 {len(종목)}종목 '
           f'(🤝쌍끌이 {쌍수} + 💼단독 {max(0,len(종목)-쌍수)}) — '
-          f'코스피 {코스피수} · 코스닥 {코스닥수}. 각 시장에서 시총 대비 상위 5개입니다.</p>')
+          f'코스피 {코스피수} · 코스닥 {코스닥수}. 각 시장에서 시총 대비 상위 {AC_SHOW_N}개입니다.</p>')
 
     return f"""
   <div class="rd-box">
     <p class="rd-lead">🐢 <b>하루 순매수는 우연이지만, 며칠 연속은 의지입니다.</b>
-      조용히 돈이 쌓이는 종목을 코스피·코스닥에서 각각 찾습니다.
+      조용히 돈이 쌓이는 종목을 기간(5·20·60일)마다 찾습니다.
       (강세 레이더가 '터진 것'을 본다면, 여기는 '쌓이는 것'을 봅니다)<br>
       🤝 쌍끌이 = 외국인·기관이 <b>둘 다</b> {기간}일 중 {쌍최소}일 이상 순매수 ·
       💼 단독 = 한쪽만 {단최소}일 이상</p>
@@ -2779,18 +2835,7 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
       <p class="ac-long-s">{기간}일은 <b>"이번 주에 막 들어온 돈"</b>입니다.
         아직 짧아 되돌릴 수도 있지만, <b>가장 빠른 신호</b>이기도 합니다.<br>
         🤝쌍끌이 = 둘 다 {쌍최소}일↑ · 💼단독 = 한쪽 {단최소}일↑</p>
-      <div class="ac-two">
-        <div class="ac-col">
-          <p class="ac-col-t">📊 코스피 · {기간}일 매집</p>
-          <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
-          {코스피행}
-        </div>
-        <div class="ac-col">
-          <p class="ac-col-t">📊 코스닥 · {기간}일 매집</p>
-          <p class="ac-col-s">그 회사엔 얼마나 큰 돈인가</p>
-          {코스닥행}
-        </div>
-      </div>
+      {_rk(종목, 기간)}
       {보충}
     </div>
     <div class="ac-body" data-g="{_AC_GID}" data-p="l">
@@ -2799,6 +2844,9 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
     <div class="ac-body" data-g="{_AC_GID}" data-p="x">
       {장기블록 or '<p class="rd-empty">60일 매집은 이력이 더 쌓이면 열립니다.</p>'}
     </div>
+    <script>function acMk(b){{var g=b.dataset.g,m=b.dataset.m;
+      document.querySelectorAll('.acm-b[data-g="'+g+'"]').forEach(function(x){{x.classList.toggle('on',x===b);}});
+      document.querySelectorAll('.acm-p[data-g="'+g+'"]').forEach(function(p){{p.hidden=(p.dataset.m!==m);}});}}</script>
     <script>(function(){{
       var root=document.currentScript.parentNode;
       root.addEventListener('click',function(e){{
@@ -2813,7 +2861,7 @@ def build_accumulation(매집, 설정=None, 종목사전=None):
     }})();</script>
     <p class="rd-foot">💡 <b>순위가 높다고 "곧 오른다"는 뜻이 아닙니다.</b> 그 회사 규모에 비해 들어온 돈이
       컸다는 사실만 보여줄 뿐이며, 이유는 개별 확인이 필요합니다.
-      시장을 나눈 이유는 시총 규모가 다른 코스피·코스닥을 한 줄로 세우면 늘 소형주만 올라오기 때문입니다.<br>
+      오른쪽 숫자(시총 대비)가 순위 기준이에요. 시장을 나눈 이유는 한 줄로 세우면 회사가 작을수록 같은 돈도 비율이 커져 코스닥만 올라오기 때문이에요.<br>
       ※ '기관'은 <b>기관계 합산</b>입니다. 증권사 자기매매(선물·ELS 헤지 등 방향성이 아닌 물량)가
       포함될 수 있습니다. 관찰 참고용이며 매수 신호가 아닙니다.</p>
   </div>"""
@@ -3418,7 +3466,7 @@ def _flow_line(실탄):
 CORE_ACC_FILE = "core_accum_log.json"
 
 
-CORE_ACC_회피일 = 5   # 🆕 2026-08-24 HO 지시 — 최근 며칠치를 피할지
+CORE_ACC_회피일 = 5   # 🔴 2026-10-09 HO «원래대로 5번» — 최근 5번 발행분은 피한다
 
 
 def _core_accum_recent(일수=None):
@@ -3685,6 +3733,31 @@ def build_core_accum(매집):
     #    ⚠️ 어제 것만 피한다(2일 전은 다시 나와도 된다) — 너무 오래 막으면
     #       정작 가장 강한 매집 종목이 영영 안 보인다.
     _최근 = _core_accum_recent()
+    # 🔴 2026-10-09 HO «위 매집 종목은 여러 탭 중에서 최근과 안 겹치는 범위에서 좋은 점수 위주로 랜덤하게 두 개»
+    #   후보 = 5·20·60일 탭 각 TOP5(밑 상세 표와 같은 순위·같은 기준 시총대비). 시장 구분 없음.
+    #   가중 = 탭 안 순위(1위 5 … 5위 1) — 점수 높을수록 잘 뽑힌다.
+    #   난수 씨앗 = 발행일 → 같은 날 다시 빌드해도 같은 두 종목(리포트가 매번 안 바뀐다).
+    #   피하기: 최근 CORE_ACC_회피일(3)번 발행분 → 모자라면 어제만 → 그래도 모자라면 제한 없이.
+    import random as _random
+    _필드 = {5: "5일등락률", 20: "장기등락률", 60: "최장기등락률"}
+    _후보 = []
+    for _목록, _기간 in ((매집.get("종목") or [], 매집.get("기간", 5)),
+                       (매집.get("중기종목") or [], 매집.get("중기기간", 20)),
+                       (매집.get("장기종목") or [], 매집.get("장기기간", 60))):
+        for _m in ("코스피", "코스닥"):
+            for _r, _s in enumerate(_ac_top([x for x in _목록 if x.get("시장") == _m])):
+                _후보.append((_s, _기간, _필드.get(_기간, "등락률"), AC_SHOW_N - _r))
+    _rng = _random.Random(int(re.sub(r"\D", "", str(DATE)) or 0))
+    뽑기2, _쓴2 = [], set()
+    for _제외 in (_최근, _core_accum_recent(1), set()):
+        _pool = [c for c in _후보 if c[0]["종목명"] not in _제외 | _쓴2]
+        while _pool and len(뽑기2) < 2:
+            c = _rng.choices(_pool, weights=[w for *_, w in _pool])[0]
+            뽑기2.append(c[:3])
+            _쓴2.add(c[0]["종목명"])
+            _pool = [p for p in _pool if p[0]["종목명"] not in _쓴2]
+        if len(뽑기2) >= 2:
+            break
 
     def _고르기(목록, 시장, 제외):
         """한 기간 목록 안에서 매집강도 1위부터 훑되, 제외 종목은 건너뛴다.
@@ -3710,7 +3783,7 @@ def build_core_accum(매집):
 
     _직전 = _core_accum_recent(1)      # 완화 단계에서 쓸 '어제만' 집합
     뽑기, _쓴이름 = [], set()
-    for 시장 in ("코스피", "코스닥"):
+    for 시장 in (() if 뽑기2 else ("코스피", "코스닥")):     # 🔴 10/09 — 새 방식이 뽑았으면 옛 방식(시장별 1개)은 건너뛴다
         _찾음 = None
         # ① 최근 5회 노출분을 피해 20일 → 5일 → 60일 순으로 새 얼굴을 찾는다
         for 목록, 기간, 필드 in _풀:
@@ -3733,6 +3806,8 @@ def build_core_accum(매집):
         if _찾음:
             뽑기.append(_찾음)
             _쓴이름.add(_찾음[0].get("종목명"))
+    if 뽑기2:
+        뽑기, _쓴이름 = 뽑기2, _쓴2
     _core_accum_save(_쓴이름)
     # 🔴 HO 지시 2026-09-17 — 강세와 같은 이유로, 비어도 틀은 남긴다.
     if not 뽑기:
@@ -3820,8 +3895,9 @@ def build_core_accum(매집):
             #    이런 식으로 쉽게."
             #    종목마다 붙이면 시끄러우니(1차 시도의 실패) 규칙은 여기
             #    한 곳에서만, 대신 줄을 바꿔 눈에 띄게 적는다.
-            f'<b style="color:#74f0d4">📉 주가가 하락한 종목일수록 점수가 높습니다</b> '
-            f'— 이미 오른 걸 쫓아 산 게 아니라는 뜻이라서예요.</p>'
+            # 🔴 2026-10-09 — 순위 기준이 «시총 대비»로 바뀌어(덜 오른 순 아님) 문장도 바꾼다.
+            f'<b style="color:#74f0d4">📊 5·20·60일 매집 상위 종목 중 두 개</b>를 '
+            f'최근 사흘 소개한 종목과 겹치지 않게 골라요 — 전체 순위는 포착 탭 아래 «매집 레이더 상세»에서요.</p>'
             # ⚠️ 2026-09-17 — 여기에 «아래 상세표와 왜 다른지» 안내를 한 번
             #   넣었다가 HO 지시로 뺐다. 설명이 길어지면 카드가 무거워진다.
             #   (차이 자체는 설계대로다: 이 카드는 최근 소개분을 피해 새 얼굴을
@@ -3858,18 +3934,37 @@ def build_premarket3(data, 해석, 날짜표기=""):
             ln.append(("🌊", "외국인", t))
     except Exception as e:
         print(f"   ⚠️ 개장 전 3초(외국인) 실패 — {type(e).__name__}: {e}")
+    # 🔴 2026-10-09 HO — ③ 테마 줄은 오늘의 대응·알약과 같은 이름이 반복돼 «다음 장 일정»으로 바꿨다.
+    _표현 = "내일"
     try:
-        build_money_bars()
-        mb = _FOLLOW_CACHE.get("MBR")
-        if mb and mb[0]:
-            nm = "·".join(_lab_nm(r["n"]) for r in mb[0][:3])
-            ln.append(("💰", "테마", f'오늘 돈이 들어온 <b>{nm}</b> — 내일도 평소보다 많이 들어오나'))
+        _t0 = datetime.strptime(str(DATE), "%Y%m%d").date()
+        _ctx = trading_day_context(_t0)
+        _nx = next_trading_day(_t0)
+        _표현 = _ctx.get("다음거래일표현") or "내일"
+        _쉼 = (_nx - _t0).days - 1                       # 사이에 낀 날(주말·휴일)
+        _미장 = sum(1 for k in range((_nx - _t0).days) if (_t0 + timedelta(days=k)).weekday() < 5)
+        _만기 = (_nx.weekday() == 3 and 8 <= _nx.day <= 14)  # 매달 둘째 목요일 = 선물·옵션 만기
+    except Exception as e:
+        print(f"   ⚠️ 개장 전 3초(다음 장) 실패 — {type(e).__name__}: {e}")
+    # 🔴 2026-10-09 (2차) HO «장이 언제 열리는지는 중요하지 않다 — 다른 내용으로» →
+    #   ③ = «오늘 1위 테마가 버티나». 시황 «내일 확인할 것»의 테마 칸(무엇)을 그대로 쓰고, 없으면 코드로 만든다.
+    #   (①이벤트·②외국인·③테마 = 내일 확인할 것 세 칸의 한 줄 요약. 돈이 간 곳·알약과 이름이 겹치지 않는다)
+    try:
+        _tx = [x for x in ((해석 or {}).get("내일확인") or []) if isinstance(x, dict)
+               and str(x.get("영역", "")).strip() == "테마" and x.get("무엇")]
+        if _tx:
+            ln.append(("🔥", "테마", _plain(str(_tx[0]["무엇"]))))
+        else:
+            _S = [s for s in ((data or {}).get("주도섹터") or []) if s.get("테마명")]
+            if _S:
+                ln.append(("🔥", "테마", f'오늘 1위 <b>{_S[0]["테마명"]}</b> — {_표현}도 10위권에 남나'))
     except Exception as e:
         print(f"   ⚠️ 개장 전 3초(테마) 실패 — {type(e).__name__}: {e}")
     if not ln:
         return build_closing(해석, 날짜표기)
     문장 = (해석.get("오늘의_한문장") or "").strip()
-    return ('<p class="sec-label"><small>내일 아침</small>🌅 내일 개장 전 3초</p>'
+    _제 = "내일" if _표현 == "내일" else _표현.split("(")[0]        # 연휴 앞이면 «월요일 개장 전 3초»
+    return (f'<p class="sec-label"><small>{_제} 아침</small>🌅 {_제} 개장 전 3초</p>'
             '<div class="pm3">'
             + (f'<p class="pm3-q">“{문장}”</p>' if 문장 else "")
             + '<p class="pm3-h">장 열리기 전에 이 세 줄만 보세요</p>'
@@ -3914,6 +4009,61 @@ def build_closing(해석, 날짜표기=""):
     {위치줄}{인사줄}
     <p class="quote-sub">— 차트프로 관제탑, {날짜표기}</p>
   </div>'''
+
+
+def _mood_pills():
+    """🔴 2026-10-09 HO 확정 — 종합 맨 위 알약 4개(2×2). 이 4개만 봐도 오늘 분위기가 읽히게.
+    네 질문이 겹치지 않게: ① 얼마나(코스피) ② 누가(외국인+기관) ③ 내 계좌는(종목 상승·하락) ④ 어디로(돈이 간 테마)
+    ⚠️ 전부 코드 숫자(AI 문장 없음). 재료가 없는 칸은 빼고, 2개 미만이면 빈 문자열(옛 관제 배지로 돌아간다)."""
+    d = _today_data() or {}
+    out = []
+    UP, DN, NE = "up", "dn", "ne"
+    try:      # ① 얼마나 — 코스피
+        v = float(str(((d.get("지수수급") or {}).get("지수") or {}).get("코스피", {}).get("등락률")).replace(",", ""))
+        말 = ("급락" if v <= -2 else "하락" if v <= -0.3 else "급등" if v >= 2 else "상승" if v >= 0.3 else "보합")
+        out.append((("📉" if v < 0 else "📈"), f"코스피 {v:+.1f}% {말}", DN if v < 0 else UP))
+    except Exception:
+        pass
+    try:      # ② 누가 — 외국인+기관(실탄) · 며칠째
+        h = [r for r in (load_json("flow_history.json") or []) if isinstance(r, dict)
+             and r.get("실탄") is not None and str(r.get("날짜", "")) <= str(DATE)]
+        if h:
+            s = h[-1]["실탄"]
+            k = _fs_streak([r["실탄"] for r in h])
+            amt = _flow_amt(abs(s)).lstrip("+")
+            if abs(s) < 1000:
+                out.append(("🤝", f"외인·기관 관망 ({_flow_amt(s)})", NE))
+            else:
+                out.append((("💸" if s < 0 else "💰"),
+                            f"외인·기관 {amt} {'매도' if s < 0 else '매수'}" + (f" · {k}일째" if k >= 2 else ""),
+                            DN if s < 0 else UP))
+    except Exception:
+        pass
+    try:      # ③ 내 계좌는 — 종목 10개 중 몇 개
+        c = d.get("등락종목수") or {}
+        상 = sum((c.get(m) or {}).get("상승", 0) for m in ("코스피", "코스닥"))
+        하 = sum((c.get(m) or {}).get("하락", 0) for m in ("코스피", "코스닥"))
+        보 = sum((c.get(m) or {}).get("보합", 0) for m in ("코스피", "코스닥"))
+        tot = 상 + 하 + 보
+        if tot:
+            if 하 >= 상:
+                out.append(("🔵", f"종목 10개 중 {round(하 / tot * 10)}개 하락", DN))
+            else:
+                out.append(("🔴", f"종목 10개 중 {round(상 / tot * 10)}개 상승", UP))
+    except Exception:
+        pass
+    try:      # ④ 어디로 — 평소보다 돈이 가장 많이 더 들어온 테마(테마 돈 막대와 같은 재료)
+        build_money_bars()
+        mb = _FOLLOW_CACHE.get("MBR")
+        if mb and mb[0]:
+            out.append(("🎯", f"돈은 {_lab_nm(mb[0][0]['n'])}로", UP))
+    except Exception:
+        pass
+    if len(out) < 2:
+        return ""
+    return ('<div class="mp4">' + "".join(
+        f'<span class="mp4-p {c}" title="{html.escape(t)}"><i>{ic}</i><b>{t}</b></span>' for ic, t, c in out)
+        + '</div>')
 
 
 def build_signal_head(지수수급, 파생, 코수, 관제=None, 사건명=None):
@@ -4010,8 +4160,8 @@ def build_signal_head(지수수급, 파생, 코수, 관제=None, 사건명=None)
                 #    ⚠️ «코스피·코스닥 동반 상승» 배지도 이제 되살린다. 2차 때
                 #       뺐던 이유는 바로 밑 지수줄과 겹쳐서였는데, 그 지수줄을
                 #       이번에 없앴으므로 겹칠 대상이 사라졌다.
-                _배지 = ""
-                if _관.get("배지"):
+                _배지 = _mood_pills()
+                if not _배지 and _관.get("배지"):
                     _배지 = ('<div class="gz-badges sh-badges">' + "".join(
                         f'<span class="gz-badge">{b}</span>'
                         for b in _관["배지"]) + '</div>'
@@ -6235,13 +6385,33 @@ def build_my_stocks(data):
   var host=document.getElementById('ms-diff'); if(!host) return;
   var rows='';
   my.forEach(function(nm){
-   var it=_dfItems(nm); if(!it.length) return;
+   var it=_dfItems(nm);
+   /* 🔴 2026-10-09 HO «빨간불은 항상 올려줘야지» — 신호등 🔴(확인 필요)이면 다른 조건과 상관없이 맨 위 줄로 올린다.
+      재료 = drawBrief가 먼저 계산해 둔 window.CP_SIG(_sigScan 결과). drawBrief → drawDiff 순서라 이미 채워져 있다. */
+   var S=(window.CP_SIG||{})[nm];
+   if(S&&S.lv===2){ var rd=(S.L||[]).filter(function(x){return x.lv===2;})[0];
+    if(rd) it=[['🔴','<b>빨간불</b> · '+rd.cat+' — '+rd.t]].concat(it).slice(0,4); }
+   if(!it.length) return;
    var r0=(P.ret[nm]||[])[P.days.length-1];
    rows+='<div class="df-s"><p class="df-n"><span class="df-go" data-nm="'+nm+'">'+nm+'</span>'+
     ((r0===null||r0===undefined)?'':' <b style="color:'+_msC(r0)+'">'+_msPct(r0)+'</b>')+'</p>'+
     it.map(function(x){return '<p class="df-i"><i>'+x[0]+'</i><span>'+x[1]+'</span></p>';}).join('')+'</div>';
   });
-  host.innerHTML=rows?('<div class="df-box"><p class="df-h">📌 오늘 챙겨볼 종목만</p>'+rows+'</div>'):'';
+  /* 🆕 2026-10-09 HO «'오늘 챙겨볼 종목만'의 기준을 밑에 접어서» — 아래 _dfItems 규칙을 그대로 옮긴 글 */
+  var why='<details class="df-why"><summary>▾ 어떤 종목이 여기 올라오나요</summary><div>'+
+   '<p>아래 여섯 가지 중 <b>하나라도</b> 걸린 종목만 올라와요(한 종목에 최대 4줄).</p>'+
+   '<p>📄 <b>새 공시</b> — 오늘 그 종목 공시가 나왔어요.</p>'+
+   '<p>💰 <b>수급</b> — 외국인 또는 기관이 ① 3일 넘게 한쪽으로 사다(팔다) 오늘 반대로 돌아섰고 그 크기가 평소 하루 거래대금의 20% 이상 · '+
+   '② 3·5·10일째 같은 방향이고 그동안 쌓인 돈이 평소 하루 거래대금의 50% 이상 · ③ 어제는 엇갈렸는데 오늘 둘이 같은 방향(각각 10% 이상) · '+
+   '④ 오늘 외국인+기관 거래 규모가 최근 10일 평균의 3배 이상.</p>'+
+   '<p>📈 <b>주가</b> — 4일 넘게 이어지던 상승(하락)이 끝나고 오늘 반대로 ±2% 이상 · 4·7·10일째 같은 방향이면서 그동안 ±10% 이상 · 오늘 하루 ±7% 이상.</p>'+
+   '<p>🌊 <b>출렁임</b> — 최근 5일 하루 변동이 그 앞 20일보다 2.5배 넘게 커졌고(±3% 이상), 오늘 처음 넘은 날.</p>'+
+   '<p>📡 <b>레이더</b> — 포착·매집 레이더에 새로 잡혔거나, 어제와 다른 레이더로 바뀌었거나, 어제 잡혔다가 빠졌어요.</p>'+
+   '<p>🏁 <b>섹터 안 자리</b> — 섹터 안에서 맨 앞줄·맨 뒷줄로 새로 들어갔고 순위가 크게 움직였어요.</p>'+
+   '<p class="df-why-n">📰 새 기사 · 📅 오늘·내일 일정은 위 여섯 가지 중 하나가 걸린 종목에만 덧붙여요(기사만으로는 거의 매일 떠서).<br>'+
+   '🚦 신호등이 <b>🔴 빨간불(확인 필요)</b>인 종목은 위 조건과 상관없이 <b>항상</b> 올라와요. 초록·노란불은 위 조건에 걸릴 때만 올라와요.</p>'+
+   '</div></details>';
+  host.innerHTML=rows?('<div class="df-box"><p class="df-h">📌 오늘 챙겨볼 종목만</p>'+rows+why+'</div>'):'';
  }
  /* 이름을 누르면 아래 «추적하기»에서 그 종목의 «오늘 분석»을 펼치고 그 자리로 간다 */
  document.addEventListener('click',function(e){
@@ -10958,7 +11128,7 @@ def _catch_compare(돈몰림, V반등, 매집, lo, hi, 첫반등=None):
     ⚠️ 표본이 없는 기법은 막대를 그리지 않는다. 0으로 그리면 "성적 0"으로 읽힌다.
     """
     항목 = []
-    for rows, 이름, 색 in ((돈몰림, "돈이 몰림", "#f0c65a"),
+    for rows, 이름, 색 in ((돈몰림, "포착 종목", "#f0c65a"),
                           (V반등, "V자 반등", "#74f0d4"),
                           (매집, "조용히 모으는 손", "#8fd0e8"),
                           (첫반등 or [], "오늘 첫 반등", "#ffc979")):
@@ -11006,6 +11176,59 @@ def _catch_compare(돈몰림, V반등, 매집, lo, hi, 첫반등=None):
             f'다만 표본이 적을 때는 순서가 자주 바뀝니다.</p></div>')
 
 
+V_LEDGER_GAP = 5     # 같은 종목이 V자로 5거래일 안에 또 잡히면 같은 신호로 본다(이틀 연속 잡힌 심텍 같은 경우)
+
+
+def _v_ledger_rows():
+    """📈 V자 반등 성적 장부 — 신호마다 한 줄(2026-10-09 HO «출석할 때마다 새 줄»).
+    [왜] 추적 목록은 종목당 한 줄이라 다시 잡히면 포착일·차수가 덮어써졌고, «1차만» 규칙까지 겹쳐
+         V자 신호 17번 중 성적표에 남은 게 2개뿐이었다(10/8 실측).
+    [재료] archive의 날짜별 «강세레이더.신규»(V자 반등 종목) + 종목사전 하루 등락(다음 날부터 오늘까지 곱함).
+         새 수집이 필요 없고, 지난 신호도 저절로 소급된다.
+    [1차 규칙] 다른 기법(돈이 몰림)으로 먼저 잡혔던 건 상관없다 — V자는 «밀렸다 되돌린 날»이라 별개 사건.
+         같은 종목이 V_LEDGER_GAP 거래일 안에 V자로 또 잡히면 첫 신호만 센다.
+    반환: [{종목명, 포착일, 경과, 이후등락, 유형들}] — _catch_stat이 그대로 받는다."""
+    try:
+        days = [(str(날), d) for 날, d in archive_days() if str(날) <= str(DATE)]
+    except Exception as e:
+        print(f"   ⚠️ V자 장부 실패 — {type(e).__name__}: {e}")
+        return []
+    if len(days) < 2:
+        return []
+    사전들 = [((d.get("계좌격자") or {}).get("종목사전") or {}) for _, d in days]
+    # 오늘 가격 = 오늘 추적 목록의 현재가(포착 종목은 120거래일까지 추적된다). 포착가 = 그날 신규 목록의 현재가(=종가).
+    #   ⚠️ 9/14·9/15처럼 종목사전이 빈 날이 있어 «하루 등락 곱하기»만으로는 8월 신호가 다 빠졌다(10/9 실측) → 가격 비교가 먼저.
+    오늘가 = {t.get("종목명"): t.get("현재가") for t in (((days[-1][1].get("강세레이더") or {}).get("추적")) or [])
+             if isinstance(t, dict) and isinstance(t.get("현재가"), (int, float))}
+    rows, 마지막 = [], {}
+    for i, (날, d) in enumerate(days):
+        for 목록 in (((d.get("강세레이더") or {}).get("신규") or {}).values()):
+            for s in (목록 or []):
+                if not isinstance(s, dict) or "V자 반등 종목" not in (s.get("유형들") or []):
+                    continue
+                nm = s.get("종목명")
+                if not nm or (nm in 마지막 and i - 마지막[nm] <= V_LEDGER_GAP):
+                    마지막[nm] = i
+                    continue
+                마지막[nm] = i
+                p0, p1 = s.get("현재가"), 오늘가.get(nm)
+                if isinstance(p0, (int, float)) and p0 > 0 and isinstance(p1, (int, float)) and p1 > 0:
+                    rows.append({"종목명": nm, "포착일": 날, "경과": len(days) - 1 - i,
+                                 "이후등락": round((p1 / p0 - 1) * 100, 2), "유형들": ["V자 반등 종목"]})
+                    continue
+                r, ok = 1.0, True
+                for j in range(i + 1, len(days)):
+                    v = 사전들[j].get(nm)
+                    if not v or len(v) < 4 or not isinstance(v[3], (int, float)):
+                        ok = False
+                        break
+                    r *= 1 + v[3] / 100
+                if ok:
+                    rows.append({"종목명": nm, "포착일": 날, "경과": len(days) - 1 - i,
+                                 "이후등락": round((r - 1) * 100, 2), "유형들": ["V자 반등 종목"]})
+    return rows
+
+
 def build_catch_after(data):
     """강세·매집 두 레이더의 포착 후 성적을 기간 탭으로 보여준다."""
     # 🆕 2026-08-26 HO 지시 — 강세를 **기법별로 쪼갠다.**
@@ -11019,7 +11242,8 @@ def build_catch_after(data):
     def _유형필터(rows, 키):
         return [t for t in rows if 키 in (t.get("유형들") or [])]
     돈몰림 = _유형필터(_강세전체, "돈이 몰린 종목")
-    V반등 = _유형필터(_강세전체, "V자 반등 종목")
+    # 🔴 2026-10-09 HO — V자는 «출석할 때마다 새 줄» 장부(archive 소급)로 잰다. 못 만들면 옛 방식.
+    V반등 = _v_ledger_rows() or _유형필터(_강세전체, "V자 반등 종목")
     # 🆕 2026-10-06 HO «레이더는 잘 잡았나에 '첫 반등'도 넣어줘» — 같은 칸(경과 구간·현재 수익·코스피 대비)으로 잰다.
     첫반등 = [t for t in (((data or {}).get("첫반등") or {}).get("추적") or [])
              if isinstance(t.get("이후등락"), (int, float)) and isinstance(t.get("경과"), int)]
@@ -11038,7 +11262,7 @@ def build_catch_after(data):
         #    한 줄이라 깔끔하고, 구간이라는 사실도 라벨에 그대로 담긴다.
         탭 += (f'<span class="cg-tab{켬}" data-n="{n}" '
                f'onclick="cgWin({n})">D+{lo}~{hi}</span>')
-        본문 = (_catch_card(돈몰림, lo, hi, "💰 돈이 몰림(강세)")
+        본문 = (_catch_card(돈몰림, lo, hi, "📡 포착 종목(강세)")     # 🔴 2026-10-09 HO «💰 돈이 몰림(강세) → 포착 종목(강세)»
               + _catch_card(V반등, lo, hi, "📈 V자 반등(전환)")
               + _catch_card(매집, lo, hi, "🐢 조용히 모으는 손(매집)")
               + _catch_card(첫반등, lo, hi, "🌅 오늘 첫 반등(반등)")
@@ -11694,7 +11918,7 @@ def build_core(핵심편, data, 해석):
                    if _macro_cards else "")
     # 🔴 2026-10-07 HO «수급 문장은 매크로 카드 밑이 아니라 코스피 카드 밑으로»
     _kospi_card = build_score_card("KOSPI", _코, 코수)
-    _fc = _flow_comment()
+    _fc = ""      # 🔴 2026-10-09 HO «코스피 카드 밑 수급 문장 삭제» — 알약·배지·오늘의 대응이 같은 말을 한다(_flow_comment는 남겨 둠)
     if _fc and _kospi_card.rstrip().endswith("</div>"):      # 코스피 카드 «안» 맨 밑에 붙인다(2열 격자가 안 깨지게)
         _kospi_card = _kospi_card.rstrip()[:-6] + _fc + "</div>"
     지수스트립 = (f'<div class="idx-grid" id="score">'
@@ -12159,7 +12383,7 @@ def build_core(핵심편, data, 해석):
                f'📡 오늘 포착 종목</p>'
              + build_radar(data.get("강세레이더"), data.get("설정"))
              + f'<p class="sec-label"><small>매집 레이더 상세</small>'
-               f'🧲 오늘 매집 종목</p>'
+               f'🧲 매집 종목 순위</p>'      # 🔴 2026-10-09 HO — 위 무료 카드(오늘 매집 종목)와 이름을 가른다
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
              # 🌅 2026-10-05 HO — 새 기법 «오늘 첫 반등»: 매집 종목 밑 · 포착 그 후 위
@@ -16727,13 +16951,17 @@ def _leader_scores(cands, theme_w=None):
         c["대장가능"] = (cap is None) or (cap >= LEADER_MIN_CAP억)
         c.setdefault("days", _leader_stay(c["n"]))
     회전있음 = bool(cands) and all(c["turn"] is not None for c in cands)
+    대금있음 = bool(cands) and any((c.get("amt") or 0) > 0 for c in cands)
     w = {"ch": LEADER_W_CH, "turn": LEADER_W_TURN if 회전있음 else 0.0,
+         "amt": LEADER_W_AMT if 대금있음 else 0.0,
          "theme": LEADER_W_THEME if theme_w is not None else 0.0, "stay": LEADER_W_STAY}
     tot = sum(w.values()) or 1.0
     mxC = max((c["ch"] for c in cands), default=0) or 1
     mxT = max((c["turn"] or 0 for c in cands), default=0) or 1
+    mxA = max((c.get("amt") or 0 for c in cands), default=0) or 1
     for c in cands:
         c["sc"] = round((c["ch"] / mxC * 100 * w["ch"]
+                         + (c.get("amt") or 0) / mxA * 100 * w["amt"]
                          + (c["turn"] or 0) / mxT * 100 * w["turn"]
                          + (theme_w or 0) * w["theme"]
                          + (c["days"] - 1) * 50 * w["stay"]) / tot, 1)
@@ -16849,9 +17077,9 @@ def _stock_panel(title, items, pid):
            # 2026-09-24 HO — «구성종목을 오늘 등락률 순으로» 문구 삭제
            f'<p class="tm-ph">{title}</p><div>{chips}</div>'   # 2026-10-04 HO «다시 누르면 닫혀요» 삭제
            f'<p class="tm-pr"><em class="r-lead">대장</em> '
-           + ({"공식": '<b>등락률·회전율(거래대금÷시총)·연속</b>으로 뽑은 1종목 '
+           + ({"공식": '<b>등락률·거래대금·회전율(거래대금÷시총)·연속</b>으로 뽑은 1종목 '
                      '(시총 1,000억↑)',
-               "공식-회전없음": '<b>등락률·연속</b>으로 뽑은 1종목 '
+               "공식-회전없음": '<b>등락률·거래대금·연속</b>으로 뽑은 1종목 '
                      '<span style="color:#6f7784">(이날은 시총 기록이 없어 회전율은 빠짐)</span>'
                }.get(_방식, '오른 종목이 없어 대장 없음'))
            + f' · <em class="r-mid">후발</em> 대장 등락률의 40% 이상 오른 종목 '
@@ -20815,7 +21043,8 @@ THEME_V17_CSS = """
 # ══════════════════════════════════════════════════════════════
 LEADER_MAX = 6          # 화면에 보여줄 대장주 수
 LEADER_W_CH = 0.40      # 강도(등락률)   — HO 확정: 「센 종목」을 보여준다
-LEADER_W_TURN = 0.30    # 회전율
+LEADER_W_TURN = 0.10    # 회전율 — 🔴 2026-10-09 HO 0.30 → 0.10 (손바뀜 많은 작은 종목 쏠림 완화)
+LEADER_W_AMT = 0.20     # 🆕 2026-10-09 HO — 테마 안 거래대금 비중(돈이 실제로 붙었나). 59일 실측: 5일 뒤 중앙 +1.56% → +2.79%, 전·후반 모두 나빠지지 않음
 LEADER_W_THEME = 0.20   # 테마 기여
 LEADER_W_STAY = 0.10    # 연속 등재
 
@@ -20949,7 +21178,9 @@ def build_theme_leaders(data):
             f'<span class="ld-v" style="color:{dc}">{r["days"]}일</span>'
             f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>'
             + 칸)
-    note = ('<div class="ld-f">📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
+    note = ('<div class="ld-f">📌 대장 = 테마 안에서 <b>많이 오르고(40) · 돈이 많이 붙고(20) · 덩치 대비 많이 돈(10)</b> 종목 '
+            '+ 테마 순위(20) · 연속(10)<br>'
+            '📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
             '📌 연속 = 최근 3거래일 중 테마 상위4에 이름 올린 횟수<br>'
             + ('📌 한 종목은 한 테마의 대장만 합니다 — 순위 높은 테마가 먼저 가져가요'
                + ('' if all(not r.get("대금없음") for r in out) else
@@ -21878,9 +22109,11 @@ def build_atc_talk(해석):
     return f'<div class="atc">{블록}</div>'
 
 
-def build_flow_timeline(이력, caption=None):
+def build_flow_timeline(이력, caption=None, cap_below=False):
     """기간 탭(5·20·60) + 통합 타임라인. 이력 부족 탭은 진행 막대.
-    caption(이력, p)을 주면 탭마다 «이 그림이 말하는 것»을 따로 붙인다."""
+    caption(이력, p)을 주면 탭마다 «이 그림이 말하는 것»을 따로 붙인다.
+    cap_below=True면 그 글을 그림·범례 «밑»(= 비차익 쉽게 읽기 바로 위)에 둔다 — 2026-10-09 HO."""
+    _밑글 = ""
     N = len(이력)
     _FS_TL_SEQ[0] += 1
     gid = f"fstl{_FS_TL_SEQ[0]}"
@@ -21902,7 +22135,11 @@ def build_flow_timeline(이력, caption=None):
                         f'({p}일까지 {p-N}일 남음)</p>')
         if caption:
             try:
-                몸체 = caption(이력, p) + 몸체
+                _c = caption(이력, p)
+                if cap_below:
+                    _밑글 += f'<div class="fs-pbody{" on" if p==20 else ""}" data-g="{gid}" data-p="{p}" style="margin-top:10px">{_c}</div>'
+                else:
+                    몸체 = _c + 몸체
             except Exception:
                 pass
         몸 += f'<div class="fs-pbody{" on" if p==20 else ""}" data-g="{gid}" data-p="{p}">{몸체}</div>'
@@ -21918,6 +22155,7 @@ def build_flow_timeline(이력, caption=None):
         <span><i style="background:#c8ced6"></i>비차익 — 점 = 측정된 날 · 점선 = 판정 보류 구간</span>
         <span><i style="background:{FS_IND}"></i>신용융자 잔고 — 빚내서 산 돈</span>
       </div>
+      {_밑글}
     </div>
     <script>(function(){{
       var root=document.currentScript.parentNode;
@@ -23203,7 +23441,7 @@ def build_flow_v2(data, 해석):
     if 이력:
         tl = (f'<div class="fv-box"><p class="fv-h">🕒 하나의 타임라인'
               f'<span>지수 + 수급 + 선물 + 비차익 + 신용</span></p>'
-              f'{build_flow_timeline(이력, caption=_fv_tl_caption)}'
+              f'{build_flow_timeline(이력, caption=_fv_tl_caption, cap_below=True)}'
               f'{_fv_bichaik_easy(이력)}{_fv_credit_note(data)}</div>')
     _fv_log_waves(이력)
     # 🔴 2026-10-03 HO «개인 온도는 삭제» — _fv_retail은 남겨 두되 화면에서 뺀다
@@ -24498,6 +24736,12 @@ html{{scroll-behavior:smooth}}
 .rd-chg{{font-size:11px;font-weight:700}}
 /* 🆕 2026-08-22 — V자 반등은 전일 종가 대비로는 하락일 수 있다. 색을 나눈다. */
 .rd-chg.up{{color:#c1432b}} .rd-chg.dn{{color:#2e6bd6}}
+.rd-chg.ac-lab{{display:block;font-size:9.5px;font-weight:600;color:var(--sub)}}
+.acm-tabs{{display:flex;gap:6px;margin:4px 0 6px}}
+.acm-b{{font:inherit;font-size:11.5px;font-weight:800;padding:4px 12px;border-radius:99px;cursor:pointer;
+  background:none;color:var(--sub);border:1px solid var(--line)}}
+.acm-b span{{font-weight:600;opacity:.7;margin-left:2px}}
+.acm-b.on{{color:#e0c060;border-color:#e0c060;background:rgba(224,192,96,.08)}}
 .ac-gap{{text-align:right;flex-shrink:0}}
 .ac-gap b{{display:block;font-size:14px;font-weight:800;color:#8a5a1f}}
 .ac-char{{display:block;font-size:9px;color:var(--sub);white-space:nowrap}}
@@ -24652,6 +24896,15 @@ html{{scroll-behavior:smooth}}
    스크립트가 display:none으로 숨긴다. 스크롤·페이드를 쓰지 않는 이유는
    리포트가 캡처로 공유되는 일이 많아서다 — 캡처엔 스크롤이 안 담긴다. */
 .sh-badges{{margin-top:10px;flex-wrap:nowrap;overflow:hidden}}
+/* 🆕 2026-10-09 HO — 오늘 분위기 알약 4개 · 2×2 (넘쳐도 숨기지 않는다) */
+.mp4{{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}}
+.mp4-p{{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;padding:7px 9px;border-radius:12px;text-align:center;
+  font-size:12px;line-height:1.25;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06)}}
+.mp4-p i{{font-style:normal;flex:none}}
+.mp4-p b{{font-weight:800;color:#f2f4f7;word-break:keep-all;min-width:0}}
+.mp4-p.dn{{border-color:rgba(91,155,255,.5);background:rgba(91,155,255,.12)}}
+.mp4-p.up{{border-color:rgba(255,107,74,.5);background:rgba(255,107,74,.12)}}
+@media (max-width:360px){{.mp4-p{{font-size:11px;padding:5px 6px}}}}
 /* ⚠️ 넘치면 숨기는 방식이라, 배지가 크면 «1개만 보이는» 날이 생긴다
    (실측: 390px에서 3개 중 1개). 헤더용은 심층편보다 살짝 작게 잡아
    같은 폭에 2개가 들어가게 한다 — 정보를 더 살리기 위한 조정이다. */
@@ -25449,6 +25702,11 @@ html{{scroll-behavior:smooth}}
 /* 🔴 2026-10-03 HO «배경색을 다르게» — 다른 카드(남색·회색)와 한눈에 갈리게 따뜻한 호박색 톤 */
 .df-box{{margin:10px 0 0;padding:12px 13px;border-radius:12px;background:linear-gradient(180deg,#2b2312,#1d180e);border:1px solid #5c4a22;box-shadow:inset 3px 0 0 #f0c65a}}
 .df-h{{margin:0 0 4px;font-size:16px;font-weight:800;color:#ffd66b;display:flex;align-items:baseline;gap:7px}}
+.df-why{{margin-top:9px;padding-top:7px;border-top:1px solid rgba(240,198,90,.2)}}
+.df-why summary{{cursor:pointer;list-style:none;font-size:11.5px;font-weight:800;color:#e0c060}}
+.df-why summary::-webkit-details-marker{{display:none}}
+.df-why p{{margin:6px 0 0;font-size:11.5px;line-height:1.65;color:#c9ced6;word-break:keep-all}}
+.df-why .df-why-n{{color:#9aa3b1;font-size:11px}}
 .df-h span{{font-size:10.5px;font-weight:600;color:#a8956a}}
 .df-s{{padding:9px 0 2px;border-top:1px solid #3a3020}}
 .df-s:first-of-type{{border-top:0}}
