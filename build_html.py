@@ -1866,8 +1866,11 @@ def _sh_theme(해석):
             f'<b>+{r["chg"]:,.0f}억</b></div>' for r in ins)
         outs = (_mb[1] or [])[:2]
         빠 = (' · '.join(f'{_lab_nm(r["n"])} <b>−{abs(r["chg"]):,.0f}억</b>' for r in outs))
+        _sl = (_FOLLOW_CACHE.get("MBS") or [])[:2]
+        팔 = ' · '.join(f'{_lab_nm(r["n"])} <b>{r["ret"]:+.1f}%</b>' for r in _sl)
         return (f'<div class="sh-box sh-theme"><p class="sh-h">💰 오늘 돈이 몰린 테마'
-                f'<span>평소보다 더 들어온 돈</span></p>{줄}'
+                f'<span>평소보다 더 들어온 돈 · 오른 테마만</span></p>{줄}'
+                + (f'<p class="sh-cm sh-mbo">🔻 팔자가 몰린 곳(거래는 늘고 테마는 내림) — {팔}</p>' if 팔 else "")
                 + (f'<p class="sh-cm sh-mbo">💸 빠진 곳 — {빠}</p>' if 빠 else "")
                 + (f'<p class="sh-cm">{한줄}</p>' if 한줄 else "")
                 + '<p class="sh-go" data-tab="테마" data-sel="#cp-picks" onclick="cpGo(this)">'
@@ -12354,6 +12357,7 @@ def build_core(핵심편, data, 해석):
     #   ⚠️ 판단 탭은 요약본이 아니다. 요약이면 일곱 번째 코너일 뿐이다.
     #   ⚠️ 서브탭은 «페이지 이동»이 아니라 같은 자리에서 갈아 끼우는
     #      것이다 — 스크롤 위치를 잃으면 오히려 불편해진다.
+    _테마 = _merge_notes_into_ax(_테마)       # 🔴 2026-10-09 (2차) HO — «👉 그래서»를 해석과 판단 «안»으로(요약)
     _판단 = build_judge_tab(data)
     # (2026-09-24 — 판단 탭 해설은 블록마다 붙는다. 탭 맨 위 통짜 해설은 없앴다)
     if _판단:
@@ -17899,6 +17903,50 @@ def _ax(lines, rec=""):
             + (f'<p class="ax-r">📊 {rec}</p>' if rec else "") + '</div>')
 
 
+def _merge_notes_into_ax(html):
+    """🔴 2026-10-09 (2차) HO «'그래서'를 해석과 판단 «안»에 넣어 달라 — 기존 해석과 판단 디자인이 가독성 좋았다. 핵심만 요약해서.»
+    챕터(«① · …» 머리표 사이)마다:
+      · 💡 해석과 판단(원래 모양 그대로)이 있으면 → 화면의 «👉 그래서» 상자를 떼어, 문장마다 «첫 문장»만 남겨
+        해석과 판단 안 «한 줄 결론» 바로 밑에 «👉 그래서» 칸으로 넣는다. 기록 줄(📊)은 작은 글씨로 그 밑에.
+      · 해석과 판단이 없는 날(해설 생성 실패 등)은 «👉 그래서» 상자를 그대로 둔다(행동 문장이 사라지지 않게).
+      · 한 챕터에 해설이 둘이면(⑤ 다가오는+물밑) 마지막 해설에 넣는다(그래서 상자 바로 위가 그 챕터다)."""
+    import re as _re
+    parts = _re.split(r'(?=<p class="sec-label"><small>)', html)
+    out = []
+    for seg in parts:
+        if '<div class="ax">' not in seg or '<details class="cn" ' not in seg:
+            out.append(seg)
+            continue
+        i = seg.rfind('<div class="ax">')
+        j = seg.find('</div>', i) + 6
+        ax = seg[i:j]
+        lines = _re.findall(r'<p class="ax-l">(.*?)</p>', ax, flags=_re.S)
+        rec = _re.search(r'<p class="ax-r">(.*?)</p>', ax, flags=_re.S)
+
+        def _first(s):
+            m = _re.search(r'^(.*?(?:요|다|요\)|다\))[.!?])(?:\s|$)', s, flags=_re.S)
+            return m.group(1) if m else s
+        li = "".join(f'<li>{_first(x)}</li>' for x in lines if x.strip())
+        if not li:
+            out.append(seg)
+            continue
+        box = ('<div class="cn-ax"><p class="cn-axh">👉 그래서</p><ul>' + li + '</ul>'
+               + (f'<p class="cn-axr">{rec.group(1)}</p>' if rec else '') + '</div>')
+        seg2 = seg[:i] + seg[j:]
+        k = seg2.rfind('<details class="cn" ')
+        b0 = seg2.find('<div class="cn-b">', k)
+        if b0 < 0:
+            out.append(seg)
+            continue
+        b0 += len('<div class="cn-b">')
+        # 한 줄 결론(cn-pt)이 맨 앞에 있으면 그 밑에, 없으면 맨 앞에
+        if seg2.startswith('<div class="cn-pt">', b0):
+            b0 = seg2.find('</div>', b0) + 6
+        seg2 = seg2[:b0] + box + seg2[b0:]
+        out.append(seg2)
+    return "".join(out)
+
+
 def _rec(pairs):
     """[(이름, 키)] → «이름 다음 날 +x%» 줄. 표본 20건 미만은 뺀다."""
     fs = _follow_stats()
@@ -18110,14 +18158,45 @@ def build_money_bars():
             continue
         rows.append({"n": nm, "chg": (ex - base) / 100, "x": ex / base, "s": s,
                      "top": None})
+    # 🔴 2026-10-09 HO «많이 팔았는데 매수로 잡힌 거라고? 수정해줘.»
+    #   [문제] 거래대금 = 산 돈 = 판 돈(같은 거래의 양쪽). «평소보다 거래가 늘었다»만으로는 사는 쪽인지 파는 쪽인지 모른다.
+    #     10/8 IT 대표주 +8,312억은 6종목 중 5종목이 내린(삼성전자 −2.1% · SK하이닉스 −2.2%) «팔자가 몰린» 거래였는데
+    #     «더 들어온 돈 1위»로 나와 종합 알약·오늘의 대응·시황까지 «돈은 IT 대표주로»라고 썼다.
+    #   [고침] 테마 등락(거래대금 가중, 돈 막대와 같이 가장 큰 한 종목은 빼고)으로 방향을 가른다.
+    #     거래가 늘고 테마가 올랐다 → 💰 사는 쪽에 돈이 몰림(MBR[0])
+    #     거래가 늘고 테마가 내렸다 → 🔻 파는 쪽에 거래가 몰림(MBS) — «돈이 간 곳»에서 뺀다.
+    _G = _theme_groups()
+    _dic = ((_today_data().get("계좌격자") or {}).get("종목사전")) or {}
+    try:
+        _HM = (((load_json("stock_money_hist.json") or {}).get("일별") or {}).get(d)) or {}
+    except Exception:
+        _HM = {}
+
+    def _tret(nm):
+        mem = [m for m in (_G.get(nm) or []) if m not in _IDX_JUNK2
+               and isinstance((_dic.get(m) or [None] * 4)[3], (int, float)) and (_HM.get(m) or 0) > 0]
+        w = sorted(((_HM.get(m) or 0), m) for m in mem)
+        if len(w) >= 2:
+            w = w[:-1]                       # 가장 큰 한 종목 빼고(돈 막대와 같은 셈)
+        tw = sum(a for a, _ in w)
+        up = (sum(1 for m in mem if _dic[m][3] > 0) / len(mem) * 100) if mem else None
+        return ((sum(a * _dic[m][3] for a, m in w) / tw) if tw > 0 else None), up
+    for r in rows:
+        r["ret"], r["up"] = _tret(r["n"])
+    #   ⚠️ 한 종목만 크게 오른 테마(10/8 풍력에너지: 동국산업 +24% · 36종목 중 5개만 상승)는 가중 등락이 +로 나와도
+    #      «사는 쪽에 돈이 몰렸다»고 보기 어렵다 → 오른 종목이 절반 이상일 때만 💰. 그 사이(섞임)는 어느 쪽에도 안 넣는다.
     # 🔴 10/7 — 돈이 절반 넘게 겹치는 테마는 하나만(같은 돈이 이름만 바꿔 여러 번 나오지 않게)
-    ins, _d1 = _pick_distinct(sorted([r for r in rows if r["chg"] >= MB_MIN_억], key=lambda r: -r["chg"]), MB_SHOW)
+    ins, _d1 = _pick_distinct(sorted([r for r in rows if r["chg"] >= MB_MIN_억 and (r["ret"] is None or (r["ret"] > 0 and (r["up"] or 0) >= 50))],
+                                     key=lambda r: -r["chg"]), MB_SHOW)
+    sells, _d3 = _pick_distinct(sorted([r for r in rows if r["chg"] >= MB_MIN_억 and r["ret"] is not None and r["ret"] <= 0],
+                                       key=lambda r: -r["chg"]), MB_SHOW)
     outs, _d2 = _pick_distinct(sorted([r for r in rows if r["chg"] <= -MB_MIN_억], key=lambda r: r["chg"]), MB_SHOW)
-    _FOLLOW_CACHE["MBDUP"] = {**_d1, **_d2}
-    if not ins and not outs:
+    _FOLLOW_CACHE["MBDUP"] = {**_d1, **_d2, **_d3}
+    if not ins and not outs and not sells:
         return ""
     _FOLLOW_CACHE["MBR"] = (ins, outs)
-    mx = max(abs(r["chg"]) for r in ins + outs)
+    _FOLLOW_CACHE["MBS"] = sells
+    mx = max(abs(r["chg"]) for r in ins + outs + sells)
     rk = _theme_cum_rank()
     rmap = {n: i + 1 for i, (n, _s) in enumerate((rk.get(sorted(rk)[-1]) or []))} if rk else {}
 
@@ -18134,9 +18213,17 @@ def build_money_bars():
                 f'<p class="mb-s">{sub}</p></div>')
     cap = (f'오늘 시장 전체 거래대금이 평소의 <b>{mult:.2f}배</b>예요 — 그만큼은 빼고, 테마에 <b>더</b> 들어온 돈만 셌어요.'
            if tot else '시장 전체 거래대금 기록이 모자라 시장 보정 없이 셌어요.')
+    def srow(r):
+        w = max(4, abs(r["chg"]) / mx * 100)
+        return (f'<div class="mb-r"><div class="mb-t"><b>{_shn(r["n"])}</b>'
+                f'<em style="color:#9aa3b1">거래 +{r["chg"]:,.0f}억</em></div>'
+                f'<div class="mb-bar"><i style="width:{w:.0f}%;background:#6f7a8b"></i></div>'
+                f'<p class="mb-s">테마 <b style="color:{TM_DOWN}">{r["ret"]:+.1f}%</b> · 거래는 늘었는데 내렸어요 — 사는 돈보다 파는 돈이 많았던 자리</p></div>')
     return ('<div class="mb">'
-            '<p class="mb-h">💰 평소보다 더 들어온 돈 <span>테마마다 가장 큰 한 종목은 빼고</span></p>'
-            + ("".join(row(r, True) for r in ins) or '<p class="mb-none">오늘은 평소보다 크게 늘어난 곳이 없어요</p>')
+            '<p class="mb-h">💰 평소보다 더 들어온 돈 <span>테마가 오르고 절반 넘게 오른 곳만 · 가장 큰 한 종목은 빼고</span></p>'
+            + ("".join(row(r, True) for r in ins) or '<p class="mb-none">오늘은 오른 테마 중 평소보다 크게 늘어난 곳이 없어요</p>')
+            + (('<p class="mb-h dn" style="color:#9aa3b1">🔻 팔자가 몰린 곳 <span>거래는 늘었는데 테마가 내림</span></p>'
+                + "".join(srow(r) for r in sells)) if sells else "")
             + '<p class="mb-h dn">💸 평소보다 빠진 돈</p>'
             + ("".join(row(r, False) for r in outs) or '<p class="mb-none">오늘은 크게 빠진 곳이 없어요</p>')
             + f'<p class="mb-n">{cap}<br>막대 길이 = 돈의 크기(위아래 같은 자). 종목이 여러 테마에 겹치면 같은 돈이 두 번 잡혀서 '
@@ -18491,6 +18578,11 @@ def _ax_flow():
             ln.append('💸 돈이 가장 많이 빠진 곳 — ' + " · ".join(f'<b>{_shn(r["n"])}</b>' for r in outs[:3])
                       + ' — 순위가 아직 높아도 돈은 빠지는 중이에요.'
                       + (f' 특히 <b>{" · ".join(_shn(n) for n in sh)}</b>는 대장 하나만 오르고 나머지 종목에선 돈이 빠졌어요.' if sh else ''))
+        _sl = _FOLLOW_CACHE.get("MBS") or []
+        if _sl:
+            ln.append('🔻 거래만 늘고 테마는 내린 곳 — ' + " · ".join(
+                f'<b>{_shn(r["n"])}</b>({r["ret"]:+.1f}%)' for r in _sl[:3])
+                + ' — 돈이 들어온 게 아니라 <b>파는 돈이 몰린</b> 자리예요.')
         hot = []                                # 순위 기준 ▲ 문장은 막대가 대신한다
     if hot:
         ln.append('▲ 돈이 들어온 ' + " · ".join(f'<b>{_shn(n)}</b>' for n in hot)
@@ -19093,6 +19185,10 @@ def build_theme_radar(data):
         if pan:                              # 🆕 2026-10-07 HO ③ — 펼치면 맨 위에 후발 추적
             _ph = f'<p class="tm-ph">{r["n"]}</p>'
             pan = pan.replace(_ph, _ph + _follow_block(r["n"]), 1)
+            # 🔴 2026-10-09 HO «기사도 화살표를 누르면 나오게 — 화살표 옆엔 '종목 및 뉴스'만»
+            if _what:
+                pan = pan.replace(_ph, _ph + _what.replace('class="tm-why solo"', 'class="tm-why tm-pnw"'), 1)
+                _what = ""
         if _stories:
             _si = _story_of.get(r["n"])
             _sn = _stories[_si]["themes"] if _si is not None else [r["n"]]
@@ -19109,7 +19205,7 @@ def build_theme_radar(data):
             f'<span class="tm-nm">{r["n"]}</span>'
             + ((lambda _a: f'<span class="tm-cd {"old" if (_SURV.get(_a, 100) <= 20) else "go"}">{_a}일째</span>')
                (_나이맵.get(r["n"]) or r["cont"]) if r["keep"] else '<span class="tm-cd new">첫날</span>')
-            + f'{arw}</div>'
+            + (f'<span class="tm-arw2">▾ 종목 및 뉴스</span>' if arw else "") + '</div>'
             f'{_what}'
             f'<div class="tm-l2">{_trail}'
             f'{_money_badge(r["n"])}{_twin_chip(r["n"])}'
@@ -19214,20 +19310,28 @@ def build_theme_radar(data):
            f'<b style="color:{TM_HOT if _nd >= 0 else TM_DOWN}">첫날 테마 {_nd:+.2f}%</b> '
            f'<span>({len(_fs["keep"])}건 · {len(_fs["new"])}건)</span></p>'
            if (_kd is not None and _nd is not None and len(_fs["keep"]) >= 20 and len(_fs["new"]) >= 20) else "")
+    # 🔴 2026-10-09 HO «분류 제목까지 색이 들어가 정신없다 — 테두리로 구별, 명칭도» → 무리마다 얇은 테두리 상자 + 무채색 제목.
+    #   생존 줄(📏)은 레이더 박스 맨 밑으로 옮겼다(_sv_html).
     _seq, _ci = [], 0
-    for _title, _cls, _its in (("🔗 이어지는 테마 · 어제도 10위 안", "go", _keep),
-                               ("🆕 첫날 테마 · 오늘은 관찰만, 내일도 남으면 그때", "new", _newr)):
+    for _title, _sub, _cls, _its in (("🔗 이어지는 테마", "이틀 이상 10위 안", "go", _keep),
+                                     ("🆕 새로 들어온 테마", "오늘은 관찰만 · 내일도 남으면 위로", "new", _newr)):
         if not _its:
             continue
-        _seq.append(f'<p class="tm-gp2 {_cls}">{_title}</p>')
-        if _cls == "go" and _SURV:
-            _seq.append(f'<p class="tm-sv1">📏 10위권 테마는 절반이 <b>{_sv.get("중앙값")}일째</b>에 빠져요 — '
-                        f'3일째까지 남는 건 <b>{_SURV.get(3, 0)}%</b>, 5일째는 <b>{_SURV.get(5, 0)}%</b>. '
-                        f'<span class="tm-cd old" style="margin:0">주황</span> = 상위 20%만 버틴 나이 · 오래 머문 테마일수록 끝물에 가까워요 '
-                        f'<span>(기록 {_sv.get("완결수")}건)</span></p>')
+        _rows, _vis = [], 0
         for _rr, _h in _its:
             _ci += 1
-            _seq.append(_h if _ci <= RADAR_LIST_OPEN else f'<div class="tm-x">{_h}</div>')
+            if _ci <= RADAR_LIST_OPEN:
+                _rows.append(_h)
+                _vis += 1
+            else:
+                _rows.append(f'<div class="tm-x">{_h}</div>')
+        _box = (f'<div class="tm-gbox {_cls}"><p class="tm-gp3">{_title}<span>{_sub}</span></p>'
+                + "".join(_rows) + '</div>')
+        _seq.append(_box if _vis else f'<div class="tm-x">{_box}</div>')
+    _sv_html = (f'<p class="tm-sv1">📏 10위권 테마는 절반이 <b>{_sv.get("중앙값")}일째</b>에 빠져요 — '
+                f'3일째까지 남는 건 <b>{_SURV.get(3, 0)}%</b>, 5일째는 <b>{_SURV.get(5, 0)}%</b>. '
+                f'<span class="tm-cd old" style="margin:0">주황</span> = 상위 20%만 버틴 나이 · 오래 머문 테마일수록 끝물에 가까워요 '
+                f'<span>(기록 {_sv.get("완결수")}건)</span></p>') if _SURV else ""
     _hid2 = max(0, _ci - RADAR_LIST_OPEN)
     _btn2 = (f'<button type="button" class="tm-mb" onclick="this.parentNode.classList.toggle(\'open\')">'
              f'<span class="o1">나머지 테마 {_hid2}개 더보기</span><span class="o2">접기</span> '
@@ -19273,7 +19377,7 @@ def build_theme_radar(data):
             + f'<p class="tm-trk">작은 그래프 = 최근 5일 순위 · 점 위 숫자가 그날 순위(위로 갈수록 높은 순위) · '
             f'<b>밖</b> = 20위 밖 · 맨 오른쪽 큰 점이 오늘</p></details>'
             f'{_c_html or _story_html or "".join(_묶음)}{_shadow_note(rk, last)}'
-            f'{_twin_note([r["n"] for r in rows])}{_chapter_note("레이더")}'
+            f'{_twin_note([r["n"] for r in rows])}{_sv_html}{_chapter_note("레이더")}'
             + hide("테마수명", _chapter_block(build_theme_survival((_나이맵.get(rows[0]["n"]) if rows else None)), "생존", ("sv-note",)))
             # 🔴🔴 HO 지시 2026-09-19 — 한 줄짜리 각주를 «교체 카드»로 승격.
             #   [왜] 순환매는 «돈이 옮겨다니는 것»이다. 그런데 화면은
@@ -20109,6 +20213,13 @@ THEME_V17_CSS = """
 .tm-sv1{margin:2px 0 8px;font-size:11.5px;line-height:1.6;color:#9aa3b1}
 .tm-sv1 b{color:#e6ebf1}
 .tm-sv1 span:last-child{color:#6f7784}
+/* 🆕 2026-10-09 — 레이더 무리 상자(무채색) · 화살표 이름 · 펼침 안 기사 */
+.tm-gbox{margin:10px 0 6px;padding:2px 10px 6px;border:1px solid #2a3444;border-radius:11px;background:rgba(255,255,255,.015)}
+.tm-gp3{margin:8px 0 2px;font-size:12.5px;font-weight:800;color:#d5dbe3;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px}
+.tm-gp3 span{font-size:10.5px;font-weight:600;color:#7d8794}
+.tm-arw2{flex:none;margin-left:6px;font-size:11px;font-weight:800;color:#e0c060;white-space:nowrap}
+.tm-pnw{margin:4px 0 8px!important}
+.tm-sv1{margin-top:10px!important;padding-top:8px;border-top:1px dashed #243041}
 .tm-gev{margin:8px 0 0;font-size:11.5px;color:#8b95a5;line-height:1.55}
 .tm-gev span{color:#6f7784}
 .tm-shw{margin:12px 0 0;padding:10px 12px;border:1px solid #2a3444;border-radius:10px;background:#0d131c}
@@ -20140,6 +20251,17 @@ THEME_V17_CSS = """
 /* 🆕 2026-10-07 — 챕터마다 «👉 그래서» · 규칙 성적표 · 그림자 배지 */
 .ax{margin:12px 0 4px;padding:11px 13px;border:1px solid rgba(224,192,96,.45);border-radius:10px;background:rgba(224,192,96,.05)}
 .ax-h{margin:0 0 6px;font-size:13px;font-weight:900;color:#e0c060}
+.cn-ax{margin:2px 0 12px;padding:9px 11px 8px;border-radius:9px;background:rgba(224,192,96,.06);border:1px solid rgba(224,192,96,.3)}
+.cn-axh{margin:0 0 4px!important;font-size:12.5px;font-weight:900;color:#e0c060}
+.cn-ax ul{margin:0!important;padding-left:17px!important}
+.cn-ax li{margin:3px 0!important;font-size:12.5px;line-height:1.65;color:#d5d9e0}
+.cn-axr{margin:6px 0 0!important;font-size:10.5px!important;line-height:1.55;color:#8b95a5}
+.cn-axr span{color:#6f7784}
+.ax-more{margin-top:8px;padding-top:7px;border-top:1px solid rgba(224,192,96,.18)}
+.ax-more summary{cursor:pointer;list-style:none;font-size:11.5px;font-weight:800;color:#9cc4f2}
+.ax-more summary::-webkit-details-marker{display:none}
+.ax-more[open] summary{margin-bottom:4px}
+.ax-mb{padding:4px 0 0!important}
 .ax-l{margin:4px 0 0;font-size:13px;line-height:1.6;color:#d5d9e0;word-break:keep-all}
 .ax-l b{color:#fff}
 .ax-r{margin:8px 0 0;padding-top:7px;border-top:1px solid rgba(224,192,96,.18);font-size:11.5px;line-height:1.6;color:#9aa3b1}
