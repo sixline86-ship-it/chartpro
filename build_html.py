@@ -259,6 +259,24 @@ _TABHASH_JS = ('<script>/*CP_TABHASH*/(function(){try{var m=/[#&]tab=([^&]+)/.ex
                '}catch(e){}})();</script>')
 
 
+# 🆕 2026-10-10 HO «지난 리포트를 누르면 종합이 보였다가 해당 탭으로 간다 — 종합은 보여주지 말고 로딩 표시 후 바로 그 탭으로.»
+#   [원인] 탭을 바꾸는 코드는 페이지 «맨 끝»에서 돈다. 리포트가 11MB라 그 전에 종합이 먼저 그려진다.
+#   [고침] <head> 맨 앞에서 주소의 #tab=를 먼저 읽어, 종합이 아닌 탭이면 화면을 가리고 «여는 중» 표시를 띄운다.
+#          문서를 다 읽고(DOMContentLoaded) 탭이 바뀐 직후에 가림을 걷는다. 8초 안전장치.
+#   ⚠️ 옛 리포트에도 같은 걸 한 번만 붙인다(_patch_old_reports_tabhash — 표시 CP_TABLOAD).
+_TABLOAD_HEAD = ('<!--CP_TABLOAD--><style>html.cp-tl body{visibility:hidden}'
+                 'html.cp-tl::before{content:"";position:fixed;left:50%;top:44%;width:34px;height:34px;margin:-17px 0 0 -17px;'
+                 'border:3px solid #2a3446;border-top-color:#e0c060;border-radius:50%;animation:cptl .8s linear infinite;z-index:100000}'
+                 'html.cp-tl::after{content:"리포트를 여는 중…";position:fixed;left:0;right:0;top:44%;margin-top:30px;text-align:center;'
+                 'color:#c9ced6;font:700 13px -apple-system,sans-serif;z-index:100000}'
+                 'html.cp-tl{background:#0b0f15}@keyframes cptl{to{transform:rotate(360deg)}}</style>'
+                 '<script>(function(){try{var m=/[#&]tab=([^&]+)/.exec(location.hash||"");if(!m)return;'
+                 'var k=decodeURIComponent(m[1]);if(!k||k==="종합")return;var d=document.documentElement;d.className+=" cp-tl";'
+                 'var off=function(){d.className=d.className.replace(/\\s*cp-tl/g,"");};'
+                 'document.addEventListener("DOMContentLoaded",function(){setTimeout(off,0);});setTimeout(off,8000);'
+                 '}catch(e){}})();</script>')
+
+
 def _patch_old_reports_tabhash():
     n = 0
     try:
@@ -270,10 +288,18 @@ def _patch_old_reports_tabhash():
                     t = fp.read()
             except Exception:
                 continue
-            if "CP_TABHASH" in t or "[#&]tab=" in t or "gtab-b" not in t:
+            if "gtab-b" not in t:
                 continue
-            i = t.rfind("</body>")
-            t = (t[:i] + _TABHASH_JS + t[i:]) if i >= 0 else (t + _TABHASH_JS)
+            _ch = False
+            if "CP_TABLOAD" not in t and "<head>" in t:           # 🆕 2026-10-10 — 종합이 먼저 보이지 않게
+                t = t.replace("<head>", "<head>" + _TABLOAD_HEAD, 1)
+                _ch = True
+            if not ("CP_TABHASH" in t or "[#&]tab=" in t):
+                i = t.rfind("</body>")
+                t = (t[:i] + _TABHASH_JS + t[i:]) if i >= 0 else (t + _TABHASH_JS)
+                _ch = True
+            if not _ch:
+                continue
             with open(f, "w", encoding="utf-8") as fp:
                 fp.write(t)
             n += 1
@@ -6110,9 +6136,14 @@ def build_my_stocks(data):
               찍힌 숫자가 먼저 보여야 한다. 초과수익은 그 아래 보조로.
        ⚠️ 5·20·60일 탭은 그대로 둔다 — 누적 구간에서는 "시장을 이겼나"가
           주인공이 맞고, 그게 이 코너의 존재 이유다. */
-    var _주 = (curW<=1) ? fmt(c.ret)+'%'  : fmt(c.ex)+'%p';
-    var _보 = (curW<=1) ? '시장 대비 '+fmt(c.ex)+'%p' : fmt(c.ret)+'%';
-    var _주색 = (curW<=1) ? (c.ret>=0?'#ff6b4a':'#5b9bff') : col;
+    /* 🔴 2026-10-10 HO «큰 빨간 숫자는 시장 대비 말고 개별 수익률로, 밑에 시장 대비. 앞에 '5일 대비'처럼.»
+       [전] 5·20·60일 탭은 큰 글씨가 초과수익(%p) + 위에 «코스피 대비» → 무엇이 무엇인지 헷갈렸다.
+       [후] 모든 탭: 큰 글씨 = 그 기간 이 종목 수익률(«5일 대비 +3.2%»), 작은 글씨 = 시장 대비(%p). */
+    var _기간 = (curW<=1) ? '전일 대비' : (curW+'일 대비');
+    var _mkNm0 = (mktFor(nm)===P.mkt_kosdaq) ? '코스닥' : '코스피';
+    var _주 = fmt(c.ret)+'%';
+    var _보 = '시장 대비 '+fmt(c.ex)+'%p';   /* 어느 시장인지는 이름줄 밑 «코스피·코스닥»이 말한다(320px에서 ▲▼와 겹쳐서 줄임) */
+    var _주색 = (c.ret>=0?'#ff6b4a':'#5b9bff');
     // 🔴 2026-09-01 HO 지시 — "등락률 밑에 시장대비 글자를 넣어줘."
     //    [WHY] 5·20·60일 탭은 큰 글씨가 %p(초과수익)인데 라벨이 없어서
     //    "이게 등락률인가?" 헷갈렸다. 당일 탭엔 이미 "시장 대비"가 붙어
@@ -6120,12 +6151,12 @@ def build_my_stocks(data):
     //    밝힌다 — 코스닥 종목이 섞여 있으면 그냥 "시장대비"만으론
     //    어느 지수인지 여전히 안 보인다.
     var _mkNm = (mktFor(nm)===P.mkt_kosdaq) ? '코스닥' : '코스피';
-    var _라벨 = (curW<=1) ? '' :
-      '<div style="font-size:9px;color:#6f7784">'+_mkNm+' 대비</div>';
+    /* 🔴 2026-10-10 — 머리글은 큰 숫자의 뜻(«5일 대비»)만. 폭이 좁아 숫자 «앞»이 아니라 숫자 «바로 위»에 둔다(320px에서 ▲▼와 겹쳐서). */
+    var _라벨 = '<div style="font-size:9.5px;font-weight:700;color:#8b95a5">'+_기간+'</div>';
     right='<div class="ms-rt" style="text-align:right">'+
      _라벨+
-     '<div style="font-size:15px;font-weight:800;color:'+_주색+'">'+_주+'</div>'+
-     '<div style="font-size:11px;color:#7d848f">'+_보+'</div>'+
+     '<div style="font-size:15px;font-weight:800;color:'+_주색+';white-space:nowrap">'+_주+'</div>'+
+     '<div style="font-size:10px;color:'+(c.ex>=0?'#c98a7e':'#7f9ccc')+'">'+_보+'</div>'+
      /* 🆕 2026-08-25 HO 지시 — 당일 탭의 '시장 상회/하회' 글자 제거.
         [WHY] 바로 위 줄이 이미 '시장 대비 -5.6%p'라고 말한다.
               부호만 봐도 아는 걸 한 줄 더 쓰면 칸만 좁아진다. */
@@ -6596,6 +6627,9 @@ def build_my_stocks(data):
   [1,'블록딜'],[1,'오버행'],[1,'공매도'],[1,'제재'],[1,'과징금'],[1,'해지'],[1,'철회'],[1,'연기'],[1,'급락']
  ];
  var SIG_NEWS_OK=['탈출','축소','개선','해소','벗어','흑자','상향','반등','철회 요구'];
+ var SIG_NEWS_FALSE=['지지부진','대부도','부도심','부도덕'];
+ var SIG_MKT=/코스피|코스닥|증시|지수|박스피|나스닥|장 막판|장막판/;
+ var SIG_MKT_W=['급락','부진','쇼크','하향'];
  function _sigScan(F, nm, hits, discs){
   var L=[], good=[];
   function add(lv,cat,txt){ L.push({lv:lv,cat:cat,t:txt}); }
@@ -6681,7 +6715,13 @@ def build_my_stocks(data):
    if(fr&&!(h.n.o===1)&&((h.n.y||0)<fr)) return;
    var t=h.n.t||'', hit=null;
    if(SIG_NEWS_OK.some(function(w){return t.indexOf(w)>=0;})) return;
-   SIG_NEWS.forEach(function(r){ if(!hit&&t.indexOf(r[1])>=0) hit=r; });
+   /* 🔴 2026-10-10 HO «OCI홀딩스 '코스피 지지부진' 기사를 악재로 받았다» — 오탐 두 갈래를 막는다.
+      ① 단어 속에 숨은 악재 글자: 지지부진(부진) · 대부도(부도) · 부도심(부도) → 그 낱말을 지우고 찾는다.
+      ② 시장 전체 기사: 제목에 코스피·코스닥·증시·지수 같은 말이 있으면 «급락·부진·쇼크·하향»은
+         그 종목 얘기가 아니라 시장 얘기라 빼요(횡령·상장폐지처럼 종목 고유 악재는 그대로 잡는다). */
+   var t0=t; SIG_NEWS_FALSE.forEach(function(w){ t0=t0.split(w).join(' '); });
+   var mk=SIG_MKT.test(t);
+   SIG_NEWS.forEach(function(r){ if(!hit&&t0.indexOf(r[1])>=0&&!(mk&&SIG_MKT_W.indexOf(r[1])>=0)) hit=r; });
    if(hit&&!seen[hit[1]]){ seen[hit[1]]=1;
     add(hit[0],'뉴스','«'+hit[1]+'» 기사 — <a href="'+h.n.u+'" target="_blank" rel="noopener">'+t.slice(0,34)+(t.length>34?'…':'')+'</a>'); }
   });
@@ -8243,34 +8283,54 @@ def build_my_stocks(data):
     [WHY] localStorage는 기기·브라우저마다 따로다. PC에 넣어도 폰엔 없고,
           카톡·텔레그램 인앱 브라우저는 아예 다른 저장소를 쓴다.
           코드로 막을 수 없으니 **되살릴 수단**을 준다. */
+ /* 🔴 2026-10-10 HO «내보내기·불러오기를 누르면 내 깃허브 주소가 다 나온다, 디자인도 별로.»
+    [원인] 브라우저 기본 알림창(alert·prompt)은 맨 위에 «사이트 주소가 보냄»을 꼭 붙인다(막을 수 없다).
+    [고침] 화면 안에 우리 디자인의 작은 시트를 띄운다. 알림창은 하나도 안 쓴다.
+    ⚠️ 문구에 줄바꿈 문자를 넣지 않는다(파이썬 문자열을 거치며 깨진 2026-08-20 사고). */
+ function msSheet(title, body){
+  var old=document.getElementById('ms-sheet'); if(old) old.remove();
+  var w=document.createElement('div'); w.id='ms-sheet'; w.className='ms-sh';
+  w.innerHTML='<div class="ms-sh-bg"></div><div class="ms-sh-c" role="dialog" aria-modal="true">'+
+   '<div class="ms-sh-h"><b>'+title+'</b><button type="button" class="ms-sh-x" aria-label="닫기">✕</button></div>'+body+'</div>';
+  document.body.appendChild(w);
+  var close=function(){ w.remove(); };
+  w.querySelector('.ms-sh-bg').onclick=close; w.querySelector('.ms-sh-x').onclick=close;
+  return w;
+ }
  window.msExport=function(){
   var my=get();
-  if(!my.length){alert('먼저 종목을 등록해 주세요.'); return;}
+  if(!my.length){ msSheet('📤 내보내기','<p class="ms-sh-p">먼저 종목을 등록해 주세요.</p>'); return; }
   var code='CP:'+my.join('|');
-  var msg='내 관심종목 '+my.length+'종목 백업 코드입니다. 복사해 두었다가 '
-        + '다른 기기에서 [불러오기]에 붙여넣으세요.';
-  // ⚠️ alert 문구에 줄바꿈을 넣지 않는다. 이 JS는 파이썬 문자열을 거쳐 HTML로
-  //    출력되는데, 그 과정에서 이스케이프가 풀려 **문자열 리터럴이 깨진다**
-  //    (2026-08-20 실제 사고 — 관심종목 JS 전체가 죽었다).
-  var ok=false;
-  try{ if(navigator.clipboard){navigator.clipboard.writeText(code); ok=true;} }catch(e){}
-  if(ok) alert(msg+' (이미 복사됨) — '+code);
-  else prompt(msg, code);
+  var w=msSheet('📤 내 관심종목 내보내기',
+   '<p class="ms-sh-p"><b>'+my.length+'종목</b>을 아래 코드로 옮길 수 있어요. 복사해서 다른 기기의 <b>📥 불러오기</b>에 붙여 넣으세요.</p>'+
+   '<textarea class="ms-sh-t" readonly></textarea>'+
+   '<button type="button" class="ms-sh-go">코드 복사하기</button><p class="ms-sh-m"></p>');
+  var ta=w.querySelector('.ms-sh-t'), msg=w.querySelector('.ms-sh-m');
+  ta.value=code;
+  w.querySelector('.ms-sh-go').onclick=function(){
+   var done=function(){ msg.textContent='✅ 복사했어요. 다른 기기에서 불러오기에 붙여 넣으세요.'; };
+   try{ if(navigator.clipboard){ navigator.clipboard.writeText(code).then(done,function(){ ta.select(); document.execCommand('copy'); done(); }); return; } }catch(e){}
+   ta.select(); try{ document.execCommand('copy'); done(); }catch(e){ msg.textContent='코드를 길게 눌러 직접 복사해 주세요.'; }
+  };
  };
  window.msImport=function(){
-  var t=prompt('내보내기로 받은 코드를 붙여넣어 주세요');
-  if(!t) return;
-  t=t.trim();
-  if(t.indexOf('CP:')!==0){alert('코드 형식이 아닙니다. CP: 로 시작해야 합니다.'); return;}
-  var names=t.slice(3).split('|').map(function(x){return x.trim();}).filter(Boolean);
-  var ok=[], bad=[];
-  names.forEach(function(n){
-   if(P.stocks[n]){ if(ok.indexOf(n)<0) ok.push(n); } else bad.push(n);
-  });
-  if(!ok.length){alert('불러올 수 있는 종목이 없습니다.'); return;}
-  if(ok.length>MAX) ok=ok.slice(0,MAX);
-  set(ok); render();
-  alert(ok.length+'종목을 불러왔습니다.'+(bad.length?' (건너뜀: '+bad.join(', ')+')':''));
+  var w=msSheet('📥 관심종목 불러오기',
+   '<p class="ms-sh-p">내보내기로 받은 코드(<b>CP:</b>로 시작)를 붙여 넣으세요. 지금 목록은 불러온 목록으로 바뀌어요.</p>'+
+   '<textarea class="ms-sh-t" placeholder="CP:삼성전자|SK하이닉스|…"></textarea>'+
+   '<button type="button" class="ms-sh-go">불러오기</button><p class="ms-sh-m"></p>');
+  var ta=w.querySelector('.ms-sh-t'), msg=w.querySelector('.ms-sh-m');
+  w.querySelector('.ms-sh-go').onclick=function(){
+   var t=(ta.value||'').trim();
+   if(t.indexOf('CP:')!==0){ msg.textContent='❗ 코드 형식이 아니에요 — CP: 로 시작해야 해요.'; return; }
+   var names=t.slice(3).split('|').map(function(x){return x.trim();}).filter(Boolean);
+   var ok=[], bad=[];
+   names.forEach(function(n){ if(P.stocks[n]){ if(ok.indexOf(n)<0) ok.push(n); } else bad.push(n); });
+   if(!ok.length){ msg.textContent='❗ 불러올 수 있는 종목이 없어요.'; return; }
+   if(ok.length>MAX) ok=ok.slice(0,MAX);
+   set(ok); render();
+   msg.textContent='✅ '+ok.length+'종목을 불러왔어요.'+(bad.length?' (못 찾은 종목: '+bad.join(', ')+')':'');
+   setTimeout(function(){ var s=document.getElementById('ms-sheet'); if(s&&!bad.length) s.remove(); },1200);
+  };
  };
 
  window.msWin=function(n){curW=n;
@@ -24263,6 +24323,7 @@ def build_html(data, report):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+{_TABLOAD_HEAD}
 <!-- ⚠️ 캐시 금지 (2026-08-18)
      GitHub Pages는 index.html을 10분 캐시하라고 지시하는데,
      모바일 인앱 브라우저(카톡·텔레그램)는 그보다 훨씬 오래 붙들고 있어
@@ -25874,6 +25935,21 @@ html{{scroll-behavior:smooth}}
 @media (max-width:360px){{.ms-anl .sc-tap,.ms-anl a.cp-chart{{font-size:9.5px !important;padding:3px 4px !important}}
   .ms-anl i.ms-ic{{display:none}} .ms-anl .cp-sname{{gap:3px}} .ms-ana{{padding:9px 8px 10px}}}}
 .ms-bk-b{{font-size:11px;font-weight:800;padding:5px 10px;border-radius:7px;background:#0f131a;border:1px solid #2a3446;color:#c9ced6;cursor:pointer}}
+/* 🆕 2026-10-10 — 내보내기·불러오기 시트(브라우저 알림창 대신) */
+.ms-sh{{position:fixed;inset:0;z-index:9999;display:flex;align-items:flex-end;justify-content:center}}
+.ms-sh-bg{{position:absolute;inset:0;background:rgba(5,8,12,.62)}}
+.ms-sh-c{{position:relative;width:100%;max-width:520px;box-sizing:border-box;background:#141922;border:1px solid #2a3446;border-bottom:0;
+  border-radius:16px 16px 0 0;padding:14px 16px 18px;box-shadow:0 -8px 30px rgba(0,0,0,.45)}}
+.ms-sh-h{{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}}
+.ms-sh-h b{{font-size:15px;color:#f2f4f7}}
+.ms-sh-x{{background:none;border:0;color:#8b95a5;font-size:16px;cursor:pointer;padding:4px 6px}}
+.ms-sh-p{{margin:0 0 10px;font-size:12.5px;line-height:1.65;color:#c9ced6;word-break:keep-all}}
+.ms-sh-p b{{color:#f0c65a}}
+.ms-sh-t{{width:100%;box-sizing:border-box;min-height:74px;resize:vertical;background:#0b0f15;border:1px solid #2a3446;border-radius:9px;
+  color:#e6ebf1;font-size:12.5px;padding:9px 10px;font-family:inherit;word-break:break-all}}
+.ms-sh-go{{display:block;width:100%;margin-top:10px;padding:11px 0;border:0;border-radius:10px;background:#f0c65a;color:#1a1408;
+  font-size:13.5px;font-weight:900;cursor:pointer;font-family:inherit}}
+.ms-sh-m{{margin:8px 0 0;font-size:12px;color:#8fd0e8;min-height:1em}}
 .ms-bk-t{{font-size:9.5px;color:#6f7784;line-height:1.5;flex:1;min-width:140px}}
 /* 🔮 돌아올 섹터 적중률 */
 .rs-grade{{font-size:11.5px;color:#c9ced6;line-height:1.75;margin:0 0 11px;padding:10px 12px;background:#141a22;border:1px solid #24303f;border-radius:10px}}
