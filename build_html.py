@@ -17986,7 +17986,13 @@ def _merge_notes_into_ax(html):
         def _first(s):
             m = _re.search(r'^(.*?(?:요|다|요\)|다\))[.!?])(?:\s|$)', s, flags=_re.S)
             return m.group(1) if m else s
-        li = "".join(f'<li>{_first(x)}</li>' for x in lines if x.strip())
+        def _fmt(s):
+            # 🔴 2026-10-12 HO «그래서가 길어지면 다 흰색이라 가독성이 안 좋다» — 첫 « — » 앞(무엇)은 진하게, 뒤(그래서 어떻게)는 옅게.
+            s = _first(s)
+            k = s.find(' — ')
+            return (f'<span class="cn-axk">{s[:k]}</span><span class="cn-axd"> — {s[k + 3:]}</span>' if k > 0
+                    else f'<span class="cn-axk">{s}</span>')
+        li = "".join(f'<li>{_fmt(x)}</li>' for x in lines if x.strip())
         if not li:
             out.append(seg)
             continue
@@ -18003,6 +18009,22 @@ def _merge_notes_into_ax(html):
         if seg2.startswith('<div class="cn-pt">', b0):
             b0 = seg2.find('</div>', b0) + 6
         seg2 = seg2[:b0] + box + seg2[b0:]
+        # 🔴 2026-10-12 HO «'그래서'와 '판단'이 겹친다» — 판단 줄의 글자 짝(두 글자씩)이 그래서 문장(줄임 전 전체)에
+        #   45% 이상 들어 있으면 같은 말로 보고 판단에서 뺀다(10/8 실측: 겹친 줄 0.53, 안 겹친 줄 0.11~0.35).
+        _bg = lambda s: (lambda t: {t[i:i + 2] for i in range(len(t) - 1)})(_re.sub(r'[^가-힣A-Za-z0-9]', '', _re.sub(r'<[^>]+>', '', s)))
+        _A = _bg(" ".join(lines))
+        _e = seg2.find('</details>', b0)
+        _h = seg2.find('<h5>👉 판단</h5>', b0)
+        if 0 <= _h < _e:
+            _part = seg2[_h:_e]
+
+            def _dd(m):
+                b = _bg(m.group(1))
+                return "" if (b and len(b & _A) / len(b) >= 0.45) else m.group(0)
+            _p2 = _re.sub(r'<ul><li>(.*?)</li></ul>', _dd, _part, flags=_re.S)
+            if '<li>' not in _p2:
+                _p2 = _p2.replace('<h5>👉 판단</h5>', '', 1)
+            seg2 = seg2[:_h] + _p2 + seg2[_e:]
         out.append(seg2)
     return "".join(out)
 
@@ -19244,7 +19266,11 @@ def build_theme_radar(data):
                 pan = pan.replace(_ph, _ph + f'<p class="tm-what tm-pdsc">📝 {_ds}</p>', 1)
         if pan:                              # 🆕 2026-10-07 HO ③ — 펼치면 맨 위에 후발 추적
             _ph = f'<p class="tm-ph">{r["n"]}</p>'
-            pan = pan.replace(_ph, _ph + _follow_block(r["n"]), 1)
+            # 🔴 2026-10-12 HO «후발 추적은 종목들 밑에» — 종목 칩 다음, 대장·후발 범례(tm-pr) 바로 위.
+            _fb = _follow_block(r["n"])
+            if _fb:
+                _k = pan.find('<p class="tm-pr"><em class="r-lead">')
+                pan = (pan[:_k] + _fb + pan[_k:]) if _k >= 0 else (pan[:pan.rfind('</div>')] + _fb + pan[pan.rfind('</div>'):])
             # 🔴 2026-10-09 HO «기사도 화살표를 누르면 나오게 — 화살표 옆엔 '종목 및 뉴스'만»
             if _what:
                 pan = pan.replace(_ph, _ph + _what.replace('class="tm-why solo"', 'class="tm-why tm-pnw"'), 1)
@@ -20314,7 +20340,10 @@ THEME_V17_CSS = """
 .cn-ax{margin:2px 0 12px;padding:9px 11px 8px;border-radius:9px;background:rgba(224,192,96,.06);border:1px solid rgba(224,192,96,.3)}
 .cn-axh{margin:0 0 4px!important;font-size:12.5px;font-weight:900;color:#e0c060}
 .cn-ax ul{margin:0!important;padding-left:17px!important}
-.cn-ax li{margin:3px 0!important;font-size:12.5px;line-height:1.65;color:#d5d9e0}
+.cn-ax li{margin:7px 0!important;font-size:12.5px;line-height:1.65;color:#d5d9e0}
+.cn-ax li+li{padding-top:7px;border-top:1px dashed rgba(224,192,96,.16)}
+.cn-axk{color:#eef1f5}
+.cn-axd{color:#9aa3b1}
 .cn-axr{margin:6px 0 0!important;font-size:10.5px!important;line-height:1.55;color:#8b95a5}
 .cn-axr span{color:#6f7784}
 .ax-more{margin-top:8px;padding-top:7px;border-top:1px solid rgba(224,192,96,.18)}
