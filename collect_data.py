@@ -526,6 +526,7 @@ def _휴장줄_청소(휴장들):
             if 빼:
                 for d in 빼:
                     일.pop(d, None)
+                    (h.get("전체") or {}).pop(d, None)   # 🆕 2026-10-12 전체 순위도 같이
                 h["날짜들"] = sorted(일)
                 with io.open(THEME_HISTORY_FILE, "w", encoding="utf-8") as f:
                     json.dump(h, f, ensure_ascii=False, separators=(",", ":"))
@@ -1610,7 +1611,7 @@ def collect_themes_and_gauge():
     #    ⚠️ 새 수집 0회 — 이미 계산된 걸 저장만 한다.
     #    🆕 2026-08-29 (2차) — 화면(주도6)이 아니라 **주도N(최대 10개)**을
     #    저장한다. 화면 6개보다 넓게 담아 순환 통계의 경계 노이즈를 줄인다.
-    _save_theme_history(주도N)
+    _save_theme_history(주도N, 분석)   # 🆕 2026-10-12 — 중복 제거 전 «전체 순위»도 같이 저장
     try:                                   # 🆕 2026-10-07 — 돈의 이동용 «거래대금 전체판»(요청 +2회)
         _save_theme_money(collect_theme_money())
     except Exception as _e:
@@ -1679,7 +1680,7 @@ def _save_theme_money(판):
         print(f"   ⚠️ 테마 거래대금판 저장 실패 — {type(e).__name__}")
 
 
-def _save_theme_history(주도N):
+def _save_theme_history(주도N, 전체=None):
     """🆕 2026-08-29 — 날짜별 상위 테마를 영구 누적한다.
 
     구조: {"날짜들": [...], "일별": {"YYYYMMDD": [{테마명, 등락, 확산도,
@@ -1723,11 +1724,27 @@ def _save_theme_history(주도N):
         "종목들": [ (x.get("종목명") if isinstance(x, dict) else x)
                   for x in (t.get("종목") or []) ][:4],
     } for t in 주도N]
+    # 🆕 2026-10-12 HO 지시 — «테마 순위판»용 전체 순위.
+    #    [왜] 위 «일별»은 종목 2개 이상 겹치면 건너뛴 목록이라, 반도체 대표주처럼
+    #    큰 테마가 다른 반도체 테마에 밀려 통째로 빠지는 날이 생긴다(→ «50위 밖» 오표시).
+    #    여기엔 중복 제거 «전»의 주도력점수 순위를 그대로 남긴다.
+    #    형식: [[테마명, 점수, 등락, 거래배수], ...] (점수 높은 순 = 1위부터)
+    #    ⚠️ 후보 자체가 등락률 상위 THEME_CAND_MAX개라, 여기 없으면 «그날 약했던 테마»다.
+    #    ⚠️ 소급 불가 — 오늘부터 쌓인다. 기존 «일별»은 건드리지 않는다.
+    if 전체:
+        def _r(v, n=2):
+            try:
+                return round(float(v), n)
+            except Exception:
+                return None
+        이력.setdefault("전체", {})[DATE] = [
+            [t.get("테마명"), _r(t.get("주도력점수"), 1), _r(t.get("테마등락")), _r(t.get("거래배수"))]
+            for t in 전체 if t.get("테마명")]
     이력["날짜들"] = sorted(일별.keys())
     try:
         with io.open(THEME_HISTORY_FILE, "w", encoding="utf-8") as _f:
             json.dump(이력, _f, ensure_ascii=False, separators=(",", ":"))
-        print(f"   🗂️ 테마 이력 적재 — 오늘 {len(주도N)}개 · 누적 {len(이력['날짜들'])}거래일")
+        print(f"   🗂️ 테마 이력 적재 — 오늘 {len(주도N)}개 · 전체순위 {len(전체 or [])}개 · 누적 {len(이력['날짜들'])}거래일")
     except Exception as e:
         print(f"   ⚠️ 테마 이력 저장 실패 — {type(e).__name__}")
 
