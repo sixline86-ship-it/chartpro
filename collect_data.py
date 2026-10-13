@@ -1268,7 +1268,12 @@ def collect_themes_and_gauge():
     #   ⚠️⚠️ 소급 불가. 오늘 안 넓히면 한 달 뒤에도 20위 밖을 못 본다.
     #     지나간 날의 거래대금은 되돌려 받을 수 없다.
     #   [비용] 0에 가깝다 — 2차 상세는 이미 계산돼 있고 담기만 한다.
-    THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "80")) if API목록 else 20
+    # 🔴 2026-10-13 HO «80개만 매기는 거야? 100개로 늘리는 건 어때?» — 80 → 100.
+    #   [영향 확인] 1년치 근사 점수로 80개 vs 100개 후보를 비교: 상위 10개 겹침 9.7/10 · 1위 같음 98.8% ·
+    #     상위 10개 평균 순위 차 0.27칸 → 위쪽 순위는 거의 그대로, 81~100위가 새로 «순위»를 갖는다.
+    #   [비용] 테마 상세 페이지 20번 더(하루 1회 수집).
+    #   ⚠️ 아래 THEME_SAVE_MAX와 «짝» — 같이 올린다.
+    THEME_CAND_MAX = int(os.getenv("THEME_CAND_MAX", "100")) if API목록 else 20
     유효 = [c for c in 후보 if c[2] is not None and not math.isnan(c[2])]
     # 🔴 HO 지시 2026-09-23 — «하반기 신규상장은 테마에서 빼. 의미없잖아.»
     #   [전] 화면(build_html)에서만 걸렀다(9/07). 그래서 수집 단계에선 살아 있어
@@ -1574,7 +1579,7 @@ def collect_themes_and_gauge():
     # 🔴 2026-09-19 — 50 → 80. 「거꾸로 보기」용. 위 THEME_CAND_MAX와 같은 값.
     #   ⚠️ 둘 중 하나만 올리면 소용없다 — 후보가 좁으면 담을 게 없고,
     #      저장이 좁으면 담아도 안 남는다. 항상 «짝»으로 움직인다.
-    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "80"))
+    THEME_SAVE_MAX = int(os.getenv("THEME_SAVE_MAX", "100"))   # 2026-10-13 80 → 100 (위 THEME_CAND_MAX와 짝)
     THEME_SHOW_MAX = 6
     주도N = []
     이미쓴종목 = set()
