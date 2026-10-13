@@ -1607,8 +1607,19 @@ def build_sectors(주도섹터, 설정=None):
     #   2개만 펼쳐두면 레이더 1~4위와 대조가 안 돼 매번 더보기를 눌러야 했다.
     앞2 = 주도섹터[:4]
     뒤4 = 주도섹터[4:8]
-    앞 = "".join(one_sector_card(a) for a in 앞2)
-    뒤 = "".join(one_sector_card(a) for a in 뒤4)
+    # 🆕 2026-10-12 HO «일봉·단기·월봉» — 카드 테마명 바로 밑에 3칸 칩 + 배열 배지
+    def _card(a):
+        h = one_sector_card(a)
+        try:
+            k = h.find('sc-chg')
+            k = h.find('</div>', k) if k >= 0 else -1
+            if k >= 0 and a.get("테마명"):
+                h = h[:k + 6] + f'<p class="sc-rk3">{_rk3_html(a["테마명"], hl="일")}</p>' + h[k + 6:]
+        except Exception:
+            pass
+        return h
+    앞 = "".join(_card(a) for a in 앞2)
+    뒤 = "".join(_card(a) for a in 뒤4)
     더보기 = ""
     if 뒤4:
         더보기 = f'''
@@ -4092,7 +4103,28 @@ def _mood_pills():
         return ""
     return ('<div class="mp4">' + "".join(
         f'<span class="mp4-p {c}" title="{html.escape(t)}"><i>{ic}</i><b>{t}</b></span>' for ic, t, c in out)
-        + '</div>')
+        + '</div>' + _align_today_line())
+
+
+def _align_today_line():
+    """🆕 2026-10-13 HO «종합 알약에도 오늘의 배열 한 줄» — 🚀 신고가 · 🟢 정배열 · ⚡ 신생 대표 테마(일봉 순)."""
+    try:
+        Q = _rank3()
+        A, R1 = Q.get("A") or {}, Q.get("R1") or {}
+        if not A:
+            return ""
+        def _top(k, m=2):
+            xs = sorted([n for n, v in A.items() if v == k], key=lambda n: R1.get(n) or 999)[:m]
+            return "·".join(_shn(n) for n in xs)
+        parts = []
+        for k in ("신고가", "정배열", "신생"):
+            e, lb, c, _w = ALIGN_BADGE[k]
+            t = _top(k)
+            parts.append(f'<span style="color:{c}">{e} {lb.split(" ")[0]}</span> '
+                         + (f'<b>{t}</b>' if t else '<em>없음</em>'))
+        return '<p class="mp4-al"><span class="mp4-alh">📊 오늘의 배열</span>' + " · ".join(parts) + '</p>'
+    except Exception:
+        return ""
 
 
 def build_signal_head(지수수급, 파생, 코수, 관제=None, 사건명=None):
@@ -12356,34 +12388,44 @@ def build_core(핵심편, data, 해석):
              + hide("오늘뜬테마요약", build_theme_spotlight())
              + hide("테마읽는순서", _flow_lead())
              # ① 오늘 무슨 일이 있었나
-             + _q("①", "오늘 무슨 일이 있었나", "🏆 오늘 뜬 테마", "오늘 하루 기준")
+             + _chart_guide()           # 🆕 2026-10-12 HO «테마 순위도 차트처럼 — 일봉·단기·월봉»
+             + _q("①", "오늘 무슨 일이 있었나", "🏆 오늘 뜬 테마", "일봉 · 오늘 하루")
              + f'<p class="th-rule">📐 <b>{int(THEME_RULE_DAY[4:6])}/{int(THEME_RULE_DAY[6:])}부터 순위 기준 변경</b> — '
                f'튀는 테마 하나가 나머지를 누르지 않게 «몇 등인가»로 비교하고, '
                f'한 종목이 테마 거래대금의 60% 이상이면 감점해요. '
                f'최근 4일 합산 순위는 며칠간 옛 기준과 섞여요.</p>'
-             + _chapter_block(build_sectors(data.get("주도섹터")) + _ax_today(data.get("주도섹터")), "오늘뜬")
-             # ② 그중 어제부터 이어지는 진짜는
-             + _q("②", "그중 어제부터 이어지는 진짜는", "📡 테마 레이더", f"{THEME_CUM_DAYS}일 누적 1~10위 · 그림자 테마 제외")
+             + _chapter_block(build_sectors(data.get("주도섹터")) + _today_folded(data) + _ax_today(data.get("주도섹터")), "오늘뜬")
+             # ② 그중 어제부터 이어지는 진짜는 (2026-10-12 HO «레이더를 순위판 위로»)
+             + _q("②", "그중 어제부터 이어지는 진짜는", "📡 테마 레이더", f"단기({THEME_CUM_DAYS}일) · {THEME_CUM_DAYS}일 누적 1~10위 · 그림자 테마 제외")
              + hide("레이더시장의폭", build_breadth_line())
-             + build_theme_radar(data) + _ax_radar()
+             + _radar_fold(build_theme_radar(data), _radar_reg_line())
+             + _ax_radar()
+             # 🆕 2026-10-12 HO «주도테마 순위판» — 순서는 40일·주 1회 고정, 막대는 오늘 하루(build_theme_board 설명)
+             + hide("테마순위판", _q("③", "오래 가는 주도 테마는", "📋 주도테마 순위판", f"월봉({BOARD_WIN}일) · 막대는 일봉")
+                    + build_theme_board(data))
              # ③ 돈은 어디서 들어와 어디로 빠지나
-             + _q("③", "돈은 어디서 들어와 어디로 빠지나", "🌊 돈의 이동 경로", "최근 10거래일")
+             # 🔴 2026-10-12 HO «돈의 이동 테마는 숨겨줘» — 순위판 줄마다 돈 표시가 들어가서 가림(계산은 그대로 돈다:
+             #   종합 알약·시황이 쓰는 MBR/MBS 캐시가 여기서 채워진다 → 함수 호출은 지우면 안 된다).
+             + hide("돈의이동챕터", _q("③", "돈은 어디서 들어와 어디로 빠지나", "🌊 돈의 이동 경로", "최근 10거래일"))
              # 🔴 2026-10-07 (2차) HO «돈의 이동 경로를 선으로, 복잡하지 않게» — 돈 선(들어온 3 + 빠진 3) 본문,
              #   막대는 접어서 «막대로 보기», 순위 선 그림은 hide(재료 계산은 그대로 돈다).
-             + _chapter_block(_mb_main()
+             + hide("돈의이동챕터", _chapter_block(_mb_main()
                               + hide("돈의이동순위", build_money_flow_theme())
                               + _ax_flow()
                               + hide("돈의이동섹터", build_money_flow_v3())
                               + hide("돈의이동이전방식",
                                      '<details class="cn-how" style="margin-top:6px"><summary>📦 이전 방식 보기 '
                                      '(10위권 테마 거래대금 합 · 중복 포함)</summary>'
-                                     + build_money_flow() + '</details>'), "돈의이동")
+                                     + build_money_flow() + '</details>'), "돈의이동"))
              # ④ 판이 커지는 중인가
              + _q("④", "판이 커지는 중인가", "🗺️ 섹터 × 테마", "테마가 섹터로 번지는지")
              + _chapter_block(build_sector_theme(data) + _ax_sector(), "섹터테마", ("tm-sfoot", "tm-snote"))
              # ⑤ 다음은 어디
-             + _q("⑤", "다음은 어디", "🛬 다가오는 테마", f"같은 {THEME_CUM_DAYS}일 누적 11~20위")
-             + _chapter_block(build_coming_themes(data), "다가오는", ("tm-foot",))
+             # 🔴 2026-10-12 HO «다가오는 테마는 숨겨줘» — 순위판이 11~20위를 늘 보여줘서 가림. ⑤엔 물밑만 남는다.
+             + (_q("⑤", "다음은 어디", "🛬 다가오는 테마", f"같은 {THEME_CUM_DAYS}일 누적 11~20위")
+                if "다가오는테마" not in HIDDEN_CHAPTERS else
+                _q("⑤", "다음은 어디", "🔦 다음 후보", "순위 밖인데 돈이 먼저 붙는 곳"))
+             + hide("다가오는테마", _chapter_block(build_coming_themes(data), "다가오는", ("tm-foot",)))
              # 🔴 2026-10-07 HO «물밑도 흐름을 — B안 · 금액과 순위도» → 흐름판. 재료가 없으면 예전 표.
              + _chapter_block((build_reverse_flow(data) or build_reverse_look(data)) + _ax_coming(), "거꾸로", ("rv2-f", "rv2-note"))
              # ⑥ 이 규칙들, 맞았나
@@ -13278,6 +13320,9 @@ def _plain(h, limit=3200):
     return t[:limit]
 
 
+_NOTE_OFF = {"돈의이동": "돈의이동챕터", "다가오는": "다가오는테마"}   # 해설키 → 가림키
+
+
 def theme_chapter_texts(data, report=None):
     """테마 탭(읽기·판단)을 한 번 그려 보면서 챕터별 본문 글자를 가로챈다.
     반환 {챕터키: 글자}. ⚠️ 판정 기록 저장 같은 부수효과는 «같은 날 덮어쓰기»라 두 번 돌아도 안전."""
@@ -13286,7 +13331,8 @@ def theme_chapter_texts(data, report=None):
     o_blk, o_rad = g["_chapter_block"], g["build_theme_radar"]
 
     def _blk(html, key, classes=()):
-        if key in NOTE_KEYS:
+        # 🔴 2026-10-12 — 가린 챕터는 해설을 만들지 않는다(안 보이는 글에 API 비용을 쓰지 않게)
+        if key in NOTE_KEYS and _NOTE_OFF.get(key) not in HIDDEN_CHAPTERS:
             cap[key] = _plain(html)
         return o_blk(html, key, classes)
 
@@ -18312,6 +18358,478 @@ def build_money_bars():
               f'<b>막대끼리 더하면 안 돼요</b>. 평소 = 최근 5거래일 중앙값.</p></div>')
 
 
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-12 HO «테마 순위판» — 순서는 주 1회 고정, 막대는 매일.
+#   [왜] 레이더는 매일 «오늘 1~10위»로 줄을 새로 세워, 어제 본 자리에 오늘 다른 테마가 와 있었다(피로).
+#        이 판은 줄 순서를 «최근 40거래일 점수 합» 순위로 정하고 매주 첫 거래일(보통 월요일)에만 바꾼다.
+#        매일 바뀌는 건 막대(오늘 하루 순위)뿐 → 눈이 자리를 외운다.
+#   [근거 · 10/12 분석] 테마 구성종목 일봉 근사 점수 1년치(249거래일 · 256테마):
+#     · 기간 40일 = 다음 5일 10위 안 예측 상관 0.136 · 상위20 다음 5일 시장 대비 +0.74%p · 다음날 순서 유지 86%
+#       (4일 0.083/+0.29/57% · 20일 0.100/+0.65/81% · 60일 0.154/+0.54/89%) → 가장 고른 40일.
+#     · ⚠️ 주의(판 위) = 최근 20일 10위 안 0회 → 다음 5일 나머지보다 −0.96%p(승률 49 vs 52).
+#       «꾸준한 중위권»이 점수 합으로 판에 올라온 것 — 주도 테마가 아니다.
+#     · ⚠️ 주의 · 처음 = 최근 20일 20위 안 0회인데 오늘 10위 안 → 다음 5일 −0.40%p. «갑자기 나타난» 테마.
+#     · 두 효과 모두 작다(승률 차 1~3%p) — «빠지라»가 아니라 «따라가기 전에 한 번 더».
+#   [재료] theme_history «전체»(10/13~, 중복 정리 전 순위) → 없는 날은 «일별»(중복 정리 후).
+#   [재검증] 2026-12-16 예약 작업이 실제 주도력점수로 다시 잰다.
+BOARD_WIN = 40          # 순서 기간(거래일). 기록이 모자라면 있는 만큼.
+BOARD_N = 20            # 판 줄 수
+BOARD_LOOK = 20         # «10위 안 N회 / 20일»·주의 판정 기간
+BOARD_OPEN = 10         # 처음부터 보이는 줄 수(나머지는 «더보기»)
+
+
+def _board_days():
+    """{날짜: [(테마명, 점수, 등락), ...점수순]}, 그날 «전체» 썼는지 {날짜: 개수}."""
+    if "BD" in _FOLLOW_CACHE:
+        return _FOLLOW_CACHE["BD"]
+    H = _theme_hist_all() or {}
+    try:
+        F = (load_json("theme_history.json") or {}).get("전체") or {}
+    except Exception:
+        F = {}
+    out, full = {}, {}
+    for d in sorted(set(H) | set(F)):
+        if not _is_trading_ymd(d):
+            continue
+        if F.get(d):
+            xs = [(r[0], r[1] or 0, r[2]) for r in F[d] if r and r[0] and _theme_ok(r[0])]
+            full[d] = len(xs)
+        else:
+            xs = [(x.get("테마명"), x.get("점수") or 0, x.get("등락")) for x in (H.get(d) or [])
+                  if x.get("테마명")]
+        xs.sort(key=lambda v: -v[1])
+        if xs:
+            out[d] = xs
+    _FOLLOW_CACHE["BD"] = (out, full)
+    return out, full
+
+
+def _board_money():
+    """{테마: (평소 대비 %, 오른 종목 %, 가중 등락)} — build_money_bars와 같은 셈(가장 큰 1종목 빼고 · 시장 증감 빼고)."""
+    M = _theme_money_days()
+    days = sorted(M)
+    if len(days) < 4:
+        return {}
+    d, prev = days[-1], days[-6:-1]
+    mult, _t = _market_money_mult(d, prev)
+    G = _theme_groups()
+    dic = ((_today_data().get("계좌격자") or {}).get("종목사전")) or {}
+    try:
+        HM = (((load_json("stock_money_hist.json") or {}).get("일별") or {}).get(d)) or {}
+    except Exception:
+        HM = {}
+    out = {}
+    for nm, (a, s) in (M.get(d) or {}).items():
+        ex = a * (1 - s / 100)
+        p = sorted(M[x][nm][0] * (1 - M[x][nm][1] / 100) for x in prev if nm in M.get(x, {}))
+        if len(p) < 3:
+            continue
+        base = p[len(p) // 2] * mult
+        if base <= 0:
+            continue
+        mem = [m for m in (G.get(nm) or []) if m not in _IDX_JUNK2
+               and isinstance((dic.get(m) or [None] * 4)[3], (int, float))]
+        up = (sum(1 for m in mem if dic[m][3] > 0) / len(mem) * 100) if mem else None
+        w = sorted(((HM.get(m) or 0), m) for m in mem if (HM.get(m) or 0) > 0)
+        if len(w) >= 2:
+            w = w[:-1]
+        tw = sum(a2 for a2, _ in w)
+        ret = (sum(a2 * dic[m][3] for a2, m in w) / tw) if tw > 0 else None
+        out[nm] = ((ex / base - 1) * 100, up, ret)
+    return out
+
+
+def _board_members(data, nm):
+    """펼침 목록 재료 — 구성종목 전부에 오늘 등락·거래대금(백만원)을 붙여 돈 많은 순 12개.
+    _stock_panel이 대장(👑와 같은 공식) → 후발 → 소외 순으로 다시 세운다."""
+    try:
+        mem0 = dict((t[0], t) for t in (_theme_members(data).get(nm) or []))
+    except Exception:
+        mem0 = {}
+    G = _theme_groups()
+    dic = ((data.get("계좌격자") or {}).get("종목사전")) or {}
+    try:
+        HM = _FOLLOW_CACHE.get("BHM")
+        if HM is None:
+            _all = (load_json("stock_money_hist.json") or {}).get("일별") or {}
+            HM = _all.get(sorted(_all)[-1]) if _all else {}
+            _FOLLOW_CACHE["BHM"] = HM or {}
+    except Exception:
+        HM = {}
+    rows = []
+    for m in (G.get(nm) or []):
+        if m in _IDX_JUNK2 or _is_pref(m):
+            continue
+        v = dic.get(m)
+        ch = v[3] if (v and len(v) > 3 and isinstance(v[3], (int, float))) else None
+        amt = (HM.get(m) or 0) * 100 or None          # 억 → 백만원(회전율 셈과 같은 단위)
+        old = mem0.get(m)
+        if old and old[2] is not None:
+            amt = old[2]
+        rows.append((m, (f"{ch:+.2f}%" if ch is not None else None), amt, (old[3] if old else None)))
+    if not rows:
+        return list(mem0.values())
+    rows.sort(key=lambda t: -(t[2] or 0))
+    return rows[:12]
+
+
+def _board_regulars():
+    """«주도 테마» = 주도테마 순위판 20위 안 + 최근 20일 10위 안 3회 이상.
+    [왜 3회] 순위판 20위 안만 보면 점수 합으로 올라온 중위권(콜드체인 10위 안 1회)도 들어와
+      «주도 지속»이 오판됐다(10/12). 1년치 근사: 주도+4일 10위 안 → 다음 5일 +1.04%p(118건 · 승률 55)."""
+    try:
+        D, _f = _board_days()
+        days = sorted(D)
+        if len(days) < 5:
+            return set()
+        d = days[-1]
+        R = {dd: {n: i + 1 for i, (n, _s, _e) in enumerate(D[dd])} for dd in days}
+        _wk = datetime.strptime(d, "%Y%m%d").isocalendar()[:2]
+        anchor = next(x for x in days if datetime.strptime(x, "%Y%m%d").isocalendar()[:2] == _wk)
+        ai = days.index(anchor)
+        sc = {}
+        for dd in days[max(0, ai + 1 - BOARD_WIN): ai + 1]:
+            for n, s, _e in D[dd]:
+                sc[n] = sc.get(n, 0) + (s or 0)
+        order = [n for n, _ in sorted(sc.items(), key=lambda v: -v[1])][:BOARD_N]
+        look = days[-BOARD_LOOK:]
+        return {n for n in order if sum(1 for x in look if (R[x].get(n) or 999) <= 10) >= 3}
+    except Exception:
+        return set()
+
+
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-12 HO «테마 순위도 차트처럼 — 일봉 · 단기(4일) · 월봉(40일)»
+#   [왜] ① 오늘 뜬 테마(하루) · ② 레이더(4일 합) · ③ 주도테마 순위판(40일 합)이 같은 테마에
+#     서로 다른 «N위»를 붙여 «뭐가 맞지?»가 됐다. 합치지 않고 «기간 이름»을 붙인다 —
+#     차트 독자는 일봉이 빠져도 월봉은 오를 수 있다는 걸 이미 안다. 숫자가 다른 게 «정보»가 된다.
+#   [3칸 칩] 테마가 나오는 곳마다 같은 모양: [일 N][4일 N][40일 N]
+#   [배열 배지] 세 숫자의 관계를 차트 말로 — 1년치 근사 점수(249거래일·256테마) 다음 5일 시장 대비:
+#     🚀 신고가  오늘 10위 안 + 4일 점수가 최근 40일 중 최고 + 40일 40위 안   +1.89%p (115건 · 승률 57)
+#     🟢 정배열  주도(40일 20위 안 + 20일 중 10위 안 3회↑) + 4일 10위 안 + 오늘 20위 안   +1.04%p (118 · 55)
+#     💤 눌림    주도 + 4일 20위 밖(푹 쉼)                                           +1.03%p (636 · 51)
+#     ↘ 밀림    주도 + 4일 20위 안인데 정배열 아님(어정쩡하게 내려옴)                  −0.03%p (191 · 48)
+#     〰️ 횡보   40일 20위 안인데 20일 동안 10위 안 0회(점수 합으로만 올라옴)          +0.09%p (1,183 · 49)
+#     ⚡ 신생    오늘 10위 안인데 직전 20일 20위 안 0회(갑자기 나타남)                 −0.44%p (291 · 41)
+#     (참고) 중위권에서 처음 10위 안 «돌파»는 +0.06%p — 대부분 가짜 돌파라 배지로 안 만든다.
+#   ⚠️ 근사 점수 기준. 2026-12-16 예약 작업이 실제 주도력점수로 다시 잰다.
+ALIGN_BADGE = {
+    "신고가": ("🚀", "신고가", "#ff5a4e", "4일 점수가 최근 40일 중 최고 — 가장 센 자리"),
+    "정배열": ("🟢", "정배열", "#3ecf9a", "일봉·단기·월봉 모두 위 — 주도 테마가 다시 달리는 중"),
+    "눌림":   ("💤", "눌림", "#e0c060", "주도 테마가 푹 쉬는 중(4일 20위 밖) — 다시 볼 자리"),
+    "밀림":   ("↘", "밀림", "#8fa3bf", "주도 테마가 어정쩡하게 내려오는 중 — 서두르지 않기"),
+    "횡보":   ("〰️", "횡보 · 주의", "#ffb35c", "40일 상위인데 10위 안엔 한 번도 못 든 중위권"),
+    "신생":   ("⚡", "신생 · 주의", "#ffb35c", "직전 20일 20위 안에 없다가 갑자기 10위 안"),
+}
+
+
+def _rank3():
+    """{"R1": 일봉, "R4": 단기(4일), "R40": 월봉(40일), "A": {테마: 배열키}, "full": 일봉 전체 개수}."""
+    if "R3" in _FOLLOW_CACHE:
+        return _FOLLOW_CACHE["R3"]
+    out = {"R1": {}, "R4": {}, "R40": {}, "A": {}, "full": None}
+    try:
+        D, full = _board_days()
+        days = sorted(D)
+        if len(days) < 5:
+            _FOLLOW_CACHE["R3"] = out
+            return out
+        d = days[-1]
+        R = {dd: {n: i + 1 for i, (n, _s, _e) in enumerate(D[dd])} for dd in days}
+        R1 = R[d]
+        # 월봉: 주도테마 순위판과 같은 셈(이번 주 첫 거래일 기준 최근 BOARD_WIN일 점수 합)
+        _wk = datetime.strptime(d, "%Y%m%d").isocalendar()[:2]
+        anchor = next(x for x in days if datetime.strptime(x, "%Y%m%d").isocalendar()[:2] == _wk)
+        ai = days.index(anchor)
+        sc = {}
+        for dd in days[max(0, ai + 1 - BOARD_WIN): ai + 1]:
+            for n, s, _e in D[dd]:
+                sc[n] = sc.get(n, 0) + (s or 0)
+        R40 = {n: i + 1 for i, (n, _) in enumerate(sorted(sc.items(), key=lambda v: -v[1]))}
+        # 단기: 레이더와 같은 함수(같은 숫자)
+        rk = _theme_cum_rank(THEME_CUM_DAYS, 100000) or {}
+        rds = sorted(rk)
+        R4 = {n: i + 1 for i, (n, _) in enumerate(rk.get(rds[-1]) or [])} if rds else {}
+        S4 = {dd: dict(rk[dd]) for dd in rds[-40:]}
+        look, prev = days[-BOARD_LOOK:], days[-BOARD_LOOK - 1:-1]
+
+        def _c(n, ds, k):
+            return sum(1 for x in ds if (R[x].get(n) or 999) <= k)
+        A = {}
+        for n in set(R1) | set(R40) | set(R4):
+            t, r4, r40 = R1.get(n) or 999, R4.get(n) or 999, R40.get(n) or 999
+            lead = r40 <= 20 and _c(n, look, 10) >= 3
+            hist = [S4[x].get(n, 0) for x in S4]
+            if t <= 10 and r40 <= 40 and len(hist) >= 20 and hist[-1] > 0 and hist[-1] >= max(hist):
+                A[n] = "신고가"
+            elif lead and r4 <= 10 and t <= 20:
+                A[n] = "정배열"
+            elif t <= 10 and len(prev) >= BOARD_LOOK and _c(n, prev, 20) == 0:
+                A[n] = "신생"
+            elif lead and r4 > 20:
+                A[n] = "눌림"
+            elif lead:
+                A[n] = "밀림"
+            elif r40 <= 20 and len(look) >= BOARD_LOOK and _c(n, look, 10) == 0:
+                A[n] = "횡보"
+        out = {"R1": R1, "R4": R4, "R40": R40, "A": A, "full": full.get(d)}
+    except Exception as e:
+        print(f"   ⚠️ 일봉·단기·월봉 계산 실패 — {type(e).__name__}: {e}")
+    _FOLLOW_CACHE["R3"] = out
+    return out
+
+
+def _align_badge(n):
+    k = (_rank3().get("A") or {}).get(n)
+    if not k:
+        return ""
+    e, lb, c, why = ALIGN_BADGE[k]
+    return f'<span class="ab" style="color:{c};border-color:{c}" title="{why}">{e} {lb}</span>'
+
+
+def _rk3_html(n, badge=True, hl=None):
+    """[일 N][4일 N][40일 N] — 테마가 나오는 곳마다 같은 칩.
+    🔴 2026-10-13 HO — 챕터의 기준 칸만 노란색: ① 오늘 뜬 테마 = «일» · ② 레이더 = «4일» · ③ 순위판 = «40일».
+    🔴 2026-10-13 HO «'일 밖'은 몇 위 밖?» — «밖» 대신 «N+»: 그날 순위를 매긴 테마 수(N) 밖이라는 뜻.
+       일봉은 등락률 상위 100개 후보만 점수를 매겨서 보통 «100+»(10/12까지는 62~80). 그 밖 칸은 99위 넘으면 «99+»."""
+    Q = _rank3()
+    def _v(m, x):
+        M = Q.get(m) or {}
+        r = M.get(x)
+        if r:
+            return str(r)
+        return f"{len(M)}+" if M else "–"
+    cells = (("일", "R1"), ("4일", "R4"), ("40일", "R40"))
+    return (f'<span class="rk3" title="일봉 = 오늘 하루 · 단기 = 최근 4일 · 월봉 = 최근 40일 순위 · N+ = N위 밖">'
+            + "".join(f'<i class="{"on" if hl == lb else ""}">{lb} {_v(k, n)}</i>' for lb, k in cells)
+            + '</span>' + (_align_badge(n) if badge else ""))
+
+
+def _chart_guide():
+    """테마 탭 맨 위 한 줄 안내 + 배열 배지 범례."""
+    leg = " ".join(f'<span class="ab" style="color:{c};border-color:{c}" title="{w}">{e} {lb}</span>'
+                   for _k, (e, lb, c, w) in ALIGN_BADGE.items())
+    return ('<div class="cg-box"><p class="cg-1">📊 <b>테마 순위도 차트처럼 봐요</b> — '
+            '<b>일봉</b>(오늘 하루) · <b>단기</b>(최근 4일) · <b>월봉</b>(최근 40일). '
+            '같은 테마라도 숫자가 다른 건 오류가 아니라 <b>정보</b>예요.</p>'
+            '<p class="cg-2"><span class="rk3"><i>일 3</i><i>4일 5</i><i>40일 12</i></span> '
+            '= 오늘 3위 · 4일 5위 · 40일 12위 · <b style="color:#e0c060">노란 칸</b> = 그 챕터의 기준 '
+            '(오늘 뜬 테마 «일» · 레이더 «4일» · 주도테마 순위판 «40일») · «100+» = 100위 밖(그날 점수를 매긴 테마 수 밖)</p>'
+            f'<details class="cg-d"><summary>▾ 배열 배지 읽는 법</summary><p class="cg-3">{leg}</p>'
+            '<p class="cg-4">🚀 신고가 = 4일 점수가 최근 40일 중 최고 · 🟢 정배열 = 일봉·단기·월봉 모두 위 · '
+            '💤 눌림 = 주도 테마가 푹 쉬는 중 · ↘ 밀림 = 주도 테마가 어정쩡하게 내려오는 중 · '
+            '〰️ 횡보 = 40일 상위인데 10위 안엔 한 번도 못 든 중위권 · ⚡ 신생 = 갑자기 나타난 테마.<br>'
+            '1년치로 재 보면 다음 5일이 🚀 > 🟢 ≈ 💤 > 〰️ ≈ ↘ > ⚡ 순이었어요(근사 점수 · 방향만 참고). '
+            '주도 테마 = 40일 20위 안 + 최근 20일 동안 10위 안 3회 이상.</p></details></div>')
+
+
+def _today_folded(data):
+    """⑤ 2026-10-12 HO «오늘 순위를 하나로» — ① 오늘 뜬 테마는 종목이 겹치는 테마를 빼고 보여준다.
+    그 빠진 테마를 지우지 않고 «묶어 접어» 일봉 순위 그대로 보여준다(전체 순위가 쌓인 날만)."""
+    Q = _rank3()
+    if not Q.get("full"):
+        return ""
+    shown = [a.get("테마명") for a in (data.get("주도섹터") or []) if a.get("테마명")]
+    G = _theme_groups()
+    _m = lambda x: {s for s in (G.get(x) or []) if s not in _IDX_JUNK2}
+    # 카드에 나온 마지막 테마의 일봉 순위까지만 — 그 안에서 빠진 것 = 종목이 겹쳐 묶인 테마
+    maxr = max([Q["R1"][s] for s in shown if s in Q["R1"]] or [0])
+    rows = []
+    for n, r in sorted(Q["R1"].items(), key=lambda v: v[1]):
+        if r > maxr:
+            break
+        if n in shown:
+            continue
+        mem = _m(n)
+        best = max(((len(mem & _m(s)), s) for s in shown), default=(0, None))
+        if best[0] < 2:
+            continue
+        rows.append(f'<div class="tf-r"><span class="rk3"><i class="on">일 {r}</i></span><b>{n}</b>'
+                    f'<span>— <b>{best[1]}</b> 카드와 종목 {best[0]}개 겹침</span></div>')
+    if not rows:
+        return ""
+    return (f'<details class="tf-dup"><summary>▾ 같은 종목이 겹쳐 묶어 둔 테마 {len(rows)}개 · 일봉 {maxr}위 안</summary>'
+            + "".join(rows) + '<p class="tf-n">같은 종목이 두 이름으로 잡히면 위 카드에선 하나만 보여줘요. '
+            '순위 숫자는 레이더·주도테마 순위판의 «일» 칸과 같아요.</p></details>')
+
+
+def _radar_fold(h, g):
+    """🔴 2026-10-12 HO «목록 전체를 '▾ 레이더 10개 테마 · 왜 움직였나(뉴스)' 한 줄로 접어 줘 — 다 그대로 두고 접기만».
+    레이더 그림·범례 → 주도 테마 판정 줄(g) → [접힘: 이어지는/새로 들어온 테마 목록 그대로] → 그림자·📏 줄."""
+    k = h.find('<div class="tm-gbox')
+    if k < 0:
+        return h + g
+    e = -1
+    for mk in ('<div class="tm-shw"', '<p class="tm-sv1"'):
+        e = h.find(mk, k)
+        if e >= 0:
+            break
+    if e < 0:
+        e = len(h)
+    c = h.rfind('</div>', k, e)            # 목록 묶음(더보기 단추 포함)을 닫는 태그 — 그 앞까지 접는다
+    if c < 0:
+        return h[:k] + g + h[k:]
+    n = h.count('class="tm-lg"', k, c)
+    return (h[:k] + g
+            + f'<details class="rd-fold"><summary>▾ 레이더 {n}개 테마 · 왜 움직였나(뉴스)</summary>'
+            + h[k:c] + '</details>' + h[c:])
+
+
+def _radar_reg_line():
+    """🆕 2026-10-12 HO — 레이더 바로 밑 한 줄: 선두 무리에 주도 테마가 몇이나 · 바깥에서 쉬는 주도 테마."""
+    reg = _board_regulars()
+    rk = _theme_cum_rank()
+    if not reg or not rk:
+        return ""
+    top = [n for n, _ in (rk.get(sorted(rk)[-1]) or [])[:10]]
+    inn = [n for n in top if n in reg]
+    lead = [n for n in top[:3] if n in reg]
+    rest = [n for n in reg if n not in top]
+    D, _f = _board_days()
+    E = {n: e for n, _s, e in (D.get(sorted(D)[-1]) or [])}
+    def _e(n):
+        e = E.get(n)
+        return (f' <em style="color:{TM_HOT if e > 0 else TM_DOWN}">{e:+.1f}%</em>' if e is not None else '')
+    if not lead and not inn:
+        verdict = "오늘 레이더 테마 중 <b>주도 테마가 하나도 없어요</b> — 큰 줄기는 쉬고 처음 보는 테마들이 판을 채운 «교대»의 날"
+    elif not lead:
+        verdict = f"주도 테마는 레이더 테마 중 <b>{len(inn)}개</b>뿐이고 <b>선두(1~3위)엔 없어요</b> — 선두는 새 얼굴"
+    else:
+        verdict = f"선두(1~3위) 중 <b>{len(lead)}개가 주도 테마</b> — 큰 줄기가 판을 이끄는 날"
+    # 🔴 2026-10-13 HO «판정 줄을 배지 개수 요약으로» — 오늘 🚀 신고가 N · 🟢 정배열 N · ⚡ 신생 N … + 한 마디
+    A = (_rank3().get("A") or {})
+    cnt = {k: sum(1 for v in A.values() if v == k) for k in ALIGN_BADGE}
+    chips = " · ".join(f'<span style="color:{ALIGN_BADGE[k][2]}">{ALIGN_BADGE[k][0]} {ALIGN_BADGE[k][1].split(" ")[0]}</span> '
+                       f'<b style="color:{"#e6ebf1" if cnt[k] else "#6f7784"}">{cnt[k]}</b>'
+                       for k in ("신고가", "정배열", "신생", "눌림", "밀림", "횡보"))
+    if cnt["정배열"] >= 2:
+        tail = "주도 테마가 다시 달리는 날"
+    elif cnt["정배열"] == 0 and cnt["눌림"] + cnt["밀림"] >= 5 and cnt["신생"] + cnt["신고가"] >= 2:
+        tail = "큰 줄기는 쉬고 새 얼굴이 뜬 «교대»의 날"
+    else:
+        tail = ""
+    verdict = (f'오늘 {chips}' + (f'<br><span class="rg-t">→ {tail} · {verdict}</span>' if tail
+                                  else f'<br><span class="rg-t">→ {verdict}</span>'))
+    return ('<div class="rg-l"><p class="rg-v">' + verdict + '</p>'
+            + (f'<p class="rg-r">■ 네모 = 주도 테마 (주도테마 순위판 20위 안 + 최근 20일 동안 10위 안 3회 이상) · ● 동그라미 = 그 밖'
+               + (f'<br>💤 바깥에서 쉬는 주도 테마 {len(rest)}개 · ' + " · ".join(f'{_shn(n)}{_e(n)}' for n in rest[:8])
+                  + (f' 외 {len(rest)-8}' if len(rest) > 8 else '') if rest else '') + '</p>')
+            + '</div>')
+
+
+def build_theme_board(data):
+    D, full = _board_days()
+    days = sorted(D)
+    if len(days) < 5:
+        return ""
+    d = days[-1]
+    R = {dd: {n: i + 1 for i, (n, _s, _e) in enumerate(D[dd])} for dd in days}
+    # ── 줄 순서: 이번 주 첫 거래일 기준 «최근 BOARD_WIN일 점수 합» (주 1회만 바뀐다) ──
+    _wk = datetime.strptime(d, "%Y%m%d").isocalendar()[:2]
+    anchor = next(x for x in days if datetime.strptime(x, "%Y%m%d").isocalendar()[:2] == _wk)
+    ai = days.index(anchor)
+    win = days[max(0, ai + 1 - BOARD_WIN): ai + 1]
+    sc = {}
+    for dd in win:
+        for n, s, _e in D[dd]:
+            sc[n] = sc.get(n, 0) + (s or 0)
+    order = [n for n, _ in sorted(sc.items(), key=lambda v: -v[1])][:BOARD_N]
+    look = days[-BOARD_LOOK:]
+    prev = days[-BOARD_LOOK - 1:-1]
+    E = {n: e for n, _s, e in D[d]}
+    MO = _board_money()
+    nfull = full.get(d)
+    out_lbl = f"{nfull}위 밖" if nfull else "순위 밖"
+
+    def _rk(dd, n):
+        return R[dd].get(n) or 999
+
+    def _money(n):
+        if n not in MO:
+            return ""
+        v, up, ret = MO[n]
+        s = "999%↑" if v > 999 else f"{abs(v):.0f}%"
+        why = f'<span class="bd-c">· 오른 종목 {up:.0f}%</span>' if up is not None else ""
+        if v >= 20:
+            if ret is not None and ret > 0 and (up or 0) >= 50:
+                return f'<span class="bd-m" style="color:{TM_HOT}">💰 돈 몰림 +{s}</span>'
+            if ret is not None and ret <= 0:
+                return (f'<span class="bd-m" style="color:{TM_DOWN}">▼ 돈 빠짐</span>'
+                        f'<span class="bd-c">· 거래 +{s}</span>{why}')
+            return f'<span class="bd-m" style="color:#9aa3b1">거래 +{s} · 사자·팔자 섞임</span>{why}'
+        if v <= -20:
+            return f'<span class="bd-m" style="color:#7f8ea3">💤 거래 한산 −{s}</span>'
+        return '<span class="bd-m" style="color:#6f7784">거래 평소 수준</span>'
+
+    def _ret(n):
+        e = E.get(n)
+        if e is None and n in MO:
+            e = MO[n][2]
+        if e is None:
+            return ""
+        c = TM_HOT if e > 0 else (TM_DOWN if e < 0 else "#8b95a5")
+        return f'<em style="color:{c}">테마 {e:+.1f}%</em>'
+
+    def _first(n):
+        t = R[d].get(n)
+        return bool(t and t <= 10 and len(prev) >= BOARD_LOOK
+                    and not any(_rk(x, n) <= 20 for x in prev))
+
+    W1 = '<span class="bd-w" title="최근 20일 동안 10위 안에 한 번도 못 든 테마">⚠️ 주의</span>'
+    W2 = '<span class="bd-w" title="최근 20일 동안 20위 안에 한 번도 없다가 오늘 10위 안">⚠️ 주의 · 처음</span>'
+    rows = []
+    for i, n in enumerate(order):
+        t = R[d].get(n)
+        n10 = sum(1 for x in look if _rk(x, n) <= 10)
+        tag = _align_badge(n)        # 🔴 2026-10-12 HO «차트 용어로» — ⚠️ 주의/처음 → 배열 배지(〰️ 횡보 · ⚡ 신생 …)
+        if t and t <= 50:
+            col = "#e0c060" if t <= 10 else ("#5d7290" if t <= 20 else "#3b4656")
+            bar = f'<i style="width:{(51 - t) / 50 * 100:.0f}%;background:{col}"></i>'
+            tod = f'<span class="bd-t">{_ret(n)}</span>'          # 일봉 순위는 아래 3칸 칩 «일 N»이 말한다
+        else:
+            bar = '<span class="bd-o"></span>'
+            tod = f'<span class="bd-t dim">{_ret(n)}</span>'
+        pid = f"bdp{i}"
+        arw, pan = _stock_panel(n, _board_members(data, n), pid)
+        click = f" onclick=\"ztog('{pid}')\"" if pan else ""
+        rows.append(
+            f'<div class="bd-r"{click}><div class="bd-1"><span class="bd-k">{i + 1}</span>'
+            f'<span class="bd-n">{n}</span>'
+            + ('<span class="tm-arw2">▾ 종목</span>' if pan else "") + f'{tod}</div>'
+            f'<div class="bd-b">{bar}<span class="bd-tk"></span></div>'
+            f'<div class="bd-3">{_rk3_html(n, badge=False, hl="40일")}{tag}<span class="bd-c">10위 안 <b>{n10}회</b> / {len(look)}일</span>{_money(n)}</div>'
+            f'</div>{pan}')
+    news = []
+    for j, (n, _s, _e) in enumerate(D[d][:10]):
+        if n in order:
+            continue
+        pid = f"bdn{j}"
+        arw, pan = _stock_panel(n, _board_members(data, n), pid)
+        click = f" onclick=\"ztog('{pid}')\"" if pan else ""
+        news.append(f'<span class="bd-ch{" w" if _first(n) else ""}"{click}>{n}<em>일 {R[d][n]}위</em>'
+                    + (f' {_align_badge(n)}' if _align_badge(n) else "")
+                    + ('<em class="bd-ar">▾</em>' if pan else "") + f'</span>{pan}')
+    fd = lambda s: f"{int(s[4:6])}/{int(s[6:])}"
+    nxt = "다음 주 첫 거래일"
+    head = (f'<p class="bd-u">순서 기준 {fd(win[0])}~{fd(win[-1])} · {len(win)}거래일'
+            + (f'(기록이 {BOARD_WIN}일 찰 때까지 자동으로 늘어나요)' if len(win) < BOARD_WIN else '')
+            + f' · 순서는 {nxt}에 바뀌어요</p>'
+            '<p class="bd-key">왼쪽 번호 = 월봉(40일) 순위(주 1회 고정) · 막대 = 일봉(오늘 하루) 순위(길수록 위 · '
+            '<b style="color:#e0c060">금색</b> 10위 안 · <b style="color:#7f95b3">파랑</b> 11~20위 · 회색 21~50위)</p>')
+    foot = ('<div class="bd-nw"><p>🆕 판 바깥인데 오늘 10위 안 — 다음 주 순서에 반영돼요</p>'
+            + ("".join(news) or '<span class="bd-none">오늘은 없어요</span>') + '</div>'
+            '<p class="bd-f">배지(🚀 신고가 · 🟢 정배열 · 💤 눌림 · ↘ 밀림 · 〰️ 횡보 · ⚡ 신생)는 테마 탭 맨 위 «배열 배지 읽는 법»과 같아요.<br>'
+            '💰 돈 몰림 = 평소(앞 5일 중앙값)보다 거래 20%↑ · 테마 상승 · 절반 넘게 상승 / '
+            '▼ 돈 빠짐 = 거래는 20%↑인데 테마 하락(파는 돈이 많았던 자리) / 💤 한산 = 거래 20%↓. '
+            '가장 큰 한 종목과 시장 전체 증감은 빼고 셌어요.</p>')
+    # 🔴 2026-10-12 HO «주도 테마 순위판도 10개만 보여주고 나머지는 접어줘»
+    _body = "".join(rows[:BOARD_OPEN])
+    if len(rows) > BOARD_OPEN:
+        _body += (f'<details class="bd-more"><summary>▾ {BOARD_OPEN + 1}~{len(rows)}위 더보기</summary>'
+                  + "".join(rows[BOARD_OPEN:]) + '</details>')
+    return f'<div class="bd">{head}{_body}{foot}</div>'
+
+
 def build_money_lines():
     """💰 2026-10-07 HO «돈의 이동 경로를 선으로, 복잡하지 않게.»
     선 하나 = 테마 하나. 가운데 점선 = 그 테마의 평소. 위 = 평소보다 더 들어온 돈(억), 아래 = 빠진 돈.
@@ -18962,6 +19480,7 @@ def build_theme_radar(data):
                   f'dominant-baseline="central">{lab}</text>')
         placed.append((x - w / 2, y - 7, w, 14))
 
+    _REG = _board_regulars()
     for r in rows:
         a = r["ang"]; x, y = POS(r["h"][-1], a)
         c = _MC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
@@ -19028,7 +19547,12 @@ def build_theme_radar(data):
             sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad+3.2:.1f}" fill="none" '
                       f'stroke="#ffffff" stroke-width="1.3" stroke-dasharray="2.2 2.2" '
                       f'opacity="0.9"/>')
-        sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad:.1f}" fill="{c}"/>')
+        # 🆕 2026-10-12 HO «주도 테마는 사각형으로» — 주도 = 주도테마 순위판 20위 안 + 최근 20일 10위 안 3회↑
+        if r["n"] in _REG:
+            _q = rad * 0.92
+            sv.append(f'<rect x="{x-_q:.1f}" y="{y-_q:.1f}" width="{2*_q:.1f}" height="{2*_q:.1f}" rx="2.2" fill="{c}"/>')
+        else:
+            sv.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rad:.1f}" fill="{c}"/>')
         # 🆕 2026-10-03 — 위 알약을 누르면 켜지는 반짝 고리(평소엔 숨김). 1위는 처음부터 켜 둔다.
         sv.append(f'<circle class="tm-hl{" on" if r["r"] == 1 else ""}" data-k="{r["r"]}" cx="{x:.1f}" cy="{y:.1f}" '
                   f'r="{rad+7:.1f}" fill="none"/>')
@@ -19287,7 +19811,7 @@ def build_theme_radar(data):
         lis.append(
             f'<div class="tm-lg"{click}>'
             f'<div class="tm-l1">'
-            f'<span class="tm-dot" style="background:{c}">{r["r"]}</span>'
+            f'<span class="tm-dot" style="background:{c}{";border-radius:3px" if r["n"] in _REG else ""}">{r["r"]}</span>'
             f'<span class="tm-nm">{r["n"]}</span>'
             + ((lambda _a: f'<span class="tm-cd {"old" if (_SURV.get(_a, 100) <= 20) else "go"}">{_a}일째</span>')
                (_나이맵.get(r["n"]) or r["cont"]) if r["keep"] else '<span class="tm-cd new">첫날</span>')
@@ -19295,7 +19819,7 @@ def build_theme_radar(data):
             f'{_what}'
             f'<div class="tm-l2">{_trail}'
             f'{_money_badge(r["n"])}{_twin_chip(r["n"])}'
-            f'</div>{_tags}{_solo}</div>{pan}')
+            f'</div><div class="tm-l3">{_rk3_html(r["n"], hl="4일")}</div>{_tags}{_solo}</div>{pan}')
         _lis_of[r["n"]] = (r["r"], lis[-1])
 
     prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
@@ -20400,6 +20924,73 @@ THEME_V17_CSS = """
 .mb-dup{margin:2px 0 0;font-size:11.5px;line-height:1.55;color:#8b95a5}
 .mb-dup b{color:#c9d0d9}
 .mb-fold summary{cursor:pointer;font-size:12.5px;font-weight:700;color:#9aa3b1;padding:8px 0}
+/* 🆕 2026-10-12 — 레이더 주도 테마 줄 */
+.rg-l{margin:6px 0 10px;padding:9px 11px;border:1px solid rgba(224,192,96,.35);border-radius:10px;background:rgba(224,192,96,.05)}
+.rg-v{margin:0;font-size:12.5px;line-height:1.6;color:#c9d0d9}
+.rg-v b{color:#e0c060}
+.rg-k{display:inline-block;width:10px;height:10px;border-radius:2px;border:2px solid #e0c060;margin-right:6px;vertical-align:-1px}
+.rg-t{font-size:11.5px;color:#9aa3b1}
+.rg-t b{color:#e0c060}
+.rg-r{margin:5px 0 0;font-size:11px;line-height:1.6;color:#8b95a5}
+.rg-r em{font-style:normal;font-weight:700}
+/* 🆕 2026-10-12 — 테마 순위판 */
+.bd{margin:2px 0 10px}
+.bd-u{margin:0 0 4px;font-size:11px;color:#6f7784}
+.bd-key{margin:0 0 6px;font-size:11.5px;color:#8b95a5;line-height:1.55}
+.bd-r{padding:8px 0;border-top:1px solid #1a2330;cursor:pointer}
+.bd-1{display:flex;align-items:center;gap:6px;min-width:0}
+.bd-k{flex:none;width:20px;text-align:right;font-size:12px;font-weight:800;color:#8b95a5;font-variant-numeric:tabular-nums}
+.bd-n{font-weight:800;font-size:13.5px;color:#e6ebf1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bd-w{flex:none;font-size:10px;font-weight:800;padding:0 6px;border-radius:99px;color:#ffb35c;border:1px solid #ffb35c;white-space:nowrap}
+.bd-t{flex:none;margin-left:auto;font-size:11.5px;font-weight:800;color:#e6ebf1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bd-t.dim{color:#5f6b7c}
+.bd-t em{font-style:normal;font-size:11px;margin-left:5px}
+.bd-b{position:relative;height:9px;margin:5px 0 0 26px;background:#141e2b;border-radius:5px}
+.bd-b i{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
+.bd-o{position:absolute;left:0;top:0;bottom:0;width:3%;background:#2a3444;border-radius:5px}
+.bd-tk{position:absolute;top:-2px;bottom:-2px;left:82%;width:1px;background:rgba(224,192,96,.55)}
+.bd-3{display:flex;align-items:center;gap:7px;margin:5px 0 0 26px;flex-wrap:wrap}
+.bd-c{font-size:11px;color:#8b95a5;font-variant-numeric:tabular-nums}
+.bd-c b{color:#e6ebf1}
+.bd-m{font-size:11px;font-weight:800;font-variant-numeric:tabular-nums}
+.bd-nw{margin-top:10px;padding:10px 11px;border:1px dashed #2a3646;border-radius:10px}
+.bd-nw p{margin:0 0 6px;font-size:12px;color:#8b95a5}
+.bd-ch{display:inline-block;margin:0 6px 6px 0;padding:2px 9px;border-radius:99px;border:1px solid #3a4658;font-size:12px;font-weight:700;color:#e6ebf1;cursor:pointer}
+.bd-ch.w{border-color:#ffb35c}
+.bd-ch em{font-style:normal;color:#e0c060;margin-left:4px}
+.bd-ch em.bd-wm{color:#ffb35c}
+.bd-ch em.bd-ar{color:#e0c060}
+.bd-none{font-size:12px;color:#6f7784}
+/* 🆕 2026-10-12 — 일봉·단기·월봉 칩 · 배열 배지 */
+.rk3{display:inline-flex;gap:0;flex:none;border:1px solid #2a3646;border-radius:6px;overflow:hidden;vertical-align:middle}
+.rk3 i{font-style:normal;font-size:10.5px;font-weight:800;color:#9aa3b1;padding:1px 5px;background:#0d131c;white-space:nowrap;font-variant-numeric:tabular-nums}
+.rk3 i+i{border-left:1px solid #2a3646}
+.rk3 i.on{color:#e0c060;font-weight:900}
+.ab{display:inline-block;flex:none;font-size:10px;font-weight:800;padding:0 6px;border:1px solid;border-radius:99px;white-space:nowrap;vertical-align:middle;margin-left:4px}
+.cg-box{margin:0 0 12px;padding:10px 12px;border:1px solid #2a3646;border-radius:10px;background:#0d131c}
+.cg-1{margin:0;font-size:12.5px;line-height:1.6;color:#c9d0d9}
+.cg-1 b{color:#e6ebf1}
+.cg-2{margin:5px 0 0;font-size:11px;color:#8b95a5}
+.cg-d summary{cursor:pointer;list-style:none;margin-top:6px;font-size:11.5px;font-weight:800;color:#e0c060}
+.cg-d summary::-webkit-details-marker{display:none}
+.cg-3{margin:6px 0 0;line-height:2}
+.cg-3 .ab{margin:0 4px 0 0}
+.cg-4{margin:4px 0 0;font-size:11px;line-height:1.6;color:#8b95a5}
+.sc-rk3{margin:4px 0 0;line-height:1.9}
+.tm-l3{margin:4px 0 0;line-height:1.9}
+.bd-3 .rk3{margin-right:2px}
+.tf-dup{margin:8px 0 4px;padding:8px 11px;border:1px dashed #2a3646;border-radius:10px}
+.tf-dup summary{cursor:pointer;list-style:none;font-size:12px;font-weight:800;color:#9aa3b1}
+.tf-dup summary::-webkit-details-marker{display:none}
+.tf-r{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #1a2330;font-size:12px;color:#c9d0d9}
+.tf-r span{color:#8b95a5;font-size:11px}
+.tf-n{margin:6px 0 0;font-size:11px;color:#6f7784}
+.rd-fold>summary{cursor:pointer;list-style:none;margin:2px 0 8px;padding:10px 12px;border:1px solid #2a3646;border-radius:10px;font-size:13px;font-weight:800;color:#e0c060;background:#0d131c}
+.rd-fold>summary::-webkit-details-marker{display:none}
+.rd-fold[open]>summary{color:#9aa3b1}
+.bd-more summary{cursor:pointer;list-style:none;padding:9px 0;border-top:1px solid #1a2330;font-size:12px;font-weight:800;color:#e0c060}
+.bd-more summary::-webkit-details-marker{display:none}
+.bd-f{margin:8px 0 0;font-size:11px;line-height:1.6;color:#6f7784}
 /* 🆕 2026-10-07 — 물밑 흐름판 표 */
 .rf-r{padding:9px 0;border-top:1px solid #1a2330}
 .rf-t{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
@@ -21490,6 +22081,8 @@ LEADER_CSS = """
 """
 
 HIDDEN_CHAPTERS = {
+    # 🔴 2026-10-12 HO «다가오는 테마와 돈의 이동 테마는 숨겨줘» — 📋 테마 순위판이 두 역할을 맡는다.
+    "다가오는테마", "돈의이동챕터",
     # 🔴 v17 (2026-09-12) — 테마 탭 3코너 재편으로 가린 코너들.
     #    삭제가 아니라 가림이다(원칙3) — 한 줄만 지우면 되살아난다.
     # 🔴 v18 (2026-09-14) — v17에서 조립부는 hide()로 감쌌는데 여기에 키를
@@ -25110,6 +25703,9 @@ html{{scroll-behavior:smooth}}
 .sh-badges{{margin-top:10px;flex-wrap:nowrap;overflow:hidden}}
 /* 🆕 2026-10-09 HO — 오늘 분위기 알약 4개 · 2×2 (넘쳐도 숨기지 않는다) */
 .mp4{{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px}}
+.mp4-al{{margin:7px 0 0;padding:7px 10px;border:1px solid #2a3646;border-radius:12px;font-size:12px;line-height:1.6;color:#9aa3b1;text-align:center}}
+.mp4-al b{{color:#e6ebf1}} .mp4-al em{{font-style:normal;color:#6f7784}}
+.mp4-alh{{display:block;font-size:10.5px;font-weight:800;color:#8b95a5}}
 .mp4-p{{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;padding:7px 9px;border-radius:12px;text-align:center;
   font-size:12px;line-height:1.25;border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.06)}}
 .mp4-p i{{font-style:normal;flex:none}}
