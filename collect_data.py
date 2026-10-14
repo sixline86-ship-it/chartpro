@@ -6906,7 +6906,7 @@ def _섹터거래대금(계좌격자):
 #   ⚠️ 이름 → 번호는 테마 목록 API(약 264개)로 맞춘다. 못 맞추면 그 테마만 빠진다(지어내지 않음).
 #   ⚠️ 실패해도 리포트는 그대로 나간다 — 화면은 이 칸이 없으면 예전 «섹터 묶음»으로 돌아간다.
 THEME_DETAIL_N = int(os.environ.get("CP_THEME_DETAIL_N", "12"))   # 4일 누적 상위 몇 개
-THEME_DETAIL_DAYS = 4                                            # build_html THEME_CUM_DAYS와 같게
+THEME_DETAIL_DAYS = 5                                            # build_html THEME_CUM_DAYS와 같게
 _M_UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
          "Referer": "https://m.stock.naver.com/"}
 
