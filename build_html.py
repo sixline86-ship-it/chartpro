@@ -1946,7 +1946,8 @@ def _sh_theme(해석):
         팔 = ' · '.join(f'{_lab_nm(r["n"])} <b>{r["ret"]:+.1f}%</b>' for r in _sl)
         return (f'<div class="sh-box sh-theme"><p class="sh-h">💰 오늘 돈이 몰린 테마'
                 f'<span>평소보다 더 들어온 돈 · 오른 테마만</span></p>{줄}'
-                + (f'<p class="sh-cm sh-mbo">🔻 팔자가 몰린 곳(거래는 늘고 테마는 내림) — {팔}</p>' if 팔 else "")
+                # 🔴 2026-10-13 HO «🔻 화살표를 파랑으로» — 🔻 이모지는 빨강 고정이라 «하락=파랑» 관례와 어긋났다 → 파란 ▼ 글자로
+                + (f'<p class="sh-cm sh-mbo"><span style="color:#5b9bff">▼</span> 팔자가 몰린 곳(거래는 늘고 테마는 내림) — {팔}</p>' if 팔 else "")
                 + (f'<p class="sh-cm sh-mbo">💸 빠진 곳 — {빠}</p>' if 빠 else "")
                 + (f'<p class="sh-cm">{한줄}</p>' if 한줄 else "")
                 + '<p class="sh-go" data-tab="테마" data-sel="#cp-picks" onclick="cpGo(this)">'
@@ -2016,7 +2017,10 @@ def _fx_wave_now():
         k = 0
         while k < len(v) and v[-1 - k] != 0 and (v[-1 - k] < 0) == (v[-1] < 0):
             k += 1
-        return {"sell": w["dir"] < 0, "lv1": w.get("lv1"), "reb": w.get("reb") or 0,
+        # 🔴 2026-10-13 — 1차(최근)·2차(가장 큰 반등) · 외국인 시계 ③과 같은 함수(_fv_steps)
+        st = [dict(x, d=(d(x["d"]) if isinstance(x["d"], int) else "")) for x in _fv_steps(rows, w)]
+        return {"steps": st,
+                "sell": w["dir"] < 0, "lv1": w.get("lv1"), "reb": w.get("reb") or 0,
                 "lv2": w.get("lv2"), "ext_d": d(w["ext"]),
                 "lv2_d": d(w["lv2_idx"]) if isinstance(w.get("lv2_idx"), int) else "",
                 "연속": k, "연속방향": -1 if v and v[-1] < 0 else 1}
@@ -2030,25 +2034,41 @@ def _sh_flow_fill(x):
     AI 글('근거'·'맞으면'·'아니면')은 1단계 주제로 쓴 날만 그대로 쓰고, 아니면 규칙 문장으로 바꾼다
     (10/7처럼 AI가 다른 주제 «속도 150%»로 쓴 날 — 숫자와 글이 어긋나지 않게)."""
     w = _fx_wave_now()
-    if not w or not w["lv1"]:
+    if not w or not w.get("steps"):
         return x
     s = w["sell"]
     되 = "되산" if s else "되판"
+    판 = "판" if s else "산"
+    A = lambda v: _fv_amt(v).lstrip("+")
+    # 🔴 2026-10-13 HO — 1차 = 최근 10일 중 가장 크게 판(산) 하루 · 2차 = 파도 안 가장 큰 반등(순서 고정, _fv_steps)
+    def 이름(st):
+        return (f'최근 {FV_RECENT_N}일 중 가장 크게 {판} 하루({st["d"]} {A(st["amt"])})' if st["k"] == "recent"
+                else f'이 파도의 가장 큰 반등({A(st["amt"])})')
+    st1 = w["steps"][0]
+    st2 = w["steps"][1] if len(w["steps"]) > 1 else None
     y = dict(x)
     y["무엇"] = (f'외국인이 {"되사기" if s else "되팔기"} 시작하나 — '
-               f'{"매도" if s else "매수"} 파도의 1단계 신호')
-    y["기준"] = (f'바닥({w["ext_d"]}) 이후 {되} 돈 {_fv_amt(w["lv1"]).lstrip("+")} 넘기'
-               + (f' <span class="sh-kb2">· 확정(2단계)은 직전 {"고점" if s else "저점"} {w["lv2_d"]} '
-                  f'{"돌파" if s else "이탈"} {_fv_amt(w["lv2"]).lstrip("+")}</span>' if w.get("lv2") else ""))
-    y["진행"] = {"시작": 0, "현재": round(w["reb"]), "목표": round(w["lv1"]), "단위": "억"}
-    ai = " ".join(str(x.get(k) or "") for k in ("무엇", "근거"))
-    if "1단계" not in ai and "가장 큰 반등" not in ai:
-        y["근거"] = (f'이 파도 안에서 외국인이 가장 크게 {되} 게 <b>{_fv_amt(w["lv1"]).lstrip("+")}</b>예요. '
-                   f'그보다 크게 {"되사야" if s else "되팔아야"} «지난번 반등과 다르다»고 말할 수 있거든요. '
-                   f'숫자는 수급 탭 외국인 시계와 같아요.')
-        y["맞으면"] = (f'파도에 처음 금이 간 것 — 다만 확정은 직전 {"고점" if s else "저점"}'
-                     f'{"(" + w["lv2_d"] + ")" if w["lv2_d"] else ""}을 넘는 2단계까지 기다려요.')
-        y["아니면"] = (f'{"반등" if s else "되밀림"}이 나와도 아직 {"매도" if s else "매수"} 파도 안의 숨 고르기예요.')
+               f'{"매도" if s else "매수"} 파도의 1차 신호')
+    y["기준"] = (f'바닥({w["ext_d"]}) 이후 {되} 돈이 {이름(st1)} 넘기'
+               + (f' <span class="sh-kb2">· 2차는 {이름(st2)}</span>' if st2 else "")
+               + (f' <span class="sh-kb2">· 확정은 직전 {"고점" if s else "저점"} {w["lv2_d"]} '
+                  f'{"돌파" if s else "이탈"} {A(w["lv2"])}</span>' if w.get("lv2") else ""))
+    y["진행"] = {"시작": 0, "현재": round(w["reb"]), "목표": round(st1["amt"]), "단위": "억"}
+    # ⚠️ 근거·맞으면·아니면은 «항상» 규칙 문장 — AI 글은 옛 1단계(가장 큰 반등) 기준으로 쓰여 숫자가 어긋난다.
+    if st1["k"] == "recent":
+        y["근거"] = (f'외국인은 최근 {FV_RECENT_N}일 중 {st1["d"]}에 가장 크게 {판} 게 <b>{A(st1["amt"])}</b>예요. '
+                   f'{"계속 빠지는" if s else "계속 오르는"} 동안엔 몇 주 전 반등보다 <b>지금의 세기</b>가 더 가까운 잣대예요 — '
+                   f'그 하루만큼은 {"되사야" if s else "되팔아야"} «최근 흐름을 되돌렸다»고 말할 수 있거든요.'
+                   + (f' 그다음이 이 파도의 가장 큰 반등({A(st2["amt"])})이에요.' if st2 else "")
+                   + ' 숫자는 수급 탭 외국인 시계와 같아요.')
+    else:
+        y["근거"] = (f'이 파도 안에서 외국인이 가장 크게 {되} 게 <b>{A(st1["amt"])}</b>예요. '
+                   f'그보다 크게 {"되사야" if s else "되팔아야"} «지난번 반등과 다르다»고 말할 수 있거든요.'
+                   + (f' 그다음이 최근 {FV_RECENT_N}일 중 가장 크게 {판} 하루({st2["d"]} {A(st2["amt"])})예요.' if st2 else "")
+                   + ' 숫자는 수급 탭 외국인 시계와 같아요.')
+    y["맞으면"] = (f'파도에 처음 금이 간 것 — 다만 확정은 직전 {"고점" if s else "저점"}'
+                 f'{"(" + w["lv2_d"] + ")" if w["lv2_d"] else ""}을 넘을 때까지 기다려요.')
+    y["아니면"] = (f'{"반등" if s else "되밀림"}이 나와도 아직 {"매도" if s else "매수"} 파도 안의 숨 고르기예요.')
     return y
 
 
@@ -4012,9 +4032,9 @@ def build_premarket3(data, 해석, 날짜표기=""):
             쪽 = "순매도" if w["연속방향"] < 0 else "순매수"
             반대 = "순매수" if w["연속방향"] < 0 else "순매도"
             t = (f'{k}일째 {쪽}' if k >= 2 else f'오늘 {쪽}') + f' — <b>{반대}가 이틀 이어지는지</b>가 첫 신호'
-            if w["lv1"]:
+            if w.get("steps"):     # 🔴 2026-10-13 — 1차 기준(최근 10일 큰 하루) · 시황·수급과 같은 숫자
                 t += (f' <span>(바닥 이후 {"되산" if s else "되판"} 돈 {_fv_amt(w["reb"]).lstrip("+")}'
-                      f' · 1단계 기준 {_fv_amt(w["lv1"]).lstrip("+")})</span>')
+                      f' · 1차 기준 {_fv_amt(w["steps"][0]["amt"]).lstrip("+")})</span>')
             ln.append(("🌊", "외국인", t))
     except Exception as e:
         print(f"   ⚠️ 개장 전 3초(외국인) 실패 — {type(e).__name__}: {e}")
@@ -4130,10 +4150,11 @@ def _mood_pills():
         보 = sum((c.get(m) or {}).get("보합", 0) for m in ("코스피", "코스닥"))
         tot = 상 + 하 + 보
         if tot:
+            # 🔴 2026-10-13 HO «10개 중 6개가 뭐야 — 전체 종목의 %로» → «전체 종목 N% 하락»(코스피+코스닥 전 종목)
             if 하 >= 상:
-                out.append(("🔵", f"종목 10개 중 {round(하 / tot * 10)}개 하락", DN))
+                out.append(("🔵", f"전체 종목 {하 / tot * 100:.0f}% 하락", DN))
             else:
-                out.append(("🔴", f"종목 10개 중 {round(상 / tot * 10)}개 상승", UP))
+                out.append(("🔴", f"전체 종목 {상 / tot * 100:.0f}% 상승", UP))
     except Exception:
         pass
     try:      # ④ 어디로 — 평소보다 돈이 가장 많이 더 들어온 테마(테마 돈 막대와 같은 재료)
@@ -4147,7 +4168,7 @@ def _mood_pills():
         return ""
     return ('<div class="mp4">' + "".join(
         f'<span class="mp4-p {c}" title="{html.escape(t)}"><i>{ic}</i><b>{t}</b></span>' for ic, t, c in out)
-        + '</div>' + _align_today_line())
+        + '</div>')   # 🔴 2026-10-13 HO «오늘의 배열은 삭제» — _align_today_line() 호출만 뺐다(함수는 남김, 되살리려면 여기 붙이면 된다)
 
 
 def _align_today_line():
@@ -12452,7 +12473,7 @@ def build_core(핵심편, data, 해석):
              + f'<p class="th-rule">📐 <b>{int(THEME_RULE_DAY[4:6])}/{int(THEME_RULE_DAY[6:])}부터 순위 기준 변경</b> — '
                f'튀는 테마 하나가 나머지를 누르지 않게 «몇 등인가»로 비교하고, '
                f'한 종목이 테마 거래대금의 60% 이상이면 감점해요. '
-               f'최근 4일 합산 순위는 며칠간 옛 기준과 섞여요.</p>'
+               f'최근 5일 합산 순위는 며칠간 옛 기준과 섞여요.</p>'
              + _chapter_block(build_sectors(data.get("주도섹터")) + _today_folded(data) + _ax_today(data.get("주도섹터")), "오늘뜬")
              # ② 그중 어제부터 이어지는 진짜는 (2026-10-12 HO «레이더를 순위판 위로»)
              + _q("②", "그중 어제부터 이어지는 진짜는", "📡 테마 레이더", f"단기({THEME_CUM_DAYS}일) · {THEME_CUM_DAYS}일 누적 1~10위 · 그림자 테마 제외")
@@ -13733,7 +13754,7 @@ def _theme_stale_notice(last, 지남):
 
 
 # ── 상수 (환경변수로 조정 가능 — 전부 «유력» 수준이라 재측정 대상) ──
-THEME_CUM_DAYS = int(os.getenv("THEME_CUM_DAYS", "4"))   # 누적 창
+THEME_CUM_DAYS = int(os.getenv("THEME_CUM_DAYS", "5"))   # 누적 창 — 🔴 2026-10-14 HO 결정 4→5(«주», 1년 근사: 다음날 유지 4일 47% vs 5일 54%, 수익 같음) · 12/16 재검증
 THEME_MOVE_TH  = int(os.getenv("THEME_MOVE_TH",  "3"))   # 색 판정 임계(칸)
 THEME_TOPN     = int(os.getenv("THEME_TOPN",     "20"))  # 순위 산출 상한
 RADAR_SHOW     = 8                                        # 레이더에 그릴 개수
@@ -14283,7 +14304,7 @@ def _judge_conflicts(rows, 메타):
         if (t["돈"] is not None and t["돈"] <= -30 and t["rk"] <= 8):
             out.append((t["n"],
                         f'아직 <b>{t["rk"]}위</b>', f'돈 <b>{t["돈"]:.0f}%</b>',
-                        "순위는 4일 합산이라 늦게 움직여요. 돈이 먼저 빠졌어요", "drain"))
+                        "순위는 5일 합산이라 늦게 움직여요. 돈이 먼저 빠졌어요", "drain"))
         # ④ 어제 크게 올라왔는데 5일 창으로는 제자리
         if (t["y"] and t["from5"] and (t["y"] - t["rk"]) >= 5
                 and abs(t["from5"] - t["rk"]) < MOVE_SLOW):
@@ -14891,6 +14912,11 @@ def _spot_v3(data=None):
     _pan = {}
     for k, r in enumerate(rows):
         _a, p = _stock_panel(r["n"], mem.get(r["n"]) or [], f"lad{k}")
+        # 🆕 2026-10-14 HO «수명표도 화살표 누르면 순위판처럼 차트가» — 펼침 맨 위에 큰 순위 차트
+        _bc = _big_chart(r["n"])
+        if _bc:
+            _op = f'<div class="tm-pan" id="lad{k}">'
+            p = p.replace(_op, _op + _bc, 1) if _op in p else f'<div class="tm-pan" id="lad{k}">{_bc}</div>'
         _pan[r["n"]] = (f"lad{k}", p)
     # 🔴 2026-09-29 — 경계를 «조건 5칸 ④ 시간이 남았나»(나이 < 평균 수명)와 같게.
     #   전에는 ≤ 라서 3일째가 수명표에선 🟢 여유, 점검표에선 «시간 없음»으로
@@ -14947,7 +14973,7 @@ def _spot_v3(data=None):
             #   [왜] 수명표의 «N위»는 원래 단기(4일 누적) 순위였는데 «오늘 순위»로 읽혔다.
             #        테마 탭 «오늘 뜬 테마»(일봉)와 숫자가 달라 오류처럼 보였다.
             #        40일 칸이 같이 보이면 «젊은 테마인데 뿌리(월봉)가 있나»도 한눈에 보인다.
-            + f'<span class="lf-rk">{_rk3_html(r["n"], hl="4일")}</span>'
+            + f'<span class="lf-rk">{_rk3_html(r["n"], hl="5일")}</span>'
             + "".join(f'<i style="font-style:normal;font-size:9.5px;font-weight:700;'
                       f'color:{xc};background:{xc}1f;border-radius:5px;padding:1px 4px">{x}</i>'
                       for x, xc in 꼬리(r))
@@ -14967,19 +14993,19 @@ def _spot_v3(data=None):
             #   글꼴에 없어 네모(□)로 깨진다. ⏳(1990년대부터 있는 기호)로 바꾸고,
             #   이름도 «테마 수명표»로 — 위 «테마들 평균 수명» 카드와 한 쌍으로 읽힌다.
             '<p class="jd-ttl" style="margin:0 0 9px;font-size:15.5px;font-weight:800;color:#e8c33a">'
-            '⏳ 테마 수명표 <span style="font-size:10.5px;font-weight:600;color:#8b95a5">· 단기(4일) 10위권 기준</span></p>'
+            '⏳ 테마 나이표 <span style="font-size:10.5px;font-weight:600;color:#8b95a5">· 지금 10위권 테마가 며칠째인가 · 단기(5일) 기준</span></p>'   # 🔴 10/14 HO — 읽기 탭 «테마 수명표»와 이름이 같아 바꿈
             # 🔴 2026-09-29 HO — «읽는 방법과 해석이 없다.» 범례 한 줄을 «읽는 방법»으로
             #   키워서 챕터 아래 📖 읽는 방법 칸으로 보낸다(_chapter_block이 sv3-how를 떼어 감).
             f'<p class="sv3-how"><b>이렇게 읽어요</b><br>'
             f'· <b>줄 = 나이</b> — 10위권에 <b>연속으로</b> 머문 날수예요. 위가 젊고, 아래로 갈수록 오래 버틴 테마예요.<br>'
             f'· <b>세 구역</b> — 🟢 아직 여유({반}일째 전) · 🟠 오래 버티는 중({반}일째 ~ 4일째) · 🔴 끝물 주의(5일째부터).<br>'
             f'· <b>구분선</b> — «평균 수명 {반}일»은 10위권 테마의 <b>절반이 빠지는 날</b>, «5일째 절벽»은 <b>대부분이 빠져나가는 지점</b>이에요(지난 기록으로 센 값).<br>'
-            f'· <b>칩</b> — 테마 이름과 <b>[일 · 4일 · 40일]</b> 세 순위(테마 탭과 같은 칩). '
-            f'<b style="color:#e0c060">노란 칸 = 4일</b>이 이 표의 기준이에요. 옆 배지(🚀🟢💤↘〰️⚡)도 테마 탭과 같은 뜻이에요. '
+            f'· <b>칩</b> — 테마 이름과 <b>[일 · 5일 · 20일]</b> 세 순위(테마 탭과 같은 칩). '
+            f'<b style="color:#e0c060">노란 칸 = 5일</b>이 이 표의 기준이에요. 옆 배지(🚀🟢💤↘〰️⚡)도 테마 탭과 같은 뜻이에요. '
             f'누르면 대장·후발 종목이 열려요. 🆕 = 오늘 처음 10위권.<br>'
-            f'· <b>40일 칸</b> — 나이가 젊어도 40일 순위가 높으면 «원래 크던 테마의 재점화», 100+면 «처음 크는 테마»예요.<br>'
+            f'· <b>20일 칸</b> — 나이가 젊어도 20일 순위가 높으면 «원래 크던 테마의 재점화», 100+면 «처음 크는 테마»예요.<br>'
             f'· <b>꼬리표</b> — <b style="color:{TM_HOT}">빨강 = 좋은 소식</b>(💰돈 늘어남 · ♻️재등판), '
-            f'<b style="color:{TM_DOWN}">파랑 = 나쁜 소식</b>(📉어제보다 밀림 · ↘4일 전보다 뒤 · 💸돈 줄어듦). '
+            f'<b style="color:{TM_DOWN}">파랑 = 나쁜 소식</b>(📉어제보다 밀림 · ↘5일 전보다 뒤 · 💸돈 줄어듦). '
             f'꼬리표가 없으면 «깨끗한 자리»예요.<br>'
             f'· 다섯 가지 조건으로 따져 본 근거는 아래 <b>📋 조건 5칸 점검표</b>를 펼치면 있어요.</p>'
             + 줄 + '</div>')
@@ -15142,6 +15168,14 @@ def _radar_picks(data=None):
     rise = [r for r in rows if r["from"] and r["from"] - r["r"] >= 3]
     rise = max(rise, key=lambda r: (r["from"] - r["r"], -r["r"])) if rise else None
     new = [r for r in rows if r["from"] is None]
+    # 🔴 2026-10-14 HO «첫 진입 알약이 없어졌네?» — 단기 창이 5일로 늘면서 «5일 창 안 20위 기록 없음»(첫 등장)이
+    #   드물어져 알약이 빠졌다. 알약은 «10위권 첫 진입»(최근 4거래일 동안 10위 밖 → 오늘 10위 안)으로 넓힌다.
+    #   (레이더 점의 흰 테두리 «첫 등장» 규칙은 그대로)
+    if not new:
+        for r in rows:
+            _h = [next((j for j, (k, _) in enumerate(rk.get(dd) or [], 1) if k == r["n"]), None) for dd in win[:-1]]
+            if r["r"] <= 10 and all((x or 999) > 10 for x in _h):
+                new.append(r)
     drain = [r for r in rows if r["ch"] is not None and r["ch"] <= -15]
     drain = min(drain, key=lambda r: r["ch"]) if drain else None
     story = None
@@ -15238,7 +15272,7 @@ def build_radar_guide_card(data=None):
         body = (f'<a href="{esc_url(u)}" target="_blank" rel="noopener">{t}</a>' if u else t)
         return f'<p class="tg-why">📰 {body}' + (f'<em>{tail}</em>' if tail else "") + '</p>'
     return ('<div class="pk-w tg-card" id="cp-picks"><p class="pk-t">🧭 오늘 테마 한눈에'
-            '<span class="pk-sec">4일 누적 1~10위</span></p>'
+            '<span class="pk-sec">5일 누적 1~10위</span></p>'
             + (f'<p class="tg-hl">{hl}</p>' if hl else "")
             + "".join(f'<div class="tg-row"><i>{a}</i><div><p>{b}</p>{_why_line(이유[i] if i < len(이유) else None)}</div></div>'
                       for i, (a, b) in enumerate(줄))
@@ -15257,7 +15291,7 @@ def radar_guide_chips(data=None):
     if p["rise"]:
         칩.append(("r", "🚀 ", "급상승", p["rise"]["r"], False))
     if p["new"]:
-        칩.append(("n", "🆕 ", "첫 등장", p["new"][0]["r"], False))
+        칩.append(("n", "🆕 ", "첫 진입", p["new"][0]["r"], False))
     if p["drain"]:
         칩.append(("d", "⚠️ ", "돈 빠짐", p["drain"]["r"], True))
     return ('<div class="tg-tap" role="group" aria-label="레이더에서 찾기">'
@@ -15687,11 +15721,16 @@ def build_spot_perf():
                 '시작했어요 — 첫 숫자는 <b>10거래일 뒤</b>에 나옵니다.<br>'
                 '<span>※ 대장주의 매일 등락률을 이어 붙여 계산해요(종가 없이도 됩니다).</span></p></div>')
     블 = []
+    # 🔴 2026-10-14 HO «첫 진입·자리잡기·익은 자리·지나간 자리가 뭘 뜻하는지 없다 + 포착 탭처럼 탭으로»
+    _뜻 = {"new": "어제 <b>20위 밖</b>에 있다가 오늘 단기(5일) <b>10위 안</b>으로 들어온 테마",
+          "early": "10위권에 들어온 지 <b>평균 수명(절반이 빠지는 날) 전</b> — 아직 젊은 테마",
+          "ripe": "평균 수명을 <b>넘겨서도</b> 10위권에 버티는 테마 — 오래 간 테마",
+          "cold": "10위권에 있지만 <b>순위가 밀렸거나</b>(5일 전보다 3칸↓) <b>돈이 빠지는</b>(거래대금 어제보다 15%↓) 테마"}
     for k, icon, 라벨, _d, c in SPOT_TYPES:
         v = p.get(k)
         if not v:
-            블.append(f'<div class="pf2-g"><p class="pf2-h" style="color:{c}">'
-                      f'{icon} {라벨}<span>해당 사례 없음</span></p></div>')
+            블.append(f'<div class="pf2-g"><p class="pf2-def">{_뜻.get(k, _d)}</p>'
+                      f'<p class="pf2-h" style="color:{c}"><span>해당 사례 없음</span></p></div>')
             continue
         lo, hi = v["창"]
         창문 = f'{lo[4:6]}/{lo[6:8]}~{hi[4:6]}/{hi[6:8]}'
@@ -15705,8 +15744,9 @@ def build_spot_perf():
                 return (f'<div class="pf2-c"><span class="pf2-d">'
                         f'{c2["d"][4:6]}/{c2["d"][6:8]}</span>'
                         f'<span class="pf2-n">{c2["n"]} · <b>{c2["대장"]}</b></span>'
+                        # 🔴 2026-10-13 HO «상승은 빨간색으로» — 초록(TM_COOL)이 «상승=빨강» 관례와 어긋났다. 상승 빨강 · 하락 파랑 · 0은 회색
                         + "".join(
-                            f'<span style="color:{TM_COOL if c2.get(n, 0) >= 0 else TM_DOWN}">'
+                            f'<span style="color:{"#ff6b4a" if c2[n] > 0 else TM_DOWN if c2[n] < 0 else "#9aa3b1"}">'
                             f'{c2[n]:+.1f}%</span>' if n in c2
                             else '<span class="pf2-w">대기</span>' for n in (1, 5, 10))
                         + '</div>')
@@ -15740,11 +15780,16 @@ def build_spot_perf():
                        f'{v[f"d{n}"]:+.1f}%</span>') if v.get(f"d{n}") is not None
                       else '<span class="pf2-w">–</span>' for n in (1, 5, 10))
                   + '</div>')
-        블.append(f'<div class="pf2-g"><p class="pf2-h" style="color:{c}">'
-                  f'{icon} {라벨}<span>{창문} · {v["건수"]}건</span></p>{몸}</div>')
+        블.append(f'<div class="pf2-g"><p class="pf2-def">{_뜻.get(k, _d)}</p><p class="pf2-h" style="color:{c}">'
+                  f'<span>{창문} · {v["건수"]}건</span></p>{몸}</div>')
+    _tabs = "".join(f'<span class="cg-tab{" on" if i == 0 else ""}" data-i="{i}" '
+                    f'onclick="var b=this.parentNode.parentNode;[].forEach.call(b.querySelectorAll(\'.cg-tab\'),function(t){{t.classList.toggle(\'on\',t===this)}},this);'
+                    f'[].forEach.call(b.querySelectorAll(\'.pf2-pn\'),function(q,j){{q.style.display=(j==this.getAttribute(\'data-i\'))?\'block\':\'none\'}},this)">'
+                    f'{icon} {라벨}</span>' for i, (k, icon, 라벨, _d, c) in enumerate(SPOT_TYPES))
+    _pn = "".join(f'<div class="pf2-pn" style="display:{"block" if i == 0 else "none"}">{b}</div>' for i, b in enumerate(블))
     return (f'<div class="pf2"><p class="jd-h">🎯 자리별 실제 성과'
             f'<span>그때 들어갔으면 지금 얼마</span></p>'
-            f'{"".join(블)}'
+            f'<div class="cg-tabs pf2-tabs">{_tabs}</div>{_pn}'
             f'<p class="pf2-f">* <b>대장주</b> = 등락률 60 + 거래대금 40으로 '
             f'뽑은 테마당 1종목<br>'
             f'* <b>D+1 · D+5 · D+10</b> = 그 자리로 판정된 날 <b>종가에 샀다면</b> 1 · 5 · 10거래일 뒤 수익률<br>'
@@ -15963,7 +16008,29 @@ def build_judge_tab(data=None):
 
 # 🔴 2026-10-04 HO «거꾸로 보기는 이름을 바꿔줘» — 이름은 여기 한 곳에서만 바꾼다.
 #   후보: 🔦 돈이 먼저 온 테마(채택) · 🌱 물밑 테마 · 📡 레이더 밖 신호 · 💧 조용히 돈 붙는 곳 · 🕵️ 숨은 돈
-RV_TITLE = "🌊 순위판 밖의 테마"   # 2026-10-04 HO 확정 → 2026-10-13 HO «'순위판 밖의 테마'로 변경»
+RV_TITLE = "🌊 돌아오는 옛 주도"   # 2026-10-04 HO 확정 → 10-13 «순위판 밖의 테마» → 2026-10-14 HO 승인 «돌아오는 옛 주도»
+# 🔴 2026-10-14 HO 승인 — 순위판 밖 테마는 «예전에 주도였던 테마»만 남긴다.
+#   [왜] 1년 근사 백테스트(옛 조건 전체 7,084건, 테마 평균 대비 20일 뒤):
+#     옛 조건 그대로                       −0.08%p (이긴 비율 44%) — 사실상 신호 없음
+#     + 지난 60일 일봉 10위 안 3회↑          +1.09%p (49%)
+#     + 그중 오늘 테마 상승                  +1.61%p (50%)  ← 채택
+#     처음 보는 테마(지난 60일 10위 안 0회)  −1.26%p (38%)  → 뺀다
+#   ⚠️ 현재 테마 구성으로 1년 전을 잰 근사(생존 편향) — 12/16 재검증 때 실제 기록으로 다시 본다.
+RV_LEAD_LOOK, RV_LEAD_MIN = 60, 3
+
+
+def _old_lead_count(nm):
+    """오늘을 뺀 최근 RV_LEAD_LOOK거래일 중 일봉 10위 안에 든 횟수 · 오늘 테마 등락(모르면 None)."""
+    D, _f = _board_days()
+    ds = sorted(D)
+    if not ds:
+        return 0, None
+    cnt = 0
+    for dd in ds[-RV_LEAD_LOOK - 1:-1]:
+        if any(n == nm for n, _s, _e in D[dd][:10]):
+            cnt += 1
+    e = next((_e for n, _s, _e in D[ds[-1]] if n == nm), None)
+    return cnt, e
 
 
 def build_reverse_look(data=None, n=6):
@@ -16010,6 +16077,9 @@ def build_reverse_look(data=None, n=6):
             continue
         if a < RV_MIN_BASE:
             continue
+        _n10, _e = _old_lead_count(nm)          # 🔴 2026-10-14 — 흐름판과 같은 «옛 주도 + 오늘 상승» 거르기
+        if _n10 < RV_LEAD_MIN or _e is None or _e <= 0:
+            continue
         후보.append({"n": nm, "rk": pos, "y": 어제.get(nm), "ch": ch, "amt": b})
     후보.sort(key=lambda x: -x["ch"])
     후보 = 후보[:n]
@@ -16024,7 +16094,7 @@ def build_reverse_look(data=None, n=6):
     if not 후보:
         _밖 = sum(1 for _nm, p in 오늘.items() if p > 20)
         return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}'
-                f'<span>순위 밖인데 돈이 붙는 곳</span></p>'
+                f'<span>예전 주도 테마에 돈이 다시 붙는 곳</span></p>'
                 f'<p class="rv2-wait">오늘은 <b>해당하는 테마가 없습니다.</b><br>'
                 f'조건은 «21위 밖 + 거래대금 어제보다 <b>30% 이상</b> 증가»예요 '
                 f'(어제 100억 이상 · 한 종목 쏠림 {RV_SOLO}% 미만).'
@@ -16078,7 +16148,7 @@ def build_reverse_look(data=None, n=6):
         + f'<span class="rv2-m" style="color:{TM_COOL}">+{x["ch"]:.0f}%</span>'
         f'</div>{_pan[x["n"]][1]}' for x in 후보)
     return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}'
-            f'<span>순위 밖인데 돈이 붙는 곳</span></p>'
+            f'<span>예전 주도 테마에 돈이 다시 붙는 곳</span></p>'
             f'<div class="rv2-r rv2-hd"><span class="rv2-n">테마</span>'
             f'<span class="rv2-k">오늘</span><span class="rv2-s">어제 대비</span>'
             f'<span class="rv2-m">거래대금</span></div>{줄}'
@@ -16347,7 +16417,7 @@ def build_money_flow_theme():
     [색]  빨강 = 돈이 들어온 테마(최근 3일 안에 문턱을 넘은 것 중 가장 크게 오른 3개)
           파랑 = 돈이 빠진 테마(오늘 10위권에서 빠진 것 중 가장 크게 내려간 3개). 나머지는 그리지 않는다.
     [표시] ▲(선 아래, 빨강) = 문턱을 넘어 들어온 날 · ▼(선 위, 파랑) = 문턱 아래로 빠진 날 — 섹터 그림의 ▲▼와 같은 모양.
-    [왜 거래대금 선이 아닌가] 테마별 거래대금 기록은 그날 상위권만 남아 빈칸이 많다(실측). 힘(4일 합산)은 매일 200위까지 남는다."""
+    [왜 거래대금 선이 아닌가] 테마별 거래대금 기록은 그날 상위권만 남아 빈칸이 많다(실측). 힘(5일 합산)은 매일 200위까지 남는다."""
     rk = _theme_cum_rank(topn=200)
     ds = sorted(rk)[-10:]
     if len(ds) < 4:
@@ -16502,7 +16572,7 @@ def build_money_flow_theme():
                + " · ".join(sh(n) for n in _shd) + '</p>' if _shd else '')
             + f'<p class="mf3-sw">{sw}</p>' + svg
             + '<details class="mf3-leg"><summary><b>표시 설명</b> ▾</summary>'
-              '· 선 = 그 테마의 힘이 <b>10위 문턱보다 얼마나 위·아래</b>인가(힘 = 레이더 순위를 정하는 값, 최근 4일 합산)<br>'
+              '· 선 = 그 테마의 힘이 <b>10위 문턱보다 얼마나 위·아래</b>인가(힘 = 레이더 순위를 정하는 값, 최근 5일 합산)<br>'
               '· <b style="color:#e0c060">점선</b> = 10위 문턱. 선이 점선 위면 그날 10위 안, 아래면 10위 밖이에요<br>'
               f'· <b style="color:{TM_HOT}">빨강 ▲</b>(선 아래) = 돈이 들어와 문턱을 넘은 날 — 최근 3일 안에 넘은 것 중 가장 크게 오른 3개<br>'
               f'· <b style="color:{TM_DOWN}">파랑 ▼</b>(선 위) = 돈이 빠지기 시작한 날 — 오늘까지 내리막이 이어진 첫날(꺾인 고점). 오늘 10위권에서 밀려난 것 중 가장 크게 내려간 3개<br>'
@@ -17178,6 +17248,35 @@ def _leader_scores(cands, theme_w=None):
     return 회전있음
 
 
+# 🧭 2026-10-14 HO 승인 — «따라갈 대장»(안C). 👑 오늘의 대장과 역할을 나눈다.
+#   [왜] 1년 근사 백테스트(그날 10위 안 테마 2,483건, 테마 평균 대비):
+#     👑 지금 공식(등락 중심)  5일 −0.15%p(이긴 비율 42%) · 20일 −1.02%p(38%)
+#     🧭 안C                   5일 +0.23%p(47%)           · 20일 +0.69%p(47%)
+#     → 👑는 «오늘 테마를 끌고 간 종목»(다음 1일은 가장 좋다 +0.36%p), 그 뒤엔 되돌림.
+#       «앞으로 볼 종목»은 체급(시총)·돈(거래대금)이 큰 쪽이 낫다.
+#   [공식] 거래대금 0.40 + 시총 0.30 + 등락(오른 만큼만) 0.20 + 연속 0.10, 오늘 +15% 넘은 종목은 후보에서 뺀다.
+#   ⚠️ 현재 테마 구성으로 1년 전을 잰 근사(생존 편향·시총 근사) — 12/16 재검증 때 실제 기록으로 다시 본다.
+FOLLOW_W = {"amt": 0.40, "cap": 0.30, "ch": 0.20, "stay": 0.10}
+FOLLOW_MAX_CH = 15.0
+
+
+def _follow_pick(cands):
+    """_leader_scores를 거친 cands → 🧭 따라갈 대장 이름(없으면 None). 오른 종목만."""
+    ok = [c for c in cands if c.get("대장가능", True) and c.get("ch") is not None
+          and 0 < c["ch"] <= FOLLOW_MAX_CH]
+    if not ok:
+        return None
+    mxA = max((c.get("amt") or 0) for c in ok) or 1
+    mxP = max((c.get("cap") or 0) for c in ok) or 1
+    mxC = max(c["ch"] for c in ok) or 1
+    def _s(c):
+        return ((c.get("amt") or 0) / mxA * 100 * FOLLOW_W["amt"]
+                + (c.get("cap") or 0) / mxP * 100 * FOLLOW_W["cap"]
+                + c["ch"] / mxC * 100 * FOLLOW_W["ch"]
+                + (c.get("days", 1) - 1) * 50 * FOLLOW_W["stay"])
+    return max(ok, key=_s)["n"]
+
+
 def _stock_panel(title, items, pid):
     """금색 ▾ + 펼침 패널. ZONE_ARROW·ztog()를 그대로 재사용한다.
 
@@ -17242,6 +17341,7 @@ def _stock_panel(title, items, pid):
             if _b["ch"] > 0:
                 _대장명, _방식 = _b["n"], ("공식" if _회전 else "공식-회전없음")
     _대장등 = next((c["ch"] for c in _cands if c["n"] == _대장명), None)
+    _따라명 = _follow_pick(_cands) if _cands else None
 
     def _role(x, a, n=None):
         """대장 / 후발 / 소외.
@@ -17251,8 +17351,11 @@ def _stock_panel(title, items, pid):
                종목이 «소외»도 «후발»도 아닌 빈칸이 되곤 했다.
           [후] 후발 = 오른 종목 중 «대장 등락률의 40% 이상». 대장을 기준으로
                «따라가는 중인가»를 잰다."""
+        _fw = '<em class="r-fw">🧭따라갈</em>' if (n is not None and n == _따라명) else ''
         if n is not None and n == _대장명:
-            return '<em class="r-lead">대장</em>'
+            return '<em class="r-lead">대장</em>' + _fw
+        if _fw:
+            return _fw
         if x is None:
             return ""
         if x <= 0:
@@ -17270,7 +17373,7 @@ def _stock_panel(title, items, pid):
     def _역할순(i):
         n, v, a, _p = _norm[i]
         r = _role(_vals[i], a, n)
-        k = (0 if "r-lead" in r else 1 if "r-mid" in r else 3 if "r-out" in r else 2)
+        k = (0 if "r-lead" in r else 0.5 if "r-fw" in r else 1 if "r-mid" in r else 3 if "r-out" in r else 2)
         return (k, -(_sc.get(n) if _sc.get(n) is not None else -1e9))
     _순서 = sorted(range(len(_norm)), key=_역할순)
     chips = "".join(
@@ -17293,7 +17396,10 @@ def _stock_panel(title, items, pid):
                      '<span style="color:#6f7784">(이날은 시총 기록이 없어 회전율은 빠짐)</span>'
                }.get(_방식, '오른 종목이 없어 대장 없음'))
            + f' · <em class="r-mid">후발</em> 대장 등락률의 40% 이상 오른 종목 '
-           f'· <em class="r-out">소외</em> 아직 안 왔거나 테마와 무관</p>{_hid_note}</div>')
+           f'· <em class="r-out">소외</em> 아직 안 왔거나 테마와 무관'
+           + (' · <em class="r-fw">🧭따라갈</em> 앞으로 볼 종목 — <b>거래대금·시총이 크고 오늘 올랐지만 +15%는 안 넘은</b> 1종목'
+              if _따라명 else '')
+           + f'</p>{_hid_note}</div>')
     return ZONE_ARROW, pan
 
 
@@ -18472,7 +18578,7 @@ def build_money_bars():
 #     · 두 효과 모두 작다(승률 차 1~3%p) — «빠지라»가 아니라 «따라가기 전에 한 번 더».
 #   [재료] theme_history «전체»(10/13~, 중복 정리 전 순위) → 없는 날은 «일별»(중복 정리 후).
 #   [재검증] 2026-12-16 예약 작업이 실제 주도력점수로 다시 잰다.
-BOARD_WIN = 40          # 순서 기간(거래일). 기록이 모자라면 있는 만큼.
+BOARD_WIN = 20          # 순서 기간(거래일). 기록이 모자라면 있는 만큼. 🔴 2026-10-14 HO 결정 40→20(«월») · 12/16 재검증
 BOARD_N = 20            # 판 줄 수
 BOARD_LOOK = 20         # «10위 안 N회 / 20일»·주의 판정 기간
 BOARD_OPEN = 10         # 처음부터 보이는 줄 수(나머지는 «더보기»)
@@ -18614,17 +18720,17 @@ def _board_regulars():
 #     (참고) 중위권에서 처음 10위 안 «돌파»는 +0.06%p — 대부분 가짜 돌파라 배지로 안 만든다.
 #   ⚠️ 근사 점수 기준. 2026-12-16 예약 작업이 실제 주도력점수로 다시 잰다.
 ALIGN_BADGE = {
-    "신고가": ("🚀", "신고가", "#ff5a4e", "4일 점수가 최근 40일 중 최고 — 가장 센 자리"),
+    "신고가": ("🚀", "신고가", "#ff5a4e", "5일 점수가 최근 20일 중 최고 — 가장 센 자리"),
     "정배열": ("🟢", "정배열", "#3ecf9a", "일봉·단기·월봉 모두 위 — 주도 테마가 다시 달리는 중"),
-    "눌림":   ("💤", "눌림", "#5fb4ff", "주도 테마가 푹 쉬는 중(4일 20위 밖) — 다시 볼 자리"),
+    "눌림":   ("💤", "눌림", "#5fb4ff", "주도 테마가 푹 쉬는 중(5일 20위 밖) — 다시 볼 자리"),
     "밀림":   ("↘", "밀림", "#8b95a5", "주도 테마가 어정쩡하게 내려오는 중 — 서두르지 않기"),
-    "횡보":   ("〰️", "횡보 · 주의", "#b48cff", "40일 상위인데 10위 안엔 한 번도 못 든 중위권"),
+    "횡보":   ("〰️", "횡보 · 주의", "#b48cff", "20일 상위인데 10위 안엔 한 번도 못 든 중위권"),
     "신생":   ("⚡", "신생 · 주의", "#ffb35c", "직전 20일 20위 안에 없다가 갑자기 10위 안"),
 }
 
 
 def _rank3():
-    """{"R1": 일봉, "R4": 단기(4일), "R40": 월봉(40일), "A": {테마: 배열키}, "full": 일봉 전체 개수}."""
+    """{"R1": 일봉, "R4": 단기(5일), "R40": 월봉(20일), "A": {테마: 배열키}, "full": 일봉 전체 개수}."""
     if "R3" in _FOLLOW_CACHE:
         return _FOLLOW_CACHE["R3"]
     out = {"R1": {}, "R4": {}, "R40": {}, "A": {}, "full": None}
@@ -18650,7 +18756,7 @@ def _rank3():
         rk = _theme_cum_rank(THEME_CUM_DAYS, 100000) or {}
         rds = sorted(rk)
         R4 = {n: i + 1 for i, (n, _) in enumerate(rk.get(rds[-1]) or [])} if rds else {}
-        S4 = {dd: dict(rk[dd]) for dd in rds[-40:]}
+        S4 = {dd: dict(rk[dd]) for dd in rds[-BOARD_WIN:]}   # 🔴 10/14 신고가 = 월(20일) 중 최고
         look, prev = days[-BOARD_LOOK:], days[-BOARD_LOOK - 1:-1]
 
         def _c(n, ds, k):
@@ -18703,8 +18809,8 @@ def _align_badge(n):
 
 
 def _rk3_html(n, badge=True, hl=None):
-    """[일 N][4일 N][40일 N] — 테마가 나오는 곳마다 같은 칩.
-    🔴 2026-10-13 HO — 챕터의 기준 칸만 노란색: ① 오늘 뜬 테마 = «일» · ② 레이더 = «4일» · ③ 순위판 = «40일».
+    """[일 N][5일 N][20일 N] — 테마가 나오는 곳마다 같은 칩.
+    🔴 2026-10-13 HO — 챕터의 기준 칸만 노란색: ① 오늘 뜬 테마 = «일» · ② 레이더 = «5일» · ③ 순위판 = «20일».
     🔴 2026-10-13 HO «'일 밖'은 몇 위 밖?» — «밖» 대신 «N+»: 그날 순위를 매긴 테마 수(N) 밖이라는 뜻.
        일봉은 등락률 상위 100개 후보만 점수를 매겨서 보통 «100+»(10/12까지는 62~80). 그 밖 칸은 99위 넘으면 «99+»."""
     Q = _rank3()
@@ -18714,9 +18820,10 @@ def _rk3_html(n, badge=True, hl=None):
         if r:
             return str(r)
         return f"{len(M)}+" if M else "–"
-    cells = (("일", "R1"), ("4일", "R4"), ("40일", "R40"))
-    return (f'<span class="rk3" title="일봉 = 오늘 하루 · 단기 = 최근 4일 · 월봉 = 최근 40일 순위 · N+ = N위 밖">'
-            + "".join(f'<i class="{"on" if hl == lb else ""}">{lb} {_v(k, n)}</i>' for lb, k in cells)
+    cells = (("일", "R1"), ("5일", "R4"), ("20일", "R40"))
+    return (f'<span class="rk3" title="일봉 = 오늘 하루 · 단기 = 최근 5일 · 월봉 = 최근 20일 순위 · N+ = N위 밖">'
+            # 🔴 2026-10-14 HO «원래 배경은 두고, 그 안의 '일·5일·20일' 글자만 얇은 둥근 테두리로»
+            + "".join(f'<i class="{"on" if hl == lb else ""}"><u>{lb}</u> {_v(k, n)}</i>' for lb, k in cells)
             + '</span>' + (_align_badge(n) if badge else ""))
 
 
@@ -18724,17 +18831,17 @@ def _chart_guide():
     """테마 탭 맨 위 한 줄 안내 + 배열 배지 범례."""
     leg = " ".join(_ab_html(_k) for _k in ALIGN_BADGE)
     return ('<div class="chcg-box"><p class="chcg-1">📊 <b>테마 순위도 차트처럼 봐요</b> — '
-            '<b>일봉</b>(오늘 하루) · <b>단기</b>(최근 4일) · <b>월봉</b>(최근 40일). '
+            '<b>일봉</b>(오늘 하루) · <b>단기</b>(최근 5일) · <b>월봉</b>(최근 20일). '
             '같은 테마라도 숫자가 다른 건 오류가 아니라 <b>정보</b>예요.</p>'
-            '<p class="chcg-2"><span class="rk3"><i>일 3</i><i>4일 5</i><i>40일 12</i></span> '
-            '= 오늘 3위 · 4일 5위 · 40일 12위 · <b style="color:#e0c060">노란 칸</b> = 그 챕터의 기준 '
-            '(오늘 뜬 테마 «일» · 레이더 «4일» · 주도 테마 순위판 «40일») · «100+» = 100위 밖(그날 점수를 매긴 테마 수 밖)</p>'
+            '<p class="chcg-2"><span class="rk3"><i><u>일</u> 3</i><i><u>5일</u> 5</i><i><u>20일</u> 12</i></span> '
+            '= 오늘 3위 · 5일 5위 · 20일 12위 · <b style="color:#e0c060">노란 칸</b> = 그 챕터의 기준 '
+            '(오늘 뜬 테마 «일» · 레이더 «5일» · 주도 테마 순위판 «20일») · «100+» = 100위 밖(그날 점수를 매긴 테마 수 밖)</p>'
             f'<details class="chcg-d"><summary>▾ 배열 배지 읽는 법</summary><p class="chcg-3">{leg}</p>'
-            '<p class="chcg-4">🚀 신고가 = 4일 점수가 최근 40일 중 최고 · 🟢 정배열 = 일봉·단기·월봉 모두 위 · '
+            '<p class="chcg-4">🚀 신고가 = 5일 점수가 최근 20일 중 최고 · 🟢 정배열 = 일봉·단기·월봉 모두 위 · '
             '💤 눌림 = 주도 테마가 푹 쉬는 중 · ↘ 밀림 = 주도 테마가 어정쩡하게 내려오는 중 · '
-            '〰️ 횡보 = 40일 상위인데 10위 안엔 한 번도 못 든 중위권 · ⚡ 신생 = 갑자기 나타난 테마.<br>'
+            '〰️ 횡보 = 20일 상위인데 10위 안엔 한 번도 못 든 중위권 · ⚡ 신생 = 갑자기 나타난 테마.<br>'
             '1년치로 재 보면 다음 5일이 🚀 > 🟢 ≈ 💤 > 〰️ ≈ ↘ > ⚡ 순이었어요(근사 점수 · 방향만 참고). '
-            '주도 테마 = 40일 20위 안 + 최근 20일 동안 10위 안 3회 이상.</p></details></div>')
+            '주도 테마 = 20일 20위 안 + 최근 20일 동안 10위 안 3회 이상.</p></details></div>')
 
 
 def _today_folded(data):
@@ -18758,7 +18865,7 @@ def _today_folded(data):
         best = max(((len(mem & _m(s)), s) for s in shown), default=(0, None))
         if best[0] < 2:
             continue
-        rows.append(f'<div class="tf-r"><span class="rk3"><i class="on">일 {r}</i></span><b>{n}</b>'
+        rows.append(f'<div class="tf-r"><span class="rk3"><i class="on"><u>일</u> {r}</i></span><b>{n}</b>'
                     f'<span>— <b>{best[1]}</b> 카드와 종목 {best[0]}개 겹침</span></div>')
     if not rows:
         return ""
@@ -19023,7 +19130,7 @@ def build_lead_first(data):
         rows.append(
             '<div class="lf-row">'
             f'<div class="cs-nl" style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">{_이름}</div>'
-            f'<div class="lf-tg"><span>💤 {th}</span>{_rk3_html(c["테마"], badge=False, hl="40일")}'
+            f'<div class="lf-tg"><span>💤 {th}</span>{_rk3_html(c["테마"], badge=False, hl="20일")}'
             f'<span>테마 대장 {c["대장순위"]}위</span>'
             f'<span>거래대금 전일의 <b>{c["배수"]:.1f}배</b></span>'
             + (f'<span>20일 고점 대비 {c["낙폭"]:+.0f}%</span>' if c.get("낙폭") is not None else '')
@@ -19038,7 +19145,7 @@ def build_lead_first(data):
             '<b>대장주가 먼저</b> 크게 움직인 날을 잡아요. 테마가 이미 20위 안에 들어온 날은 늦은 경우가 많았어요.</p>'
             + body +
             '<details class="lf-how"><summary>▾ 조건 · 근거 보기</summary>'
-            '<p>① 💤 눌림 중인 주도 테마 (40일 20위 안 + 최근 20일 10위 안 3회↑ + 어제 기준 4일 20위 밖)<br>'
+            '<p>① 💤 눌림 중인 주도 테마 (20일 20위 안 + 최근 20일 10위 안 3회↑ + 어제 기준 5일 20위 밖)<br>'
             '② 테마는 아직 안 깨어남 (오늘 일봉 20위 밖)<br>'
             '③ 그 테마 대장주 = 최근 거래대금 1~2위<br>'
             '④ 오늘 <b>+5% 이상</b> + 거래대금 <b>전일 대비 1.5배 이상</b><br>'
@@ -19112,6 +19219,142 @@ def _radar_reg_line():
                + (f'💤 바깥에서 쉬는 주도 테마 {len(rest)}개 · ' + " · ".join(f'{_shn(n)}{_e(n)}' for n in rest[:8])
                   + (f' 외 {len(rest)-8}' if len(rest) > 8 else '') if rest else '') + '</p>')
             + '</div>')
+
+
+# 🆕 2026-10-14 HO «주도 테마 순위판 테마명 옆에 미니차트(B안)» — 테마 순위를 주가처럼(위가 1위).
+#   금선 = 20일 순위(매일 다시 센 최근 BOARD_WIN일 점수 합) · 회색선 = 5일(레이더와 같은 함수) · 점 = 오늘 일봉
+#   (빨강 10위 안 · 회색 11~100위 · 파랑 바닥 = 순위 밖) · 점선 = 10위. 세로 눈금은 로그(1·10·100위) — 위쪽 10위 안에 칸을 더 준다.
+#   ⚠️ 순위판 «순서»는 주 1회 고정이고 선은 매일 다시 그린다 → 끝점이 칩 «40일 N»과 하루이틀 다를 수 있다.
+#   ⚠️ 기록이 BOARD_WIN일보다 짧으면 있는 만큼만 그린다(10/14 기준 26거래일).
+MINI_W, MINI_H = 64, 22
+MINI_SPAN = 40          # 차트에 보여주는 기간(거래일) — 선 계산 창(BOARD_WIN)과 별개
+
+
+def _mini_series():
+    if "MINI" in _FOLLOW_CACHE:
+        return _FOLLOW_CACHE["MINI"]
+    out = None
+    try:
+        D, _f = _board_days()
+        alld = sorted(D)
+        days = alld[-MINI_SPAN:]          # 🔴 10/14 — 그림은 40일을 보여주고, 금선은 월(20일) 합산
+        R1 = {dd: {n: i + 1 for i, (n, _s, _e) in enumerate(D[dd])} for dd in days}
+        rk = _theme_cum_rank(THEME_CUM_DAYS, 100000) or {}
+        R4 = {dd: {n: i + 1 for i, (n, _) in enumerate(rk.get(dd) or [])} for dd in days}
+        R40 = {}
+        for dd in days:
+            i = alld.index(dd)
+            sc = {}
+            for x in alld[max(0, i + 1 - BOARD_WIN): i + 1]:
+                for n, s, _e in D[x]:
+                    sc[n] = sc.get(n, 0) + (s or 0)
+            R40[dd] = {n: j + 1 for j, (n, _) in enumerate(sorted(sc.items(), key=lambda v: -v[1]))}
+        out = (days, R1, R4, R40)
+    except Exception as e:
+        print(f"   ⚠️ 미니차트 재료 실패 — {type(e).__name__}: {e}")
+    _FOLLOW_CACHE["MINI"] = out
+    return out
+
+
+def _mini_chart(n):
+    S = _mini_series()
+    if not S:
+        return ""
+    days, R1, R4, R40 = S
+    N = len(days)
+    if N < 5:
+        return ""
+    W, H = MINI_W, MINI_H
+    import math
+    X = lambda i: 2 + (W - 8) * i / (N - 1)
+    Y = lambda r: 2 + (H - 5) * math.log10(min(max(r, 1), 100)) / 2
+
+    def _pl(arr, col, w):
+        out, seg = "", []
+        for i, r in enumerate(arr + [None]):
+            if r is None or r > 100:
+                if len(seg) > 1:
+                    out += (f'<polyline points="{" ".join(seg)}" fill="none" stroke="{col}" '
+                            f'stroke-width="{w}" stroke-linejoin="round"/>')
+                seg = []
+            else:
+                seg.append(f"{X(i):.1f},{Y(r):.1f}")
+        return out
+    r40 = [R40[d].get(n) for d in days]
+    if not any(r40):
+        return ""
+    g = f'<line x1="0" x2="{W}" y1="{Y(10):.1f}" y2="{Y(10):.1f}" stroke="#2a3342" stroke-dasharray="2 2"/>'
+    g += _pl([R4[d].get(n) for d in days], "#8d96a4", 1)
+    g += _pl(r40, "#e0c060", 1.5)   # 🔴 10/14 HO «노란색이 진해 흰(회색)선이 안 보일 수 있다 — 아주 조금 얇게» 1.9→1.5
+    t = R1[days[-1]].get(n)
+    if t and t <= 100:
+        g += f'<circle cx="{X(N - 1):.1f}" cy="{Y(t):.1f}" r="2.8" fill="{"#ff6b4a" if t <= 10 else "#9aa3b1"}"/>'
+    else:
+        g += f'<circle cx="{X(N - 1):.1f}" cy="{H - 2}" r="2.2" fill="#5b9bff"/>'
+    return (f'<svg class="bd-mc" viewBox="0 0 {W} {H}" width="{W}" height="{H}" aria-hidden="true">{g}</svg>')
+
+
+
+def _big_chart(n):
+    """🆕 2026-10-14 HO «종목이나 미니차트를 누르면 차트가 크게» — 순위판 펼침 맨 위의 큰 순위 차트.
+    미니차트와 같은 재료(_mini_series). 금선 20일 · 흰선 5일 · 점 일봉(빨강 10위 안) · 금빛 띠 = 10위 안 · 로그 눈금 1·10·30·100위."""
+    S = _mini_series()
+    if not S:
+        return ""
+    days, R1, R4, R40 = S
+    N = len(days)
+    if N < 5:
+        return ""
+    import math
+    W, H, L, Rr, T, B, fh = 340, 150, 6, 34, 8, 18, 12
+    iw, ih = W - L - Rr, H - T - B - fh
+    X = lambda i: L + iw * (i + .5) / N
+    Y = lambda r: T + ih * math.log10(min(max(r, 1), 100)) / 2
+    FY = T + ih + fh / 2 + 2
+    g = f'<rect x="{L}" y="{T}" width="{iw}" height="{Y(10) - T:.1f}" fill="rgba(224,192,96,.06)"/>'
+    for r in (1, 10, 30, 100):
+        g += (f'<line x1="{L}" x2="{L + iw}" y1="{Y(r):.1f}" y2="{Y(r):.1f}" stroke="#1f2733"'
+              + ('' if r == 10 else ' stroke-dasharray="2 3"') + '/>'
+              f'<text x="{W - Rr + 5}" y="{Y(r) + 3.5:.1f}" font-size="9" fill="{"#e0c060" if r == 10 else "#6f7784"}">{r}위</text>')
+    g += f'<text x="{W - Rr + 5}" y="{FY + 3:.1f}" font-size="9" fill="#6f7784">밖</text>'
+
+    def _pl(arr, col, w):
+        out, seg = "", []
+        for i, r in enumerate(arr + [None]):
+            if r is None or r > 100:
+                if len(seg) > 1:
+                    out += (f'<polyline points="{" ".join(seg)}" fill="none" stroke="{col}" stroke-width="{w}" '
+                            f'stroke-linejoin="round" stroke-linecap="round"/>')
+                seg = []
+            else:
+                seg.append(f"{X(i):.1f},{Y(r):.1f}")
+        return out
+    g += _pl([R40[d].get(n) for d in days], "#e0c060", 2.2)
+    g += _pl([R4[d].get(n) for d in days], "#cfd6e0", 1.3)
+    r1 = [R1[d].get(n) for d in days]
+    for i, r in enumerate(r1):
+        last = i == N - 1
+        if r is None or r > 100:
+            g += f'<circle cx="{X(i):.1f}" cy="{FY:.1f}" r="1.6" fill="#3a4352"/>'
+        else:
+            g += (f'<circle cx="{X(i):.1f}" cy="{Y(r):.1f}" r="{4.4 if last else 2.6}" fill="{"#ff6b4a" if r <= 10 else "#9aa3b1"}"'
+                  + (' stroke="#0d1117" stroke-width="1.5"' if last else '') + '/>')
+    t = r1[-1]
+    if t and t <= 100:
+        ty = Y(t)
+        g += (f'<text x="{X(N - 1) - 8:.1f}" y="{ty + 14 if ty < T + 12 else ty - 7:.1f}" font-size="10" font-weight="700" '
+              f'fill="#fff" text-anchor="end" stroke="#10151d" stroke-width="3" paint-order="stroke">오늘 {t}위</text>')
+    else:
+        g += (f'<text x="{X(N - 1) - 6:.1f}" y="{FY - 5:.1f}" font-size="10" font-weight="700" fill="#5b9bff" '
+              f'text-anchor="end">오늘 순위 밖</text>')
+    fd = lambda s: f"{int(s[4:6])}/{int(s[6:])}"
+    for i in (0, N // 2, N - 1):
+        g += (f'<text x="{X(i):.1f}" y="{H - 3}" font-size="9" fill="{"#cfd6e0" if i == N - 1 else "#6f7784"}" '
+              f'text-anchor="middle">{fd(days[i])}</text>')
+    lg = ('<p class="bdc-lg"><span><i style="border-color:#e0c060;border-top-width:3px"></i>20일선</span>'
+          '<span><i style="border-color:#cfd6e0"></i>5일선</span><span><i class="d"></i>일봉(빨강 = 10위 안)</span>'
+          f'<span>· 최근 {N}거래일</span></p>')
+    return (f'<div class="bdc"><svg viewBox="0 0 {W} {H}" role="img" aria-label="{html.escape(n)} 순위 차트">{g}</svg>{lg}</div>')
 
 
 def build_theme_board(data):
@@ -19188,13 +19431,21 @@ def build_theme_board(data):
             tod = f'<span class="bd-t dim">{_ret(n)}</span>'
         pid = f"bdp{i}"
         arw, pan = _stock_panel(n, _board_members(data, n), pid)
+        # 🆕 2026-10-14 HO «종목이나 미니차트를 누르면 차트가 크게» — 펼침 맨 위에 큰 순위 차트(종목이 없어도 차트만은 열리게)
+        _bc = _big_chart(n)
+        if _bc:
+            _op = f'<div class="tm-pan" id="{pid}">'
+            pan = pan.replace(_op, _op + _bc, 1) if _op in pan else f'<div class="tm-pan" id="{pid}">{_bc}</div>'
         click = f" onclick=\"ztog('{pid}')\"" if pan else ""
         rows.append(
             f'<div class="bd-r"{click}><div class="bd-1"><span class="bd-k">{i + 1}</span>'
+            # 🔴 2026-10-14 — 미니차트가 이름 옆에 들어가며 «종목 ▾» 알약은 셋째 줄 끝으로(320px에서 이름이 «2차…»로 잘렸다)
+            # 🔴 2026-10-14 HO «미니차트 왼쪽에 화살표와 '종목' 글자» — [▾ 종목][미니차트][테마 ±%] 한 줄
             f'<span class="bd-n">{n}</span>'
-            + ('<span class="bd-arw">종목 ▾</span>' if pan else "") + f'{tod}</div>'
+            + ('<span class="bd-arw bd-arw1">▾ 종목</span>' if pan else '') + f'{_mini_chart(n)}{tod}</div>'
             f'<div class="bd-b">{bar}<span class="bd-tk"></span></div>'
-            f'<div class="bd-3">{_rk3_html(n, badge=False, hl="40일")}{tag}<span class="bd-c">10위 안 <b>{n10}회</b> / {len(look)}일</span>{_money(n)}</div>'
+            f'<div class="bd-3">{_rk3_html(n, badge=False, hl="20일")}{tag}<span class="bd-c">10위 안 <b>{n10}회</b> / {len(look)}일</span>{_money(n)}'
+            + '</div>'
             f'</div>{pan}')
     news = []
     for j, (n, _s, _e) in enumerate(D[d][:10]):
@@ -19211,9 +19462,13 @@ def build_theme_board(data):
     head = (f'<p class="bd-u">순서 기준 {fd(win[0])}~{fd(win[-1])} · {len(win)}거래일'
             + (f'(기록이 {BOARD_WIN}일 찰 때까지 자동으로 늘어나요)' if len(win) < BOARD_WIN else '')
             + f' · 순서는 {nxt}에 바뀌어요</p>'
-            '<p class="bd-key">왼쪽 번호 = 월봉(40일) 순위(주 1회 고정) · 막대 = 일봉(오늘 하루) 순위(길수록 위 · '
-            '<b style="color:#e0c060">금색</b> 10위 안 · <b style="color:#7f95b3">파랑</b> 11~20위 · 회색 21~50위)</p>')
-    head = f'<details class="bd-fold"><summary>▾ 순서 · 막대 읽는 법</summary>{head}</details>'   # 🔴 2026-10-13 HO «설명들도 접어줘»
+            '<p class="bd-key">왼쪽 번호 = 월봉(20일) 순위(주 1회 고정) · 막대 = 일봉(오늘 하루) 순위(길수록 위 · '
+            '<b style="color:#e0c060">금색</b> 10위 안 · <b style="color:#7f95b3">파랑</b> 11~20위 · 회색 21~50위)</p>'
+            # 🆕 2026-10-14 — 테마명 옆 미니차트 읽는 법
+            '<p class="bd-key">이름 옆 미니차트 = 테마 순위를 주가처럼(위가 1위) · <b style="color:#e0c060">금선</b> 20일 · '
+            '<b style="color:#aab2be">회색선</b> 5일 · 점 = 오늘(<b style="color:#ff6b4a">빨강</b> 10위 안 · 회색 그 밖 · '
+            '<b style="color:#5b9bff">파랑 바닥</b> 순위 밖) · 점선 = 10위. 선은 매일 다시 그려요(순서는 주 1회).</p>')
+    head = f'<details class="bd-fold"><summary>▾ 순서 · 막대 · 미니차트 읽는 법</summary>{head}</details>'   # 🔴 2026-10-13 HO «설명들도 접어줘»
     foot = ('<div class="bd-nw"><p>🆕 판 바깥인데 오늘 10위 안 — 다음 주 순서에 반영돼요</p>'
             + ("".join(news) or '<span class="bd-none">오늘은 없어요</span>') + '</div>'
             '<details class="bd-fold"><summary>▾ 배지 · 돈 표시 읽는 법</summary>'
@@ -19386,6 +19641,7 @@ def build_reverse_flow(data=None, n=4):
     R0 = {k: i + 1 for i, (k, _s) in enumerate(rk.get(rd[-1]) or [])} if rd else {}
     R1 = {k: i + 1 for i, (k, _s) in enumerate(rk.get(rd[-2]) or [])} if len(rd) >= 2 else {}
     cand, cut = [], []
+    _rv_new, _rv_thin, _rv_down = [], [], []
     for nm in M[d]:
         r0 = R0.get(nm)
         if r0 is not None and r0 <= 20:
@@ -19403,14 +19659,25 @@ def build_reverse_flow(data=None, n=4):
         if M[d][nm][1] >= THEME_SHADOW_PCT:
             cut.append((nm, M[d][nm][1]))
             continue
-        cand.append({"n": nm, "base": base, "now": now, "pct": pct, "r0": r0, "r1": R1.get(nm)})
+        # 🔴 2026-10-14 HO 승인 — 옛 주도(지난 60일 일봉 10위 안 3회↑) + 오늘 테마 상승만
+        _n10, _e = _old_lead_count(nm)
+        if _n10 < RV_LEAD_MIN:
+            (_rv_new if _n10 == 0 else _rv_thin).append(nm)
+            continue
+        if _e is None or _e <= 0:
+            _rv_down.append(nm)
+            continue
+        cand.append({"n": nm, "base": base, "now": now, "pct": pct, "r0": r0, "r1": R1.get(nm), "n10": _n10, "e": _e})
     cand.sort(key=lambda c: -c["pct"])
     cand, _rdup = _pick_distinct(cand, n)
     _FOLLOW_CACHE["RV"] = [c["n"] for c in cand]
     if not cand:
-        return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>순위 밖인데 돈이 붙는 곳</span></p>'
+        return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>예전 주도 테마에 돈이 다시 붙는 곳</span></p>'
                 '<p class="rv2-wait">오늘은 <b>해당하는 테마가 없습니다.</b><br>'
-                '조건 — 레이더 20위 밖 · 평소보다 30% 이상 많은 돈 · 평소 100억 이상 · 한 종목 쏠림 70% 미만</p></div>')
+                f'조건 — 레이더 20위 밖 · <b>지난 {RV_LEAD_LOOK}거래일 일봉 10위 안 {RV_LEAD_MIN}회↑</b>(옛 주도) · 오늘 테마 상승 · '
+                '평소보다 30% 이상 많은 돈 · 평소 100억 이상 · 한 종목 쏠림 70% 미만</p>'
+                + (f'<p class="rv2-x">🚫 돈은 붙었지만 <b>처음 보는 테마</b> {len(_rv_new)}개는 뺐어요 — 과거 성적이 가장 나빴던 자리예요.</p>'
+                   if _rv_new else '') + '</div>')
     COL = ["#ff5a4e", "#ff9a3d", "#ff7eb6", "#c99bff"]
     # 날마다 «평소 대비 %»
     ser = []
@@ -19482,6 +19749,7 @@ def build_reverse_flow(data=None, n=4):
         rows += (f'<div class="rf-r"' + (f' onclick="ztog(\'rvF{i}\')" style="cursor:pointer"' if _span else '') + '>'
                  f'<div class="rf-t"><i style="background:{c["col"]}"></i><b>{c["n"]}</b>'
                  + ('<em class="rv2-ar">▾</em>' if _span else '')
+                 + f'<span class="rf-old">옛 주도 {c["n10"]}회 · 오늘 {c["e"]:+.1f}%</span>'
                  + f'<span class="rf-k {c["kind"][0]}">{c["kind"][1]}</span></div>'
                  f'<div class="rf-g"><span><small>순위 어제→오늘</small>'
                  + ('<b>100위 밖</b>' if (not c["r0"] and not c["r1"]) else
@@ -19491,14 +19759,19 @@ def build_reverse_flow(data=None, n=4):
                  f'<span><small>평소보다</small><b style="color:{TM_HOT}">{c["pct"]:+.0f}%</b></span></div></div>{_span}')
     cutl = (f'<p class="rv2-x">🚫 <b>한 종목이 거래대금 {THEME_SHADOW_PCT}% 이상</b>인 테마는 뺐어요: '
             + " · ".join(f'{_lab_nm(nm)}({s:.0f}%)' for nm, s in sorted(cut, key=lambda t: -t[1])[:4]) + '</p>') if cut else ""
-    return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>순위 밖인데 돈이 붙는 곳 · 최근 11거래일</span></p>'
-            + svg + rows + cutl
+    _newl = (f'<p class="rv2-x">🚫 돈은 붙었지만 <b>처음 보는 테마</b>(지난 {RV_LEAD_LOOK}일 10위 안 0회) '
+             f'{len(_rv_new)}개는 뺐어요 — 과거 성적이 가장 나빴던 자리예요.</p>') if _rv_new else ""
+    return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>예전 주도 테마에 돈이 다시 붙는 곳 · 최근 11거래일</span></p>'
+            + svg + rows + cutl + _newl
             + '<details class="mb-fold"><summary>📖 그림 읽는 법 ▾</summary><p class="mb-n">'
               '· 선 = 그 테마에 들어온 돈이 <b>평소보다 몇 % 많았나</b>(가운데 회색 점선 = 평소, 평소 = 앞 5거래일 중앙값)<br>'
               '· «N일째 쌓이는 중» = 며칠 연속 평소보다 15% 이상 — 순위판 밖에서 조용히 돈이 모이는 자리<br>'
               '· «오늘 하루 튐» = 오늘만 많았던 곳 — 내일도 이어지는지 확인<br>'
               '· 테마마다 가장 큰 한 종목과, 날마다 시장 전체가 늘고 준 만큼은 빼고 셌어요<br>'
-              '· 순위 = 레이더와 같은 최근 4일 합산 순위 · 금액 = 가장 큰 한 종목을 뺀 테마 거래대금</p></details></div>')
+              '· 순위 = 레이더와 같은 최근 5일 합산 순위 · 금액 = 가장 큰 한 종목을 뺀 테마 거래대금<br>'
+              f'· <b>옛 주도 N회</b> = 오늘을 뺀 지난 {RV_LEAD_LOOK}거래일 동안 일봉 10위 안에 든 횟수({RV_LEAD_MIN}회 이상만 보여요)<br>'
+              '· 왜 옛 주도만? 1년치 근사로 재 보니 «순위 밖 + 돈 증가»만으로는 20일 뒤 성적이 테마 평균과 같았고, '
+              '<b>예전 주도 + 오늘 상승</b>이면 평균보다 나았어요. 처음 보는 테마는 오히려 나빴어요(확정이 아니라 경향).</p></details></div>')
 
 
 def _theme_overlap(a, b):
@@ -19629,7 +19902,7 @@ def _ax_coming():
         ln.append('11~20위에 있어도 ' + " · ".join(f'<b>{_shn(n)}</b>' for n in down[:3])
                   + '는 <b>내려가는 중</b>이에요(위에서 밀려 온 테마) — 다가오는 테마가 아니에요.')
     if rv:
-        ln.append('🌊 순위판 밖 ' + " · ".join(f'<b>{_shn(n)}</b>' for n in rv)
+        ln.append('🌊 돌아오는 옛 주도 ' + " · ".join(f'<b>{_shn(n)}</b>' for n in rv)
                   + ' — 하루치 신호예요. 내일도 돈이 늘면 «다가오는 테마»로 올라와요.')
     return _ax(ln, _rec([("11~20위 테마 다음 날", "coming1"), ("10위 진입 첫날 테마 다음 날", "new")]))
 
@@ -19660,6 +19933,18 @@ def build_rule_board():
             f'<p class="rb-n">시장 대비(전체 266테마 평균과의 차이) · 9/1부터 {fs.get("days", 0)}거래일 · '
             '표본 = 테마×날. 강세장 기록이라 <b>방향만</b> 참고하세요 — 크기는 장세에 따라 달라져요. '
             '동그라미 숫자 = 그 규칙을 쓰는 챕터.</p></div>')
+
+
+RADAR_C_UP, RADAR_C_MID, RADAR_C_DN = "#ff5a4e", "#9aa3b1", "#5b9bff"   # 레이더 점 색(10/14 A안)
+
+
+def _radar_key():
+    return ('<div class="tm-key">'
+            f'<span><i style="background:{RADAR_C_UP}"></i>다가오는 중</span>'
+            f'<span><i style="background:{RADAR_C_MID}"></i>머무는 중</span>'
+            f'<span><i style="background:{RADAR_C_DN}"></i>식는 중</span>'
+            f'<span><i style="background:{RADAR_C_UP};box-shadow:0 0 0 1.5px #0d1119,0 0 0 2.6px #ffffff"></i>첫 등장(흰 테두리)</span>'
+            '</div>')
 
 
 def build_theme_radar(data):
@@ -19883,6 +20168,14 @@ def build_theme_radar(data):
     for r in rows:
         a = r["ang"]; x, y = POS(r["h"][-1], a)
         c = _MC[r["st"]]; rad = 5.5 + (r["stay"] - 1) * 2.0
+        # 🔴 2026-10-14 HO «점 색은 A안(다가옴·머묾·식음 3색), 나머지는 그대로»
+        #   빨강 = 5일 창 안에서 3칸↑ 올라왔거나 처음 들어옴 · 파랑 = 최근 3일 중 가장 좋던 순위보다 3칸↓ · 회색 = 그 사이
+        #   크기(머문 날)·꼬리·꼬리 숫자·첫 등장 흰 테두리·주도 네모는 그대로.
+        _hh = [v if v else 999 for v in r["h"]]
+        _now, _best = _hh[-1], min(_hh[-3:])
+        c = (RADAR_C_DN if _now - _best >= 3
+             else RADAR_C_UP if (r["from"] is None or r["from"] - _now >= 3) else RADAR_C_MID)
+        r["_c"] = c
         # ── 꼬리 = «5거래일 창의 첫 기록» 자리 → 오늘 자리 ──
         #   ⚠️ 어제 대비가 아니다. 오늘 포함 최근 5거래일 중 가장 이른 날(4거래일 전)의
         #      순위에서 출발한다. 그날 20위 밖이었으면 창 안에서 처음 20위 안에 든 날.
@@ -20098,7 +20391,7 @@ def build_theme_radar(data):
         return f'<span class="tm-mn fl">돈은 비슷 {ch:+.0f}%</span>'
 
     for r in rows:
-        c = _MC[r["st"]]
+        c = r.get("_c") or _MC[r["st"]]      # 🔴 10/14 — 레이더 점과 같은 색(A안)
         _ph, _over = _age_phrase(_나이맵.get(r["n"]), _중앙, _표본)
         # ⚠️ 여기에 이모지(⏱)를 쓰면 일부 안드로이드 폰트에서 네모로 깨진다.
         #    색(호박색)만으로도 「오래됐다」는 충분히 읽힌다.
@@ -20218,7 +20511,7 @@ def build_theme_radar(data):
             f'{_what}'
             f'<div class="tm-l2">{_trail}'
             f'{_money_badge(r["n"])}{_twin_chip(r["n"])}'
-            f'</div><div class="tm-l3">{_rk3_html(r["n"], hl="4일")}</div>{_tags}{_solo}</div>{pan}')
+            f'</div><div class="tm-l3">{_rk3_html(r["n"], hl="5일")}</div>{_tags}{_solo}</div>{pan}')
         _lis_of[r["n"]] = (r["r"], lis[-1])
 
     prev = {k for k, _ in (rk.get(days[-2]) or [])[:10]}
@@ -20380,7 +20673,7 @@ def build_theme_radar(data):
             #   그 «7일»이 긴 건지 짧은 건지 말해주는 게 아무것도 없었다.
             #   근거는 주장 바로 옆에 있어야 한다.
             #   ⚠️ 오늘 1위 테마의 나이를 넘겨 «내 자리»를 표시한다.
-            f'{move_key()}'
+            f'{_radar_key()}'      # 🔴 2026-10-14 — 레이더 점 색 3가지(다가옴·머묾·식음)
             # 🔴 2026-10-06 HO «금색 점선~ 설명들은 접어줘» — 그림 설명 두 줄을 접힘 하나로
             + '<details class="tm-trd"><summary>📖 그림 읽는 법 ▾</summary>'
             # 🔴 2026-10-04 HO «금색 원을 안이 비어있는 금색 점선으로» — 범례 기호를 실제 고리 모양 그대로
@@ -20758,7 +21051,7 @@ def _sector_cycle():
 
 
 def _sector_themes_by_score(data):
-    """{섹터명: [{n, rk, sc, st, from}, ...]} — «4일 누적 순위» 상위 3개.
+    """{섹터명: [{n, rk, sc, st, from}, ...]} — «5일 누적 순위» 상위 3개.
 
     ⚠️ collect_data의 네이버테마 목록은 «등락률 순»이다. 화면은 테마 레이더와
        같은 기준을 써야 하므로 여기서 누적 순위로 다시 정렬한다.
@@ -21147,6 +21440,7 @@ THEME_V17_CSS = """
 .r-lead{color:#0b0e13;background:#ffc93c}
 .r-mid{color:#ffc93c;border:1px solid rgba(255,201,60,.45)}
 .r-out{color:#7d8695;border:1px solid rgba(125,134,149,.4)}
+.r-fw{color:#7fd6ff;border:1px solid rgba(127,214,255,.45)}
 .tm-pr{margin:8px 0 0;padding-top:7px;border-top:1px solid rgba(255,255,255,.07);
   font-size:9.5px;color:#6f7784;line-height:1.8}
 /* 📐 시장의 폭 — 레이더 위 한 줄 */
@@ -21300,6 +21594,8 @@ THEME_V17_CSS = """
 .ta-l{display:flex;gap:8px}
 .ta-l i{font-style:normal;flex:none;width:20px;text-align:center}
 .ta-l span span{color:#6f7784;font-size:11.5px}
+/* 🔴 2026-10-13 — «돈이 간 곳» 안내(누르면 테마 탭). 금색 = 다른 «→ 탭 이동» 안내(.sh-go)와 같은 색 */
+.ta-l span span.ta-go{color:#e0c060;font-size:12.5px;font-weight:700;cursor:pointer}
 /* 🆕 2026-10-07 — 🌅 내일 개장 전 3초 */
 .pm3{margin:0 0 1rem;padding:14px 14px 12px;border-radius:12px;background:linear-gradient(135deg,#1c1f24,#2a2f38);border:1px solid rgba(255,170,90,.28)}
 .pm3-q{margin:0 0 11px;padding-bottom:11px;border-bottom:1px solid rgba(255,255,255,.08);font-size:14.5px;font-weight:700;color:#fff;line-height:1.7;text-align:center;word-break:keep-all}
@@ -21356,6 +21652,27 @@ THEME_V17_CSS = """
 .bd-key{margin:0 0 6px;font-size:11.5px;color:#8b95a5;line-height:1.55}
 .bd-r{padding:8px 0;border-top:1px solid #1a2330;cursor:pointer}
 .bd-1{display:flex;align-items:center;gap:6px;min-width:0}
+/* 🆕 2026-10-14 — 테마명 옆 미니차트(금선 20일 · 회색 5일 · 점 오늘). 이름이 길면 이름이 줄어들고 차트는 그대로 */
+/* 🔴 2026-10-14 HO «미니차트는 '테마 +2.0%' 왼쪽에 한 줄로 통일» — 이름이 남는 칸을 다 먹고, 차트·등락은 오른쪽 고정 폭 */
+.bd-mc{flex:none;display:block;width:64px;height:22px;margin-left:auto;cursor:pointer}
+.bd-r .bd-n{flex:1 1 auto}
+/* 🆕 10/14 HO «미니차트 옆 ▾ — 미니차트나 종목 어느 쪽을 눌러도 차트+종목이 펼쳐지게»(줄 전체가 눌림) */
+.bd-arw1{margin-left:auto}
+.bd-arw1+.bd-mc{margin-left:0}
+/* 좁은 화면(≤380px) — 이름이 «반… 기…»로 눌리지 않게 오른쪽 묶음([▾ 종목][미니차트][테마 ±%])을 줄인다 */
+@media (max-width:380px){.bd-r .bd-1{gap:4px}.bd-arw1{padding:0 5px;font-size:10px}
+.bd-1 .bd-mc{width:50px}.bd-r .bd-t{min-width:0;margin-left:2px}.bd-r .bd-t em{font-size:11px}}
+.bd-r .bd-t{margin-left:4px;min-width:74px;text-align:right}
+/* 펼침 맨 위 큰 순위 차트 */
+.bdc{margin:2px 0 10px;padding:8px 8px 6px;background:#10151d;border:1px solid #1e2937;border-radius:10px}
+.bdc svg{display:block;width:100%;height:auto}
+.bdc svg text{font-family:ui-monospace,Menlo,Consolas,monospace}
+.bdc-lg{display:flex;flex-wrap:wrap;gap:4px 10px;margin:2px 0 0;font-size:10px;color:#6f7784}
+.bdc-lg span{display:inline-flex;align-items:center;gap:4px}
+.bdc-lg i{display:inline-block;width:13px;border-top:2px solid}
+.bdc-lg i.d{width:7px;height:7px;border:0;border-radius:50%;background:#ff6b4a}
+/* 이름은 두 줄까지 접어 다 보이게(한 줄 말줄임이면 320px에서 «2차…»만 남았다) */
+.bd-r .bd-n{white-space:normal;word-break:keep-all;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .bd-k{flex:none;width:20px;text-align:right;font-size:12px;font-weight:800;color:#8b95a5;font-variant-numeric:tabular-nums}
 .bd-n{font-weight:800;font-size:13.5px;color:#e6ebf1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bd-w{flex:none;font-size:10px;font-weight:800;padding:0 6px;border-radius:99px;color:#ffb35c;border:1px solid #ffb35c;white-space:nowrap}
@@ -21402,9 +21719,13 @@ THEME_V17_CSS = """
 .lf-how p b{color:#e6ebf1}
 .lf-w{color:#ffb35c!important}
 /* 🆕 2026-10-12 — 일봉·단기·월봉 칩 · 배열 배지 */
+/* 🔴 2026-10-14 HO «일·5일·20일 칸을 얇은 원 테두리로 — 헷갈린다» → 칸마다 따로 둥근 알약 */
 .rk3{display:inline-flex;gap:0;flex:none;border:1px solid #2a3646;border-radius:6px;overflow:hidden;vertical-align:middle}
 .rk3 i{font-style:normal;font-size:10.5px;font-weight:800;color:#9aa3b1;padding:1px 5px;background:#0d131c;white-space:nowrap;font-variant-numeric:tabular-nums}
 .rk3 i+i{border-left:1px solid #2a3646}
+/* 🔴 2026-10-14 HO — 칸(배경)은 원래대로, 기간 글자(일·5일·20일)만 얇은 둥근 테두리 */
+.rk3 i u{text-decoration:none;display:inline-block;font-size:9.5px;font-weight:700;line-height:1.25;padding:0 4px;margin-right:2px;border:1px solid #4a5668;border-radius:99px;color:#7f8a99}
+.rk3 i.on u{border-color:#8a7434;color:#c9a84a}
 .rk3 i.on{color:#e0c060;font-weight:900}
 .ab{display:inline-block;flex:none;font-size:10px;font-weight:800;padding:0 6px;border:1px solid;border-radius:99px;white-space:nowrap;vertical-align:middle;margin-left:4px}
 .chcg-box{margin:0 0 12px;padding:10px 12px;border:1px solid #2a3646;border-radius:10px;background:#0d131c}
@@ -21436,6 +21757,8 @@ THEME_V17_CSS = """
 .rf-t{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
 .rf-t i{width:10px;height:10px;border-radius:50%;flex:none}
 .rf-t b{font-size:14px;color:#e6ebf1}
+.rf-t{flex-wrap:wrap}
+.rf-old{order:9;flex-basis:100%;margin:2px 0 0 14px;font-size:10.5px;font-weight:700;color:#c9a84a}
 .rf-k{margin-left:auto;font-size:10.5px;font-weight:800;padding:1px 8px;border-radius:99px}
 .rf-k.stair{color:#ff5a4e;background:rgba(255,90,78,.12)}
 .rf-k.spike{color:#ff9a3d;background:rgba(255,154,61,.12)}
@@ -21634,6 +21957,11 @@ THEME_V17_CSS = """
 .pf2-wait b{color:#dfe4ea}
 .pf2-wait span{display:block;margin-top:6px;font-size:10px;color:#6f7784}
 .pf2-g{margin:0 0 11px}
+/* 🆕 2026-10-14 — 자리별 성과 탭(포착 «레이더는 잘 잡았나»와 같은 탭 모양) + 자리 뜻 한 줄 */
+.pf2-tabs{margin:2px 0 9px;flex-wrap:wrap}
+.pf2-tabs .cg-tab{font-size:11px;padding:6px 2px;min-width:0;white-space:nowrap;letter-spacing:-.3px}
+.pf2-def{margin:0 0 6px;padding:7px 9px;border-radius:8px;background:#0d141c;border:1px solid #1e2937;font-size:11.5px;color:#c9d0d9;line-height:1.6;word-break:keep-all}
+.pf2-def b{color:#fff}
 .pf2-h{display:flex;align-items:baseline;gap:7px;margin:0 0 5px;
   font-size:12px;font-weight:800}
 .pf2-h span{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784}
@@ -21655,7 +21983,7 @@ THEME_V17_CSS = """
 .pf2-c .pf2-n b{color:#ffffff;font-weight:800}
 .pf2-more>summary{list-style:none;cursor:pointer;font-size:10px;font-weight:800;color:#c9a34a;padding:5px 0 2px}
 .pf2-more>summary::-webkit-details-marker{display:none}
-/* 🔴 2026-10-13 — 테마 수명표 칩 둘째 줄: [일·4일·40일] + 배열 배지 */
+/* 🔴 2026-10-13 — 테마 수명표 칩 둘째 줄: [일·5일·20일] + 배열 배지 */
 .lf-rk{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:3px}
 .lf-rk .ab{margin-left:2px}
 .pf2-w{color:#5f6875 !important;font-weight:600 !important}
@@ -22369,6 +22697,8 @@ def build_theme_leaders(data):
         _leader_scores(cand, theme_w=max(0, (21 - ti) / 20 * 100))
         for c in cand:
             c["대금없음"] = c["turn"] is None
+        _fw = _follow_pick(cand)                       # 🧭 2026-10-14 — 같은 테마의 «따라갈 대장»
+        _fwc = next((c for c in cand if c["n"] == _fw), None)
         cand = [c for c in cand if c["대장가능"]]     # 시총 1,000억 미만 제외
         if not cand:
             continue
@@ -22377,6 +22707,7 @@ def build_theme_leaders(data):
         if not best:
             continue
         _쓴대장.add(best["n"])
+        best["fw"], best["fw_ch"] = (_fwc["n"], _fwc["ch"]) if _fwc else (None, None)
         best["th"] = s.get("테마명") or ""
         best["thr"] = ti
         out.append(best)
@@ -22427,8 +22758,15 @@ def build_theme_leaders(data):
             f'<span class="ld-v" style="color:{tc}">{turn_txt}</span>'
             f'<span class="ld-v" style="color:{dc}">{r["days"]}일</span>'
             f'<span class="ld-s" style="color:{c}">{r["sc"]:.0f}</span></div>'
+            # 🧭 2026-10-14 HO 승인 — 같은 테마의 «따라갈 대장»(앞으로 볼 종목)
+            + (f'<div class="ld-fw">🧭 따라갈 대장 <b>{r["fw"]}</b> <em>{r["fw_ch"]:+.1f}%</em></div>'
+               if r.get("fw") and r["fw"] != r["n"] else
+               ('<div class="ld-fw">🧭 따라갈 대장도 <b>같은 종목</b>이에요</div>' if r.get("fw") else ''))
             + 칸)
-    note = ('<div class="ld-f">📌 대장 = 테마 안에서 <b>많이 오르고(40) · 돈이 많이 붙고(20) · 덩치 대비 많이 돈(10)</b> 종목 '
+    note = ('<div class="ld-f">🧭 <b>따라갈 대장</b> = 같은 테마에서 <b>거래대금·시총이 크고, 오늘 올랐지만 +15%는 안 넘은</b> 종목. '
+            '👑는 «오늘 테마를 끌고 간 종목»이라 다음 날까지는 강하지만 그 뒤엔 되돌림이 잦았어요. '
+            '1년치 근사로 재 보니 🧭 쪽이 5일·20일 뒤 성적이 테마 평균보다 나았어요(확정이 아니라 경향).<br>'
+            '📌 대장 = 테마 안에서 <b>많이 오르고(40) · 돈이 많이 붙고(20) · 덩치 대비 많이 돈(10)</b> 종목 '
             '+ 테마 순위(20) · 연속(10)<br>'
             '📌 회전 = 오늘 거래대금 ÷ 시가총액 — 덩치 대비 얼마나 돌았나<br>'
             '📌 연속 = 최근 3거래일 중 테마 상위4에 이름 올린 횟수<br>'
@@ -22499,6 +22837,9 @@ LEADER_CSS = """
 .ld-n>i b{font-weight:800}
 .ld-v{font-size:10px;font-weight:800;text-align:right}
 .ld-s{font-size:11.5px;font-weight:800;text-align:right}
+.ld-fw{margin:-4px 0 6px;font-size:10.5px;color:#8b93a0;font-weight:600}
+.ld-fw b{color:#7fd6ff;font-weight:800}
+.ld-fw em{font-style:normal;color:#ff6b4a;font-weight:800;margin-left:2px}
 .ld-f{margin-top:9px;padding-top:8px;border-top:1px solid #1a212b;
   font-size:9.5px;color:#5a6474;line-height:1.65}
 
@@ -22835,7 +23176,7 @@ def _fs_timeline_svg(이력, p, W=380):
 
     # ⚠️ viewBox 폭은 실제 표시 폭과 맞춰야 한다. 700으로 잡으면 390px 화면에서
     #    0.54배로 축소돼 11px 글자가 6px가 된다(안 읽힘).
-    H = 372   # 신용잔고 레인(+72) 포함 — 2026-08-21
+    H = 396   # 신용잔고 레인(+72) 포함 — 2026-08-21 · 🔴 2026-10-13 +24(레인 D 글자 자리)
     # ⚠️ 오른쪽 여백(PR)은 선 이름표가 앉을 자리다. 0에 가깝게 잡으면
     #    선이 화면 끝까지 꽉 차서 '어느 선이 외국인인지'를 못 읽는다.
     PL, PR = 7, 46
@@ -23012,7 +23353,9 @@ def _fs_timeline_svg(이력, p, W=380):
     #    개인의 조바심을 보여주는 유일한 지표라, 개인 순매수 선보다 정보가 많다.
     #  ⚠️ 수집원이 아직 불안정하다. 값이 없으면 **레인 자리에 그 사실을 적는다.**
     #     조용히 빼면 "왜 없지"를 알 수가 없다.
-    DT, DB = 296, 356
+    # 🔴 2026-10-13 HO «신용융자 잔고 그래프와 글자가 겹친다» — 선이 오른쪽 위로 오르면 제목·«기준일»·금액 글자 위를 지나갔다.
+    #   [고침] 레인을 24 키우고(DB 356→380) 선은 글자 세 줄(제목 DT+12 · 금액 DT+30) **아래**(DT+38~DB)에서만 그린다.
+    DT, DB = 296, 380
     g.append(f'<line x1="{PL}" y1="{DT-8}" x2="{W-PR}" y2="{DT-8}" '
              f'stroke="#fff" stroke-opacity=".07"/>')
     # 🔴 2026-09-21 — 신용잔고를 «기준일»로 줄 세운다.
@@ -23038,7 +23381,7 @@ def _fs_timeline_svg(이력, p, W=380):
     if len(_실값) >= 3:
         _hi, _lo = max(_실값), min(_실값)
         _sp = (_hi - _lo) or 1
-        _Y = lambda v: DB - (DB - DT - 12) * (v - _lo) / _sp
+        _Y = lambda v: DB - (DB - DT - 38) * (v - _lo) / _sp
         _pts, _prev = [], None
         for k, v in enumerate(_신):
             if v is None:
@@ -23149,9 +23492,11 @@ def build_today_action(data, 해석, gauge=None):
         mb = _FOLLOW_CACHE.get("MBR")
         if mb and mb[0]:
             ins = mb[0][:3]
+            # 🔴 2026-10-13 (2차) HO «내용은 써주고 마지막에 테마 탭 이동을» — 설명은 그대로, 끝에 이동 안내(누르면 테마 탭)
             ln.append(('💰', '돈이 간 곳',
                        " · ".join(f'<b>{_lab_nm(r["n"])}</b> +{r["chg"]:,.0f}억' for r in ins)
-                       + '. 지수와 따로 움직인 자리 — 종목을 고른다면 여기부터 보세요.'))
+                       + '. 지수와 따로 움직인 자리 — 종목을 고른다면 여기부터 보세요. '
+                       + '<span class="ta-go" data-tab="테마" data-sel="#tab-테마" onclick="cpGo(this)">테마 탭에서 →</span>'))
     except Exception as e:
         print(f"   ⚠️ 오늘의 대응(돈) 실패 — {type(e).__name__}: {e}")
     # 🔴 2026-10-07 HO — ⏰ 내일 갈림길 줄은 뺐다(종합 맨 끝 «🌅 내일 개장 전 3초»가 맡는다).
@@ -23810,6 +24155,42 @@ def _fv_wave(rows, key="외현"):
             "avg": avg_at(len(cum) - 1), "from_start": ws <= 1}
 
 
+# 🆕 2026-10-13 HO «3.71조(예전 반등)만 기다리는데, 계속 빠질 때는 최근 N일의 큰 매도 금액이 1차 기준이어야 한다.
+#   그다음이 예전 반등(3.71조)을 넘느냐가 2차. 상승 파도도 마찬가지.»
+#   [왜] «파도 안 가장 큰 반등»(lv1)은 몇 주 전 숫자라, 매도가 이어지는 동안 «0%»로 며칠째 멈춰 있었다.
+#        지금의 매도 세기를 반영하는 «가까운 잣대»가 필요했다.
+#   [규칙] 1차 후보 = 바닥(ext)까지 최근 FV_RECENT_N거래일 중 파도 방향으로 «가장 크게 판(산) 하루».
+#          «바닥 이후 되산(되판) 돈»이 그 하루를 넘으면 = 최근의 가장 센 하루를 «되돌렸다».
+#   [N] HO 결정 2026-10-13 «일단 10일» (아래는 첫 제안 때의 실측 — 10일은 반등 4번 중 2번을 잡았다)
+#   [N=5 첫 제안 근거] 100거래일(5/15~10/13) 실측 — 매도 파도 안 반등 4번:
+#          N=3·5 → 4번 모두 바닥 2~3일 뒤 잡힘(«이른 신호» 역할) · N=10 → 2번 · N=20 → 1번(사실상 2차·확정과 역할이 겹침).
+#          N=3과 5는 결과가 같았고, 5일 = 외국인 시계 ② «최근 5일 막대»와 같은 창이라 독자가 그 막대에서 바로 찾을 수 있다.
+#          ⚠️ 표본이 반등 4번뿐이다 — 기록이 쌓이면(2026-12 재검증) 다시 본다.
+#   [순서] HO «금액 크기가 아니라 위치» — 시간상 가까운 «최근 하루»가 항상 1차, «가장 큰 반등»이 2차.
+FV_RECENT_N = 10   # 🔴 2026-10-13 (2차) HO «일단 10일로»
+
+
+def _fv_steps(rows, w, key="외현"):
+    """1차·2차 기준 — 순서 고정(최근 = 1차 · 가장 큰 반등 = 2차). [{k:"recent"|"bounce", amt, d(행 번호|None)}]. 못 구하면 []."""
+    out = []
+    try:
+        sell = w["dir"] < 0
+        ex = w["ext"]
+        win = [(i, rows[i].get(key) or 0) for i in range(max(0, ex - FV_RECENT_N + 1), ex + 1)]
+        win = [(i, v) for i, v in win if v != 0 and (v < 0) == sell]
+        if win:
+            i, v = max(win, key=lambda t: abs(t[1]))
+            out.append({"k": "recent", "amt": abs(v), "d": i})
+        if w.get("lv1"):
+            out.append({"k": "bounce", "amt": w["lv1"], "d": None})
+    except Exception as e:
+        print(f"   ⚠️ 외국인 1차·2차 기준 실패 — {type(e).__name__}: {e}")
+        return []
+    # 🔴 2026-10-13 (2차) HO «중요한 건 금액 크기가 아니라 위치. 오늘처럼 급락이 나왔으면 오늘이 기준 —
+    #   몇 주 전 반등(3.71조)보다 가까이 있는 오늘 금액이 1차.» → 순서 고정: 최근(가까운 쪽) = 1차, 가장 큰 반등 = 2차.
+    return out
+
+
 def _fv_price(이력):
     """② 외국인이 판 가격대 — 20일·60일. 순매도한 날의 코스피를 매도금액으로 가중평균."""
     칸 = []
@@ -24461,7 +24842,7 @@ def _fv_clock(이력):
     [세 질문]
       ① 지금 어느 국면인가 — 파도 방향·일수·누적 + 평균 매도가와 지금의 거리(한 줄)
       ② 힘이 빠지고 있나   — 감속 게이지: 오늘 하루 ÷ 파도 평균 하루 + 최근 5일 막대
-      ③ 무엇이 보이면 바뀌나 — 반대 방향 2일 연속 → 1단계(가장 큰 반등) → 2단계(직전 고점)
+      ③ 무엇이 보이면 바뀌나 — 반대 방향 2일 연속 → 1차·2차(최근 5일 가장 큰 하루 · 가장 큰 반등, 작은 쪽 먼저) → 전환 확정(직전 고점)
     ⚠️ 전부 규칙(코드). 숫자는 flow_history 그대로. 개인 합계는 원본 검증 전이라 쓰지 않는다."""
     rows = [r for r in (이력 or []) if isinstance(r, dict) and r.get("날짜", "") <= DATE
             and r.get("외현") is not None and r.get("종가")]
@@ -24567,7 +24948,7 @@ def _fv_clock(이력):
         _svg += (f'<line x1="{_X(_i2):.1f}" y1="{_y2:.1f}" x2="{_R}" y2="{_y2:.1f}" stroke="#e0c060" stroke-width="1.2" stroke-dasharray="5 3" opacity=".9"/>'
                  f'<circle cx="{_X(_i2):.1f}" cy="{_y2:.1f}" r="4" fill="none" stroke="#e0c060" stroke-width="1.6"/>'
                  f'<text x="{min(_X(_i2) + 6, _R - 120):.1f}" y="{_y2 - 6:.1f}" font-size="9" font-weight="800" fill="#e0c060" '
-                 f'stroke="#0d1420" stroke-width="3" paint-order="stroke">직전 고점 {d(rows[_l2])} · 넘으면 2단계</text>')
+                 f'stroke="#0d1420" stroke-width="3" paint-order="stroke">직전 고점 {d(rows[_l2])} · 넘으면 전환 확정</text>')
     _ey = _Y(_cs[-1])
     _svg += (f'<circle cx="{_X(_N-1):.1f}" cy="{_ey:.1f}" r="3.6" fill="#ffc93c"/>'
              f'<text x="{_X(_N-1) - 6:.1f}" y="{_ey + (16 if _ey + 16 <= _H - 16 else -9):.1f}" font-size="11" font-weight="800" '
@@ -24644,14 +25025,20 @@ def _fv_clock(이력):
                 f'<p class="fc-cs">{상태}</p>{bar}</div>')
     ck = [줄(k >= 2, f'외국인 <b>{반대} 2일 연속</b> — 가장 먼저 보이는 신호',
             f'지금 {k}일째' if k else f'오늘도 {"순매도" if sell else "순매수"} — 아직 0일')]
-    if w["lv1"]:
-        ck.append(줄(w["reb"] >= w["lv1"],
-                    f'<b>1단계</b> · 바닥({d(rows[w["ext"]])}) 이후 {"되산" if sell else "되판"} 돈이 '
-                    f'이 파도의 «가장 큰 반등»({_fv_amt(w["lv1"]).lstrip("+")})보다 커지기',
-                    f'지금 {_fv_amt(w["reb"] if sell else -w["reb"])}', w["reb"] / w["lv1"] * 100))
+    # 🔴 2026-10-13 HO — 1차 = 최근 5일 중 가장 크게 판(산) 하루 · 2차 = 파도 안 가장 큰 반등. 금액 작은 쪽이 먼저(_fv_steps).
+    되 = "되산" if sell else "되판"
+    for _no, _st in enumerate(_fv_steps(rows, w), 1):
+        if _st["k"] == "recent":
+            _무엇 = (f'최근 {FV_RECENT_N}일 중 가장 크게 {"판" if sell else "산"} 하루'
+                    f'({d(rows[_st["d"]])} {_fv_amt(_st["amt"]).lstrip("+")})보다 커지기')
+        else:
+            _무엇 = f'이 파도의 «가장 큰 반등»({_fv_amt(_st["amt"]).lstrip("+")})보다 커지기'
+        ck.append(줄(w["reb"] >= _st["amt"],
+                    f'<b>{_no}차</b> · 바닥({d(rows[w["ext"]])}) 이후 {되} 돈이 {_무엇}',
+                    f'지금 {_fv_amt(w["reb"] if sell else -w["reb"])}', w["reb"] / _st["amt"] * 100))
     if w["lv2"]:
         ck.append(줄(w["reb"] >= w["lv2"],
-                    f'<b>2단계 · 전환 확정</b> · 누적선이 직전 {"고점" if sell else "저점"}'
+                    f'<b>전환 확정</b> · 누적선이 직전 {"고점" if sell else "저점"}'
                     f'({d(rows[w["lv2_idx"]])}) {"돌파" if sell else "이탈"} — {_fv_amt(w["lv2"]).lstrip("+")} 필요',
                     "", w["reb"] / w["lv2"] * 100))
     # 받쳐 준 쪽 — 기관 파도 한 줄
@@ -24676,6 +25063,9 @@ def _fv_clock(이력):
            '<p>외국인 <b>누적 순매수 선</b>을 차트처럼 읽습니다(다우 이론). 고점·저점이 함께 낮아지는 동안이 '
            '«매도 파도», 함께 높아지는 동안이 «매수 파도»예요. 기준 숫자는 우리 관제탑에서 판단하지 않고 '
            '<b>파도 자신의 고점·저점</b>에서 나와, 새 꼭짓점이 생길 때마다 저절로 바뀝니다.</p>'
+           f'<p>«최근 {FV_RECENT_N}일 중 가장 큰 하루»는 <b>지금의 세기</b>를 재는 가까운 잣대예요. '
+           '«가장 큰 반등»은 몇 주 전 숫자일 수 있어서, 매도가 이어지는 동안엔 <b>가까이 있는 최근 하루</b>를 먼저 되돌리는지(1차) 보고, '
+           '그다음 가장 큰 반등을 넘는지(2차) 봅니다.</p>'
            + (f'<p>이 파도에서 외국인은 <b>{len(w["bounces"])}번</b> 되돌렸다가 모두 원래 방향으로 돌아갔어요:</p>'
               f'<div class="fv-bt">{_bt}</div>' if w["bounces"] else "")
            + '<p>«평균 매도가»는 외국인이 순매도한 날들의 코스피 종가를 그날 매도금액만큼 무겁게 쳐서 평균 낸 값이에요.</p>'
