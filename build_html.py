@@ -16282,15 +16282,61 @@ def _pick_why(p):
     뿌리 = f"20일 순위판 {r40}위" if r40 else "20일 순위판 주도"
     if p["tier"] == 1:
         y = p.get("y4")
-        return f"쉬던 {뿌리} 테마가 오늘 일봉 {t}위로 돌아왔어요" + (f"(어제 단기 {y}위)" if y and y < 999 else "")
+        return f"쉬던 {뿌리} 테마가 오늘 일봉 {t}위로 돌아왔어요" + (f"(어제 5일 {y}위)" if y and y < 999 else "")
     if p["tier"] in (2, 3):
-        s = f"{뿌리} 테마가 오늘 단기 10위권에 첫날 들어왔어요(일봉 {t}위)"
+        s = f"{뿌리} 테마가 오늘 5일 10위권에 첫날 들어왔어요(일봉 {t}위)"
         if p["tier"] == 2 and p.get("m"):
             s += f" · 돈 평소보다 +{p['m'][0]:.0f}%"
         return s
     if p["tier"] == 4:
-        return f"일봉·단기·월봉이 모두 위에 있는 정배열이에요(일봉 {t}위 · 단기 {p['r4']}위)"
-    return f"{뿌리} 테마가 단기 10위권 {p['age']}일째 버티는 중이에요(일봉 {t}위)"
+        return f"오늘·5일·20일이 모두 위에 있는 정배열이에요(일봉 {t}위 · 5일 {p['r4']}위)"
+    return f"{뿌리} 테마가 5일 10위권 {p['age']}일째 버티는 중이에요(일봉 {t}위)"
+
+
+# 🔴 2026-10-15 (2차) HO «시안 A로 — 결론 한 줄 + 테마명 옆 미니차트(누르면 크게 + 조건 불빛 작게) · 순위판/대장주/나이표 링크는 빼고»
+#   · 조건 맞는 테마는 전부 좋은 순서대로(1년: 1번째 +2.84 · 2번째 +2.49 · 3번째 +1.58 …) — 위 2개 = 오늘의 결론, 3번째부터 = 같이 볼 테마(흐리게)
+#   · 결론 한 줄 = 1번 테마의 자리로 고르는 문장 틀 5개 · 근거 = 그 자리의 1년 성적(5일 뒤 시장 대비 · 이긴 비율)
+STRAT_TITLE = "🎯 오늘 테마 활용 전략"
+STRAT_TOP = 2
+PICK_STAT = {1: (4.10, 58), 2: (3.96, 70), 3: (1.53, 53), 4: (1.52, 58), 5: (1.59, 55)}   # 1년 근사 5일 뒤 %p · 시장보다 나은 비율
+PICK_HEAD = {1: "쉬던 주도 테마가 돌아온 날이에요",
+             2: "옛 주도 테마에 다시 불이 붙은 날이에요",
+             3: "옛 주도 테마가 다시 고개를 든 날이에요",
+             4: "오늘·5일·20일이 모두 위에 있는 테마가 있어요",
+             5: "주도 테마가 자리를 지키는 날이에요"}
+
+
+def _pick_head_sub(p):
+    """결론 한 줄 아래 설명(테마 이름 + 움직임 + 그 자리의 1년 성적)."""
+    t, r4, r40 = p["t"], p["r4"], p.get("r40")
+    nm = f'<b>{p["n"]}</b>'
+    if p["tier"] == 1:
+        y = p.get("y4")
+        s = f'{nm} — 20일 순위판 {r40}위였던 테마가 5일 동안 밀렸다가' + (f'(5일 {y}위)' if y and y < 999 else '') + f' 오늘 일봉 {t}위로 올라섰어요.'
+    elif p["tier"] in (2, 3):
+        s = f'{nm} — 20일 순위판 {r40}위 주도 테마가 오늘 5일 10위권에 첫날 들어왔어요(일봉 {t}위)'
+        s += (f', 돈도 평소보다 +{p["m"][0]:.0f}% 몰렸어요.' if p["tier"] == 2 and p.get("m") else '.')
+    elif p["tier"] == 4:
+        s = f'{nm} — 오늘 일봉 {t}위 · 5일 {r4}위 · 20일 {r40}위, 세 기간이 모두 위에 있어요.'
+    else:
+        s = f'{nm} — 20일 순위판 {r40}위 주도 테마가 5일 10위권에서 {p["age"]}일째 버티고 있어요(일봉 {t}위).'
+    a, w = PICK_STAT[p["tier"]]
+    return s + f' 지난 1년 이 모양은 5일 뒤 시장보다 평균 <b class="up">+{a:.1f}%p</b>, 10번 중 약 {round(w / 10)}번 시장을 이겼어요.'
+
+
+def _pick_lamps(p):
+    """시안 B의 조건 불빛 5칸(작게) — 펼쳤을 때만."""
+    m = p.get("m")
+    b = p.get("b")
+    mon = bool(m and m[0] >= 20 and (m[2] or 0) > 0 and (m[1] or 0) >= 50)
+    a = p.get("age") or 0
+    L = [(bool(p.get("lead")), "★", "옛 주도", ""),
+         (b == "재진입", "🔁", "재진입", " re"),
+         (mon, "💰", (f"돈 +{m[0]:.0f}%" if m and m[0] > 0 else "돈"), ""),
+         (b == "정배열" or p["tier"] == 4, "🟢", "정배열", " ok"),
+         (a >= 1, (f"{a}일" if a else "0일"), ("며칠째" if a else "쉬는 중"), " ok")]
+    return ('<div class="ts-lamps">' + "".join(f'<div class="ts-lp{(" on" + c) if on else ""}"><b>{ic}</b>{lb}</div>' for on, ic, lb, c in L)
+            + '</div><p class="ts-lpk">★ 옛 주도 = 순위판 20위 안 + 20일 중 3번 이상 일봉 10위 안 · 💰 = 평소보다 거래 많고 테마도 오름 · 며칠째 = 5일 10위권 연속</p>')
 
 
 def build_theme_strategy(data=None):
@@ -16303,21 +16349,29 @@ def build_theme_strategy(data=None):
     except Exception:
         MO = {}
     d0, today = bd[-1]
-    picks = _pick_day(d0, today, ages.get(d0) or {}, MO)
-    # 장부 — 오늘(과 지난날 재계산) 저장
-    hist = []
-    for d, day in bd[:-1]:
-        for p in _pick_day(d, day, ages.get(d) or {}, None):
-            hist.append({"d": d, **p})
+    _pm = globals().get("PICK_MAX")
+    globals()["PICK_MAX"] = 99
+    try:
+        picks = _pick_day(d0, today, ages.get(d0) or {}, MO)
+        hist = []
+        for d, day in bd[:-1]:
+            for p in _pick_day(d, day, ages.get(d) or {}, None)[:STRAT_TOP]:
+                hist.append({"d": d, **p})
+    finally:
+        globals()["PICK_MAX"] = _pm
+    for p in picks:
+        p["b"] = (today.get(p["n"]) or {}).get("b")
+        p["lead"] = (today.get(p["n"]) or {}).get("lead")
+    # 장부 — 오늘 위 2개(+같이 볼 테마 표시) · 지난날은 재계산(돈 조건 제외)
     try:
         if _is_trading_ymd(DATE):
             pth = apath(PICK_LOG)
             lg = (json.load(open(pth, encoding="utf-8")) if os.path.exists(pth) else {}) or {}
-            lg[str(d0)] = [{"n": p["n"], "tier": p["tier"], "why": _pick_why(p)} for p in picks]
+            lg[str(d0)] = [{"n": p["n"], "tier": p["tier"], "top": int(k < STRAT_TOP)} for k, p in enumerate(picks)]
             for h in hist:
                 lg.setdefault(h["d"], [])
-                if not any(x.get("n") == h["n"] for x in lg[h["d"]]) and len(lg[h["d"]]) < PICK_MAX:
-                    lg[h["d"]].append({"n": h["n"], "tier": h["tier"], "re": 1})
+                if not any(x.get("n") == h["n"] for x in lg[h["d"]]):
+                    lg[h["d"]].append({"n": h["n"], "tier": h["tier"], "top": 1, "re": 1})
             with open(asave(PICK_LOG), "w", encoding="utf-8") as f:
                 json.dump(lg, f, ensure_ascii=False, separators=(",", ":"))
     except Exception as e:
@@ -16330,12 +16384,12 @@ def build_theme_strategy(data=None):
     def _c(v):
         return "#ff6b4a" if v > 0 else ("#5b9bff" if v < 0 else "#9aa3b1")
 
-    def _basket(n):
+    def _basket(n, k=3):
         try:
             it = [x for x in (_board_members(data or {}, n) or []) if x and not _stock_hide(x[0])]
         except Exception:
             it = []
-        it = sorted(it, key=lambda x: -((x[2] if len(x) > 2 and isinstance(x[2], (int, float)) else 0)))[:3]
+        it = sorted(it, key=lambda x: -((x[2] if len(x) > 2 and isinstance(x[2], (int, float)) else 0)))[:k]
         out = []
         for x in it:
             r = x[1] if len(x) > 1 else None
@@ -16344,10 +16398,9 @@ def build_theme_strategy(data=None):
             except Exception:
                 rv = None
             out.append(f'<span class="ts-st">{x[0]}' + (f'<i style="color:{_c(rv)}">{rv:+.1f}%</i>' if rv is not None else '') + '</span>')
-        return "".join(out)
+        return out
 
     def _exit(n, d):
-        """d 다음 날부터 오늘까지 «이틀 연속 일봉 20위 밖»이면 그 날짜."""
         if d not in days:
             return None
         run = 0
@@ -16357,28 +16410,54 @@ def build_theme_strategy(data=None):
                 return dd
         return None
 
-    # ── 오늘 픽 ──
+    # ── 머리: 오늘의 결론 한 줄 ──
+    md = f"{int(str(d0)[4:6])}/{int(str(d0)[6:])}"
     if picks:
-        body = ""
-        for k, p in enumerate(picks, 1):
-            ic, lab, col = PICK_TIER[p["tier"]]
-            body += (f'<div class="ts-p"><div class="ts-h"><b class="ts-k">{k}</b><span class="ts-n">{p["n"]}</span>'
-                     f'<span class="ts-tg" style="color:{col};border-color:{col}">{ic} {lab}</span></div>'
-                     f'<p class="ts-why">{_pick_why(p)}</p>'
-                     f'<div class="ts-rk">{_rk3_html(p["n"], badge=False, hl="일")}</div>'
-                     f'<p class="ts-bl">담는다면 <b>한 종목보다 묶음으로</b> · 거래대금 상위 3</p>'
-                     f'<div class="ts-bk">{_basket(p["n"]) or "<span class=ts-st>종목 정보 없음</span>"}</div></div>')
+        head = (f'<div class="ts-top"><div class="ts-k1">오늘의 결론 · {md}</div>'
+                f'<div class="ts-hl">{PICK_HEAD[picks[0]["tier"]]}</div>'
+                f'<div class="ts-hs">{_pick_head_sub(picks[0])}</div></div>')
     else:
-        body = '<p class="ts-none">오늘은 조건에 맞는 테마가 없어요 — <b>쉬는 것도 전략</b>이에요.</p>'
-    # ── 지난 픽 성적 ──
-    hist.sort(key=lambda h: (h["d"], h["tier"]), reverse=True)
+        head = (f'<div class="ts-top"><div class="ts-k1">오늘의 결론 · {md}</div>'
+                '<div class="ts-hl">오늘은 꼭 볼 테마가 없어요</div>'
+                '<div class="ts-hs">주도 이력이 있는 테마 가운데 오늘 조건에 맞는 테마가 없어요. 쉬는 것도 전략이에요.</div></div>')
+    # ── 몸통: 테마 줄(위 2개 굵게 · 3번째부터 같이 볼 테마) ──
+    body = ""
+    for k, p in enumerate(picks):
+        ic, lab, col = PICK_TIER[p["tier"]]
+        pid = f"tsp{k}"
+        mc = _mini_chart(p["n"])
+        pan = (f'<div class="tm-pan ts-pan" id="{pid}">{_big_chart(p["n"])}{_pick_lamps(p)}</div>')
+        top = k < STRAT_TOP
+        stx = _basket(p["n"], 3 if top else 2)
+        _lb = lab if (top or p["tier"] != 5) else str(p["age"]) + "일째"
+        tag = f'<span class="ts-tg" style="color:{col};border-color:{col}">{ic} {_lb}</span>'
+        if top:
+            body += (f'<div class="ts-p"><b class="ts-k">{k + 1}</b><div class="ts-in">'
+                     f'<div class="ts-h" onclick="ztog(\'{pid}\')"><span class="ts-n">{p["n"]}</span>{mc}<span class="ts-arw">▾</span></div>'
+                     + tag + ('<div style="height:6px"></div>' if k == 0 else f'<p class="ts-why">{_pick_why(p)}</p>')
+                     + f'<div class="ts-bk">{"".join(stx) or "<span class=ts-st>종목 정보 없음</span>"}</div>{pan}</div></div>')
+        else:
+            _names = " · ".join(re.sub(r"<[^>]+>", "", x.split("<i")[0]) for x in stx)
+            body += (f'<div class="ts-p ts-sub"><b class="ts-k">{k + 1}</b><div class="ts-in">'
+                     f'<div class="ts-h" onclick="ztog(\'{pid}\')"><span class="ts-n">{p["n"]}</span>{mc}<span class="ts-arw">▾</span></div>'
+                     f'<p class="ts-why">{tag} 같이 볼 테마 · {_names}</p>{pan}</div></div>')
+    # ── 꼬리: 나오는 조건 · 어제 픽 결과 · 지난 성적 · 어떻게 고르나 ──
+    hist.sort(key=lambda h: (h["d"], -h["tier"]), reverse=True)
+    yd = hist[0]["d"] if hist else None
+    yl = ""
+    if yd:
+        bits = []
+        for h in [x for x in hist if x["d"] == yd]:
+            r1 = fx(h["n"], h["d"], 1)
+            bits.append(f'{_shn(h["n"])} ' + (f'<b style="color:{_c(r1)}">{r1:+.1f}%p</b>' if r1 is not None else '<b class="ts-z">대기</b>'))
+        yl = f'<p class="ts-yd">어제 결론({int(yd[4:6])}/{int(yd[6:])}) 다음 날 → ' + " · ".join(bits) + '</p>'
     rows = ""
     v5 = []
     for h in hist[:10]:
         ic, lab, col = PICK_TIER[h["tier"] if h["tier"] != 2 else 3]
         r1, r5 = fx(h["n"], h["d"], 1), fx(h["n"], h["d"], 5)
         ex = _exit(h["n"], h["d"])
-        st = (f'<span class="ts-out">퇴장 {int(ex[4:6])}/{int(ex[6:])}</span>' if ex else '<span class="ts-in">유지</span>')
+        st = (f'<span class="ts-out">퇴장 {int(ex[4:6])}/{int(ex[6:])}</span>' if ex else '<span class="ts-inn">유지</span>')
         rows += (f'<tr><td><b>{int(h["d"][4:6])}/{int(h["d"][6:])} · {_shn(h["n"])}</b><small>{ic} {lab}</small></td>'
                  + (f'<td style="color:{_c(r1)}">{r1:+.1f}%p</td>' if r1 is not None else '<td class="ts-z">대기</td>')
                  + (f'<td style="color:{_c(r5)}">{r5:+.1f}%p</td>' if r5 is not None else '<td class="ts-z">대기</td>')
@@ -16387,31 +16466,30 @@ def build_theme_strategy(data=None):
         r5 = fx(h["n"], h["d"], 5)
         if r5 is not None:
             v5.append(r5)
-    summ = (f'<p class="ts-sum">지난 픽 {len(v5)}건 · 5일 뒤 시장 대비 평균 <b style="color:{_c(sum(v5) / len(v5))}">{sum(v5) / len(v5):+.1f}%p</b>'
+    summ = (f'<p class="ts-sum">지난 결론 {len(v5)}건 · 5일 뒤 시장 대비 평균 <b style="color:{_c(sum(v5) / len(v5))}">{sum(v5) / len(v5):+.1f}%p</b>'
             f' · 시장보다 나은 비율 <b>{sum(1 for x in v5 if x > 0) / len(v5) * 100:.0f}%</b></p>') if len(v5) >= 5 else \
-        f'<p class="ts-sum">지난 픽 성적은 쌓는 중이에요({len(v5)}건)</p>'
-    hist_html = (f'<details class="ts-hist"><summary>▾ 지난 픽 성적표 · 숨김 없이</summary>{summ}'
+        f'<p class="ts-sum">지난 성적은 쌓는 중이에요({len(v5)}건)</p>'
+    hist_html = (f'<details class="ts-hist"><summary>▾ 지난 결론 성적표 · 틀린 날도 그대로</summary>{summ}'
                  '<table class="bp-t ts-t"><tr><th>날짜 · 테마</th><th>D+1</th><th>D+5</th><th>상태</th></tr>'
                  + rows + '</table>'
                  '<p class="ts-note">* 테마 수익 = 구성종목 평균 − 전 종목 평균(%p) · 고른 날 종가 기준 · '
                  '지난날은 같은 규칙으로 다시 계산했어요(그날 돈 조건은 빼고)</p></details>') if hist else ""
-    return ('<div class="ts" id="cp-strat"><p class="ts-t1">🎯 오늘 테마 활용 전략 <i class="lk-ic" title="유료">🔒</i>'
-            '<span>순위판·레이더·나이표를 합친 결론 · 하루 최대 2개</span></p>'
-            + body +
-            '<p class="ts-exit">🚪 <b>내려오는 조건</b> — 순위판에 <b>▼ 돈 빠짐</b>이 뜨거나, <b>이틀 연속 일봉 20위 밖</b>이면 전략에서 내려요.</p>'
-            + hist_html +
+    return (f'<div class="ts" id="cp-strat"><p class="ts-t1">{STRAT_TITLE} <i class="lk-ic" title="유료">🔒</i></p>'
+            + head + body +
+            '<p class="ts-exit">🚪 <b>내려오는 조건</b> — <b>▼ 돈 빠짐</b>이 뜨거나 <b>이틀 연속 일봉 20위 밖</b>이면 결론에서 내려요. '
+            '담는다면 한 종목보다 <b>묶음</b>으로(테마 거래대금 상위 3).</p>'
+            + yl + hist_html +
             '<details class="ts-how"><summary>▾ 어떻게 고르나</summary><p>'
-            '후보 = 오늘 일봉 또는 단기 10위 안 · <b>▼ 돈 빠짐은 제외</b>. 아래 순서로 하루 최대 2개를 골라요(같은 칸이면 오늘 일봉 순위가 높은 쪽).<br>'
-            '① 🔁 <b>재진입</b> — 쉬던 옛 주도가 오늘 일봉 10위 안<br>'
-            '② 🔥 <b>재점화</b> — 옛 주도가 단기 10위권 1일째 + 💰 돈 몰림<br>'
-            '③ 🌱 <b>옛 주도 첫날</b> — 옛 주도가 단기 10위권 1일째<br>'
-            '④ 🟢 <b>정배열</b> — 일봉·단기·월봉 모두 위<br>'
-            '⑤ ✅ <b>자리 잡은 옛 주도</b> — 옛 주도 + 나이 2일째 이상<br>'
-            '<b>옛 주도</b> = 순위판 20위 안 + 최근 20일 일봉 10위 안 3회 이상.<br>'
-            '📊 1년치 근사(현재 테마 구성으로 과거를 잼): 후보 전체 5일 뒤 시장 대비 <b>+0.55%p</b> → 이 규칙 <b>+2.69%p</b>(시장보다 나은 비율 58%), '
-            '앞 반년 +2.94 · 뒤 반년 +2.44. 처음 온 테마의 1일째는 +0.24로 약해서 넣지 않았어요.<br>'
-            '⚠️ 추천이 아니라 «테마 화면을 대신 읽어 준 결론»이에요. 수수료·세금은 빠져 있어요.</p></details></div>')
-
+            '후보 = <b>순위판 20개 테마</b> 가운데 오늘 일봉 또는 5일 10위 안 · <b>▼ 돈 빠짐은 제외</b>. 테마마다 가장 좋은 자리 하나를 매겨 아래 순서로 줄 세워요(같은 자리면 오늘 일봉 순위가 높은 쪽). '
+            '<b>위 2개가 오늘의 결론</b>, 3번째부터는 같이 볼 테마예요.<br>'
+            '① 🔁 <b>재진입</b> — 쉬던 옛 주도가 오늘 일봉 10위 안 · 1년 +4.1%p<br>'
+            '② 🔥 <b>재점화</b> — 옛 주도가 5일 10위권 첫날 + 💰 돈 몰림 · +4.0%p<br>'
+            '③ 🌱 <b>옛 주도 첫날</b> — 옛 주도가 5일 10위권 첫날 · +1.5%p<br>'
+            '④ 🟢 <b>정배열</b> — 오늘·5일·20일 모두 위 · +1.5%p<br>'
+            '⑤ ✅ <b>자리 잡은 옛 주도</b> — 옛 주도 + 5일 10위권 2일째 이상 · +1.6%p<br>'
+            '📊 1년치 근사(현재 테마 구성으로 과거를 잼): 후보 전체 5일 뒤 시장 대비 <b>+0.55%p</b> → 위 2개 <b>+2.69%p</b>(시장보다 나은 비율 58%). '
+            '순위판 밖에서 처음 온 테마의 첫날은 +0.24로 약해서 넣지 않았어요.<br>'
+            '⚠️ 매수 추천이 아니라 «테마 화면을 대신 읽어 준 결론»이에요. 수수료·세금은 빠져 있어요.</p></details></div>')
 
 
 def build_spot_perf():
@@ -22732,30 +22810,43 @@ THEME_V17_CSS = """
 .bp-t2 td:first-child b{font-size:11.5px;color:#e6ebf1}
 .bp-none{margin:0;font-size:11.5px;color:#6f7784}
 .bp-row{cursor:pointer}
-/* 🎯 오늘 테마 활용 전략 */
-.ts{margin:16px 0 8px;padding:13px 12px 10px;border-radius:14px;background:linear-gradient(180deg,#1d1710,#121018);border:1px solid #5c4a22;box-shadow:inset 3px 0 0 #f0c65a}
-.ts-t1{margin:0 0 10px;font-size:16px;font-weight:900;color:#f0d68a}
-.ts-t1 span{display:block;margin-top:2px;font-size:10.5px;font-weight:600;color:#a89a76}
-.ts-p{padding:10px 10px 9px;margin:0 0 8px;border-radius:11px;background:#0f141c;border:1px solid #2a3343}
-.ts-h{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
-.ts-k{flex:none;width:20px;height:20px;border-radius:50%;background:#f0c65a;color:#1a1405;font-size:12px;display:inline-flex;align-items:center;justify-content:center}
-.ts-n{font-size:15px;font-weight:900;color:#f2f4f7;word-break:keep-all;overflow-wrap:anywhere}
-.ts-tg{font-size:10.5px;font-weight:800;border:1px solid;border-radius:99px;padding:0 7px;line-height:1.7;white-space:nowrap}
-.ts-why{margin:6px 0 6px;font-size:12px;line-height:1.55;color:#d5dbe3;word-break:keep-all}
-.ts-rk{margin:0 0 6px}
-.ts-bl{margin:4px 0 4px;font-size:10.5px;color:#8b93a0}
+/* 🎯 오늘 테마 활용 전략 (시안 A) */
+.ts{margin:16px 0 8px;padding:13px 12px 10px;border-radius:14px;background:#121821;border:1px solid #2a3343}
+.ts-t1{margin:0 0 9px;font-size:16px;font-weight:900;color:#f0d68a}
+.ts-top{background:linear-gradient(180deg,#1d1710,#121018);border:1px solid #5c4a22;border-radius:12px;padding:11px 12px 10px;margin:0 0 6px}
+.ts-k1{font-size:10.5px;font-weight:800;color:#e0c060;letter-spacing:.06em}
+.ts-hl{font-size:18px;font-weight:900;line-height:1.35;margin:3px 0 5px;color:#f2f4f7;word-break:keep-all;text-wrap:balance}
+.ts-hs{font-size:12px;color:#cfc6ae;line-height:1.6;word-break:keep-all}.ts-hs b{color:#f2f4f7}.ts-hs b.up{color:#ff6b4a}
+.ts-p{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;padding:10px 0 9px;border-top:1px solid #1e2937}
+.ts-top+.ts-p{border-top:0}
+.ts-k{width:22px;height:22px;border-radius:50%;background:#f0c65a;color:#1a1405;font-size:12px;display:flex;align-items:center;justify-content:center}
+.ts-in{min-width:0}
+.ts-h{display:flex;align-items:center;gap:7px;cursor:pointer;min-width:0}
+.ts-n{font-size:15px;font-weight:900;color:#f2f4f7;word-break:keep-all;overflow-wrap:anywhere;min-width:0}
+.ts-h .bd-mc{margin-left:auto;width:64px}
+.ts-arw{flex:none;font-size:11px;color:#8b93a0}
+.ts-tg{display:inline-block;margin:4px 0 0;font-size:10.5px;font-weight:800;border:1px solid;border-radius:99px;padding:0 7px;line-height:1.7;white-space:nowrap}
+.ts-why{margin:5px 0 6px;font-size:12px;line-height:1.55;color:#d5dbe3;word-break:keep-all}
 .ts-bk{display:flex;flex-wrap:wrap;gap:5px}
 .ts-st{font-size:11.5px;font-weight:800;color:#e6ebf1;background:#161d28;border:1px solid #2a3646;border-radius:8px;padding:2px 7px;white-space:nowrap}
 .ts-st i{font-style:normal;margin-left:4px;font-size:10.5px}
-.ts-none{margin:0 0 8px;font-size:12.5px;color:#c9d0d9}
-.ts-exit{margin:4px 0 8px;font-size:11px;line-height:1.6;color:#aab2be;word-break:keep-all}
-.ts-hist,.ts-how{margin-top:6px;border-top:1px solid #2a2a2a;padding-top:6px}
+.ts-sub{opacity:.78}.ts-sub .ts-k{background:#2a3343;color:#9aa3b1}.ts-sub .ts-n{font-size:13px}.ts-sub .ts-why{margin:3px 0 0;font-size:11px;color:#9aa3b1}.ts-sub .ts-tg{margin:0 4px 0 0}
+.ts-pan{margin:8px 0 0 !important}
+.ts-lamps{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:8px 0 4px}
+.ts-lp{border-radius:7px;padding:4px 2px 3px;text-align:center;font-size:9.5px;line-height:1.3;border:1px solid #1e2937;color:#6f7784;background:#0b0f15;word-break:keep-all}
+.ts-lp b{display:block;font-size:11px}
+.ts-lp.on{border-color:rgba(240,198,90,.55);color:#f0c65a;background:#1c1810}
+.ts-lp.on.re{border-color:#ff7a3d;color:#ff7a3d}.ts-lp.on.ok{border-color:#3ecf9a;color:#3ecf9a;background:#0f1a15}
+.ts-lpk{margin:2px 0 0;font-size:9.5px;color:#6f7784;line-height:1.5}
+.ts-exit{margin:6px 0 4px;padding-top:8px;border-top:1px solid #1e2937;font-size:11px;line-height:1.6;color:#aab2be;word-break:keep-all}
+.ts-yd{margin:0 0 6px;font-size:11px;color:#aab2be}
+.ts-hist,.ts-how{margin-top:6px;border-top:1px solid #1e2937;padding-top:6px}
 .ts-hist summary,.ts-how summary{cursor:pointer;list-style:none;font-size:11.5px;font-weight:800;color:#e0c060}
 .ts-hist summary::-webkit-details-marker,.ts-how summary::-webkit-details-marker{display:none}
 .ts-sum{margin:6px 0 4px;font-size:11.5px;color:#c9d0d9}
 .ts-t td small{display:block;font-size:9.5px;color:#8b93a0;font-weight:600}
-.ts-t .ts-z{color:#6f7784;font-weight:700;font-size:10.5px}
-.ts-in{color:#9aa3b1;font-size:10.5px}.ts-out{color:#5b9bff;font-size:10.5px}
+.ts-z{color:#6f7784;font-weight:700;font-size:10.5px}
+.ts-inn{color:#9aa3b1;font-size:10.5px}.ts-out{color:#5b9bff;font-size:10.5px}
 .ts-note{margin:6px 0 0;font-size:10px;color:#6f7784;line-height:1.6}
 .ts-how p{margin:6px 0 0;font-size:11px;line-height:1.7;color:#aab3c0;word-break:keep-all}
 /* 🔴 2026-10-14 HO «배지 크기 통일» — 순위판 성과 표 안의 배지 알약은 모두 같은 폭·높이 */
