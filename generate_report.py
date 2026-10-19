@@ -1006,13 +1006,14 @@ SYSTEM_PROMPT = """\
               감속판정과 반대되는 해석(«꾸준히 판다»를 강조)으로 쓰지 마라 — 같은 화면의 «외국인 시계»와 어긋난다.
               🔴 2026-10-07 HO — 수급 칸의 '무엇'·'기준'·'진행'은 **화면 코드가 외국인 시계 숫자로 덮어쓴다**
                  (시황 탭 숫자와 수급 탭 숫자가 항상 같게). 주제는 하나로 고정:
-                 «외국인이 돌아서는 1단계 신호(이 파도의 가장 큰 반등보다 크게 되사기/되팔기)가 나오나».
+                 «외국인이 돌아서기 시작하나 — 연속 매도(매수) 덩어리의 1/3을 되찾나(1차), 절반(2차)».
+                 🔴 2026-10-19 — 옛 기준(가장 큰 반등·최근 큰 하루)은 버렸다. «하루 큰 매수»는 알람일 뿐이다.
                  너는 이 주제로 '근거'(왜 이걸 보나)·'맞으면'·'아니면' 글만 쓴다.
-                 ⚠️ 1단계·2단계 기준 숫자를 새로 계산하거나 다른 숫자(평균의 150% 등)로 바꾸지 마라.
+                 ⚠️ 1차·2차·확정 기준 숫자를 새로 계산하거나 다른 숫자(평균의 150% 등)로 바꾸지 마라.
                     숫자가 필요하면 '외국인파도'의 값을 그대로 옮긴다. '진행'은 넣지 않아도 된다.
-              예) 근거 "8/19부터 매도 파도. 이 파도에서 외국인은 한 번 되사러 왔다(9/02→9/08 +3.7조)가
-                  다시 팔았어요. 이번 반등이 그보다 커야 «지난번과 다르다»고 말할 수 있거든요."
-                  맞으면 "파도에 처음 금이 간 것 — 확정은 직전 고점 돌파(2단계)까지 기다려요."
+              예) 근거 "9/23~10/15 13일 연속 27조를 팔았어요. 하루 큰 매수는 숏커버 같은 하루짜리가 많아서,
+                  그 덩어리의 1/3을 되찾는지로 봐요."
+                  맞으면 "파도에 처음 금이 간 것 — 절반을 넘으면 더 믿을 만하고, 확정은 직전 진짜 고점 돌파예요."
                   아니면 "반등이 나와도 아직 매도 파도 안의 숨 고르기예요."
     ② "이슈"  오늘 핵심이슈가 내일 주가로 이어지나 (뉴스가 먼저 온 종목·업종)
     ③ "테마"  들어온 테마가 버티나 / 다음 후보가 들어오나 (테마요약 근거)
@@ -1656,6 +1657,10 @@ def theme_summary_for_prompt():
 # ⚠️ 아래 _fv_wave는 build_html.py의 것을 «그대로» 복사했다. 규칙이 달라지면
 #    화면과 해석글이 다른 말을 한다 — 한쪽을 고치면 반드시 같이 고친다.
 FV_SWING_MIN = 1.0   # 꼭짓점으로 인정할 최소 되돌림 = 그때의 평소 하루 폭 × 이 배수(하루치 잡음 거르기)
+# 🔴 2026-10-19 HO 승인 — build_html.py와 같은 새 사다리(알람 → 연속 매도 1/3 → 절반 → 직전 «진짜» 고점 돌파). 근거는 build_html 주석.
+FV_TRUE_SWING = 2.0
+FV_STREAK_MIN = 5
+FV_ALARM_N = 20
 
 
 def _fv_wave(rows, key="외현"):
@@ -1736,10 +1741,62 @@ def _fv_wave(rows, key="외현"):
     lv1 = max(과거되) if 과거되 else None
     직전 = [i for i in (H if wd < 0 else L) if ws - 1 <= i < ex]
     lv2_idx = 직전[-1] if 직전 else None
+    # 🔴 2026-10-19 — 확정 = «진짜» 꼭짓점(평소 하루 폭 × FV_TRUE_SWING) · build_html과 같음
+    _p2, _d2, _e2 = [], 0, 0
+    for i in range(1, len(cum)):
+        if _d2 == 0:
+            _d2 = 1 if cum[i] >= cum[0] else -1
+            _p2.append((0, "L" if _d2 == 1 else "H"))
+            _e2 = i
+            continue
+        if (_d2 == 1 and cum[i] > cum[_e2]) or (_d2 == -1 and cum[i] < cum[_e2]):
+            _e2 = i
+        elif abs(cum[i] - cum[_e2]) >= FV_TRUE_SWING * avg_at(i):
+            _p2.append((_e2, "H" if _d2 == 1 else "L"))
+            _d2, _e2 = -_d2, i
+    _진짜 = [i for i, t in _p2 if t == ("H" if wd < 0 else "L") and ws - 1 <= i < ex]
+    if _진짜:
+        lv2_idx = _진짜[-1]
     lv2 = abs(cum[lv2_idx] - cum[ex]) if lv2_idx is not None else None
     return {"s": ws, "dir": wd, "ext": ex, "reb": reb, "lv1": lv1, "lv2": lv2,
             "lv2_idx": lv2_idx, "bounces": [x for x in 되 if x["b"] <= ex],
             "avg": avg_at(len(cum) - 1), "from_start": ws <= 1}
+
+
+def _fv_ladder(rows, w, key="외현"):
+    """build_html._fv_ladder와 같은 규칙 — 한쪽을 고치면 반드시 같이 고친다."""
+    try:
+        sell = w["dir"] < 0
+        sg = 1 if sell else -1
+        v = [(r.get(key) or 0) for r in rows]
+        cum, c = [], 0.0
+        for x in v:
+            c += x
+            cum.append(c)
+        ex, ws = w["ext"], w["s"]
+        same = lambda x: x != 0 and (x < 0) == sell
+        base, k = None, ex
+        while k >= max(0, ws - 1):
+            if same(v[k]):
+                e = k
+                while k - 1 >= 0 and same(v[k - 1]):
+                    k -= 1
+                if e - k + 1 >= FV_STREAK_MIN:
+                    base = {"kind": "streak", "a": k, "e": e, "n": e - k + 1, "amt": abs(sum(v[k:e + 1]))}
+                    break
+            k -= 1
+        if base is None and isinstance(w.get("lv2_idx"), int) and w["lv2_idx"] < ex:
+            a = w["lv2_idx"]
+            base = {"kind": "leg", "a": a, "e": ex, "n": ex - a, "amt": abs(cum[ex] - cum[a])}
+        rec = max(0.0, sg * (cum[-1] - cum[base["e"]])) if base else 0.0
+        last = len(v) - 1
+        prev = [(i, v[i]) for i in range(max(0, last - FV_ALARM_N + 1), last) if v[i] != 0 and (v[i] > 0) == sell]
+        thr = max(prev, key=lambda t: abs(t[1])) if prev else None
+        today = v[last]
+        on = today != 0 and (today > 0) == sell and (thr is None or abs(today) >= abs(thr[1]))
+        return {"base": base, "rec": rec, "alarm": {"thr": abs(thr[1]) if thr else 0, "d": thr[0] if thr else None, "on": on}}
+    except Exception:
+        return None
 
 
 def foreign_wave_for_prompt():
@@ -1761,9 +1818,9 @@ def foreign_wave_for_prompt():
             "누적_억": round(sum(r["외현"] for r in wr)),
             ("매도평균지수" if sell else "매수평균지수"): 평균, "오늘지수": wr[-1]["종가"],
             "극점일": D(w["ext"]), "극점이후되돌림_억": round(w["reb"]),
-            "1단계_약한신호": ({"기준": "이 파도에서 가장 큰 반등", "필요_억": round(w["lv1"]),
-                           "진행_퍼센트": round(w["reb"] / w["lv1"] * 100)} if w["lv1"] else None),
-            "2단계_전환확정": ({"기준": f"직전 {'고점' if sell else '저점'}({D(w['lv2_idx'])}) 돌파",
+            # 🔴 2026-10-19 HO 승인 — 새 사다리(화면 «외국인 시계 ③»과 같은 숫자)
+            **_ladder_for_prompt(rows, w, sell, D),
+            "전환확정": ({"기준": f"직전 «진짜» {'고점' if sell else '저점'}({D(w['lv2_idx'])}) 돌파",
                            "필요_억": round(w["lv2"]), "진행_퍼센트": round(w["reb"] / w["lv2"] * 100)}
                           if w["lv2"] else None),
             "파도안_실패한반등": [{"구간": f"{D(x['a'])}→{D(x['b'])}", "억": round(x["mv"])}
@@ -1771,6 +1828,24 @@ def foreign_wave_for_prompt():
             # 🆕 2026-10-05 — 화면 «외국인 시계 ② 힘이 빠지고 있나»와 같은 규칙. 해석글이 화면과 어긋나지 않게.
             "최근5일_억": [{"날짜": r["날짜"], "억": round(r["외현"])} for r in rows[-5:]],
             "감속판정": _decel(rows, wr, sell)}
+
+
+def _ladder_for_prompt(rows, w, sell, D):
+    L = _fv_ladder(rows, w)
+    if not L or not L["base"]:
+        return {}
+    b = L["base"]
+    덩이 = (f"연속 {'매도' if sell else '매수'} {D(b['a'])}~{D(b['e'])} · {b['n']}일" if b["kind"] == "streak"
+           else f"직전 진짜 {'고점' if sell else '저점'}({D(b['a'])}) 이후")
+    al = L["alarm"]
+    return {"기준덩어리": {"구간": 덩이, "억": round(b["amt"])},
+            "알람_하루큰반대매매": {"기준_억": round(al["thr"]), "기준일": D(al["d"]) if al["d"] is not None else None,
+                             "오늘켜짐": al["on"], "주의": "혼자서는 5번 중 1번만 진짜 전환"},
+            "1차_3분의1회복": {"필요_억": round(b["amt"] / 3), "지금_억": round(L["rec"]),
+                          "진행_퍼센트": round(L["rec"] / (b["amt"] / 3) * 100) if b["amt"] else None},
+            "2차_절반회복": {"필요_억": round(b["amt"] / 2), "지금_억": round(L["rec"]),
+                         "진행_퍼센트": round(L["rec"] / (b["amt"] / 2) * 100) if b["amt"] else None,
+                         "근거": "2021~ 기록에서 연속 5일↑ 매도의 절반 회복은 4번 모두 진짜 전환(표본 작음)"}}
 
 
 def _decel(rows, wr, sell):
