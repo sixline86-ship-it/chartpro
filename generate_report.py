@@ -1008,6 +1008,8 @@ SYSTEM_PROMPT = """\
                  (시황 탭 숫자와 수급 탭 숫자가 항상 같게). 주제는 하나로 고정:
                  «외국인이 돌아서기 시작하나 — 연속 매도(매수) 덩어리의 1/3을 되찾나(1차), 절반(2차)».
                  🔴 2026-10-19 — 옛 기준(가장 큰 반등·최근 큰 하루)은 버렸다. «하루 큰 매수»는 알람일 뿐이다.
+                 ⚠️ 백테스트 성적·사례 수(«N번 중 N번» 등)는 구독자 글에 쓰지 마라 — 기준과 보는 법만 쓴다.
+                 🔴 '외국인파도'의 방향이 «횡보»면 주제는 «누적선이 직전 고점(1차)·그 앞 고점(2차)을 돌파하나»다.
                  너는 이 주제로 '근거'(왜 이걸 보나)·'맞으면'·'아니면' 글만 쓴다.
                  ⚠️ 1차·2차·확정 기준 숫자를 새로 계산하거나 다른 숫자(평균의 150% 등)로 바꾸지 마라.
                     숫자가 필요하면 '외국인파도'의 값을 그대로 옮긴다. '진행'은 넣지 않아도 된다.
@@ -1718,6 +1720,8 @@ def _fv_wave(rows, key="외현"):
         wd = 1
     else:
         wd = -1 if cum[-1] < cum[0] else 1       # 혼조 — 큰 방향으로
+    mixed = not ((cum[H[-1]] < cum[H[-2]] and cum[L[-1]] < cum[L[-2]])
+                 or (cum[H[-1]] > cum[H[-2]] and cum[L[-1]] > cum[L[-2]]))   # 🔴 2026-10-19 횡보
     # 시작 — 매도 파도면 «더 높은 고점»이 마지막으로 나온 곳
     src = H if wd < 0 else L
     k = len(src) - 1
@@ -1760,7 +1764,24 @@ def _fv_wave(rows, key="외현"):
     lv2 = abs(cum[lv2_idx] - cum[ex]) if lv2_idx is not None else None
     return {"s": ws, "dir": wd, "ext": ex, "reb": reb, "lv1": lv1, "lv2": lv2,
             "lv2_idx": lv2_idx, "bounces": [x for x in 되 if x["b"] <= ex],
-            "avg": avg_at(len(cum) - 1), "from_start": ws <= 1}
+            "avg": avg_at(len(cum) - 1), "from_start": ws <= 1,
+            "mixed": mixed, "cum": cum, "piv1": piv, "piv2": _p2}
+
+
+def _fv_side_levels(w):
+    """build_html._fv_side_levels와 같은 규칙(횡보 — 직전 고점 → 그 앞 고점)."""
+    cum = w["cum"]
+    now = cum[-1]
+    P = w.get("piv2") or []
+    Hs = [i for i, t in P if t == "H"] or [i for i, t in w["piv1"] if t == "H"]
+    out, lvl = [], now
+    for i in reversed(Hs):
+        if cum[i] > lvl:
+            out.append(i)
+            lvl = cum[i]
+            if len(out) == 2:
+                break
+    return out
 
 
 def _fv_ladder(rows, w, key="외현"):
@@ -1814,6 +1835,12 @@ def foreign_wave_for_prompt():
     sell = w["dir"] < 0
     쪽 = [(abs(r["외현"]), r["종가"]) for r in wr if (r["외현"] < 0) == sell and r["외현"] != 0]
     평균 = round(sum(a * c for a, c in 쪽) / sum(a for a, _ in 쪽)) if 쪽 else None
+    if w.get("mixed"):   # 🔴 2026-10-19 HO «횡보는 전고점 돌파 위주로»
+        return {"방향": "횡보(고점·저점이 엇갈림)", "시작일": wr[0]["날짜"], "일수": len(wr),
+                "누적_억": round(sum(r["외현"] for r in wr)),
+                "돌파기준": [{"차수": k + 1, "고점일": D(i), "더_사야_억": round(w["cum"][i] - w["cum"][-1])}
+                         for k, i in enumerate(_fv_side_levels(w))],
+                "최근5일_억": [{"날짜": r["날짜"], "억": round(r["외현"])} for r in rows[-5:]]}
     return {"방향": "매도 파도" if sell else "매수 파도", "시작일": wr[0]["날짜"], "일수": len(wr),
             "누적_억": round(sum(r["외현"] for r in wr)),
             ("매도평균지수" if sell else "매수평균지수"): 평균, "오늘지수": wr[-1]["종가"],
@@ -1840,12 +1867,11 @@ def _ladder_for_prompt(rows, w, sell, D):
     al = L["alarm"]
     return {"기준덩어리": {"구간": 덩이, "억": round(b["amt"])},
             "알람_하루큰반대매매": {"기준_억": round(al["thr"]), "기준일": D(al["d"]) if al["d"] is not None else None,
-                             "오늘켜짐": al["on"], "주의": "혼자서는 5번 중 1번만 진짜 전환"},
+                             "오늘켜짐": al["on"]},
             "1차_3분의1회복": {"필요_억": round(b["amt"] / 3), "지금_억": round(L["rec"]),
                           "진행_퍼센트": round(L["rec"] / (b["amt"] / 3) * 100) if b["amt"] else None},
             "2차_절반회복": {"필요_억": round(b["amt"] / 2), "지금_억": round(L["rec"]),
-                         "진행_퍼센트": round(L["rec"] / (b["amt"] / 2) * 100) if b["amt"] else None,
-                         "근거": "2021~ 기록에서 연속 5일↑ 매도의 절반 회복은 4번 모두 진짜 전환(표본 작음)"}}
+                         "진행_퍼센트": round(L["rec"] / (b["amt"] / 2) * 100) if b["amt"] else None}}
 
 
 def _decel(rows, wr, sell):
