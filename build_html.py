@@ -2095,7 +2095,27 @@ def _fx_wave_now():
         if w.get("mixed"):
             _hs, _lw = _fv_side_levels(w)
             _side = [{"d": d(i), "need": w["cum"][i] - w["cum"][-1]} for i, _j in _hs]
-        return {"mixed": bool(w.get("mixed")), "side": _side, "steps": st, "rec": L.get("rec") or 0,
+        # 🔴 2026-10-19 HO — 시황 = «어제 → 오늘 무엇이 바뀌었나», 종합 = 신호등. 어제 상태는 어제까지 자료로 다시 잰다.
+        def _state(rr):
+            ww = _fv_wave(rr)
+            if not ww:
+                return None
+            LL = _fv_ladder(rr, ww) or {}
+            ss = LL.get("steps") or []
+            rc = LL.get("rec") or 0
+            sd = []
+            if ww.get("mixed"):
+                sd = [ww["cum"][i] - ww["cum"][-1] for i, _j in _fv_side_levels(ww)[0]]
+            return {"mixed": bool(ww.get("mixed")), "sell": ww["dir"] < 0,
+                    "p1": (rc / ss[0]["amt"] * 100) if ss else None,
+                    "p2": (rc / ss[1]["amt"] * 100) if len(ss) > 1 else None,
+                    "pc": (ww["reb"] / ww["lv2"] * 100) if ww.get("lv2") else None,
+                    "alarm": bool((LL.get("alarm") or {}).get("on")),
+                    "base_a": (rr[LL["base"]["a"]]["날짜"] if LL.get("base") else None),
+                    "side": sd, "days": len(rr) - ww["s"]}
+        _now, _prev = _state(rows), (_state(rows[:-1]) if len(rows) > 12 else None)
+        return {"now": _now, "prev": _prev,
+                "mixed": bool(w.get("mixed")), "side": _side, "steps": st, "rec": L.get("rec") or 0,
                 "base": (dict(b, a_d=d(b["a"]), e_d=d(b["e"])) if b else None),
                 "alarm": L.get("alarm"),
                 "sell": w["dir"] < 0, "lv1": w.get("lv1"), "reb": w.get("reb") or 0,
@@ -2105,6 +2125,37 @@ def _fx_wave_now():
     except Exception as e:
         print(f"   ⚠️ 외국인 파도(시황용) 실패 — {type(e).__name__}: {e}")
         return None
+
+
+def _fx_go(txt):
+    return f'<p class="sh-go" data-tab="수급" data-sel="#cp-fvclock" onclick="cpGo(this)">{txt}</p>'
+
+
+def _fx_delta_line(w):
+    """🔴 2026-10-19 — 시황 «내일 확인할 것 ①»: 어제 → 오늘 무엇이 바뀌었나(외국인 시계와 같은 숫자)."""
+    n, p = w.get("now") or {}, w.get("prev") or {}
+    P = lambda v: "–" if v is None else f'{max(0, min(999, v)):.0f}%'
+    ch = lambda a, b: (b is not None and a is not None and round(a) != round(b))
+    if n.get("mixed"):
+        a = (p.get("side") or [None])[0] if p.get("mixed") else None
+        b = (n.get("side") or [None])[0]
+        if b is None:
+            return '횡보 — 최근 고점들을 이미 넘었어요'
+        return ('횡보 · 직전 고점까지 ' + (f'{_fv_amt(a).lstrip("+")} → ' if a is not None else '')
+                + f'<b>{_fv_amt(b).lstrip("+")}</b> 남음')
+    bits = []
+    if p and p.get("base_a") != n.get("base_a"):
+        bits.append('기준 덩어리가 새로 바뀌었어요')
+    for k, nm in (("p1", "1차"), ("p2", "2차"), ("pc", "확정")):
+        if n.get(k) is None:
+            continue
+        if ch(p.get(k), n.get(k)):
+            bits.append(f'{nm} {P(p.get(k))} → <b>{P(n.get(k))}</b>')
+    if n.get("alarm"):
+        bits.append('🔔 <b>알람 켜짐</b>')
+    if not bits:
+        return f'어제와 같아요 — 1차 {P(n.get("p1"))} · 2차 {P(n.get("p2"))}'
+    return '어제 → 오늘 · ' + ' · '.join(bits)
 
 
 def _sh_flow_fill(x):
@@ -2121,8 +2172,10 @@ def _sh_flow_fill(x):
         y["기준"] = (f'누적선이 직전 고점({sd[0]["d"]}) 돌파 — {A(sd[0]["need"])} 더 사기'
                    + (f' <span class="sh-kb2">· 2차는 그 앞 고점({sd[1]["d"]}) {A(sd[1]["need"])}</span>' if len(sd) > 1 else ""))
         y["진행"] = None
+        y["기준"] = _fx_delta_line(w)
+        y["_go"] = _fx_go("🕰️ 단계·차트 전체는 수급 탭 «외국인 시계»에서 →")
         y["근거"] = ('고점과 저점이 엇갈리는 «횡보»예요. 이럴 땐 하루 숫자보다 <b>누적선이 직전 고점을 넘는지</b>가 방향을 정해요.'
-                   ' 숫자는 수급 탭 외국인 시계와 같아요.')
+                   '')
         y["맞으면"] = '횡보를 벗어나 매수 쪽으로 기우는 첫 신호예요.'
         y["아니면"] = '아직 방향 없는 횡보 — 직전 저점을 깨면 매도 쪽으로 기울어요.'
         return y
@@ -2148,10 +2201,13 @@ def _sh_flow_fill(x):
                + (f' <span class="sh-kb2">· 확정은 직전 «진짜» {"고점" if s else "저점"} {w["lv2_d"]} '
                   f'{"돌파" if s else "이탈"} {A(w["lv2"])}</span>' if w.get("lv2") else ""))
     y["진행"] = {"시작": 0, "현재": round(w.get("rec") or 0), "목표": round(st1["amt"]), "단위": "억"}
+    # 🔴 2026-10-19 HO «시황·종합·수급이 같은 말» → 시황은 «어제 → 오늘 변화»만, 단계 전체는 수급 탭으로
+    y["기준"] = _fx_delta_line(w)
+    y["_go"] = _fx_go("🕰️ 단계·차트 전체는 수급 탭 «외국인 시계»에서 →")
     # ⚠️ 근거·맞으면·아니면은 «항상» 규칙 문장 — 숫자가 화면과 어긋나지 않게.
     y["근거"] = (f'외국인은 {덩이}를 했어요. 하루 큰 매수는 숏커버 같은 하루짜리가 많아서, '
                f'<b>같은 덩어리</b>로 견줘요 — 그 손이 자기 {"매도" if s else "매수"}의 1/3을 되돌렸는가.'
-               + ' 숫자는 수급 탭 외국인 시계와 같아요.')
+               )
     y["맞으면"] = (f'파도에 처음 금이 간 것 — 절반({A(st2["amt"]) if st2 else "–"})을 넘으면 더 믿을 만하고, '
                  f'확정은 직전 «진짜» {"고점" if s else "저점"}'
                  f'{"(" + w["lv2_d"] + ")" if w["lv2_d"] else ""}을 넘을 때예요.')
@@ -2180,8 +2236,9 @@ def _sh_tomorrow(해석):
             f'<div class="sh-k"><p class="sh-kq"><b>{i}</b>'
             + (f'<em class="sh-ka">{x.get("영역")}</em>' if x.get("영역") else "")
             + f'{x.get("무엇","")}</p>'
-            + (f'<p class="sh-kb">기준 <em>{x.get("기준","")}</em></p>' if x.get("기준") else "")
+            + (f'<p class="sh-kb">{"변화" if x.get("_go") else "기준"} <em>{x.get("기준","")}</em></p>' if x.get("기준") else "")
             + _sh_progress(x.get("진행"))
+            + (x.get("_go") or "")
             + (f'<p class="sh-kw"><span>💬 왜 이걸 보냐면요</span>{_sh_breath(x.get("근거",""))}</p>' if x.get("근거") else "")
             + '<div class="sh-ky">'
             + (f'<p><i class="y">이렇게 되면</i>{x.get("맞으면","")}</p>' if x.get("맞으면") else "")
@@ -2671,7 +2728,7 @@ NAVER_CHART = "https://m.stock.naver.com/domestic/stock/{code}/total"
 NAVER_NEWS = "https://m.stock.naver.com/domestic/stock/{code}/news"
 
 
-def chart_pill(코드):
+def chart_pill(코드, 이름=None):
     """종목코드(6자리) → 네이버 차트 알약 HTML. 없으면 빈 문자열."""
     c = str(코드 or "").strip()
     if len(c) != 6 or not c.isdigit():
@@ -2682,9 +2739,16 @@ def chart_pill(코드):
     return (f'<a class="cp-chart" href="{NAVER_CHART.format(code=c)}" '
             f'target="_blank" rel="noopener" '
             f'onclick="event.stopPropagation()">📈 차트</a>'
-            f'<a class="cp-chart cp-news" href="{NAVER_NEWS.format(code=c)}" '
+            # 🔴 2026-10-19 HO «뉴스는 검색어를 "종목명" 주가로 좁혀» — 바로 기사 목록 + 같은 이름 다른 뜻 잡음 줄이기
+            f'<a class="cp-chart cp-news" href="{_news_url(이름) if 이름 else NAVER_NEWS.format(code=c)}" '
             f'target="_blank" rel="noopener" '
             f'onclick="event.stopPropagation()">📰 뉴스</a>')
+
+
+def _news_url(이름):
+    import urllib.parse as _up
+    return ("https://m.search.naver.com/search.naver?where=m_news&sort=1&query="
+            + _up.quote(f'"{re.sub(r"<[^>]+>", "", str(이름)).strip()}" 주가'))
 
 
 def sc_click(nm, 색=None, 크기=15, 끼움="", 코드=None):
@@ -2715,7 +2779,7 @@ def sc_click(nm, 색=None, 크기=15, 끼움="", 코드=None):
     #     떨어졌다. 그러면 등락률이 배지에 밀려 안 보인다.
     #     → 이름줄에는 «이름 + 등락률»만, 배지는 «아랫줄»에 따로 둔다.
     #   ⚠️ 기본 동작은 그대로다 — 세 번째 반환값을 «안 쓰면» 예전과 같다.
-    _배지 = f'<span class="sc-tap"><i>▾</i>기업분석</span>{chart_pill(코드)}'
+    _배지 = f'<span class="sc-tap"><i>▾</i>기업분석</span>{chart_pill(코드, nm)}'
     # 🆕 2026-10-13 HO «포착 종목은 '저장' 알약으로 바로 내 종목에» — 포착 탭을 그리는 동안만 붙인다(_SC_SAVE)
     if _SC_SAVE[0]:
         _배지 += (f'<span class="cp-chart cp-save" data-nm="{안전}" '
@@ -4102,13 +4166,32 @@ def build_premarket3(data, 해석, 날짜표기=""):
             k = w["연속"]
             쪽 = "순매도" if w["연속방향"] < 0 else "순매수"
             반대 = "순매수" if w["연속방향"] < 0 else "순매도"
-            t = (f'{k}일째 {쪽}' if k >= 2 else f'오늘 {쪽}') + f' — <b>{"되사는" if s else "되파는"} 돈이 얼마나 쌓이는지</b>가 관건'
-            if w.get("mixed") and w.get("side"):   # 🔴 2026-10-19 — 횡보: 직전 고점 돌파까지
-                t = (f'횡보 — <b>직전 고점({w["side"][0]["d"]}) 돌파</b>가 첫 신호 '
-                     f'<span>({_fv_amt(w["side"][0]["need"]).lstrip("+")} 더 사야)</span>')
-            elif w.get("steps"):     # 🔴 2026-10-19 — 1차 = 연속 매도의 1/3 · 시황·수급과 같은 숫자
-                t += (f' <span>({"되산" if s else "되판"} 돈 {_fv_amt(w.get("rec") or 0).lstrip("+")}'
-                      f' · 1차(연속 {"매도" if s else "매수"}의 1/3) {_fv_amt(w["steps"][0]["amt"]).lstrip("+")})</span>')
+            # 🔴 2026-10-19 HO — 종합은 «신호등» 한 줄 + 누르면 수급 탭 외국인 시계로
+            n = w.get("now") or {}
+            P = lambda v: f'{max(0, min(100, v or 0)):.0f}%'
+            if n.get("mixed"):
+                dot, lab = "⚪", "횡보"
+                nxt = (f'직전 고점까지 {_fv_amt(n["side"][0]).lstrip("+")}' if n.get("side") else '최근 고점 모두 넘음')
+            elif s:
+                if (n.get("pc") or 0) >= 100:
+                    dot, lab, nxt = "🔴", "매수 전환 확정", "직전 진짜 고점 돌파"
+                elif (n.get("p2") or 0) >= 100:
+                    dot, lab, nxt = "🟠", "2차 켜짐", f'확정까지 {P(n.get("pc"))}'
+                elif (n.get("p1") or 0) >= 100:
+                    dot, lab, nxt = "🟡", "1차 켜짐", f'2차 {P(n.get("p2"))}'
+                else:
+                    dot, lab = "🔵", f'매도 파도 {n.get("days", "")}일째'
+                    nxt = ('🔔 알람 켜짐 · ' if n.get("alarm") else '') + f"1차 진행 {P(n.get('p1'))}"
+            else:
+                if (n.get("pc") or 0) >= 100:
+                    dot, lab, nxt = "🔵", "매수 파도 꺾임 확정", "직전 진짜 저점 이탈"
+                elif (n.get("p1") or 0) >= 100:
+                    dot, lab, nxt = "🟡", "매수 파도 꺾이는 중", f'2차 {P(n.get("p2"))}'
+                else:
+                    dot, lab = "🔴", f'매수 파도 {n.get("days", "")}일째'
+                    nxt = f'꺾임 1차 진행 {P(n.get("p1"))}'
+            t = (f'<span class="pm-go" data-tab="수급" data-sel="#cp-fvclock" onclick="cpGo(this)">'
+                 f'{dot} <b>{lab}</b> · {nxt} <em>수급 탭 →</em></span>')
             ln.append(("🌊", "외국인", t))
     except Exception as e:
         print(f"   ⚠️ 개장 전 3초(외국인) 실패 — {type(e).__name__}: {e}")
@@ -7050,7 +7133,7 @@ def build_my_stocks(data):
    svg+='<line x1="'+X(i-1)+'" y1="'+Y(h[i-1])+'" x2="'+X(i)+'" y2="'+Y(h[i])+'" stroke="#e8c33a" stroke-opacity="'+(ok?.8:.35)+'" stroke-width="1.5"'+(ok?'':' stroke-dasharray="2 2"')+'/>'; }
   h.forEach(function(v,i){ var inn=v&&v<=20, last=i===n-1;
    svg+=inn?('<circle cx="'+X(i)+'" cy="'+Y(v)+'" r="'+(last?3.2:2.2)+'" fill="'+(last?'#ffc93c':'#8b95a5')+'"/><text x="'+X(i)+'" y="'+(Y(v)-5)+'" text-anchor="middle" font-size="9.5" font-weight="'+(last?800:600)+'" fill="'+(last?'#ffc93c':'#a8b0bb')+'">'+v+'</text>')
-     :('<circle cx="'+X(i)+'" cy="48" r="2" fill="none" stroke="#5c6676"/><text x="'+X(i)+'" y="43" text-anchor="middle" font-size="8" fill="#5c6676">밖</text>'); });
+     :('<circle cx="'+X(i)+'" cy="48" r="2" fill="none" stroke="#5c6676"/><text x="'+X(i)+'" y="43" text-anchor="middle" font-size="9.5" font-weight="700" fill="#8b95a5">밖</text>'); });
   return '<p class="mt-tl"><b>'+_tShort(T)+'</b> <span class="mt-tn">최근 5일 순위 · 오른쪽이 오늘</span></p><svg class="mt-td" viewBox="0 0 '+W+' 54">'+svg+'</svg>';
  }
  function _tE(T){  /* 사이클 단계 */
@@ -7807,7 +7890,7 @@ def build_my_stocks(data):
     '<span class="cp-sname" id="'+_bid+'-n">'+
     '<span class="sc-tap"><i>▾</i>기업분석</span>'+_chart+
     (_cd0?'<a class="cp-chart ms-disc" href="https://m.stock.naver.com/domestic/stock/'+_cd0+'/discussion" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ms-ic">💬 </i>토론방</a>'+
-          '<a class="cp-chart ms-news" href="https://m.search.naver.com/search.naver?where=m_news&sort=1&query='+encodeURIComponent(nm)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ms-ic">📰 </i>뉴스</a>':'')+
+          '<a class="cp-chart ms-news" href="https://m.search.naver.com/search.naver?where=m_news&sort=1&query='+encodeURIComponent('"'+nm+'" 주가')+'" target="_blank" rel="noopener" onclick="event.stopPropagation()"><i class="ms-ic">📰 </i>뉴스</a>':'')+
     _bell(_F,_bid)+'</span></div>'+_bellBox(_F,_bid)+
     /* 🆕 2026-09-04 (2차) HO 지시 — 기업분석 펼침칸을 «기사·공시(items)» **위**로
        올린다. [WHY] 예전엔 이름 → 기사/공시 → 기업분석 → 오늘 분석 순서라,
@@ -12832,7 +12915,11 @@ def build_core(핵심편, data, 해석):
             '<div class="jd-tabs">'
             # 🔴 2026-10-19 HO «'오늘 테마' / '내일 테마 전략 · 성적표' — 오늘 칸은 좁게, 내일 칸은 넓게»
             '<button class="jd-tb-b on" onclick="jdTab(0,this)">📊 오늘 테마</button>'
-            '<button class="jd-tb-b" onclick="jdTab(1,this)">🎯 내일 테마 전략 · 성적표</button>'
+            '<button class="jd-tb-b" onclick="jdTab(1,this)">🎯 내일 테마 전략 · 성적표'
+            # 🔴 2026-10-19 HO «자물쇠가 풀린 그림으로» — 이모지는 기기마다 달라 보여 직접 그린다(고리가 열린 금색 자물쇠)
+            '<svg class="jd-unlk" viewBox="0 0 18 16" aria-label="잠금 해제"><path d="M8.2 7.5V4.2a3.2 3.2 0 0 1 6.4 0V6.4" fill="none" '
+            'stroke="#e0c060" stroke-width="1.8" stroke-linecap="round"/><rect x="1" y="7.5" width="9.4" height="7.5" rx="1.8" fill="#e0c060"/>'
+            '<circle cx="5.7" cy="11.2" r="1.1" fill="#3a2f12"/></svg></button>'
             '</div>'
             f'<div id="jdPane0">{_테마}</div>'
             f'<div id="jdPane1" style="display:none">{_판단}</div>'
@@ -19055,7 +19142,7 @@ def _why_html(w, cls="tm-why"):
 #      ⚠️ 9월은 반도체 강세장 — 확산형이 반도체·AI에 몰린 건 장세 영향도 섞여 있다.
 # ══════════════════════════════════════════════════════════════
 THEME_SHADOW_PCT = 70     # 한 종목 몫이 이 % 이상 = 그림자 테마
-FOLLOW_MIN_N = 3          # 후발 판정에 필요한 최소 기록 수
+FOLLOW_MIN_N = 5          # 후발 판정에 필요한 최소 기록 수 (🔴 2026-10-19 HO 3 → 5)
 FOLLOW_LAG = 0.4          # 덜 간 종목 = 앞장선 종목 등락의 40% 미만
 FOLLOW_H = 3              # 따라왔나 = 다음 3거래일
 FOLLOW_LEAD_CAP억 = 1000  # 앞장선 종목 후보 시총 하한
@@ -19226,28 +19313,23 @@ def _follow_block(nm):
             return ""
         lag = sorted([x for x in mem if x != lead and 0 < R[d][x] < L * FOLLOW_LAG],
                      key=lambda x: -(cap.get(x) or 0))[:3]
+        # 🔴 2026-10-19 HO «너무 복잡 — 아주 쉽게» → 질문 하나 · 답 하나. 판정이 확실한 테마만 보여준다(반반·기록 부족은 숨김).
+        #   [셈법은 그대로] 이 테마가 10위권이던 날, 대장 등락의 40%도 못 오른 종목들이 다음 3일 시장보다 더 올랐나.
+        #   7할 이상 → «따라 오르는 테마» · 3할 이하 → «대장 혼자 가는 테마». 숫자(N번 중 M번)는 화면에 안 쓴다.
         t = _follow_stats()["typ"].get(nm)
-        if t and t[0] >= FOLLOW_MIN_N:
-            cnt, w, avg = t
-            rate = w / cnt
-            k, lab = (("wide", "확산형") if rate >= 0.7 else ("solo", "독주형") if rate <= 0.3 else ("mix", "반반"))
-            msg = (f'지난 {cnt}번 중 <b>{w}번</b> 덜 간 종목이 따라왔어요 · '
-                   f'3일 평균 시장보다 <b>{avg:+.1f}%p</b>')
-        else:
-            k, lab = "wait", "기록 쌓는 중"
-            msg = f'10위권에 든 기록이 {FOLLOW_MIN_N}번 미만이라 아직 판정하지 않아요'
-        act = {"wide": "앞장선 종목은 이미 갔어요. <b>아래 덜 간 종목</b>을 보세요.",
-               "solo": "따라오는 종목이 드문 테마예요. <b>앞장선 종목만</b> 보세요.",
-               "mix": "반반이에요. 덜 간 종목은 <b>거래대금이 붙는지</b> 확인하고 보세요.",
-               "wait": "판정 전이에요. 덜 간 종목은 참고만 하세요."}[k]
-        chips = "".join(f'<span class="fw-c">{x}<em>{R[d][x]:+.1f}%</em><s>{_eok(cap[x])}</s></span>' for x in lag)
-        return (f'<div class="fw"><p class="fw-t">🔁 후발 추적 <span class="fw-ty {k}">{lab}</span></p>'
-                f'<p class="fw-ld">오늘 앞장선 종목 <b>{lead}</b> <em>{L:+.1f}%</em></p>'
-                f'<p class="fw-m">{msg}</p><p class="fw-a">👉 {act}</p>'
-                + (f'<p class="fw-cl">따라올 후보 · 앞장선 종목 등락의 40% 미만 상승 · 시총 500억↑ · 시총 큰 순</p>'
-                   f'<div class="fw-cs">{chips}</div>' if chips else
-                   '<p class="fw-cl">오늘은 «덜 간» 종목이 없어요 — 다 같이 올랐거나 안 올랐어요</p>')
-                + '</div>')
+        if not t or t[0] < FOLLOW_MIN_N:
+            return ""
+        rate = t[1] / t[0]
+        if rate >= 0.7:
+            chips = "".join(f'<span class="fw-c">{x}<em>{R[d][x]:+.1f}%</em></span>' for x in lag)
+            return ('<div class="fw"><p class="fw-t">🔁 덜 오른 종목도 따라 오를까?</p>'
+                    f'<p class="fw-a">✅ <b>따라 오르는 테마</b>예요 — 대장({lead})이 먼저 가면 덜 오른 종목이 며칠 뒤 따라온 적이 많았어요.</p>'
+                    + (f'<p class="fw-cl">오늘 덜 오른 종목</p><div class="fw-cs">{chips}</div>' if chips else '')
+                    + '</div>')
+        if rate <= 0.3:
+            return ('<div class="fw"><p class="fw-t">🔁 덜 오른 종목도 따라 오를까?</p>'
+                    f'<p class="fw-a">⚠️ <b>대장 혼자 가는 테마</b>예요 — 덜 오른 종목은 잘 안 따라왔어요. 대장({lead})만 보세요.</p></div>')
+        return ""
     except Exception as e:
         print(f"   ⚠️ 후발 추적 칸 실패 [{nm}] — {type(e).__name__}: {e}")
         return ""
@@ -19442,12 +19524,12 @@ def _ax_radar():
                   + ' — 오늘 볼 곳은 여기예요.')
     if wide:
         ln.append(" · ".join(f'<b>{_shn(n)}</b>' for n in wide)
-                  + '는 <b>확산형</b> — ▾를 눌러 «따라올 후보»(덜 간 종목)를 보세요.')
+                  + '는 <b>따라 오르는 테마</b> — ▾를 눌러 «덜 오른 종목»을 보세요.')
     if solo:
         ln.append(" · ".join(f'<b>{_shn(n)}</b>' for n in solo)
-                  + '는 <b>독주형</b> — 앞장선 종목만 보세요.')
+                  + '는 <b>대장 혼자 가는 테마</b> — 대장만 보세요.')
     if keep and not wide and not solo:
-        ln.append('오늘은 확산형·독주형 판정이 난 테마가 없어요 — ▾를 눌러 앞장선 종목과 따라올 후보를 함께 보세요.')
+        ln.append('오늘 이어지는 테마는 «따라 오르는지» 판정이 아직 안 났어요 — 대장 위주로 보세요.')
     _cur10 = {k for k, _ in (rk.get(last) or [])[:10]}
     _gone = sorted(prev - _cur10)
     if new:
@@ -21706,7 +21788,7 @@ def build_theme_radar(data):
                           f'font-weight="{800 if _last else 600}" fill="{c if _last else "#a8b0bb"}">{v}</text>')
             else:
                 _dots += (f'<circle cx="{x}" cy="{y}" r="2" fill="none" stroke="#5c6676" stroke-width="1"/>'
-                          f'<text x="{x}" y="{y - 4.5:.1f}" text-anchor="middle" font-size="7.5" fill="#5c6676">밖</text>')
+                          f'<text x="{x}" y="{y - 5.5:.1f}" text-anchor="middle" font-size="9.5" font-weight="700" fill="#8b95a5">밖</text>')   # 🔴 10/19 HO «밖이 안 보여»
         _trail = (f'<svg class="tm-tr" viewBox="0 0 {_W} {_H}" width="{_W}" height="{_H}">'
                   f'{_seg}{_dots}</svg>')
         _what, _tags, _solo = "", "", ""
@@ -22837,6 +22919,7 @@ THEME_V17_CSS = """
 .tm-shf b{color:#e6ebf1}
 .tm-shn{margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.55}
 .fw{margin:6px 0 10px;padding:10px 12px;border:1px solid #2a3444;border-radius:10px;background:#0d131c}
+.pm-go{cursor:pointer}.pm-go em{font-style:normal;font-size:.9em;color:#8fc4ff;white-space:nowrap}
 .fw-t{margin:0 0 4px;font-size:12.5px;font-weight:800;color:#e6ebf1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fw-ty{font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px}
 .fw-ty.wide{color:#ff5a4e;background:rgba(255,90,78,.12)}
@@ -23576,7 +23659,7 @@ THEME_V17_CSS = """
 .jd-cs{margin:0;padding:6px 8px;font-size:11px;color:#8fd0e8;line-height:1.6;
   background:rgba(143,208,232,.07);border-radius:7px}
 .jd-tabs{display:flex;gap:6px;margin:0 0 12px}
-.jd-tabs .jd-tb-b:first-child{flex:0 0 36%}.jd-tabs .jd-tb-b:last-child{flex:1 1 auto;white-space:nowrap;letter-spacing:-.02em}
+.jd-tabs .jd-tb-b:first-child{flex:0 0 33%}.jd-unlk{width:15px;height:13px;margin-left:4px;vertical-align:-2px}@media (max-width:380px){.jd-tabs .jd-tb-b{font-size:11px;letter-spacing:-.04em}}.jd-tabs .jd-tb-b:last-child{flex:1 1 auto;white-space:nowrap;letter-spacing:-.02em}
 .jd-tb-b{flex:1;padding:9px 0;font-size:12.5px;font-weight:800;
   color:#7d8695;background:#111823;border:1px solid #1e2937;
   border-radius:9px;cursor:pointer;font-family:inherit}
@@ -25163,7 +25246,7 @@ def build_atc_talk(해석):
     return f'<div class="atc">{블록}</div>'
 
 
-def build_flow_timeline(이력, caption=None, cap_below=False):
+def build_flow_timeline(이력, caption=None, cap_below=False, cap_out=None):
     """기간 탭(5·20·60) + 통합 타임라인. 이력 부족 탭은 진행 막대.
     caption(이력, p)을 주면 탭마다 «이 그림이 말하는 것»을 따로 붙인다.
     cap_below=True면 그 글을 그림·범례 «밑»(= 비차익 쉽게 읽기 바로 위)에 둔다 — 2026-10-09 HO."""
@@ -25208,8 +25291,9 @@ def build_flow_timeline(이력, caption=None, cap_below=False):
         <span><i style="background:#6f7784"></i>코스피</span>
         <span><i style="background:{FS_CRD}"></i>신용융자 잔고 — 빚내서 산 돈</span>
       </div>
-      {_밑글}
+      {"" if isinstance(cap_out, list) else _밑글}
     </div>
+    {"" if not isinstance(cap_out, list) or cap_out.append(_밑글) else ""}
     <script>(function(){{
       var root=document.currentScript.parentNode;
       root.addEventListener('click',function(e){{
@@ -26354,6 +26438,46 @@ def _fv_bichaik_easy(이력):
             '</details></div>')
 
 
+def _fv_credit_alert(data, 이력=None):
+    """🆕 2026-10-19 HO «신용융자 잔고가 확 내려갔는데 한 줄이 없다 — 급등락할 때는 꼭 짚어줘.»
+    [규칙] 하루 변화가 평소(최근 20일 평균 하루 변화)의 2배 이상 · 또는 잔고의 1% 이상이면 «접지 않고» 보이게 쓴다.
+    ⚠️ 반대매매 금액은 따로 수집하지 않는다 → «반대매매가 몰린 것으로 보여요»까지만(단정 금지)."""
+    try:
+        c = (data or {}).get("신용잔고") or {}
+        H = [x for x in (c.get("이력") or []) if isinstance(x.get("잔고"), (int, float))][-21:]
+        if len(H) < 10:
+            return ""
+        v = [x["잔고"] for x in H]
+        df = [b - a for a, b in zip(v[:-1], v[1:])]
+        평 = sum(abs(x) for x in df[:-1]) / max(1, len(df) - 1)
+        d1 = df[-1]
+        if not 평 or not (abs(d1) >= 평 * 2 or abs(d1) >= v[-2] * 0.01):
+            return ""
+        d2 = df[-1] + df[-2] if len(df) >= 2 and (df[-2] > 0) == (d1 > 0) else None
+        bd = H[-1]["날짜"]
+        dd = f'{bd[4:6]}/{bd[6:]}'
+        kr = next((r.get("코스피등락") for r in (이력 or []) if isinstance(r, dict) and r.get("날짜") == bd), None)
+        pct = d1 / v[-2] * 100
+        col = TM_HOT if d1 > 0 else TM_DOWN
+        head = (f'💳 <b>신용융자 잔고 {"급증" if d1 > 0 else "급감"}</b> — {dd} 하루 '
+                f'<b style="color:{col}">{_fv_amt(d1)}</b>({pct:+.1f}%) · 평소 하루 변화의 <b>{abs(d1) / 평:.1f}배</b>'
+                + (f' · 이틀 합 <b style="color:{col}">{_fv_amt(d2)}</b>' if d2 is not None else ''))
+        if d1 < 0 and isinstance(kr, (int, float)) and kr <= -3:
+            why = (f'코스피가 <b>{kr:+.1f}%</b> 급락한 날과 겹쳐요. 담보가 모자라 증권사가 강제로 판 <b>«반대매매»</b>와 '
+                   '겁먹은 손절·상환이 한꺼번에 나온 것으로 보여요. <span class="fv-ca-n">(반대매매 금액은 따로 발표되지 않아 정확한 몫은 몰라요)</span>')
+        elif d1 < 0:
+            why = '개인이 빚을 갚거나 정리하는 중이에요 — 빚으로 산 물량(언제든 나올 매물)이 줄어든다는 뜻이에요.'
+        elif isinstance(kr, (int, float)) and kr < 0:
+            why = '지수가 빠지는 날 빚을 더 냈어요 — «버티기·물타기» 성격이라, 더 빠지면 반대매매 물량이 될 수 있어요.'
+        else:
+            why = '빚내서 사는 돈이 급히 늘었어요 — 지수가 꺾이면 반대매매로 한꺼번에 나올 수 있는 물량이에요.'
+        return (f'<div class="fv-ca {"up" if d1 > 0 else "dn"}"><p>{head}</p><p class="fv-ca-w">{why}</p>'
+                '<p class="fv-ca-n">신용 숫자는 2거래일 늦게 발표돼요.</p></div>')
+    except Exception as e:
+        print(f"   ⚠️ 신용 급변 알림 실패 — {type(e).__name__}: {e}")
+        return ""
+
+
 def _fv_credit_note(data):
     """🆕 2026-10-03 HO «개인 온도는 삭제하고, 신용융자 잔고에 특이사항이 있으면 밑에 설명으로.»
     [규칙] 특이사항이 하나도 없으면 아무것도 안 낸다(없는 걸 채우지 않는다).
@@ -26699,7 +26823,7 @@ def _fv_clock(이력):
     q3 = (f'<div class="fc-q"><p class="fc-qh"><i>3</i>{_제목} <span>위에서부터 차례로</span></p>'
           + "".join(ck) + (f'<p class="fc-t fc-in">{_덧}</p>' if _덧 else "")
           + (f'<p class="fc-t fc-in">{기}</p>' if 기 else "") + 근거 + '</div>')
-    return (f'<div class="fv-box fc"><p class="fv-h">🕰️ 외국인 시계<span>세 가지만 보면 돼요</span></p>'
+    return (f'<div class="fv-box fc" id="cp-fvclock"><p class="fv-h">🕰️ 외국인 시계<span>세 가지만 보면 돼요</span></p>'
             f'{q1}{q2}{q3}</div>')
 
 
@@ -26709,10 +26833,12 @@ def build_flow_v2(data, 해석):
         이력 = []
     tl = ""
     if 이력:
+        # 🔴 2026-10-19 HO «📌 이 그림이 말하는 것을 프로그램 비차익 밑으로» · «신용 급등락은 꼭 짚어줘»
+        _cap = []
+        _tlh = build_flow_timeline(이력, caption=_fv_tl_caption, cap_below=True, cap_out=_cap)
         tl = (f'<div class="fv-box"><p class="fv-h">🕒 하나의 타임라인'
               f'<span>지수 + 수급 + 선물 + 신용</span></p>'
-              f'{build_flow_timeline(이력, caption=_fv_tl_caption, cap_below=True)}'
-              f'{_fv_bichaik_easy(이력)}{_fv_credit_note(data)}</div>')
+              f'{_tlh}{_fv_credit_alert(data, 이력)}{_fv_bichaik_easy(이력)}{"".join(_cap)}{_fv_credit_note(data)}</div>')
     _fv_log_waves(이력)
     # 🔴 2026-10-03 HO «개인 온도는 삭제» — _fv_retail은 남겨 두되 화면에서 뺀다
     #   (그 «위험 신호» 칸은 _fv_credit_note의 ①로 옮겼다).
@@ -27861,6 +27987,8 @@ html{{scroll-behavior:smooth}}
    [세기] 배경 알파 0.035~0.05. 흰 글자 대비에 영향을 주지 않는 선.
           왼쪽 세로줄(3px)만 조금 진하게 줘서 «어디부터 어디까지»를 알린다.
    ⚠️ 지금은 6개가 세로로 쌓인다. 탭 전환 JS는 다음 단계. */
+/* 🔴 2026-10-19 HO «리포트 전체적으로 글자가 작다 — 키워줘» → 탭 본문 전체를 8% 키운다(그림·글자 함께). 390·320px 넘침 점검 완료 */
+.tabsec{{zoom:1.08}}
 .tabsec{{position:relative;border-radius:14px;padding:14px 13px 18px;
   margin:0 0 14px;border:1px solid rgba(255,255,255,.07);
   background:var(--tabbg,transparent)}}
@@ -29640,6 +29768,10 @@ html{{scroll-behavior:smooth}}
 .fv-fold[open]>summary .fv-sumr{{transform:rotate(180deg)}}
 .fv-bk-h span{{font-size:10px;font-weight:600;color:#7d848f;margin-left:4px}}
 .fv-bk-d{{margin:0 0 8px;font-size:11.5px;line-height:1.65;color:#aab3c0}}
+.fv-ca{{margin:12px 0 0;padding:10px 12px;border-radius:10px;border:1px solid;font-size:12.5px;line-height:1.7;color:#d5dbe3}}
+.fv-ca.dn{{background:rgba(91,155,255,.08);border-color:rgba(91,155,255,.35)}}.fv-ca.up{{background:rgba(255,107,74,.08);border-color:rgba(255,107,74,.35)}}
+.fv-ca p{{margin:0}}.fv-ca-w{{margin-top:4px !important;color:#c9d0d9}}
+.fv-ca-n{{font-size:10.5px;color:#8b93a0}}p.fv-ca-n{{margin-top:3px !important}}
 .fv-bc{{margin:12px 0 0;padding:12px 12px 8px;border-radius:12px;background:#111823;border:1px solid #1e2937}}
 .fv-bc-h{{margin:0 0 6px;font-size:13px;font-weight:800;color:#e8ecf1}}
 .fv-bc-h span{{margin-left:6px;font-size:10.5px;font-weight:600;color:#7d8695}}
