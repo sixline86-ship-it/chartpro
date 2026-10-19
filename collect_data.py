@@ -5403,6 +5403,12 @@ CORPMAP_FILE = "corp_map.json"
 PROFILE_하루할당 = int(os.environ.get("CP_PROFILE_QUOTA", "20"))
 PROFILE_재무갱신일 = 80      # 이 일수가 지나면 재무를 다시 받는다(분기 주기)
 PROFILE_SLEEP = 0.12
+# 🆕 2026-10-19 HO «기업분석에 연도별 매출만 나온다 — 최근(26년) 1·2분기 매출도» → 분기 실적(3개월)을 «분기별»에 채운다.
+#   올해 공시된 분기 + 전년 같은 분기(전년 대비용). 한 종목당 DART 호출 최대 4~6번.
+#   · 평소 발행(daily)에서는 레이더 종목 + 하루 QTR_하루할당 종목만(발행 시간 보호 · 기본 15)
+#   · 몰아 모으기(enrich.yml)에서는 CP_QTR_QUOTA를 크게 줘서 나머지를 밤사이 채운다
+QTR_하루할당 = int(os.environ.get("CP_QTR_QUOTA", "15"))
+QTR_재시도일 = 20           # 공시가 아직 없던 분기는 이 일수 뒤 다시 시도
 
 
 def _load_json(path, 기본):
@@ -5568,6 +5574,56 @@ def _dart_finance(고유, 연도, 보고서="11011"):
                 "부채": _pick("부채총계", 구분),
                 "자본": _pick("자본총계", 구분)}
     return None
+
+
+def _qtr_wanted(기준일=None):
+    """지금 받아야 할 분기 목록 [(키, 연도, 보고서코드)] — 공시 마감(1분기 5/15 · 반기 8/14 · 3분기 11/14) 다음 날부터.
+    올해 분기 + 전년 같은 분기. 1~5월 중순엔 «작년» 분기를 올해처럼 본다."""
+    d = datetime.strptime(기준일 or DATE, "%Y%m%d")
+    md = d.month * 100 + d.day
+    yr = d.year
+    qs = []
+    if md >= 516:
+        qs.append(("Q1", "11013"))
+    if md >= 815:
+        qs.append(("Q2", "11012"))
+    if md >= 1115:
+        qs.append(("Q3", "11014"))
+    if not qs:                       # 1/1~5/15 — 작년 1~3분기를 보여준다
+        yr -= 1
+        qs = [("Q1", "11013"), ("Q2", "11012"), ("Q3", "11014")]
+    out = []
+    for y in (yr, yr - 1):
+        for q, code in qs:
+            out.append((f"{y}{q}", y, code))
+    return out
+
+
+def _fill_quarters(고유, 기존):
+    """기존 프로필(dict)의 «분기별»에서 빠진 분기만 받아 돌려준다. (분기별, 분기시도, 새로받은수)"""
+    분기별 = dict(기존.get("분기별") or {})
+    시도 = dict(기존.get("분기시도") or {})
+    새 = 0
+    오늘 = datetime.strptime(DATE, "%Y%m%d")
+    for 키, y, code in _qtr_wanted():
+        if 키 in 분기별:
+            continue
+        t = 시도.get(키)
+        if t:
+            try:
+                if (오늘 - datetime.strptime(t, "%Y%m%d")).days < QTR_재시도일:
+                    continue
+            except Exception:
+                pass
+        time.sleep(PROFILE_SLEEP)
+        fin = _dart_finance(고유, y, code)
+        if fin:
+            분기별[키] = fin
+            시도.pop(키, None)
+            새 += 1
+        else:
+            시도[키] = DATE
+    return 분기별, 시도, 새
 
 
 def _profile_targets(레이더종목들, 유니버스):
@@ -6405,10 +6461,39 @@ def collect_stock_profiles(레이더종목들, 유니버스):
                 break
         if not 개요 and not 연도별:
             continue
+        분기별, 분기시도, _ = _fill_quarters(고유, 기존) if 연도별 else ({}, {}, 0)
         캐시[nm] = {"개요": 개요, "연도별": 연도별,
+                    "분기별": 분기별, "분기시도": 분기시도,
                     "시총": (유니버스.get(nm) or {}).get("시총"),
                     "갱신일": DATE}
         채움 += 1
+
+    # 🆕 2026-10-19 — 분기 실적 채우기(이미 연도별 재무가 있는 종목). 레이더 종목 먼저 → 시총 순 → 나머지.
+    q채움 = 0
+    if QTR_하루할당 > 0:
+        순 = [nm for nm in 레이더종목들 if nm in 캐시]
+        순 += [nm for nm, _ in sorted((유니버스 or {}).items(), key=lambda kv: kv[1].get("순위") or 99999) if nm in 캐시]
+        순 += list(캐시.keys())
+        본q = set()
+        필요 = {k for k, _y, _c in _qtr_wanted()}
+        for nm in 순:
+            if q채움 >= QTR_하루할당:
+                break
+            if nm in 본q:
+                continue
+            본q.add(nm)
+            v = 캐시.get(nm) or {}
+            if not v.get("연도별") or 필요 <= set((v.get("분기별") or {}).keys()):
+                continue
+            고유 = 지도.get(nm)
+            if not 고유:
+                continue
+            분기별, 분기시도, 새 = _fill_quarters(고유, v)
+            if 새 or 분기시도 != (v.get("분기시도") or {}):
+                v["분기별"], v["분기시도"] = 분기별, 분기시도
+                캐시[nm] = v
+                q채움 += 1
+        print(f"   📅 분기 실적 {q채움}종목 갱신 (하루 {QTR_하루할당}종목 · 대상 {sorted(필요)})")
 
     try:
         with io.open(PROFILE_FILE, "w", encoding="utf-8") as f:
