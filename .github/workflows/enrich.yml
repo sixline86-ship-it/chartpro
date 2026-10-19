@@ -98,6 +98,8 @@ jobs:
           #       «최대 7일 전»이든 체감 차이는 크지 않다.
           CP_PROFILE_QUOTA: ${{ github.event.inputs.profile_quota || '0' }}
           CP_BIZ_QUOTA: ${{ github.event.inputs.biz_quota || '30' }}
+          # 🆕 2026-10-19 — 분기 실적(올해 공시된 분기 + 전년 같은 분기) 채우기. 400종목 ≈ 10분 · 열흘이면 전 종목 한 바퀴.
+          CP_QTR_QUOTA: '400'
           CP_SNEWS_QUOTA: ${{ github.event.inputs.news_quota || '600' }}
           CP_BIZPORT_QUOTA: ${{ github.event.inputs.bizport_quota || '0' }}
           CP_RETRY_FAILED: ${{ github.event.inputs.retry_failed || 'no' }}
