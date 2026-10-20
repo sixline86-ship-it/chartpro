@@ -633,6 +633,11 @@ jobs:
           for f in thumb/*.png; do
             [ -e "$f" ] && git add "$f" 2>/dev/null || true
           done
+          # 🆕 2026-10-20 msd/ms_날짜.js = 내 종목 전용 데이터(리포트에서 떼어 낸 약 8MB).
+          #   ⚠️ 빠지면 그날 리포트의 «내 종목» 탭이 «데이터를 못 불러왔어요»가 된다 — 반드시 커밋.
+          for f in msd/*.js; do
+            [ -e "$f" ] && git add "$f" 2>/dev/null || true
+          done
           # ⚠️ 조건부로만 생기는 파일은 반드시 개별 루프 — 하나라도 없으면
           #    -A 한 줄 전체가 pathspec 에러로 실패하는 사고를 이미 겪었다.
           #    stock_capture_log.json = 종목별 예보 성적(2026-08-29 코드 심음).
@@ -654,7 +659,9 @@ jobs:
                    biz_report_fail.json stock_news_fail.json \
                    stock_capture_log.json judge_log.json \
                    wave_log.json accum_long_cache.json \
-                   stock_money_hist.json; do
+                   stock_money_hist.json theme_index.json stock_ret_hist.json; do
+            # 🆕 2026-10-20 stock_ret_hist.json = 종목별 일간 등락률(내 종목 60일 재료 · 장마감 후 실행에서만 갱신).
+            # 🆕 2026-10-20 theme_index.json = 테마 구성(7일마다 collect_data가 갱신 · 갱신 안 한 날은 변화 없음).
             # 🆕 2026-10-07 stock_money_hist.json = 종목별 하루 거래대금 기록(테마 돈 흐름 재료).
             #   장마감 후 실행에서만 생기므로 조건부 루프에 둔다. 빠지면 매일 초기화되고 일봉 채우기가 매일 다시 돈다.
             git add "$f" 2>/dev/null || true
