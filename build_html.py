@@ -416,7 +416,7 @@ ACC_COND = (
     '한꺼번에 걸러 <b>모두 통과한 종목만</b> 올라와요.')
 ACC_VIEW_CORE = (
     '매집 상위 종목 중 <b>최근에 소개한 종목과 겹치지 않게</b> 두 개를 골라요 — '
-    '전체 순위는 아래 «매집 레이더 상세»에서요.<br>'
+    '전체 순위는 «🔬 전체 레이더 · 성적표» 탭의 «매집 레이더 상세»에서요.<br>'
     '«그동안 주가»는 돈이 쌓인 그 기간 동안의 등락이에요. 덜 올랐다고 나쁜 게 아니라 '
     '<b>아직 가격에 덜 반영됐다</b>는 뜻일 수 있어요.')
 
@@ -450,7 +450,7 @@ RADAR_COND = (
 RADAR_VIEW_CORE = (
     '💰은 이미 크게 오른 자리라 다음 날 되밀리기도 하고, '
     '📈은 되돌린 힘이 이어질지 하루짜리인지 아직 몰라요.<br>'
-    '두 조건식의 실제 성적은 아래 «🛬 기법 종목 성과»에서 좋든 나쁘든 그대로 공개해요.')
+    '두 조건식의 실제 성적은 «🔬 전체 레이더 · 성적표» 탭의 «🛬 기법 종목 성과»에서 좋든 나쁘든 그대로 공개해요.')
 
 
 def dev_note(text):
@@ -2510,7 +2510,7 @@ def build_radar(강세레이더, 설정=None):
     return f"""
   <div class="rd-box">
     {신규HTML}
-    {_folds(RADAR_COND, '🔄 <b>N차 포착</b> = 추적 중이던 종목이 다시 불붙은 것 · '
+    {_folds(RADAR_COND, '🔄 <b>N차 포착</b> = 추적 중이던 종목이 다시 불붙은 것<br>'
                         '🔥 <b>거래량 폭발</b> = 거래량이 평소와 비교할 수 없을 만큼 터진 날<br>'
                         '한 종목이 <b>두 조건식에 동시에</b> 걸리면 배지가 둘 다 붙어요.<br>' + RADAR_VIEW_CORE)}
   </div>"""
@@ -3944,6 +3944,19 @@ def build_core_strong(강세레이더):
             # 🔴 2026-10-19 HO — 긴 «추천이 아닙니다…공개할게요»는 탭 머리 한 줄로 옮기고,
             #   두 기법 설명은 위 «어떤 원리로 뽑았나요» 접기로 옮겼다.
             f'</div>')
+
+
+def _acc_basis(매집, 오늘=None):
+    """🔴 2026-10-20 HO «매집 레이더 '오늘 외국인·기관' 표기를 '어제(직전 거래일) 기준'으로».
+    네이버 종목별 매매동향은 다음 날 올라온다 — 18:10 발행 때는 직전 거래일까지가 최신이다.
+    수집이 넘긴 «수급기준일»이 있으면 그 날짜를, 없으면(옛 데이터) «직전 거래일»이라고만 쓴다."""
+    d = str((매집 or {}).get("수급기준일") or "")
+    if d and 오늘 and d == str(오늘):
+        return ""
+    when = f"{d[4:6]}/{d[6:8]}(직전 거래일)" if len(d) == 8 else "직전 거래일"
+    return ('<p style="margin:6px 2px 10px;font-size:11.5px;color:#8b93a0;line-height:1.6">'
+            f'📅 매집 판정의 외국인·기관 수급은 <b style="color:#c9ced6">{when}까지</b>예요 — '
+            '종목별 매매는 네이버가 다음 날 확정해 올려서, 저녁 발행 때는 하루 전까지가 최신이에요.</p>')
 
 
 def build_core_accum(매집):
@@ -5430,6 +5443,19 @@ def _mystock_payload():
                         _코드]
     if not days:
         return None
+    # 🔴 2026-10-20 HO «60일이 실제론 38거래일» — collect_data가 쌓는 stock_ret_hist.json
+    #   (종목별 일간 등락률 + 코스피·코스닥 일봉 등락)으로 archive에 빠진 거래일을 메운다.
+    #   ⚠️ 파일이 없으면(첫 수집 전) 예전과 똑같이 archive만 쓴다.
+    _RH = load_json("stock_ret_hist.json") or {}
+    _RHd, _RHi = (_RH.get("일별") or {}), (_RH.get("지수") or {})
+    if _RHd:
+        _끝 = max(days)
+        _모두 = sorted(set(days) | {d for d in _RHd if d <= _끝 and d in _RHi})
+        days = _모두[-MYSTOCK_DAYS:]
+        for _d in days:
+            for _nm, _v in (_RHd.get(_d) or {}).items():
+                if _nm in meta and per.setdefault(_nm, {}).get(_d) is None:
+                    per[_nm][_d] = _v
     # 🔴 2026-09-01 HO 지시 — "코스닥 종목도 코스피랑 비교되고 있는 거
     #    아니야?" → 맞았다. 실측 확인: 여기 시장 딕셔너리가 "코스피등락"만
     #    읽어서 모든 종목(코스닥 포함)에 공통으로 쓰이고 있었다.
@@ -5445,6 +5471,11 @@ def _mystock_payload():
                 시장_코스닥[_d] = r.get("코스닥등락")
     except Exception:
         pass
+    for _d, _v in (_RHi.items() if _RHd else []):
+        if 시장_코스피.get(_d) is None and _v and _v[0] is not None:
+            시장_코스피[_d] = _v[0]
+        if 시장_코스닥.get(_d) is None and _v and len(_v) > 1 and _v[1] is not None:
+            시장_코스닥[_d] = _v[1]
     return {
         "days": days,
         "mkt_kospi": [시장_코스피.get(d) for d in days],
@@ -5452,6 +5483,310 @@ def _mystock_payload():
         "stocks": meta,
         "ret": {nm: [per[nm].get(d) for d in days] for nm in per},
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# 🆕 2026-10-20 HO «내 종목 전략 비교» (PRO) — 선 그래프 하나 + 항목 단추(시안 B 확정).
+#   [항목] 지수 대비 · 상승력 · 방어력 · 거래대금 · 외국인+기관 · 테마 안 등수
+#   [선택] 항목마다 따로 종목을 고른다(«내 종목은 시장을 이기고 있나»와 같은 체크 칩).
+#   [용량] 일별 등락은 «내 종목» 칸이 이미 싣는 CP_MSP(P)를 그대로 쓴다.
+#          여기서는 테마 구성 · 종목별 거래대금 · 종목별 외국인/기관만 더 싣는다.
+#   ⚠️ 데이터 한계(2026-10-20 실측)
+#     · 종목별 외국인·기관(stock_flow_history)은 시총 상위 약 230종목뿐.
+#     · 거래대금(stock_money_hist)은 약 1,100종목, 9/14부터.
+#     · 테마 구성(theme_index.json)은 수집일 기준 — 매일 갱신되지 않는다.
+# ══════════════════════════════════════════════════════════════
+MYCMP_MAX = 8          # 🔴 2026-10-20 HO «일단 8개로»
+
+
+def _mycmp_payload():
+    ms = _mystock_payload() or {}
+    days = ms.get("days") or []
+    names = set((ms.get("stocks") or {}).keys())
+    if len(days) < 5 or not names:
+        return None
+    th = {}
+    for t, mem in ((load_json("theme_index.json") or {}).get("그룹") or {}).items():
+        mm = [m for m in (mem or []) if m in names]     # 지수 딱지(코스피·선물 등)는 저절로 빠진다
+        if len(mm) >= 4:
+            th[t] = mm
+    mh = (load_json("stock_money_hist.json") or {}).get("일별") or {}
+    md = [d for d in sorted(mh)][-(len(days) + 20):]
+    mo = {}
+    for d in md:
+        for n, v in (mh.get(d) or {}).items():
+            if n in names:
+                mo.setdefault(n, {})[d] = v
+    mo = {n: [round(v.get(d), 1) if v.get(d) is not None else None for d in md] for n, v in mo.items()}
+    fl = {}
+    for n, v in ((load_json("stock_flow_history.json") or {}).get("종목") or {}).items():
+        if n not in names:
+            continue
+        arr = [(round((v[d][0] or 0) + (v[d][1] or 0), 1) if d in v else None) for d in days]
+        if any(x is not None for x in arr):
+            fl[n] = arr
+    print(f"   🔬 내 종목 전략 비교 — 테마 {len(th)} · 거래대금 {len(mo)}종목 · 수급 {len(fl)}종목 · 거래일 {len(days)}")
+    return {"th": th, "md": md, "mo": mo, "fl": fl, "nd": len(days)}
+
+
+MYCMP_CSS = """<style>
+.mc-h3{font-size:13px;color:#8b93a0;margin:16px 2px 8px;font-weight:600}
+.mc-per{display:flex;gap:6px}
+.mc-per button{flex:1;background:#141922;border:1px solid #232a36;color:#c9ced6;border-radius:8px;padding:8px 0;font-size:13px;cursor:pointer}
+.mc-per button.on{background:#232c3a;color:#fff;font-weight:700;border-color:#3a4658}
+.mc-card{background:#141922;border:1px solid #232a36;border-radius:12px;padding:12px 12px 10px;margin-top:12px}
+.mc-mt{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:10px}
+.mc-mt button{background:#10151d;border:1px solid #2e3746;color:#c9ced6;border-radius:8px;padding:7px 0;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.mc-mt button.on{background:#2a2414;border-color:#e0c060;color:#e0c060;font-weight:700}
+.mc-q{font-size:12px;color:#aab2bf;margin:0 0 8px;line-height:1.55}
+.mc-sum{font-size:12.5px;background:#0f141c;border-radius:8px;padding:7px 9px;margin:0 0 8px;color:#dfe3e9}
+.mc-sum b{color:#e0c060}
+#mcRoot svg{display:block;width:100%;height:auto;touch-action:pan-y}
+.mc-rd{font-size:11.5px;color:#aab2bf;margin:4px 0 2px;min-height:18px;line-height:1.6}
+.mc-rd span{display:inline-block;max-width:100%;margin-right:8px}
+.mc-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mc-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid #2e3746;border-radius:8px;padding:5px 9px 5px 6px;font-size:12.5px;color:#c9ced6;cursor:pointer;background:#10151d;max-width:100%}
+.mc-chip i{width:15px;height:15px;flex:0 0 15px;border-radius:4px;border:2px solid #4a5464;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:900;color:#0b0f15}
+.mc-chip.on{color:#fff;border-color:#3a4658}
+.mc-chip.on i{background:var(--c);border-color:var(--c)}
+.mc-chip.on i::after{content:"✓"}
+.mc-chip.off{opacity:.45}
+.mc-th{display:inline-block;font-weight:700;color:#e8eaee;border:1px solid #3a4352;border-radius:10px;padding:0 7px;cursor:pointer;background:#1a2230}
+.mc-nd{font-size:12px;color:#7d8694;padding:6px 0}
+.mc-hint{font-size:11.5px;color:#8b93a0;margin:8px 2px 0}
+.mc-foot{font-size:11.5px;color:#8b93a0;margin-top:12px;line-height:1.7}
+.mc-empty{padding:20px 8px;text-align:center;color:#8b93a0;font-size:13px}
+.mc-rk{margin-top:12px;border-top:1px solid #232a36;padding-top:8px}
+.mc-rkh{font-size:13px;font-weight:700;color:#dfe3e9;margin:0 0 4px}
+.mc-rkh{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mc-rks{font-size:11px;color:#8b93a0;margin:-2px 0 4px}
+.mc-allck{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#aab2bf;cursor:pointer;padding:2px 2px 2px 6px;white-space:nowrap}
+.mc-allck i{width:16px;height:16px;border-radius:50%;border:2px solid #5b6472;box-sizing:border-box;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:900;color:#0b0f15}
+.mc-allck.on{color:#e0c060}.mc-allck.on i{background:#e0c060;border-color:#e0c060}.mc-allck.on i::after{content:"✓"}.mc-rkh small{font-weight:400;color:#8b93a0;font-size:11px}
+.mc-ri{display:flex;align-items:center;gap:7px;padding:7px 2px;border-bottom:1px solid #1c232e;cursor:pointer;color:#7d8694}
+.mc-ri:last-child{border-bottom:0}.mc-ri.on{color:#e8eaee}
+.mc-rn{flex:0 0 18px;text-align:right;font-size:12px;font-weight:700}
+.mc-dt{flex:0 0 9px;width:9px;height:9px;border-radius:50%;background:var(--c)}.mc-ri:not(.on) .mc-dt{background:transparent;border:1.5px solid #5b6472;box-sizing:border-box}
+.mc-rm{flex:1;min-width:0}.mc-rm b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mc-ri.on .mc-rm b{color:var(--c)}
+.mc-rs{display:block;font-size:11.5px;margin-top:2px;line-height:1.6}.mc-rs em{font-style:normal;color:#8b93a0}
+.mc-rl{font-weight:700;white-space:nowrap}
+.mc-warn{font-size:12.5px;background:#1a1d2a;border:1px solid #33405a;border-radius:8px;padding:7px 9px;margin:0 0 8px;color:#c9d6ee;line-height:1.6}.mc-warn b{color:#8fbaff}
+.mc-ok{font-size:12.5px;background:#121a16;border:1px solid #23402f;border-radius:8px;padding:7px 9px;margin:0 0 8px;color:#a9d8bb}
+.mc-rv{flex:0 0 auto;font-size:13px;font-weight:800;text-align:right;white-space:nowrap}.mc-ri.on .mc-rv{color:var(--c)}
+.mc-nd2{font-size:11.5px;font-weight:400;color:#5b6472}
+@media (max-width:360px){.mc-card{padding:10px 9px 8px}.mc-mt button{font-size:11.5px}}
+</style>"""
+
+MYCMP_JS = r"""<script>(function(){
+var X=window.CP_MYCMP||{},MAX=__MAX__,COL=["#ffb84d","#5ec8ff","#c58bff","#6fe0a0","#ff7b9c","#f4f08a","#ff9b5e","#9fb4ff"];
+var K="chartpro_mystocks",SK="chartpro_cmpsel3",PK="chartpro_cmpper",MK="chartpro_cmpmet",TK={};
+function J(k,d){try{var v=JSON.parse(localStorage.getItem(k)||"null");return v==null?d:v}catch(e){return d}}
+function W(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+function P(){return window.CP_MSP||{days:[],ret:{},stocks:{}}}
+function mine(){var v=J(K,[]);if(!Array.isArray(v)||!v.length)v=(window.CP_MS_DEMO||[]).slice();return v.filter(function(n){return P().ret[n]})}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function sg(v,d){return v==null?"–":(v>0?"+":"")+v.toFixed(d==null?1:d)}
+var SELNOW=[],ORD=[];
+function col(n){var i=SELNOW.indexOf(n);return i<0?"#5b6472":COL[i%COL.length]}   /* 색은 «지금 그래프에 켠 순서»로 — 8개까지 겹치지 않게 */
+/* 🏷 테마 안 — 2026-10-20 HO «돈의 몫 + 역할 배지»로 교체(수익률 순위는 예측력이 없었다 · 백테스트는 로직 문서에).
+   배지(최근 5일 기준, 우선순위 순):
+     🎭 무늬만   : 지난 20일 일간 등락이 나머지 테마 종목 평균과 상관 0.3 미만 — 테마 순위를 믿으면 안 된다
+     🐢 돈 빠짐  : 테마 거래대금 중 내 몫(최근 5일)이 이전 20일의 0.7배 이하
+     🚀 돈 몰림  : 내 몫이 1.3배 이상 + 지난 20일 수익률은 테마 하위 절반(아직 덜 오름)
+     👑 테마 돈 1위 : 사실 표시(추가 수익 신호는 아님)
+   ⚠️ 거래대금 기록이 있는 종목끼리만 몫을 나눈다(지금 약 1,180종목). */
+/* 🔴 2026-10-20 HO «몫(%)은 시총 큰 종목이 늘 위 아니야?» → 맞다. 선을 «내 몫 ÷ 평소 내 몫»(배)로 바꿔
+   크기 편향을 없앤다. 👑(테마 돈 1위)도 사실상 «시총 1위»라 뺐다(백테스트로도 불안정).
+   HO «🐢·🎭 경고를 바꿀까의 명분으로» → 맨 위에 «교체 검토» 상자. */
+var ROLE={muni:["🎭","무늬만 테마","#9aa3b1"],out:["🐢","돈 빠지는 중","#6aa8ff"],in:["🚀","돈 몰림 · 아직 덜 오름","#ff8a6a"],mid:["➖","보통","#7d8694"]};
+var MET=[
+ {k:"ex",b:"📈 지수 대비",q:"기간 첫날부터 코스피(코스닥)보다 <b>얼마나 앞서 있나</b>. 점선(0) = 시장. 위면 시장을 이기는 중이에요.",ref:0,f:function(v){return sg(v)+"%p"}},
+ {k:"up",b:"🚀 상승력",q:"지수가 <b>오른 날만</b> 모아, 지수보다 더 번 몫을 쌓은 선. 가파르게 오를수록 «오를 때 세게 오르는» 종목이에요.",ref:0,f:function(v){return sg(v)+"%p"}},
+ {k:"dn",b:"🛡️ 방어력",q:"지수가 <b>빠진 날만</b> 모아, 지수보다 덜 빠진 몫을 쌓은 선. 0보다 위면 «빠질 때 버티는» 종목이에요.",ref:0,f:function(v){return sg(v)+"%p"}},
+ {k:"mo",b:"🔥 거래대금",q:"그날 거래대금이 <b>그 종목의 직전 20일 평균의 몇 배</b>였나. 점선(1배) = 평소. 튀어 오른 날이 «돈이 몰린 날»이에요.",ref:1,f:function(v){return v==null?"–":v.toFixed(1)+"배"}},
+ {k:"su",b:"🤝 외국인+기관",q:"기간 첫날부터 외국인+기관 순매수를 쌓은 선. 크기는 <b>«그 종목 평소 하루 거래대금 몇 일치»</b>예요. 위로 갈수록 꾸준히 담는 중이에요.",ref:0,f:function(v){return v==null?"–":(v>0?"+":"")+v.toFixed(1)+"일치"}},
+ {k:"th",b:"🏷 테마 안",q:"테마의 돈 중 내 종목 몫이 <b>평소(이전 20일)의 몇 배</b>인가. 점선(1배) = 평소. 아래로 꺾이면 테마의 돈이 이 종목에서 빠지는 중이에요. 회사 크기와 상관없이 «자기 평소»와 비교해요.<br>🐢 돈 빠지는 중 · 🎭 테마와 따로 움직임 → <b>교체 검토의 명분</b> · 🚀 돈 몰림·아직 덜 오름 → 참고<br>테마 이름을 누르면 다른 테마로 바뀌어요.",ref:1,f:function(v){return v==null?"–":v.toFixed(2)+"배"}}];
+function ixOf(per){var a=[],n=P().days.length;for(var i=Math.max(0,n-per);i<n;i++)a.push(i);return a}
+function themesOf(n){var o=[];for(var t in (X.th||{}))if(X.th[t].indexOf(n)>=0)o.push(t);return o}
+function cum(m,ix){var r=P().ret[m]||[],c=1;ix.forEach(function(i){if(r[i]!=null)c*=1+r[i]/100});return c}
+function mAt(m,d){var a=(X.mo||{})[m];if(!a)return null;var j=X.md.indexOf(d);return j<0?null:a[j]}
+/* 테마 t 안에서 n의 «돈의 몫»(그날까지 최근 5일 평균, %) */
+function shareSeries(n,t,ix){var mm=X.th[t],days=P().days,raw=[];
+ ix.forEach(function(i){var d=days[i],me=mAt(n,d),tot=0;if(me==null){raw.push(null);return}mm.forEach(function(m){var v=mAt(m,d);if(v!=null)tot+=v});raw.push(tot>0?me/tot*100:null)});
+ return raw.map(function(_,k){var s=0,c=0;for(var q=Math.max(0,k-4);q<=k;q++)if(raw[q]!=null){s+=raw[q];c++}return c?s/c:null})}
+function shareRatio(n,t,ix){var L=P().days.length,all=[];for(var i=0;i<L;i++)all.push(i);
+ var mm=X.th[t],days=P().days,raw=all.map(function(i){var d=days[i],me=mAt(n,d),tot=0;if(me==null)return null;mm.forEach(function(m){var v=mAt(m,d);if(v!=null)tot+=v});return tot>0?me/tot:null});
+ return ix.map(function(k){var a=[],b=[];for(var q=Math.max(0,k-4);q<=k;q++)if(raw[q]!=null)a.push(raw[q]);
+  for(q=k-5;q>=0&&b.length<20;q--)if(raw[q]!=null)b.push(raw[q]);
+  if(a.length<2||b.length<5)return null;var A=a.reduce(function(x,y){return x+y},0)/a.length,B=b.reduce(function(x,y){return x+y},0)/b.length;return B>0?A/B:null})}
+function corr(a,b){var n=a.length;if(n<12)return null;var ma=0,mb=0;for(var i=0;i<n;i++){ma+=a[i];mb+=b[i]}ma/=n;mb/=n;var sa=0,sb=0,sc=0;
+ for(i=0;i<n;i++){sa+=(a[i]-ma)*(a[i]-ma);sb+=(b[i]-mb)*(b[i]-mb);sc+=(a[i]-ma)*(b[i]-mb)}return (sa&&sb)?sc/Math.sqrt(sa*sb):null}
+function role(n,t){var days=P().days,L=days.length,mm=X.th[t],R=P().ret;
+ var i20=[];for(var i=Math.max(0,L-20);i<L;i++)i20.push(i);
+ var xs=[],ys=[];i20.forEach(function(i){var me=(R[n]||[])[i];if(me==null)return;var s=0,c=0;mm.forEach(function(m){if(m!==n){var v=(R[m]||[])[i];if(v!=null){s+=v;c++}}});if(c){xs.push(me);ys.push(s/c)}});
+ var cr=corr(xs,ys);if(cr!=null&&cr<0.3)return {r:"muni",cr:cr};
+ var all=[];for(i=0;i<L;i++)all.push(i);var sh=shareSeries(n,t,all),last5=null,prev=[];
+ for(i=L-1;i>=0;i--)if(sh[i]!=null){last5=sh[i];break}
+ for(i=L-6;i>=0&&prev.length<20;i--)if(sh[i]!=null)prev.push(sh[i]);
+ var base=prev.length>=5?prev.reduce(function(x,y){return x+y},0)/prev.length:null,chg=(base&&last5!=null)?last5/base:null;
+ var c20={};mm.forEach(function(m){c20[m]=cum(m,i20)});var rk=1;mm.forEach(function(m){if(c20[m]>c20[n])rk++});
+ var o={chg:chg,sh:last5,rk:rk,n:mm.length,cr:cr};
+ if(chg!=null&&chg<=0.7)o.r="out";else if(chg!=null&&chg>=1.3&&rk>mm.length/2)o.r="in";else o.r="mid";return o}
+function thPick(n,ix){var ts=themesOf(n).filter(function(t){return X.th[t].some(function(m){return (X.mo||{})[m]})});if(!ts.length)return null;
+ var sc=ts.map(function(t){var mm=X.th[t],s=0;mm.forEach(function(m){s+=cum(m,ix)});return [t,s/mm.length]}).sort(function(a,b){return b[1]-a[1]});
+ var j=(TK[n]||0)%sc.length;return {t:sc[j][0],tot:sc.length}}
+function series(n,k,per){var ix=ixOf(per),p=P(),r=p.ret[n]||[],mk=((p.stocks[n]||[])[3]==="코스닥")?p.mkt_kosdaq:p.mkt_kospi,out=[];mk=mk||[];
+ if(k==="ex"||k==="up"||k==="dn"){var cs=1,cm=1,su=0,sd=0;ix.forEach(function(i){var a=r[i],b=mk[i];
+  if(a!=null&&b!=null){cs*=1+a/100;cm*=1+b/100;if(b>0)su+=a-b;else if(b<0)sd+=a-b}
+  out.push(k==="ex"?(cs-cm)*100:k==="up"?su:sd)});return out}
+ var days=p.days;
+ if(k==="mo"){var a=(X.mo||{})[n];if(!a)return null;var md=X.md;
+  ix.forEach(function(i){var j=md.indexOf(days[i]);if(j<0||a[j]==null){out.push(null);return}
+   var pv=[];for(var q=j-1;q>=0&&pv.length<20;q--)if(a[q]!=null)pv.push(a[q]);
+   out.push(pv.length>=5?a[j]/(pv.reduce(function(x,y){return x+y},0)/pv.length):null)});return out}
+ if(k==="su"){var f=(X.fl||{})[n],a2=(X.mo||{})[n];if(!f||!a2)return null;
+  var v=a2.filter(function(x){return x!=null}).slice(-20);if(!v.length)return null;var avg=v.reduce(function(x,y){return x+y},0)/v.length;
+  var acc=0,have=false;ix.forEach(function(i){if(f[i]!=null){acc+=f[i];have=true}out.push(have?acc/avg:null)});return have?out:null}
+ if(k==="th"){var t=thPick(n,ix);if(!t)return null;var s=shareRatio(n,t.t,ix);return s.some(function(x){return x!=null})?s:null}}
+function last(a){if(!a)return null;for(var i=a.length-1;i>=0;i--)if(a[i]!=null)return a[i];return null}
+function svg(lines,M,N,days){if(!lines.length)return '<div class="mc-nd" style="padding:28px 0;text-align:center">아래 순위표에서 그래프에 넣을 종목을 눌러 주세요</div>';var W=340,H=210,pl=36,pr=52,pt=10,pb=20,vals=[];
+ lines.forEach(function(l){l.p.forEach(function(v){if(v!=null)vals.push(v)})});if(M.ref!=null)vals.push(M.ref);
+ if(!vals.length)return '<div class="mc-nd">고른 종목에 이 항목 데이터가 없어요</div>';
+ var lo=Math.min.apply(null,vals),hi=Math.max.apply(null,vals);if(hi===lo){hi+=1;lo-=1}var pd=(hi-lo)*.08;lo-=pd;hi+=pd;if(M.k==="th"&&lo<0)lo=0;
+ function Xp(i){return pl+(N<=1?0:(W-pl-pr)*i/(N-1))}
+ function Yp(v){return pt+(H-pt-pb)*(1-(v-lo)/(hi-lo))}
+ var g='<svg viewBox="0 0 '+W+' '+H+'" class="mc-svg">';
+ [lo+(hi-lo)*.1,(lo+hi)/2,hi-(hi-lo)*.1].forEach(function(v){var y=Yp(v);g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="#1f2733"/><text x="'+(pl-4)+'" y="'+(y+3.5)+'" fill="#6b7482" font-size="9.5" text-anchor="end">'+(Math.abs(v)>=10?v.toFixed(0):v.toFixed(1))+'</text>'});
+ if(M.ref!=null){var yr=Yp(M.ref);g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+yr+'" y2="'+yr+'" stroke="#8b93a0" stroke-dasharray="3 3"/><text x="'+(W-pr-2)+'" y="'+(yr-3)+'" fill="#8b93a0" font-size="9" text-anchor="end">'+(M.ref===0?"시장":"평소")+'</text>'}
+ g+='<text x="'+pl+'" y="'+(H-5)+'" fill="#6b7482" font-size="9.5">'+days[0]+'</text><text x="'+(W-pr)+'" y="'+(H-5)+'" fill="#6b7482" font-size="9.5" text-anchor="end">'+days[N-1]+'</text>';
+ var ends=[];lines.forEach(function(l){var d="",pen=false;l.p.forEach(function(v,i){if(v==null){pen=false;return}d+=(pen?"L":"M")+Xp(i).toFixed(1)+" "+Yp(v).toFixed(1);pen=true});
+  g+='<path d="'+d+'" fill="none" stroke="'+l.c+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  for(var i=l.p.length-1;i>=0;i--)if(l.p[i]!=null){g+='<circle cx="'+Xp(i)+'" cy="'+Yp(l.p[i])+'" r="3" fill="'+l.c+'"/>';ends.push({y:Yp(l.p[i]),c:l.c,t:M.f(l.p[i])});break}});
+ ends.sort(function(a,b){return a.y-b.y});for(var i=1;i<ends.length;i++)if(ends[i].y-ends[i-1].y<11)ends[i].y=ends[i-1].y+11;
+ ends.forEach(function(e){g+='<text x="'+(W-pr+6)+'" y="'+(e.y+3.5)+'" fill="'+e.c+'" font-size="10" font-weight="700">'+e.t+'</text>'});
+ return g+'<line class="mc-cur" x1="0" x2="0" y1="'+pt+'" y2="'+(H-pb)+'" stroke="#e8eaee" opacity="0"/></svg>'}
+var CUR=null;
+function rd(i){if(!CUR)return "";var L=CUR.lines,M=CUR.M;if(i==null)i=CUR.N-1;
+ return '<b style="color:#c9ced6">'+CUR.days[i]+'</b> '+L.map(function(l){return '<span style="color:'+l.c+'">● '+esc(l.n)+' '+M.f(l.p[i])+'</span>'}).join(" ")}
+var RORD={in:0,mid:1,out:2,muni:3};
+function draw(){var root=document.getElementById("mcRoot");if(!root)return;
+ /* 🔴 2026-10-20 HO «기본 5일 · 지수 대비» */
+ var per=+J(PK,5),mi=+J(MK,0);if([5,20,60].indexOf(per)<0)per=5;if(!(mi>=0&&mi<MET.length))mi=0;var M=MET[mi];
+ /* 🔴 2026-10-20 HO «어느 항목에서 체크하든 모든 항목에 똑같이» — 선택은 하나의 목록 */
+ var my=mine(),S=J(SK,null),sel=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}).slice(0,MAX):[];if(!sel.length)sel=top3();SELNOW=sel;
+ var p=P(),N=Math.min(per,p.days.length),days=p.days.slice(-N).map(function(d){return d.slice(4,6)+"/"+d.slice(6)}),ix=ixOf(N);
+ [].forEach.call(document.querySelectorAll("#mcPer button"),function(b){b.className=(+b.getAttribute("data-p")===per)?"on":""});
+ if(!my.length){document.getElementById("mcBody").innerHTML='<div class="mc-empty">«📋 내 종목» 탭에서 종목을 먼저 등록해 주세요</div>';return}
+ /* 내 전체 종목 값 — 순위표와 그래프가 같은 계산을 쓴다 */
+ var V={};my.forEach(function(n){var s=series(n,M.k,N),o={s:s,v:last(s)};if(M.k==="th"){var t=thPick(n,ix);if(t){o.t=t;o.role=role(n,t.t)}}V[n]=o});
+ var lines=[],miss=[];sel.forEach(function(n){var o=V[n];if(o.s&&o.s.some(function(v){return v!=null}))lines.push({n:n,c:col(n),p:o.s});else miss.push(n)});
+ CUR={lines:lines,M:M,N:N,days:days};
+ var h='<div class="mc-mt">'+MET.map(function(x,i){return '<button data-m="'+i+'" class="'+(i===mi?"on":"")+'">'+x.b+'</button>'}).join("")+'</div>';
+ h+='<div class="mc-q">'+M.q+'</div>';
+ if(M.k==="th"){var wn=my.filter(function(n){return V[n].role&&(V[n].role.r==="out"||V[n].role.r==="muni")});
+  h+=wn.length?'<div class="mc-warn">⚠️ <b>교체 검토</b> · '+wn.map(function(n){var R=ROLE[V[n].role.r];return esc(n)+' '+R[0]+' '+R[1]}).join(" · ")+'</div>'
+   :'<div class="mc-ok">✅ 내 종목 중 테마의 돈이 빠지거나 테마와 따로 노는 종목은 없어요</div>'}
+ h+=svg(lines,M,N,days)+'<div class="mc-rd" id="mcRd">'+rd()+'</div>';
+ if(miss.length)h+='<div class="mc-nd">데이터 없음: '+miss.map(esc).join(", ")+(M.k==="su"?" (외국인+기관은 지금 시총 상위 약 230종목만 수집)":M.k==="th"?" (거래대금 기록이 있는 종목만 계산)":"")+'</div>';
+ /* 📋 내 전체 종목 순위 — 그래프에 켠 종목은 색, 꺼진 종목은 회색. 줄을 누르면 그래프에 넣고 뺀다 */
+ var ord=my.slice().sort(function(a,b){var A=V[a],B=V[b];
+  if(M.k==="th"){var ma=A.role&&A.role.r==="muni",mb=B.role&&B.role.r==="muni";if(ma!==mb)return ma?1:-1;if(A.v==null)return 1;if(B.v==null)return -1;return B.v-A.v}
+  if(A.v==null)return 1;if(B.v==null)return -1;return B.v-A.v});ORD=ord;
+ var rk=0;var allOn=sel.length>0&&sel.length>=Math.min(my.length,MAX);
+ /* 🔴 2026-10-20 HO «전체 선택·해제가 너무 크다 — 작게, 동그라미로 체크/해제» */
+ h+='<div class="mc-rk"><div class="mc-rkh"><span>📋 내 종목 '+my.length+'개 순위</span>'+
+  '<span class="mc-allck'+(allOn?" on":"")+'" data-all="'+(allOn?"0":"1")+'"><i></i>전체 선택</span></div>'+
+  '<div class="mc-rks">줄을 누르면 그래프에 넣고 빼요</div>';
+ ord.forEach(function(n){var o=V[n],on=sel.indexOf(n)>=0,c=on?col(n):"#5b6472",has=(o.v!=null);if(has)rk++;
+  var val=has?M.f(o.v):'<span class="mc-nd2">데이터 없음</span>',sub="";
+  if(M.k==="th"&&o.t){var ro=o.role,R=ROLE[ro.r];sub='<span class="mc-th" data-th="'+esc(n)+'">'+esc(o.t.t)+(o.t.tot>1?" ⇄":"")+'</span> <span class="mc-rl" style="color:'+R[2]+'">'+R[0]+' '+R[1]+'</span>'}
+  h+='<div class="mc-ri'+(on?" on":"")+'" data-n="'+esc(n)+'" style="--c:'+c+'"><span class="mc-rn">'+(has?rk:"–")+'</span><span class="mc-dt"></span>'+
+   '<span class="mc-rm"><b>'+esc(n)+'</b>'+(sub?'<span class="mc-rs">'+sub+'</span>':'')+'</span><span class="mc-rv">'+val+'</span></div>'});
+ h+='</div><div class="mc-hint" id="mcHint">고른 종목은 <b>모든 항목에 똑같이</b> 적용돼요 (최대 '+MAX+'개) · 그래프를 누르거나 밀면 그날 값이 나와요</div>';
+ document.getElementById("mcBody").innerHTML=h}
+/* 🔴 2026-10-20 HO «아무것도 선택 안 되어 있으면 5일 지수 대비 강한 순 3개» — 처음 열 때 · 전부 해제했을 때 */
+function top3(){var my=mine(),a=[];my.forEach(function(n){var v=last(series(n,"ex",5));if(v!=null)a.push([n,v])});
+ a.sort(function(x,y){return y[1]-x[1]});return a.slice(0,3).map(function(x){return x[0]})}
+window.mcDraw=draw;
+document.addEventListener("click",function(ev){var t=ev.target.closest?ev.target.closest("#mcRoot [data-all],#mcRoot [data-th],#mcRoot [data-n],#mcRoot [data-m],#mcRoot [data-p]"):null;if(!t)return;var v;
+ /* 🔴 2026-10-20 HO «전체 선택·해제» — 전체 선택은 그래프 한도(MAX)까지 위에서부터 */
+ if((v=t.getAttribute("data-all"))!==null){var hh=document.getElementById("mcHint");
+  if(v==="1"){var my0=(ORD&&ORD.length)?ORD:mine();W(SK,my0.slice(0,MAX));   /* 전체 선택 = 지금 순위표 위에서부터 */if(my0.length>MAX&&hh){draw();hh=document.getElementById("mcHint");if(hh){hh.textContent="❗ 그래프에는 최대 "+MAX+"개까지라 위에서부터 "+MAX+"개만 켰어요.";hh.style.color="#ffb84d"}return}}
+  else W(SK,[]);}
+ else if((v=t.getAttribute("data-th"))!==null){TK[v]=(TK[v]||0)+1;ev.stopPropagation()}
+ else if((v=t.getAttribute("data-p"))!==null)W(PK,+v);
+ else if((v=t.getAttribute("data-m"))!==null)W(MK,+v);
+ else if((v=t.getAttribute("data-n"))!==null){var my=mine(),S=J(SK,null),s=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}):[];if(!s.length)s=top3();var i=s.indexOf(v);
+  if(i>=0)s.splice(i,1);else{if(s.length>=MAX){var hh=document.getElementById("mcHint");if(hh){hh.textContent="❗ 그래프에는 최대 "+MAX+"개까지예요. 다른 종목을 먼저 빼 주세요.";hh.style.color="#ffb84d"}return}s.push(v)}
+  W(SK,s)}
+ draw()});
+function scrub(e){var sv=e.target.closest&&e.target.closest("#mcRoot .mc-svg");if(!sv||!CUR||CUR.N<2)return;
+ var b=sv.getBoundingClientRect(),x=(e.clientX-b.left)/b.width*340,i=Math.round((x-36)/((340-36-52)/(CUR.N-1)));i=Math.max(0,Math.min(CUR.N-1,i));
+ var X0=36+(340-36-52)*i/(CUR.N-1),l=sv.querySelector(".mc-cur");l.setAttribute("x1",X0);l.setAttribute("x2",X0);l.setAttribute("opacity",".5");
+ var r=document.getElementById("mcRd");if(r)r.innerHTML=rd(i)}
+document.addEventListener("pointermove",scrub);document.addEventListener("pointerdown",scrub);
+draw();
+})();</script>"""
+
+
+def build_my_compare():
+    try:
+        pay = _mycmp_payload()
+    except Exception as e:
+        print(f"   ⚠️ 내 종목 전략 비교 계산 실패 — {type(e).__name__}: {e}")
+        return ""
+    if not pay:
+        return ""
+    return ('<div class="mc-wrap" id="mcRoot">' + MYCMP_CSS
+            + '<script>window.CP_MYCMP=' + json.dumps(pay, ensure_ascii=False, separators=(",", ":")) + ';</script>'
+            + '<p class="mc-h3">⏱ 기간</p><div class="mc-per" id="mcPer">'
+            + ''.join(f'<button data-p="{p}">{p}일</button>' for p in (5, 20, 60)) + '</div>'
+            + '<div class="mc-card" id="mcBody"></div>'
+            # 🔴 2026-10-20 HO — 데이터 범위·기간·테마 선택 설명은 로직 문서에만(화면에서 뺌):
+            #   외국인+기관 = 수집 종목만(현재 시총 상위 약 230) · 60일 = 쌓인 거래일만큼 · 테마 = 기간 중 가장 강한 테마부터 · 배지 = 최근 5일
+            + '<div class="mc-foot">· 종목 등록·삭제는 «📋 내 종목» 탭에서 해요.</div>'
+            + MYCMP_JS.replace("__MAX__", str(MYCMP_MAX))
+            + '</div>')
+
+
+MSD_DIR = "msd"
+
+
+def _msd_script(js):
+    """🔴 2026-10-20 HO «리포트가 무겁다» — 내 종목 전용 데이터(window.CP_* 약 8MB)를
+    msd/ms_날짜.js로 떼어 낸다. 리포트 첫 화면은 그만큼 가벼워진다.
+    [불러오는 때] ① 내 종목 탭을 누른 순간 ② 주소가 #tab=내 종목 ③ 첫 화면이 다 뜨고 2.5초 뒤(미리 받기)
+    [안전] 데이터가 오기 전에도 화면 코드가 죽지 않게 같은 이름의 «빈 값»을 먼저 깔아 둔다.
+    ⚠️ 파일을 못 쓰면 예전처럼 리포트 안에 그대로 넣는다(발행은 멈추지 않는다).
+    ⚠️ daily.yml이 msd/*.js를 커밋해야 한다(조건부 루프)."""
+    try:
+        os.makedirs(MSD_DIR, exist_ok=True)
+        path = f"{MSD_DIR}/ms_{DATE}.js"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(js)
+    except Exception as e:
+        print(f"   ⚠️ 내 종목 데이터 파일 쓰기 실패({type(e).__name__}) — 리포트 안에 넣습니다")
+        return '<script>' + js + '</script>'
+    기본 = []
+    for m in re.finditer(r'window\.(CP_[A-Z_0-9]+)=(.)', js):
+        k, c = m.group(1), m.group(2)
+        v = "{}" if c == "{" else "[]" if c == "[" else '""' if c == '"' else "0" if (c.isdigit() or c == "-") else "null"
+        기본.append(f'if(window.{k}===undefined)window.{k}={v};')
+    print(f"   🗂️ 내 종목 데이터 분리 → {path} ({len(js.encode('utf-8'))/1e6:.1f}MB)")
+    return ('<script>' + "".join(dict.fromkeys(기본)) + f'window.CP_MSD_SRC="{path}";' + r"""
+(function(){var st=0,cbs=[];
+ function flush(){window.CP_MS_READY=1;var e=document.getElementById('ms-load');if(e)e.style.display='none';
+  try{if(window.msRender)msRender()}catch(x){}try{if(window.mcDraw)mcDraw()}catch(x){}try{if(window.cpFire)cpFire()}catch(x){}
+  while(cbs.length){try{cbs.shift()()}catch(x){}}}
+ window.cpMsLoad=function(cb){if(cb)cbs.push(cb);if(st===2){flush();return}if(st===1)return;st=1;
+  var s=document.createElement('script');s.src=window.CP_MSD_SRC;s.async=true;
+  s.onload=function(){st=2;flush()};
+  s.onerror=function(){st=0;var e=document.getElementById('ms-load');if(e)e.textContent='⚠️ 내 종목 데이터를 못 불러왔어요. 새로고침해 주세요.'};
+  document.head.appendChild(s)};
+ document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('.gtab-b[data-go="내 종목"]');if(b)cpMsLoad()},true);
+ try{if(/[#&]tab=(%EB%82%B4|내)/.test(location.hash))cpMsLoad()}catch(x){}
+ window.addEventListener('load',function(){setTimeout(function(){cpMsLoad()},2500)});
+})();</script>""")
 
 
 def build_my_stocks(data):
@@ -6281,6 +6616,7 @@ def build_my_stocks(data):
  }
  var K='chartpro_mystocks', MAX=""" + str(MYSTOCK_MAX) + """;
  var P=""" + PAY + """, NEWS=""" + NEWS + """, DISC=""" + DISC + """;
+ window.CP_MSP=P;   // 🆕 2026-10-20 «내 종목 전략 비교»가 같은 일별 등락을 다시 싣지 않고 함께 쓴다
  // ⚠️ 기본은 **당일**. 다른 코너와 같은 창 구성·같은 이름으로 맞춘다(2026-08-21).
  var WINDOWS=[[1,'당일'],[5,'5일'],[20,'20일'],[60,'60일']], curW=1;
  function get(){var d=(window.CP_MS_DEMO||[]).slice();try{var v=JSON.parse(localStorage.getItem(K))||[];return v.length?v:d}catch(e){return d}}
@@ -6612,7 +6948,11 @@ def build_my_stocks(data):
   if(ds.length) out.push(['📄','새 공시 <a href="'+ds[0].u+'" target="_blank" rel="noopener">'+ds[0].t+'</a>'+(ds.length>1?' 외 '+(ds.length-1)+'건':'')]);
   /* ② 수급 */
   var sf=(window.CP_SFLOW||{})[nm];
-  if(sf&&sf.length>=2&&sf[sf.length-1][0]===lab){
+  /* 🔴 2026-10-20 — 종목별 외국인·기관은 네이버가 다음 날 올린다(18:10엔 직전 거래일까지).
+     수집 날짜 밀림을 고친 뒤로 마지막 줄 = 직전 거래일 → «오늘»이라 쓰지 않고 그 날짜를 쓴다. */
+  var plab=prev.slice(4,6)+'/'+prev.slice(6,8);
+  if(sf&&sf.length>=2&&(sf[sf.length-1][0]===lab||sf[sf.length-1][0]===plab)){
+   var WD=(sf[sf.length-1][0]===lab)?'오늘':'어제('+sf[sf.length-1][0]+')';
    var L=sf.length-1, who=[[1,'외국인'],[2,'기관']], did=false;
    /* 🔴 2026-10-03 HO «수급 연속·전환에 평소 대비 거래대금 조건도.»
       sf 행 = [날짜, 외국인, 기관, 그날 거래대금, 평소(20일 평균) 거래대금] (억)
@@ -6630,18 +6970,18 @@ def build_my_stocks(data):
        전환: 3일 넘게 한 방향 → 오늘 반대, 그 크기가 평소 거래대금의 20%+(실측 상위 25% 선 18%보다 위)
        연속: 3·5·10일째 고비 + 그동안 누적이 평소 거래대금의 50%+(반나절 거래대금이 한쪽으로 쏠림) */
     if(t&&pv.n>=3&&pv.d!==(t>0?1:-1)&&pctV(t)!==null&&pctV(t)>=20){
-     out.push(['💰',w[1]+' '+pv.n+'일 연속 '+(pv.d>0?'매수':'매도')+' → 오늘 <b>'+(t>0?'매수':'매도')+' 전환</b> '+A(t)+
+     out.push(['💰',w[1]+' '+pv.n+'일 연속 '+(pv.d>0?'매수':'매도')+' → '+WD+' <b>'+(t>0?'매수':'매도')+' 전환</b> '+A(t)+
       ' (평소 거래대금의 '+pctV(t).toFixed(0)+'%)'+volTag]); did=true; volTag='';
     }else if(nw.n>=5&&nw.n%5===0){  /* 🔴 2026-10-14 HO «챙겨볼 종목이 너무 많다» — 3일째는 빼고 5·10·15일째만, 누적은 평소 거래대금의 100%↑(하루치 이상) */
      var s=0; for(var i=L-nw.n+1;i<=L;i++) s+=col[i];
      if(pctV(s)!==null&&pctV(s)>=100){
-      out.push(['💰',w[1]+' <b>'+nw.n+'일째 '+(nw.d>0?'매수':'매도')+'</b> · 그동안 '+A(s)+
+      out.push(['💰',w[1]+' <b>'+nw.n+'일째 '+(nw.d>0?'매수':'매도')+'</b>'+(WD==='오늘'?'':' <span style="color:#8b93a0">('+sf[L][0]+'까지)</span>')+' · 그동안 '+A(s)+
        ' (평소 거래대금의 '+pctV(s).toFixed(0)+'%)'+volTag]); did=true; volTag=''; }
     }
    });
    var f=sf[L][1], g=sf[L][2], f0=sf[L-1][1], g0=sf[L-1][2];
    if(!did&&f&&g&&(f>0)===(g>0)&&!(f0&&g0&&(f0>0)===(g0>0))&&pctV(f)>=10&&pctV(g)>=10)
-    out.push(['💰','외국인·기관 <b>오늘 동반 '+(f>0?'매수':'매도')+'</b> (어제는 엇갈림) · '+A(f)+' / '+A(g)]);
+    out.push(['💰','외국인·기관 <b>'+WD+' 동반 '+(f>0?'매수':'매도')+'</b> (그 전날은 엇갈림) · '+A(f)+' / '+A(g)]);
    var a=0,k=0; for(var j=Math.max(0,L-10);j<L;j++){ a+=Math.abs(sf[j][1])+Math.abs(sf[j][2]); k++; }
    var x=(k>=3&&a>0)?(Math.abs(f)+Math.abs(g))/(a/k):null;
    if(x!==null&&x>=3) out.push(['💰','외국인·기관 거래 규모 <b>평소의 '+x.toFixed(1)+'배</b>']);
@@ -6705,6 +7045,9 @@ def build_my_stocks(data):
      이제 💰 수급·📈 주가·🌊 출렁임·📡 레이더·🏁 섹터 자리 중 하나가 걸린 종목만 올라오고, 기사·일정은 그 밑에 덧붙는다. */
   var strong=out.length;
   if(strong===0) return [];
+  /* 🔴 2026-10-20 — 공시 제목과 같은 기사는 중복이라 뺀다(에코프로비엠 «대량보유» 2줄 실측) */
+  var _dsT={};ds.forEach(function(g){_dsT[String(g.t||'').replace(/\\s/g,'')]=1;});
+  nw2=nw2.filter(function(a3){return !_dsT[String(a3.t||'').replace(/\\s/g,'')];});
   if(nw2.length) out.push(['📰','새 기사 '+nw2.length+'건 · <a href="'+nw2[0].u+'" target="_blank" rel="noopener">'+nw2[0].t+'</a>']);
   /* ⑦ 일정 오늘·내일 */
   (window.CP_SCHEDULE||[]).filter(function(s){return s.c===nm&&s.dd<=1;}).slice(0,2).forEach(function(s){
@@ -6744,7 +7087,8 @@ def build_my_stocks(data):
    '<p>📄 <b>새 공시</b> — 오늘 그 종목 공시가 나왔어요.</p>'+
    '<p>💰 <b>수급</b> — 외국인 또는 기관이 ① 3일 넘게 한쪽으로 사다(팔다) 오늘 반대로 돌아섰고 그 크기가 평소 하루 거래대금의 20% 이상 · '+
    '② 5·10·15일째 같은 방향이고 그동안 쌓인 돈이 평소 하루 거래대금의 100% 이상 · ③ 어제는 엇갈렸는데 오늘 둘이 같은 방향(각각 10% 이상) · '+
-   '④ 오늘 외국인+기관 거래 규모가 최근 10일 평균의 3배 이상.</p>'+
+   '④ 오늘 외국인+기관 거래 규모가 최근 10일 평균의 3배 이상.<br>'+
+   '※ 종목별 외국인·기관 매매는 네이버가 <b>다음 날</b> 올려서, 리포트 시각엔 <b>어제(직전 거래일)까지</b>예요. 그래서 수급 줄에는 날짜를 붙여요.</p>'+
    '<p>📈 <b>주가</b> — 모두 <b>시장(전체 종목 중앙값)보다</b> 그만큼 다르게 움직였을 때만: 4일 넘게 이어지던 상승(하락)이 끝나고 오늘 반대로 ±2% 이상 · 4·7·10일째 같은 방향이면서 그동안 ±10% 이상 · 오늘 하루 ±7% 이상.</p>'+
    '<p>🌊 <b>출렁임</b> — 최근 5일 하루 변동이 그 앞 20일보다 2.5배 넘게 커졌고(±3% 이상), 오늘 처음 넘은 날.</p>'+
    '<p>📡 <b>레이더</b> — 포착·매집 레이더에 새로 잡혔거나, 어제와 다른 레이더로 바뀌었거나, 어제 잡혔다가 빠졌어요.</p>'+
@@ -8681,6 +9025,7 @@ def build_my_stocks(data):
    t.style.background=on?'#2a3446':'#171c25';
    t.style.color=on?'#f0c65a':'#7d848f'; t.style.fontWeight=on?800:600;});
   render();};
+ window.msRender=render;   /* 🔴 2026-10-20 — 내 종목 데이터 파일이 도착하면 다시 그린다(_msd_script) */
  if(document.readyState!=='loading'){render()}else{
   document.addEventListener('DOMContentLoaded',render)}
 })();
@@ -8701,7 +9046,8 @@ def build_my_stocks(data):
     for n, 이름 in [(1, "당일"), (5, "5일"), (20, "20일"), (60, "60일")])
 
     # 🆕 2026-10-03 HO — «어제와 달라진 것» 카드 자리(내 종목 탭 맨 위). 바뀐 게 없으면 JS가 비워 둔다.
-    return ('<div id="ms-diff"></div>'
+    return ('<div id="ms-load" style="margin:8px 2px 0;font-size:12px;color:#8b93a0">⏳ 내 종목 데이터를 불러오는 중…</div>'
+            '<div id="ms-diff"></div>'
             '<div style="background:#141922;border:1px solid #232a36;border-radius:12px;'
             'padding:13px 14px;margin:10px 0 0">'
             # ⚠️ 큰 제목은 입력창 바로 밑(ms-sug 다음)에 있다. 여기 또 두면 두 번 나온다.
@@ -8714,6 +9060,8 @@ def build_my_stocks(data):
             #    [왜] 이미 등록한 사람(=매일 보는 사람)에게 등록 폼이 먼저 나오면
             #    매번 스크롤해서 지나쳐야 한다. 성적이 먼저 보여야 «오늘 어땠나»가
             #    바로 읽힌다. 등록 폼은 사실상 처음 한 번만 쓰는 자리다.
+            # 🔴 2026-10-20 HO «내 종목은 시장을 이기고 있나는 숨겨줘» — 지우지 않고 가린다(id는 JS가 쓰므로 남긴다).
+            '<div style="display:none">'
             '<p style="margin:13px 0 9px;font-size:17px;font-weight:800;color:#f2f4f7">'
             '내 종목은 시장을 이기고 있나</p>'
             f'<div style="display:flex;gap:6px;margin-bottom:9px">{탭}</div>'
@@ -8723,8 +9071,8 @@ def build_my_stocks(data):
             #    등록 폼·목록·백업 버튼을 다 지나야 나왔다.
             #    ⚠️ id는 문서에 «하나»여야 한다 — 아래에서 지우고 여기로 «옮겼다».
             #       (복제하면 getElementById가 위쪽 빈 div를 잡아 전부 멈춘다)
-            '<div id="ms-sum"></div><div id="ms-chart"></div>'
-            '<p style="margin:16px 0 6px;font-size:17px;font-weight:800;color:#f0c65a;padding-top:13px;border-top:1px solid #232a36">'
+            '<div id="ms-sum"></div><div id="ms-chart"></div></div>'
+            '<p style="margin:4px 0 6px;font-size:17px;font-weight:800;color:#f0c65a">'
             '📋 내 종목 추적하기</p>'
             '<p style="margin:0 0 8px;font-size:11.5px;color:#c9ced6;line-height:1.6">'
             '한 번 등록해두면 <b style="color:#e8eaee">매일 자동으로 추적</b>합니다 — '
@@ -8762,7 +9110,7 @@ def build_my_stocks(data):
             #    그 자리에 짧은 설명이 붙어 있다. 접힌 채로 아무도 안 여는
             #    도움말이 카드 맨 아래를 차지하고 있었다.
             '</div>' + JS
-            + '<script>' + 이름배열JS + """
+            + _msd_script(이름배열JS) + '<script>' + """
 /* 자체 자동완성 (datalist 대체)
    [WHY] 입력창을 누르기만 해도 전 종목 목록이 뜨면 모바일에서 키보드가 가려진다.
          글자를 1자 이상 넣었을 때만, 앞글자 일치 우선으로 최대 8개만 보여준다. */
@@ -8917,6 +9265,22 @@ def zone_member_panel(섹터명, pid, 최대=8, 여백=95):
 #   [고침] «지금 실제로 보이는가»(getComputedStyle)를 기준으로 삼는다.
 #   ⚠️ 이 함수는 섹터 지도·섹터 성적표·돌아올 섹터·테마 3코너가 전부 쓴다.
 #     여기 한 줄 고치면 그 전부가 같이 낫는다.
+# 🔴 2026-10-20 HO — 유료 탭 표시: 닫힌 금색 자물쇠(고리가 몸체에 꽂힌 모양). 테마 탭은 열린 자물쇠(.jd-unlk)
+# 🔴 2026-10-20 HO «포착도 테마처럼 열린 자물쇠 · 눌린(밝은) 탭에서도 보이게» — 두 탭 공용
+LOCK_SVG = ('<svg class="jd-unlk" viewBox="0 0 18 16" aria-label="잠금 해제"><path class="lk-s" d="M8.2 7.5V4.2a3.2 3.2 0 0 1 6.4 0V6.4" fill="none" '
+            'stroke="#e0c060" stroke-width="1.8" stroke-linecap="round"/><rect class="lk-b" x="1" y="7.5" width="9.4" height="7.5" rx="1.8" fill="#e0c060"/>'
+            '<circle class="lk-k" cx="5.7" cy="11.2" r="1.1" fill="#3a2f12"/></svg>')
+
+# 🔴 2026-10-20 HO «유료 탭에 PRO 작은 마크 · 머리 문구 '해당 서비스는 프로만 이용 가능합니다.'»
+PRO_MK = '<span class="pro-mk">PRO</span>'
+
+
+def PP_HEAD(sub):
+    return ('<div class="pp-hd"><span class="pp-bd">PRO</span><div class="pp-t">'
+            '<p class="pp-t1">해당 서비스는 <b>프로</b>만 이용 가능합니다.</p>'
+            f'<p class="pp-t2">{sub}</p></div></div>')
+
+
 ZTOG_JS = ('<script>function ztog(id){var e=document.getElementById(id);'
            'if(!e)return;var v=getComputedStyle(e).display;'
            'e.style.display=(v==="none"?"block":"none");}</script>')
@@ -12917,12 +13281,12 @@ def build_core(핵심편, data, 해석):
             '<button class="jd-tb-b on" onclick="jdTab(0,this)">📊 오늘 테마</button>'
             '<button class="jd-tb-b" onclick="jdTab(1,this)">🎯 내일 테마 전략 · 성적표'
             # 🔴 2026-10-19 HO «자물쇠가 풀린 그림으로» — 이모지는 기기마다 달라 보여 직접 그린다(고리가 열린 금색 자물쇠)
-            '<svg class="jd-unlk" viewBox="0 0 18 16" aria-label="잠금 해제"><path d="M8.2 7.5V4.2a3.2 3.2 0 0 1 6.4 0V6.4" fill="none" '
-            'stroke="#e0c060" stroke-width="1.8" stroke-linecap="round"/><rect x="1" y="7.5" width="9.4" height="7.5" rx="1.8" fill="#e0c060"/>'
-            '<circle cx="5.7" cy="11.2" r="1.1" fill="#3a2f12"/></svg></button>'
+            + LOCK_SVG + PRO_MK + '</button>'
             '</div>'
             f'<div id="jdPane0">{_테마}</div>'
-            f'<div id="jdPane1" style="display:none">{_판단}</div>'
+            f'<div id="jdPane1" class="pp" style="display:none">'
+            + PP_HEAD('차트프로가 모든 테마를 분석해 고른 <b>내일 테마</b>와, 그 <b>실제 성적</b>')
+            + f'{_판단}</div>'
             + JUDGE_JS)
 
     # 🔴 v17 (2026-09-12) — 종목 탭 재구성.
@@ -12934,20 +13298,23 @@ def build_core(핵심편, data, 해석):
     _SC_SAVE[0] = True          # 🆕 2026-10-13 — 포착 탭 종목에 «＋저장» 알약
     _종목 = (build_core_strong(data.get("강세레이더"))
              + build_core_accum(data.get("매집레이더"))
+             + _acc_basis(data.get("매집레이더"), data.get("날짜"))
              # 🔴 2026-10-13 (4차) HO «눌림 카드는 '주도 테마 눌림'으로 · 오늘 첫 반등(→ 역돌마)과 같이 묶어 아래로»
              #   → 위 짝 카드(build_core_pullback)는 빼고, 아래 «눌림 레이더» 묶음(역돌마 + 주도 테마 눌림)으로 합쳤다.
              + f'<p class="sec-label"><small>테마를 가로질러</small>'
                f'👑 오늘의 테마 대장주'
                f'<span style="font-size:11px;font-weight:600;color:#8b93a0">'
                f' · 테마별 1종목</span></p>'
-             + build_theme_leaders(data)
-             + f'<p class="sec-label"><small>강세 레이더 상세</small>'
-               f'📡 오늘 포착 종목</p>'
+             + build_theme_leaders(data))
+    # 🔴 2026-10-20 HO «포착도 테마처럼 탭 둘 — 오늘의 대장주까지 무료, 그 밑은 🔒 유료»
+    _종목유료 = (f'<p class="sec-label"><small>강세 레이더 상세</small>'
+               f'📡 오늘 전체 포착 종목</p>'
              + build_radar(data.get("강세레이더"), data.get("설정"))
              + f'<p class="sec-label"><small>매집 레이더 상세</small>'
-               f'🧲 매집 종목 순위</p>'      # 🔴 2026-10-09 HO — 위 무료 카드(오늘 매집 종목)와 이름을 가른다
+               f'🧲 오늘 전체 매집 순위</p>'      # 🔴 2026-10-09 HO — 위 무료 카드(오늘 매집 종목)와 이름을 가른다
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
+             + _acc_basis(data.get("매집레이더"), data.get("날짜"))
              # 🌅 2026-10-05 HO — 새 기법 «오늘 첫 반등»: 매집 종목 밑 · 포착 그 후 위
              # 🔴 2026-10-13 (4차) HO — «눌림 레이더» 묶음 = 🌅 역돌마(옛 «오늘 첫 반등») + 🎯 주도 테마 눌림
              + '<div class="nr-grp"><p class="nr-gh">🌙 눌림 레이더 <span>쉬던 종목이 처음 고개를 든 날 · 두 기법</span></p>'
@@ -12978,6 +13345,17 @@ def build_core(핵심편, data, 해석):
                       '<b>오르냐 내리냐의 예측이 아니에요</b>.<br>'
                       '💡 줄은 그 공시가 무슨 뜻인지 쉽게 풀어 쓴 설명이에요. 공시 줄을 누르면 DART 원문이 열려요.')
              + '</div>')
+    _종목 = ('<div class="jd-tabs pc-tabs">'
+             '<button class="jd-tb-b on" onclick="pcTab(0,this)">📡 오늘 포착</button>'
+             f'<button class="jd-tb-b" onclick="pcTab(1,this)">🔬 전체 포착 종목 · 성적표{LOCK_SVG}{PRO_MK}</button></div>'
+             f'<div id="pcPane0">{_종목}</div><div id="pcPane1" class="pp" style="display:none">'
+             + PP_HEAD('차트프로 조건식으로 잡은 <b>모든 종목</b>과, 그 <b>실제 성적</b>')
+             + ""
+             f'{_종목유료}</div>'
+             '<script>function pcTab(i,el){for(var k=0;k<2;k++){var p=document.getElementById("pcPane"+k);'
+             'if(p)p.style.display=(k===i?"block":"none");}'
+             'var bs=el.parentElement.querySelectorAll(".jd-tb-b");'
+             'for(var j=0;j<bs.length;j++)bs[j].className="jd-tb-b"+(j===i?" on":"");}</script>')
 
     _SC_SAVE[0] = False
     # 🔴 HO 지시 2026-09-12 — 「내 종목」을 별도 탭으로 분리한다.
@@ -12985,6 +13363,20 @@ def build_core(핵심편, data, 해석):
     #    성격이 다른데 한 탭에 섞여 있어 스크롤이 길었다.
     _내종목 = (build_my_stocks(data)
                + build_stock_brief())
+    # 🆕 2026-10-20 HO «내 종목 비교» — 테마·포착과 같은 무료/PRO 두 칸.
+    _비교 = build_my_compare()
+    if _비교 and _내종목.strip():
+        _내종목 = ('<div class="jd-tabs ms-tabs">'
+                 '<button class="jd-tb-b on" onclick="msTab(0,this)">📋 내 종목</button>'
+                 f'<button class="jd-tb-b" onclick="msTab(1,this)">🔬 내 종목 심층 비교{LOCK_SVG}{PRO_MK}</button></div>'
+                 f'<div id="msPane0">{_내종목}</div><div id="msPane1" class="pp" style="display:none">'
+                 + PP_HEAD('내가 담은 종목끼리, <b>같은 잣대</b>로 <b>나란히 비교</b>')
+                 + _비교 + '</div>'
+                 '<script>function msTab(i,el){for(var k=0;k<2;k++){var p=document.getElementById("msPane"+k);'
+                 'if(p)p.style.display=(k===i?"block":"none");}'
+                 'var bs=el.parentElement.querySelectorAll(".jd-tb-b");'
+                 'for(var j=0;j<bs.length;j++)bs[j].className="jd-tb-b"+(j===i?" on":"");'
+                 'if(i===1&&window.mcDraw)window.mcDraw();}</script>')
 
     # 🔴 2026-09-07 HO 지시 — 「어제의 채점표」 숨김.
     #    삭제가 아니라 가림이다(원칙3). HIDDEN_CHAPTERS에서 "어제채점표"
@@ -16473,6 +16865,14 @@ def build_board_perf():
 # ══════════════════════════════════════════════════════════════
 PICK_LOG = "theme_pick_log.json"
 PICK_MAX = 2
+PICK_WHY_SHORT = {1: "쉬던 옛 주도가 오늘 다시 하루 10위 안으로", 2: "옛 주도가 5일 10위권 첫날 + 돈까지 몰림",
+                  3: "옛 주도가 5일 10위권에 처음 들어온 날", 4: "오늘·5일·20일 순위가 모두 위쪽",
+                  5: "옛 주도가 5일 10위권에 이틀째 이상"}
+PICK_WHY_TXT = {1: "쉬던 옛 주도 테마가 오늘 <b>다시 하루 10위 안</b>으로 돌아온 자리예요 — 다섯 자리 중 1년 성적이 가장 좋았어요.",
+                2: "옛 주도 테마가 5일 10위권에 <b>처음 들어온 날, 돈까지 몰린</b> 자리예요.",
+                3: "옛 주도 테마가 5일 10위권에 <b>처음 들어온 날</b>이에요(돈 몰림 없이) — 다섯 자리 중 가장 약해요.",
+                4: "오늘·5일·20일 순위가 <b>모두 위쪽</b>인 정배열 자리예요.",
+                5: "옛 주도 테마가 5일 10위권에 <b>이틀째 이상 자리 잡은</b> 상태예요."}
 PICK_TIER = {1: ("🔁", "재진입", "#ff7a3d"), 2: ("🔥", "재점화", "#ff5a4e"), 3: ("🌱", "옛 주도 첫날", "#ff9a5c"),
              4: ("🟢", "정배열", "#3ecf9a"), 5: ("✅", "자리 잡은 옛 주도", "#7fd0a8")}
 
@@ -16590,19 +16990,38 @@ def _pick_head_sub(p):
     return s + f' 지난 1년 이 모양은 5일 뒤 시장보다 평균 <b class="up">+{a:.1f}%p</b>, 10번 중 약 {round(w / 10)}번 시장을 이겼어요.'
 
 
+TS_LP_JS = ('<script>function tsTg(el){var w=el.closest(".ts-in"),p=w&&w.querySelector(".ts-lpk");if(!p)return;'
+            'w.querySelectorAll(".ts-lp").forEach(function(x){x.classList.remove("sel")});'
+            'if(p.getAttribute("data-k")==="tg"){p.innerHTML="👆 «고른 이유»와 배지를 누르면 무슨 뜻인지 나와요";p.classList.remove("x");p.removeAttribute("data-k")}'
+            'else{p.innerHTML="<b>고른 이유</b> · "+el.getAttribute("data-x");p.classList.add("x");p.setAttribute("data-k","tg")}}'
+            'function tsLp(el){var w=el.closest(".ts-lw"),p=w.querySelector(".ts-lpk"),on=el.classList.contains("sel");'
+            'w.querySelectorAll(".ts-lp").forEach(function(x){x.classList.remove("sel")});'
+            'if(on){p.innerHTML="👆 배지를 누르면 무슨 뜻인지 나와요";p.classList.remove("x")}'
+            'else{el.classList.add("sel");p.innerHTML=el.getAttribute("data-x");p.classList.add("x")}p.removeAttribute("data-k")}</script>')
+
+
 def _pick_lamps(p):
     """시안 B의 조건 불빛 5칸(작게) — 펼쳤을 때만."""
     m = p.get("m")
     b = p.get("b")
     mon = bool(m and m[0] >= 20 and (m[2] or 0) > 0 and (m[1] or 0) >= 50)
     a = p.get("age") or 0
-    L = [(bool(p.get("lead")), "★", "옛 주도", ""),
-         (b == "재진입", "🔁", "재진입", " re"),
-         (mon, "💰", (f"돈 +{m[0]:.0f}%" if m and m[0] > 0 else "돈"), ""),
-         (b == "정배열" or p["tier"] == 4, "🟢", "정배열", " ok"),
-         (a >= 1, (f"{a}일" if a else "0일"), ("며칠째" if a else "쉬는 중"), " ok")]
-    return ('<div class="ts-lamps">' + "".join(f'<div class="ts-lp{(" on" + c) if on else ""}"><b>{ic}</b>{lb}</div>' for on, ic, lb, c in L)
-            + '</div><p class="ts-lpk">★ 옛 주도 = 순위판 20위 안 + 20일 중 3번 이상 일봉 10위 안 · 💰 = 평소보다 거래 많고 테마도 오름 · 며칠째 = 5일 10위권 연속</p>')
+    # 🔴 2026-10-20 HO «배지를 누르면 무엇인지 1~2줄 · 밑의 설명 줄은 지우고 '누르면 설명' 안내»
+    X = {"★": "최근까지 시장을 이끌던 <b>옛 주도 테마</b>예요 — 순위판 20위 안이면서 20일 중 3번 이상 하루 10위 안에 들었어요.",
+         "🔁": "쉬던 옛 주도 테마가 오늘 <b>다시 하루 10위 안으로 돌아온</b> 날이에요.",
+         "💰": "평소보다 <b>거래대금이 많이 붙고</b> 테마도 함께 오른 날이에요(평소 = 앞 5일 중앙값).",
+         "🟢": "오늘·5일·20일 순위가 모두 위쪽이에요 — 차트로 치면 <b>이동평균이 위로 가지런한 정배열</b>.",
+         "D": (f"5일 기준 10위권에 <b>{a}일 연속</b> 머물렀어요. 길수록 자리를 잡은 테마예요." if a else
+               "지금은 5일 기준 10위권 밖에서 <b>쉬는 중</b>이에요.")}
+    L = [(bool(p.get("lead")), "★", "옛 주도", "", X["★"]),
+         (b == "재진입", "🔁", "재진입", " re", X["🔁"]),
+         (mon, "💰", (f"돈 +{m[0]:.0f}%" if m and m[0] > 0 else "돈"), "", X["💰"]),
+         (b == "정배열" or p["tier"] == 4, "🟢", "정배열", " ok", X["🟢"]),
+         (a >= 1, (f"{a}일" if a else "0일"), ("며칠째" if a else "쉬는 중"), " ok", X["D"])]
+    return ('<div class="ts-lw"><div class="ts-lamps">'
+            + "".join(f'<div class="ts-lp{(" on" + c) if on else ""}" data-x="{html.escape(x, quote=True)}" onclick="tsLp(this)"><b>{ic}</b>{lb}</div>'
+                      for on, ic, lb, c, x in L)
+            + '</div><p class="ts-lpk">👆 배지를 누르면 무슨 뜻인지 나와요</p></div>')
 
 
 def build_theme_strategy(data=None):
@@ -16782,29 +17201,39 @@ def build_theme_strategy(data=None):
         stx = _basket(p["n"], 3)
         if p["tier"] == 5 and p["t"] > 20:
             lab = "눌린 옛 주도"
-        tag = f'<span class="ts-tg" style="color:{col};border-color:{col}">{ic} {lab}</span>'
+        # 🔴 2026-10-20 HO «이 알약은 뭐야?» — 배지(지금 상태)와 달리 «왜 골랐나(5가지 자리 중 어디)»다 → 이름표를 붙이고 누르면 설명
+        # 🔴 2026-10-20 (2차) HO «누르면 나오는 것 말고 그냥 옆에 한 줄로 설명»
+        _tx = PICK_WHY_SHORT.get(p["tier"], "")
+        if lab == "눌린 옛 주도":
+            _tx = "자리 잡은 옛 주도인데 오늘 하루 20위 밖으로 쉬어 감"
+        tag = (f'<span class="ts-tg" style="color:{col};border-color:{col}">{ic} {lab}</span>'
+               f'<span class="ts-tgx">{_tx}</span>')
         # 🔴 2026-10-16 (2차) HO «종목은 안 눌러도 보이게 · 주의할 점은 자세히 안으로 · 자세히는 미니차트 옆에 나란히(미니차트 조금 크게)»
         bk = (f'<p class="ts-bl">담는다면 <b>한 종목보다 묶음으로</b> · 거래대금 상위 3</p>'
               f'<div class="ts-bk">{"".join(stx) or "<span class=ts-st>종목 정보 없음</span>"}</div>')
         warn = ('<div class="ts-blk risk"><p class="ts-bh">⚠️ 주의할 점</p>'
                 + "".join(f'<p class="ts-wl">· {x}</p>' for x in _warn(p)) + '</div>')
+        # 🔴 2026-10-20 HO «차트를 눌러도 열리게 · 펼침은 맨 위로 · 차트 밑 다섯 불빛은 «이 테마의 기억» 위로(늘 보이게)»
         pan = (f'<div class="tm-pan ts-pan" id="{pid}">'
                f'<p class="ts-why">{_x999(_pick_why(p))}</p>'
                + (warn if top else '') +
-               f'{_big_chart(p["n"])}{_pick_lamps(p)}'
+               f'{_big_chart(p["n"])}'
                f'<div class="ts-blk cond"><p class="ts-bh">🧭 내일 볼 것</p>{_cond(p)}</div></div>')
+        lamps = _pick_lamps(p)
         more = f'<button type="button" class="ts-more" onclick="ztog(\'{pid}\');this.classList.toggle(\'on\')">▾ 자세히</button>'
+        mc = (f'<span class="ts-mct" onclick="ztog(\'{pid}\');var b=this.parentNode.querySelector(\'.ts-more\');'
+              f'if(b)b.classList.toggle(\'on\')">{mc}</span>') if mc else mc
         withl = (f'<p class="ts-with">＋ 같은 종목 테마 {" · ".join(_shn(w) for w in p["with"])}</p>' if p.get("with") else '')
         if top:
             body += (f'<div class="ts-p"><b class="ts-k">{k + 1}</b><div class="ts-in">'
-                     f'<div class="ts-h"><span class="ts-n">{p["n"]}</span>{mc}{more}</div>'
-                     f'<div class="ts-tr">{tag}</div>{withl}'
+                     f'<div class="ts-h"><span class="ts-n">{p["n"]}</span>{mc}{more}</div>{pan}'
+                     f'<div class="ts-tr">{tag}</div>{withl}{lamps}'
                      f'<div class="ts-blk mem"><p class="ts-bh">🧠 이 테마의 기억</p>{_mem(p["n"])}</div>'
-                     f'{bk}{pan}</div></div>')
+                     f'{bk}</div></div>')
         else:
             body += (f'<div class="ts-p ts-sub"><b class="ts-k">{k + 1}</b><div class="ts-in">'
-                     f'<div class="ts-h"><span class="ts-n">{p["n"]}</span>{mc}{more}</div>'
-                     f'<div class="ts-tr">{tag}<span class="ts-sm">같이 볼 테마</span></div>{withl}{bk}{pan}</div></div>')
+                     f'<div class="ts-h"><span class="ts-n">{p["n"]}</span>{mc}{more}</div>{pan}'
+                     f'<div class="ts-tr">{tag}<span class="ts-sm">같이 볼 테마</span></div>{withl}{lamps}{bk}</div></div>')
     # ── 꼬리: 나오는 조건 · 어제 픽 결과 · 지난 성적 · 어떻게 고르나 ──
     hist.sort(key=lambda h: (h["d"], -h["tier"]), reverse=True)
     yd = hist[0]["d"] if hist else None
@@ -16840,7 +17269,7 @@ def build_theme_strategy(data=None):
                  + rows + '</table>'
                  '<p class="ts-note">* 테마 수익 = 구성종목 평균 − 전 종목 평균(%p) · 고른 날 종가 기준 · '
                  '지난날은 같은 규칙으로 다시 계산했어요(그날 돈 조건은 빼고)</p></details>') if hist else ""
-    return (f'<div class="ts" id="cp-strat"><p class="ts-t1">{STRAT_TITLE}<span>«오늘 테마» 탭의 챕터를 모두 합쳐 고른 테마</span></p>'
+    return (TS_LP_JS + f'<div class="ts" id="cp-strat"><p class="ts-t1">{STRAT_TITLE}<span>«오늘 테마» 탭의 챕터를 모두 합쳐 고른 테마</span></p>'
             + head + body +
             '<p class="ts-exit">🚪 <b>내려오는 조건</b> — <b>▼ 돈 빠짐</b>이 뜨거나 <b>이틀 연속 일봉 20위 밖</b>이면 내일 테마에서 내려요.</p>'
             + yl + hist_html + '</div>'
@@ -22919,7 +23348,22 @@ THEME_V17_CSS = """
 .tm-shf b{color:#e6ebf1}
 .tm-shn{margin:8px 0 0;font-size:11px;color:#6f7784;line-height:1.55}
 .fw{margin:6px 0 10px;padding:10px 12px;border:1px solid #2a3444;border-radius:10px;background:#0d131c}
-.pm-go{cursor:pointer}.pm-go em{font-style:normal;font-size:.9em;color:#8fc4ff;white-space:nowrap}
+/* 🔴 2026-10-20 HO «유료 탭도 화려하지 않지만 느낌 있게» — 금빛 실선·옅은 금빛 머리·챕터 제목 금색 막대 */
+.pp{margin-top:2px;padding:12px 10px 8px;border-radius:14px;border:1px solid rgba(224,192,96,.22);
+  background:linear-gradient(180deg,rgba(224,192,96,.07),rgba(224,192,96,0) 180px)}
+.pp-hd{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 0 9px;border-bottom:1px solid rgba(224,192,96,.16)}
+.pp-bd{flex:none;font-size:9.5px;font-weight:900;letter-spacing:.16em;color:#e0c060;border:1px solid rgba(224,192,96,.55);border-radius:99px;padding:1px 8px}
+.pp-t{min-width:0}.pp-t p{margin:0}.pp-t1{font-size:12px;font-weight:800;color:#e6d6a6}.pp-t1 b{color:#e0c060}
+.pp-t2{margin-top:2px !important;font-size:11px;line-height:1.5;color:#a8a08a}.pp-t2 b{color:#e6d6a6}
+.jd-tb-b{position:relative}.jd-tabs{margin-top:10px !important}
+.pro-mk{position:absolute;top:-7px;right:8px;font-size:8.5px;font-weight:900;letter-spacing:.12em;line-height:1;
+  color:#1a1408;background:#e0c060;border-radius:99px;padding:2px 6px;box-shadow:0 0 0 2px #0d1119}
+.ts-tgx{margin-left:7px;font-size:11px;color:#9aa3b1;line-height:1.5}
+@media (max-width:360px){.ts-t1{font-size:14.5px;letter-spacing:-.03em}}
+#pcPane1 .sec-label{border-left:3px solid #e0c060;padding-left:9px}
+#pcPane1 .sec-label small{color:#bfa760}
+#pcPane1 .rd-box,#pcPane1 .cg-box,#pcPane1 .disc-box,#pcPane1 .nr-grp{box-shadow:inset 0 1px 0 rgba(224,192,96,.18)}
+.pm-go{cursor:pointer}.ts-mct{cursor:pointer}.pm-go em{font-style:normal;font-size:.9em;color:#8fc4ff;white-space:nowrap}
 .fw-t{margin:0 0 4px;font-size:12.5px;font-weight:800;color:#e6ebf1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .fw-ty{font-size:11px;font-weight:800;padding:1px 8px;border-radius:99px}
 .fw-ty.wide{color:#ff5a4e;background:rgba(255,90,78,.12)}
@@ -23364,7 +23808,7 @@ THEME_V17_CSS = """
 /* 🎯 오늘 테마 활용 전략 (시안 A) */
 .ts{margin:16px 0 8px;padding:13px 12px 10px;border-radius:14px;background:#121821;border:1px solid #2a3343}
 .ts-t1{margin:0 0 9px;font-size:16px;font-weight:900;color:#f0d68a}
-.ts-t1>span{font-size:11px;font-weight:600;color:#8b93a0;margin-left:5px;white-space:nowrap}
+.ts-t1>span{display:block;margin:3px 0 0;font-size:11px;font-weight:600;color:#8b93a0}
 .ts-top{background:linear-gradient(180deg,#1d1710,#121018);border:1px solid #5c4a22;border-radius:12px;padding:11px 12px 10px;margin:0 0 6px}
 .ts-k1{font-size:10.5px;font-weight:800;color:#e0c060;letter-spacing:.06em}
 .ts-hl{font-size:18px;font-weight:900;line-height:1.35;margin:3px 0 5px;color:#f2f4f7;word-break:keep-all;text-wrap:balance}
@@ -23403,12 +23847,18 @@ THEME_V17_CSS = """
 .ts-with{margin:4px 0 0;font-size:10.5px;color:#a89a76;word-break:keep-all}
 .ts-sub{opacity:.78}.ts-sub .ts-k{background:#2a3343;color:#9aa3b1}.ts-sub .ts-n{font-size:13px}.ts-sub .ts-why{margin:3px 0 0;font-size:11px;color:#9aa3b1}.ts-sub .ts-tg{margin:0 4px 0 0}
 .ts-pan{margin:8px 0 0 !important}
-.ts-lamps{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:8px 0 4px}
+.ts-lamps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin:8px 0 4px}.ts-lp{min-width:0;overflow:hidden}
+@media (max-width:360px){.pp{padding:10px 5px 6px !important}.ts-lamps{gap:3px}.ts-lp{font-size:8.5px}}
 .ts-lp{border-radius:7px;padding:4px 2px 3px;text-align:center;font-size:9.5px;line-height:1.3;border:1px solid #1e2937;color:#6f7784;background:#0b0f15;word-break:keep-all}
 .ts-lp b{display:block;font-size:11px}
 .ts-lp.on{border-color:rgba(240,198,90,.55);color:#f0c65a;background:#1c1810}
 .ts-lp.on.re{border-color:#ff7a3d;color:#ff7a3d}.ts-lp.on.ok{border-color:#3ecf9a;color:#3ecf9a;background:#0f1a15}
-.ts-lpk{margin:2px 0 0;font-size:9.5px;color:#6f7784;line-height:1.5}
+.ts-lpk{margin:3px 0 0;font-size:10.5px;color:#7d8695;line-height:1.6}
+.ts-lpk.x{padding:6px 9px;border-radius:8px;background:#141922;border:1px solid #2a3343;color:#c9d0d9;font-size:11.5px}
+.ts-lpk.x b{color:#f0d68a}
+.ts-lp{cursor:pointer}.ts-lp.sel{outline:2px solid #6fe3ff;outline-offset:1px}
+/* 🔴 2026-10-20 HO «차트·자세히를 오른쪽 끝으로» */
+.ts-h .ts-mct{margin-left:auto}.ts-h .ts-n+.ts-more{margin-left:auto}
 .ts-exit{margin:6px 0 4px;padding-top:8px;border-top:1px solid #1e2937;font-size:11px;line-height:1.6;color:#aab2be;word-break:keep-all}
 .ts-yd{margin:0 0 6px;font-size:11px;color:#aab2be}
 .ts-hist,.ts-how{margin-top:6px;border-top:1px solid #1e2937;padding-top:6px}
@@ -23659,7 +24109,8 @@ THEME_V17_CSS = """
 .jd-cs{margin:0;padding:6px 8px;font-size:11px;color:#8fd0e8;line-height:1.6;
   background:rgba(143,208,232,.07);border-radius:7px}
 .jd-tabs{display:flex;gap:6px;margin:0 0 12px}
-.jd-tabs .jd-tb-b:first-child{flex:0 0 33%}.jd-unlk{width:15px;height:13px;margin-left:4px;vertical-align:-2px}@media (max-width:380px){.jd-tabs .jd-tb-b{font-size:11px;letter-spacing:-.04em}}.jd-tabs .jd-tb-b:last-child{flex:1 1 auto;white-space:nowrap;letter-spacing:-.02em}
+.jd-tabs .jd-tb-b:first-child{flex:0 0 33%}.jd-tb-b.on .jd-unlk .lk-s{stroke:#4a3a0c}.jd-tb-b.on .jd-unlk .lk-b{fill:#4a3a0c}.jd-tb-b.on .jd-unlk .lk-k{fill:#e0c060}
+.jd-unlk{width:15px;height:13px;margin-left:4px;vertical-align:-2px}@media (max-width:380px){.jd-tabs .jd-tb-b{font-size:11px;letter-spacing:-.04em}}.jd-tabs .jd-tb-b:last-child{flex:1 1 auto;white-space:nowrap;letter-spacing:-.02em}
 .jd-tb-b{flex:1;padding:9px 0;font-size:12.5px;font-weight:800;
   color:#7d8695;background:#111823;border:1px solid #1e2937;
   border-radius:9px;cursor:pointer;font-family:inherit}
@@ -28160,8 +28611,8 @@ html{{scroll-behavior:smooth}}
 /* 🆕 2026-08-22 — V자 반등은 전일 종가 대비로는 하락일 수 있다. 색을 나눈다. */
 .rd-chg.up{{color:#c1432b}} .rd-chg.dn{{color:#2e6bd6}}
 .rd-chg.ac-lab{{display:block;font-size:9.5px;font-weight:600;color:var(--sub)}}
-.acm-tabs{{display:flex;gap:6px;margin:4px 0 6px}}
-.acm-b{{font:inherit;font-size:11.5px;font-weight:800;padding:4px 12px;border-radius:99px;cursor:pointer;
+.acm-tabs{{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:6px 0 8px}}
+.acm-b{{font:inherit;font-size:12px;font-weight:800;padding:7px 8px;border-radius:10px;cursor:pointer;text-align:center;
   background:none;color:var(--sub);border:1px solid var(--line)}}
 .acm-b span{{font-weight:600;opacity:.7;margin-left:2px}}
 .acm-b.on{{color:#e0c060;border-color:#e0c060;background:rgba(224,192,96,.08)}}
@@ -29197,10 +29648,10 @@ html{{scroll-behavior:smooth}}
 .ms-x{{flex:none;color:#6f7784;font-size:12px;cursor:pointer;padding:2px 2px 2px 4px}}
 .ms-tg{{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;column-gap:4px;align-items:start}}
 /* 🔴 2026-10-03 HO «종목명 아래로 떨어진 오늘 분석을 옆으로.» 한 줄 고정 — 이름이 길면 이름만 «…»로 줄인다. */
-.ms-tn{{font-size:14px;font-weight:800;color:#e8eaee;min-width:0;display:flex;align-items:center;flex-wrap:nowrap}}
+.ms-tn{{font-size:14px;font-weight:800;color:#e8eaee;min-width:0;display:flex;align-items:center;flex-wrap:wrap;row-gap:4px}}
 .ms-trow{{padding:9px 4px !important}}
 .ms-tn .mt-sigslot{{flex:none}}
-.ms-nmx{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.ms-nmx{{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .ms-tn .ms-ap{{flex:none;margin-left:6px;vertical-align:0;padding:2px 7px}}
 .ms-rt{{min-width:52px;max-width:68px;white-space:normal;line-height:1.3}}
 .ms-rt>div:last-child{{font-size:10.5px !important}}
@@ -30132,7 +30583,16 @@ html{{scroll-behavior:smooth}}
     }}catch(e){{}}
   }}
   btns.forEach(function(b){{
-    b.addEventListener('click',function(){{ show(b.getAttribute('data-go')); }});
+    b.addEventListener('click',function(){{
+      var k=b.getAttribute('data-go'); show(k);
+      /* 🔴 2026-10-20 HO «테마·포착을 누르면 기본은 무료 탭» — 유료 탭을 보다 나갔다 와도
+         큰 탭을 누르면 언제나 첫(무료) 서브탭으로 돌아온다. */
+      try{{
+        var sec=document.querySelector('section.tabsec[data-tab="'+k+'"]');
+        var f=sec?sec.querySelector('.jd-tabs .jd-tb-b'):null;
+        if(f&&!f.classList.contains('on')) f.click();
+      }}catch(e){{}}
+    }});
   }});
   /* 🆕 2026-09-29 HO — «지난 리포트를 누르면 그날의 같은 탭으로».
      주소 끝 #tab=테마 를 읽어 그 탭을 연다. 지난 리포트 링크는 누르는 순간
