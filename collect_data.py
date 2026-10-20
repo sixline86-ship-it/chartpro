@@ -3840,7 +3840,7 @@ def _fetch_investor_flow_api(code, days):
         print(f"  🔍 [수급 API] 첫 항목 키: {sorted(rows[0])}")
         _TREND_KEY_LOGGED["done"] = True
 
-    외, 기, 종가들, 대금 = [], [], [], []
+    외, 기, 종가들, 대금, 일자 = [], [], [], [], []
     for it in rows[:days]:
         종가 = to_num(_pick(it, "closePrice", "nowPrice", "price", "endPrice"))
         외량 = to_num(_pick(it, "foreignerPureBuyQuant", "foreignPureBuyQuant",
@@ -3852,6 +3852,8 @@ def _fetch_investor_flow_api(code, days):
         if 종가 is None or (외량 is None and 기량 is None):
             continue
         종가들.append(종가)
+        # 🔴 2026-10-20 — 이 줄이 «어느 거래일» 값인지 같이 들고 간다(아래 update_stock_flow_history).
+        일자.append(str(_pick(it, "bizdate", "localDate", "date") or ""))
         # ⚠️ 이 API가 «주식 수»를 주면 종가를 곱해 억원으로, 이미 «금액»이면
         #    그대로 억으로 환산한다. 순매매량은 보통 수만~수백만 주 단위라
         #    절대값이 1e9를 넘으면 금액(원)으로 본다.
@@ -3891,6 +3893,10 @@ def _fetch_investor_flow_api(code, days):
             "오늘외국인": round(외[0], 1), "오늘기관": round(기[0], 1),
             "오늘대금": 대금[0] if 대금 else None,
             "평균대금20": (round(sum(_대) / len(_대), 1) if len(_대) >= 5 else None),
+            # 🔴 2026-10-20 — 18:10 발행 때 이 API의 맨 앞 줄은 «오늘»이 아니라 «직전 거래일»이었다
+            #   (19:30에도 오늘 줄이 없음 — 실측). 그래서 «오늘외국인»은 사실 어제 값이다.
+            #   일자를 같이 넘겨 stock_flow_history가 날짜를 하루씩 밀어 적던 사고를 막는다.
+            "일자": 일자, "대금목록": 대금, "기준일": (일자[0] if 일자 else None),
             "일수": len(외)}
 
 
@@ -4049,9 +4055,36 @@ def update_stock_flow_history(유니버스결과):
         print(f"   ⚠️ stock_flow_history 읽기 실패({type(e).__name__}) — 새로 시작")
 
     적재 = 0
-    # 🆕 2026-09-30 — [외국인, 기관] → [외국인, 기관, 거래대금, 20일 평균 거래대금](억원).
-    #   뒤 두 칸은 없으면 null. 옛 줄(2칸)은 그대로 둔다 — 읽는 쪽이 길이를 보고 쓴다.
+    # 🔴 2026-10-20 실측 사고 — 9/30~10/19 값이 «하루씩 밀려» 적혀 있었다.
+    #   [원인] 18:10 발행 때 네이버 종목별 매매동향 API의 맨 앞 줄은 «직전 거래일»인데,
+    #     그 값을 오늘 날짜(DATE)로 적었다(10/19 칸 = 실제 10/16 값). 8/25~9/10(옛 경로)은 정상.
+    #   [고침] API가 준 거래일(bizdate)을 열쇠로 쓴다. 받은 20~60일치를 날짜별로 «덮어쓰므로»
+    #     한 번 돌면 지난 밀린 칸도 저절로 바로잡힌다. 오늘 줄은 네이버가 올려준 뒤(다음 실행)에 생긴다.
+    #   ⚠️ 주말 칸(8/29·8/30 같은 옛 찌꺼기)은 지운다.
+    _새날짜 = set()
     for _row in 유니버스결과:
+        if len(_row) == 5 and isinstance(_row[1], list):
+            nm, 일자, 외들, 기들, 대금들 = _row
+            if not nm:
+                continue
+            for k, d in enumerate(일자):
+                if not (isinstance(d, str) and len(d) == 8 and d.isdigit()):
+                    continue
+                try:
+                    if datetime.strptime(d, "%Y%m%d").weekday() >= 5:
+                        continue
+                except ValueError:
+                    continue
+                _금 = 대금들[k] if k < len(대금들) else None
+                _앞 = [x for x in 대금들[k + 1:k + 21] if isinstance(x, (int, float)) and x > 0]
+                _평 = round(sum(_앞) / len(_앞), 1) if len(_앞) >= 5 else None
+                본체["종목"].setdefault(nm, {})[d] = [round(외들[k], 1), round(기들[k], 1), _금, _평]
+                _새날짜.add(d)
+            적재 += 1
+            continue
+    for _row in 유니버스결과:
+        if len(_row) == 5 and isinstance(_row[1], list):
+            continue
         nm, 외, 기 = _row[0], _row[1], _row[2]
         if not nm:
             continue
@@ -4060,7 +4093,18 @@ def update_stock_flow_history(유니버스결과):
         본체["종목"].setdefault(nm, {})[DATE] = ([외, 기, _금, _평] if (_금 or _평) else [외, 기])
         적재 += 1
 
-    if DATE not in 본체["날짜들"]:
+    if _새날짜:
+        본체["날짜들"] = sorted(set(본체["날짜들"]) | _새날짜)
+        # 주말·오늘(아직 네이버에 없는 날)에 옛 방식으로 적힌 칸은 지운다
+        def _주말(d):
+            try:
+                return datetime.strptime(d, "%Y%m%d").weekday() >= 5
+            except ValueError:
+                return True
+        본체["날짜들"] = [d for d in 본체["날짜들"] if not _주말(d) and (d in _새날짜 or d < min(_새날짜))]
+        본체["meta"]["스키마버전"] = 2
+        본체["meta"]["날짜기준"] = "네이버 매매동향 bizdate(실제 거래일)"
+    elif DATE not in 본체["날짜들"]:
         본체["날짜들"].append(DATE)
     본체["날짜들"] = sorted(set(본체["날짜들"]))[-SFH_보관:]
     살릴 = set(본체["날짜들"])
@@ -4183,6 +4227,7 @@ def collect_accumulation_radar():
     if ACC_LONGEST:
         print(f"🗿 60일 매집 — 오늘은 {ACC_LONG_주기일}조 중 {_조+1}조를 갱신합니다 "
               f"(약 {len(유니버스)//ACC_LONG_주기일}종목만 3페이지, 나머지는 캐시 승계)")
+    _수급기준일들 = []   # 🔴 2026-10-20 — 이 판정이 «어느 거래일까지»의 수급인지(네이버는 다음 날 올린다)
     _수급적재 = []   # 🆕 2026-08-24 — 조건 통과 여부와 무관하게 **전 종목** 저장
     #  ⚠️ 조건을 통과한 종목만 저장하면 "60일 안에 이만한 매집이 있었나"를
     #     판정할 수 없다. 비교 대상이 되려면 안 잡힌 날도 있어야 한다.
@@ -4194,7 +4239,12 @@ def collect_accumulation_radar():
         if not flow:
             실패 += 1
             continue
-        if isinstance(flow.get("오늘외국인"), (int, float)):
+        if flow.get("기준일"):
+            _수급기준일들.append(flow["기준일"])
+        if flow.get("일자"):
+            # 🔴 2026-10-20 — 받은 20~60일치를 «실제 거래일» 그대로 넘긴다(아래에서 날짜별로 덮어쓴다).
+            _수급적재.append((이름, flow["일자"], flow["외국인"], flow["기관"], flow.get("대금목록") or []))
+        elif isinstance(flow.get("오늘외국인"), (int, float)):
             _수급적재.append((이름, flow["오늘외국인"], flow.get("오늘기관") or 0,
                           flow.get("오늘대금"), flow.get("평균대금20")))
         외전체, 기전체 = flow["외국인"], flow["기관"]
@@ -4376,6 +4426,8 @@ def collect_accumulation_radar():
         print(f"   ⚠️ 종목별 수급 이력 적재 실패({type(e).__name__}) — 무시하고 진행")
 
     return {"종목": 종목, "중기종목": 중기목록, "중기기간": ACC_LONG,
+            # 🔴 2026-10-20 HO «매집 '오늘 외국인·기관'은 어제 기준으로 표기» — 가장 흔한 기준일
+            "수급기준일": (max(set(_수급기준일들), key=_수급기준일들.count) if _수급기준일들 else None),
             "장기종목": 장기목록, "장기기간": ACC_LONGEST,
             # 🆕 2026-09-07 — 60일 매집이 «언제 기준»인지. 매일 절반씩
             #    갱신하므로 보통 오늘/어제 두 날짜가 섞인다. 가장 오래된
@@ -4503,7 +4555,10 @@ def collect_strength_radar(지수종가=None):
         #      환산한다. 시총 기준(5,000억)·거래대금 기준(500억)이 «억» 단위라
         #      환산을 빠뜨리면 모든 종목이 조건을 통과해버린다.
         _mkt = "KOSPI" if 시장 == "코스피" else "KOSDAQ"
-        for _pg in range(0, 6):
+        # 🔴 2026-10-20 HO «거래대금 기록을 전 종목으로» — 6쪽(시총 상위 600)에서 끝까지로.
+        #   강세 레이더 후보는 시총·거래대금 하한으로 거르므로 결과는 그대로다(소형주는 어차피 탈락).
+        #   늘어난 건 _대금유니버스_캐시(→ stock_money_hist · 섹터 거래대금)뿐. 요청 +20회 남짓.
+        for _pg in range(0, STR_MONEY_PAGES):
             _rows, _why = _mc_fetch({"tradeType": "KRX", "marketType": _mkt,
                                      "orderType": "marketSum",
                                      "startIdx": _pg, "pageSize": 100})
@@ -6996,6 +7051,74 @@ _M_UA = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
          "Referer": "https://m.stock.naver.com/"}
 
 
+# ══════════════════════════════════════════════════════════════
+# 🔴 2026-10-20 HO «theme_index.json이 8/19에 멈춘 원인 확인하고 갱신되게»
+#   [원인] 이 파일을 만드는 코드가 저장소 어디에도 없었다(8/19에 한 번 만들어 올린 파일).
+#     게다가 그때 방식은 링크를 긁어 «코스피·코스닥·선물·코스피200» 같은 지수 딱지까지 섞였다.
+#   [고침] 모바일 테마 API(collect_theme_detail과 같은 주소)로 «전 테마(약 264개) × 구성종목»을 받는다.
+#     7일에 한 번만(수집일이 7일 이상 지났을 때) — 요청 약 270회 · 1~2분.
+#   ⚠️ 받은 테마가 200개 미만이거나 종목이 1,500개 미만이면 덮어쓰지 않는다(반쪽 파일 방지).
+#   ⚠️ daily.yml 조건부 git add 루프에 theme_index.json이 있어야 매번 남는다.
+# ══════════════════════════════════════════════════════════════
+THEME_INDEX_FILE = "theme_index.json"
+THEME_INDEX_EVERY = 7
+
+
+def update_theme_index():
+    옛 = _load_json(THEME_INDEX_FILE, {}) or {}
+    try:
+        _지남 = (datetime.strptime(DATE, "%Y%m%d") - datetime.strptime(str(옛.get("수집일")), "%Y%m%d")).days
+    except Exception:
+        _지남 = 999
+    if _지남 < THEME_INDEX_EVERY:
+        print(f"   🗂️ 테마 구성 — {옛.get('수집일')} 수집분 사용({_지남}일 지남 · {THEME_INDEX_EVERY}일마다 갱신)")
+        return
+    목록 = {}
+    for p in range(1, 6):
+        try:
+            j = requests.get("https://m.stock.naver.com/api/stocks/theme",
+                             params={"page": p, "pageSize": 100}, headers=_M_UA, timeout=10).json()
+        except Exception as e:
+            print(f"   ⚠️ 테마 구성 — 목록 {p}쪽 실패 {type(e).__name__}")
+            break
+        gs = j.get("groups") or []
+        for g in gs:
+            if g.get("name") and g.get("no"):
+                목록[g["name"]] = g["no"]
+        if len(gs) < 100:
+            break
+    그룹, 번호, 실패 = {}, {}, 0
+    for nm, no in 목록.items():
+        멤버 = []
+        for pg in range(1, 6):
+            try:
+                time.sleep(0.12)
+                j = requests.get(f"https://m.stock.naver.com/api/stocks/theme/{no}",
+                                 params={"page": pg, "pageSize": 100}, headers=_M_UA, timeout=10).json()
+            except Exception:
+                실패 += 1
+                break
+            st = j.get("stocks") or []
+            멤버 += [clean_name(x["stockName"]) for x in st if x.get("stockName")]
+            if len(st) < 100:
+                break
+        멤버 = list(dict.fromkeys(멤버))
+        if 멤버:
+            그룹[nm] = 멤버
+            번호[nm] = no
+    종목수 = len({m for v in 그룹.values() for m in v})
+    if len(그룹) < 200 or 종목수 < 1500:
+        print(f"   🚨 테마 구성 — {len(그룹)}테마·{종목수}종목뿐(실패 {실패}) → 덮어쓰지 않고 옛 파일 유지")
+        return
+    try:
+        with io.open(THEME_INDEX_FILE, "w", encoding="utf-8") as f:
+            json.dump({"수집일": DATE, "출처": "m.stock.naver.com/api/stocks/theme",
+                       "그룹": 그룹, "번호": 번호}, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   🗂️ 테마 구성 갱신 — {len(그룹)}테마 · {종목수}종목 (옛 수집일 {옛.get('수집일')})")
+    except Exception as e:
+        print(f"   ⚠️ 테마 구성 저장 실패 — {type(e).__name__}")
+
+
 def collect_theme_detail():
     h = _load_json(THEME_HISTORY_FILE, {}) or {}
     일별 = h.get("일별") or {}
@@ -7444,8 +7567,75 @@ def _fr_candles(code, count=200):
 #            요청 = 유니버스 종목 수(약 1,200회, 8갈래 동시) · 1~2분. 한 번 채우면 다시 안 돈다.
 # ══════════════════════════════════════════════════════════════
 STOCK_MONEY_FILE = "stock_money_hist.json"
+STR_MONEY_PAGES = 40       # 🔴 2026-10-20 시장별 시총 API 쪽 수(100종목/쪽) — 빈 쪽에서 멈춘다
 STOCK_MONEY_MIN = 10       # 이보다 적게 쌓였으면 일봉으로 채운다
 STOCK_MONEY_KEEP = 80      # 이만큼만 남긴다(거래일)
+
+
+# ══════════════════════════════════════════════════════════════
+# 🔴 2026-10-20 HO «내 종목 60일이 실제론 38거래일» → 종목별 일간 등락률을 따로 쌓는다.
+#   [왜] 내 종목 그래프는 archive(날짜별 data 파일)의 종목사전 등락률을 이어 붙였는데,
+#     archive에 빠진 날(9/11~9/15 등)과 8/16 이전이 비어 60일이 38일뿐이었다.
+#   [오늘 값] 종목사전(전 종목) 등락률 — 새 요청 0회.
+#   [지난 값] 기록이 짧으면 «한 번만» 일봉(fchart)으로 채운다(전 종목 약 2,600회 · 12갈래 · 1~2분).
+#   [지수] 코스피·코스닥 일봉으로 매번 덮어쓴다(요청 2회) — market_history의 빈 날도 메운다.
+# ══════════════════════════════════════════════════════════════
+STOCK_RET_FILE = "stock_ret_hist.json"
+STOCK_RET_KEEP = 70
+
+
+def update_stock_ret_hist(계좌격자):
+    if _휴장일() or not _장마감후():
+        return
+    h = _load_json(STOCK_RET_FILE, {}) or {}
+    일별 = h.setdefault("일별", {})
+    지수 = h.setdefault("지수", {})
+    사전 = (계좌격자 or {}).get("종목사전") or {}
+    오늘 = {n: v[3] for n, v in 사전.items() if len(v) > 3 and isinstance(v[3], (int, float))}
+    if len(오늘) >= 1000:
+        일별[DATE] = 오늘
+    for _i, _sym in enumerate(("KOSPI", "KOSDAQ")):
+        rows = _fr_candles(_sym, count=STOCK_RET_KEEP + 5)
+        for k in range(1, len(rows)):
+            d, c0, c1 = rows[k][0], rows[k - 1][4], rows[k][4]
+            if d > DATE or not c0:
+                continue
+            지수.setdefault(d, [None, None])[_i] = round((c1 / c0 - 1) * 100, 2)
+    _횟수 = {}
+    for _m in 일별.values():
+        for _n in _m:
+            _횟수[_n] = _횟수.get(_n, 0) + 1
+    if len(일별) < 50:
+        대상 = list(오늘)
+    else:
+        대상 = [n for n in 오늘 if _횟수.get(n, 0) < 10][:300]
+    codes = {n: (사전.get(n) or [None] * 6)[5] for n in 대상}
+    codes = {n: c for n, c in codes.items() if c}
+    if codes:
+        from concurrent.futures import ThreadPoolExecutor
+        t0 = time.time()
+        with ThreadPoolExecutor(12) as ex:
+            got = dict(ex.map(lambda it: (it[0], _fr_candles(it[1], count=STOCK_RET_KEEP + 5)), codes.items()))
+        채움 = 0
+        for n, rows in got.items():
+            for k in range(1, len(rows)):
+                d, c0, c1 = rows[k][0], rows[k - 1][4], rows[k][4]
+                if d >= DATE or not c0:
+                    continue
+                if n not in 일별.setdefault(d, {}):
+                    일별[d][n] = round((c1 / c0 - 1) * 100, 2)
+                    채움 += 1
+        print(f"   📈 종목 등락률 지난 기록 채움 — {len(got)}종목 · {채움:,}칸 ({time.time()-t0:.0f}초, 일봉)")
+    for d in sorted(일별)[:-STOCK_RET_KEEP]:
+        del 일별[d]
+    for d in sorted(지수)[:-STOCK_RET_KEEP]:
+        del 지수[d]
+    try:
+        with io.open(STOCK_RET_FILE, "w", encoding="utf-8") as f:
+            json.dump(h, f, ensure_ascii=False, separators=(",", ":"))
+        print(f"   📈 종목 등락률 기록 {len(일별)}거래일 · 지수 {len(지수)}일")
+    except Exception as e:
+        print(f"   ⚠️ 종목 등락률 기록 저장 실패 — {type(e).__name__}")
 
 
 def update_stock_money_hist(계좌격자):
@@ -7460,9 +7650,16 @@ def update_stock_money_hist(계좌격자):
            if isinstance(s.get("거래대금"), (int, float)) and s.get("거래대금") > 0}
     if len(오늘) >= 500:
         일별[DATE] = 오늘
-    if len(일별) < STOCK_MONEY_MIN and 오늘:
+    # 🔴 2026-10-20 — 파일 전체가 짧을 때만이 아니라, «기록이 짧은 종목»도 일봉으로 채운다
+    #   (전 종목으로 넓히면서 새로 들어온 약 1,400종목은 첫날 하루치뿐이라 «몫» 기준선이 없다).
+    _횟수 = {}
+    for _d, _m in 일별.items():
+        for _n in _m:
+            _횟수[_n] = _횟수.get(_n, 0) + 1
+    _짧은 = [n for n in 오늘 if _횟수.get(n, 0) < STOCK_MONEY_MIN]
+    if 오늘 and (len(일별) < STOCK_MONEY_MIN or _짧은):
         사전 = (계좌격자 or {}).get("종목사전") or {}
-        codes = {n: (사전.get(n) or [None] * 6)[5] for n in 오늘}
+        codes = {n: (사전.get(n) or [None] * 6)[5] for n in (오늘 if len(일별) < STOCK_MONEY_MIN else _짧은)}
         codes = {n: c for n, c in codes.items() if c}
         from concurrent.futures import ThreadPoolExecutor
         t0 = time.time()
@@ -7706,6 +7903,10 @@ if __name__ == "__main__":
         update_stock_money_hist(계좌격자)
     except Exception as e:
         print(f"   ⚠️ 종목 거래대금 기록 실패({type(e).__name__}: {str(e)[:100]})")
+    try:                                       # 🔴 2026-10-20 — 종목 등락률 날짜별 기록(내 종목 60일 재료)
+        update_stock_ret_hist(계좌격자)
+    except Exception as e:
+        print(f"   ⚠️ 종목 등락률 기록 실패({type(e).__name__}: {str(e)[:100]})")
     # 🌅 2026-10-05 — 오늘 첫 반등(HO 기법). 종목사전(시총)이 있어야 대상을 고른다.
     try:
         첫반등 = collect_first_rebound(계좌격자)
@@ -7715,6 +7916,10 @@ if __name__ == "__main__":
     # 🆕 2026-10-01 — 테마 레이더 «이야기 묶음» 재료. 테마 이력(오늘 줄)이 저장된 «뒤»여야 한다.
     try:
         테마상세 = collect_theme_detail()
+        try:                                   # 🔴 2026-10-20 — 테마 구성 주 1회 갱신
+            update_theme_index()
+        except Exception as _e:
+            print(f"   ⚠️ 테마 구성 갱신 실패({type(_e).__name__}) — 옛 파일로 진행")
     except Exception as e:
         print(f"   ⚠️ 테마상세 수집 실패({type(e).__name__}) — 레이더는 예전 묶음으로 나갑니다")
         테마상세 = None
