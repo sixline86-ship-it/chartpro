@@ -5525,8 +5525,16 @@ def _mycmp_payload():
         arr = [(round((v[d][0] or 0) + (v[d][1] or 0), 1) if d in v else None) for d in days]
         if any(x is not None for x in arr):
             fl[n] = arr
-    print(f"   🔬 내 종목 전략 비교 — 테마 {len(th)} · 거래대금 {len(mo)}종목 · 수급 {len(fl)}종목 · 거래일 {len(days)}")
-    return {"th": th, "md": md, "mo": mo, "fl": fl, "nd": len(days)}
+    # 🔴 2026-10-21 HO «시총 대비 잣대» — 최신 종목사전 7번째 칸 = 시가총액(억)
+    cap = {}
+    try:
+        _ld = archive_days(1)
+        _sd = ((_ld[-1][1].get("계좌격자") or {}).get("종목사전") or {}) if _ld else {}
+        cap = {n: v[6] for n, v in _sd.items() if n in names and len(v) > 6 and isinstance(v[6], (int, float)) and v[6] > 0}
+    except Exception:
+        cap = {}
+    print(f"   🔬 내 종목 전략 비교 — 테마 {len(th)} · 거래대금 {len(mo)}종목 · 수급 {len(fl)}종목 · 시총 {len(cap)} · 거래일 {len(days)}")
+    return {"th": th, "md": md, "mo": mo, "fl": fl, "cap": cap, "nd": len(days)}
 
 
 MYCMP_CSS = """<style>
@@ -5570,6 +5578,26 @@ MYCMP_CSS = """<style>
 .mc-rm{flex:1;min-width:0}.mc-rm b{display:block;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mc-ri.on .mc-rm b{color:var(--c)}
 .mc-rs{display:block;font-size:11.5px;margin-top:2px;line-height:1.6}.mc-rs em{font-style:normal;color:#8b93a0}
 .mc-rl{font-weight:700;white-space:nowrap}
+.mc-scl{display:inline-flex;border:1px solid #2e3746;border-radius:99px;overflow:hidden;margin:0 0 8px}
+.mc-scl button{background:#10151d;border:0;color:#aab2bf;font-size:12px;padding:5px 12px;cursor:pointer}
+.mc-scl button.on{background:#2a2414;color:#e0c060;font-weight:700}
+.mc-wn{color:#e8eaee}.mc-why{color:#9fb4d8;font-size:12px}
+.mc-peerb{display:inline-block;font-size:11px;font-weight:700;color:#9fd0ff;border:1px solid #2f4a66;border-radius:10px;padding:0 7px;cursor:pointer;white-space:nowrap}
+.mc-peerb.on{background:#16314d;color:#cfe6ff}
+.mc-peer{background:#0f141c;border:1px solid #2f4a66;border-radius:10px;padding:9px 9px 6px;margin:0 0 10px}
+.mc-ph{font-size:13px;color:#dfe3e9;display:flex;align-items:center;gap:4px}.mc-ph b{color:#9fd0ff}
+.mc-px{margin-left:auto;color:#8b93a0;cursor:pointer;padding:0 4px;font-size:14px}
+.mc-pq{font-size:10.5px;color:#7d8694;margin:3px 0 6px;line-height:1.5}
+.mc-pw{max-height:330px;overflow:auto}
+.mc-peer table{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
+.mc-peer th{position:sticky;top:0;background:#0f141c;color:#8b93a0;font-weight:600;text-align:right;padding:4px 2px;cursor:pointer;white-space:nowrap}
+.mc-peer th.on{color:#e0c060}.mc-peer th:nth-child(2){text-align:left}
+.mc-peer td{text-align:right;padding:4px 2px;border-top:1px solid #1c232e;color:#aab2bf;white-space:nowrap}
+.mc-peer td.mc-pnm{text-align:left;max-width:74px;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:420px){.mc-peer td.mc-pk,.mc-peer th:first-child{display:none}.mc-peer table{font-size:10.5px}.mc-peer td.mc-pnm{max-width:62px}}
+@media (max-width:360px){.mc-peer{padding:8px 5px 5px}.mc-peer table{font-size:10px}.mc-peer td,.mc-peer th{padding:3px 1px}.mc-peer td.mc-pnm{max-width:52px}}
+.mc-peer td.mc-pk{color:#5b6472;width:14px}.mc-peer td.mc-pn{color:#4a5262}
+.mc-peer tr.me td{color:#e0c060;font-weight:700}
 .mc-warn{font-size:12.5px;background:#1a1d2a;border:1px solid #33405a;border-radius:8px;padding:7px 9px;margin:0 0 8px;color:#c9d6ee;line-height:1.6}.mc-warn b{color:#8fbaff}
 .mc-ok{font-size:12.5px;background:#121a16;border:1px solid #23402f;border-radius:8px;padding:7px 9px;margin:0 0 8px;color:#a9d8bb}
 .mc-rv{flex:0 0 auto;font-size:13px;font-weight:800;text-align:right;white-space:nowrap}.mc-ri.on .mc-rv{color:var(--c)}
@@ -5579,7 +5607,7 @@ MYCMP_CSS = """<style>
 
 MYCMP_JS = r"""<script>(function(){
 var X=window.CP_MYCMP||{},MAX=__MAX__,COL=["#ffb84d","#5ec8ff","#c58bff","#6fe0a0","#ff7b9c","#f4f08a","#ff9b5e","#9fb4ff"];
-var K="chartpro_mystocks",SK="chartpro_cmpsel3",PK="chartpro_cmpper",MK="chartpro_cmpmet",TK={};
+var K="chartpro_mystocks",SCK="chartpro_cmpscale",PEER=null,PS="r",SK="chartpro_cmpsel3",PK="chartpro_cmpper",MK="chartpro_cmpmet",TK={};
 function J(k,d){try{var v=JSON.parse(localStorage.getItem(k)||"null");return v==null?d:v}catch(e){return d}}
 function W(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
 function P(){return window.CP_MSP||{days:[],ret:{},stocks:{}}}
@@ -5604,8 +5632,12 @@ var MET=[
  {k:"up",b:"🚀 상승력",q:"지수가 <b>오른 날만</b> 모아, 지수보다 더 번 몫을 쌓은 선. 가파르게 오를수록 «오를 때 세게 오르는» 종목이에요.",ref:0,f:function(v){return sg(v)+"%p"}},
  {k:"dn",b:"🛡️ 방어력",q:"지수가 <b>빠진 날만</b> 모아, 지수보다 덜 빠진 몫을 쌓은 선. 0보다 위면 «빠질 때 버티는» 종목이에요.",ref:0,f:function(v){return sg(v)+"%p"}},
  {k:"mo",b:"🔥 거래대금",q:"그날 거래대금이 <b>그 종목의 직전 20일 평균의 몇 배</b>였나. 점선(1배) = 평소. 튀어 오른 날이 «돈이 몰린 날»이에요.",ref:1,f:function(v){return v==null?"–":v.toFixed(1)+"배"}},
- {k:"su",b:"🤝 외국인+기관",q:"기간 첫날부터 외국인+기관 순매수를 쌓은 선. 크기는 <b>«그 종목 평소 하루 거래대금 몇 일치»</b>예요. 위로 갈수록 꾸준히 담는 중이에요.",ref:0,f:function(v){return v==null?"–":(v>0?"+":"")+v.toFixed(1)+"일치"}},
+ {k:"su",b:"🤝 외국인+기관",q:"기간 첫날부터 외국인+기관 순매수를 쌓은 선. 크기는 <b>«그 종목 평소 하루 거래대금 몇 일치»</b>예요. 점선 = 순매수 0(산 만큼 팔았음).",ref:0,refLab:"순매수 0",f:function(v){return v==null?"–":(v>0?"+":"")+v.toFixed(1)+"일치"}},
  {k:"th",b:"🏷 테마 안",q:"테마의 돈 중 내 종목 몫이 <b>평소(이전 20일)의 몇 배</b>인가. 점선(1배) = 평소. 아래로 꺾이면 테마의 돈이 이 종목에서 빠지는 중이에요. 회사 크기와 상관없이 «자기 평소»와 비교해요.<br>🐢 돈 빠지는 중 · 🎭 테마와 따로 움직임 → <b>교체 검토의 명분</b> · 🚀 돈 몰림·아직 덜 오름 → 참고<br>테마 이름을 누르면 다른 테마로 바뀌어요.",ref:1,f:function(v){return v==null?"–":v.toFixed(2)+"배"}}];
+/* 🔴 2026-10-21 HO «거래대금·외국인+기관에 잣대 알약 — 자기 대비 | 시총 대비» */
+var MCAP={mo:{k:"mo",b:"🔥 거래대금",q:"그날 거래대금이 <b>시가총액의 몇 %</b>였나(회전율). 회사 크기와 상관없이 같은 잣대로 재서 <b>같은 테마·업종 종목끼리 비교할 때 좋아요</b>.<br>회전율이 높다 = <b>사고판 양(손바뀜)이 많았다</b>는 뜻이에요. 거래는 늘 산 만큼 팔린 거라, <b>누가 더 급했는지는 가격과 같이</b> 봐요 — 오르며 높으면 사려는 쪽, 내리며 높으면 팔려는 쪽이 셌던 거예요.",f:function(v){return v==null?"–":v.toFixed(2)+"%"}},
+ su:{k:"su",b:"🤝 외국인+기관",q:"기간 첫날부터 외국인+기관 순매수를 쌓아 <b>시가총액의 몇 %</b>인지. 큰 회사·작은 회사를 같은 잣대로 재서 <b>같은 테마·업종 종목끼리 비교할 때 좋아요</b>. 점선 = 순매수 0.",ref:0,refLab:"순매수 0",f:function(v){return v==null?"–":(v>0?"+":"")+v.toFixed(2)+"%"}}};
+function scaleOf(k){var o=J(SCK,{});return (o&&o[k]==="cap")?"cap":"self"}
 function ixOf(per){var a=[],n=P().days.length;for(var i=Math.max(0,n-per);i<n;i++)a.push(i);return a}
 function themesOf(n){var o=[];for(var t in (X.th||{}))if(X.th[t].indexOf(n)>=0)o.push(t);return o}
 function cum(m,ix){var r=P().ret[m]||[],c=1;ix.forEach(function(i){if(r[i]!=null)c*=1+r[i]/100});return c}
@@ -5635,15 +5667,18 @@ function role(n,t){var days=P().days,L=days.length,mm=X.th[t],R=P().ret;
 function thPick(n,ix){var ts=themesOf(n).filter(function(t){return X.th[t].some(function(m){return (X.mo||{})[m]})});if(!ts.length)return null;
  var sc=ts.map(function(t){var mm=X.th[t],s=0;mm.forEach(function(m){s+=cum(m,ix)});return [t,s/mm.length]}).sort(function(a,b){return b[1]-a[1]});
  var j=(TK[n]||0)%sc.length;return {t:sc[j][0],tot:sc.length}}
-function series(n,k,per){var ix=ixOf(per),p=P(),r=p.ret[n]||[],mk=((p.stocks[n]||[])[3]==="코스닥")?p.mkt_kosdaq:p.mkt_kospi,out=[];mk=mk||[];
+function series(n,k,per,sc){var ix=ixOf(per),p=P(),r=p.ret[n]||[],mk=((p.stocks[n]||[])[3]==="코스닥")?p.mkt_kosdaq:p.mkt_kospi,out=[];mk=mk||[];
  if(k==="ex"||k==="up"||k==="dn"){var cs=1,cm=1,su=0,sd=0;ix.forEach(function(i){var a=r[i],b=mk[i];
   if(a!=null&&b!=null){cs*=1+a/100;cm*=1+b/100;if(b>0)su+=a-b;else if(b<0)sd+=a-b}
   out.push(k==="ex"?(cs-cm)*100:k==="up"?su:sd)});return out}
  var days=p.days;
  if(k==="mo"){var a=(X.mo||{})[n];if(!a)return null;var md=X.md;
   ix.forEach(function(i){var j=md.indexOf(days[i]);if(j<0||a[j]==null){out.push(null);return}
+   if(sc==="cap"){var cp=(X.cap||{})[n];out.push(cp?a[j]/cp*100:null);return}
    var pv=[];for(var q=j-1;q>=0&&pv.length<20;q--)if(a[q]!=null)pv.push(a[q]);
    out.push(pv.length>=5?a[j]/(pv.reduce(function(x,y){return x+y},0)/pv.length):null)});return out}
+ if(k==="su"&&sc==="cap"){var f0=(X.fl||{})[n],cp0=(X.cap||{})[n];if(!f0||!cp0)return null;
+  var ac=0,hv=false;ix.forEach(function(i){if(f0[i]!=null){ac+=f0[i];hv=true}out.push(hv?ac/cp0*100:null)});return hv?out:null}
  if(k==="su"){var f=(X.fl||{})[n],a2=(X.mo||{})[n];if(!f||!a2)return null;
   var v=a2.filter(function(x){return x!=null}).slice(-20);if(!v.length)return null;var avg=v.reduce(function(x,y){return x+y},0)/v.length;
   var acc=0,have=false;ix.forEach(function(i){if(f[i]!=null){acc+=f[i];have=true}out.push(have?acc/avg:null)});return have?out:null}
@@ -5657,7 +5692,7 @@ function svg(lines,M,N,days){if(!lines.length)return '<div class="mc-nd" style="
  function Yp(v){return pt+(H-pt-pb)*(1-(v-lo)/(hi-lo))}
  var g='<svg viewBox="0 0 '+W+' '+H+'" class="mc-svg">';
  [lo+(hi-lo)*.1,(lo+hi)/2,hi-(hi-lo)*.1].forEach(function(v){var y=Yp(v);g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y+'" y2="'+y+'" stroke="#1f2733"/><text x="'+(pl-4)+'" y="'+(y+3.5)+'" fill="#6b7482" font-size="9.5" text-anchor="end">'+(Math.abs(v)>=10?v.toFixed(0):v.toFixed(1))+'</text>'});
- if(M.ref!=null){var yr=Yp(M.ref);g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+yr+'" y2="'+yr+'" stroke="#8b93a0" stroke-dasharray="3 3"/><text x="'+(W-pr-2)+'" y="'+(yr-3)+'" fill="#8b93a0" font-size="9" text-anchor="end">'+(M.ref===0?"시장":"평소")+'</text>'}
+ if(M.ref!=null){var yr=Yp(M.ref);g+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+yr+'" y2="'+yr+'" stroke="#8b93a0" stroke-dasharray="3 3"/><text x="'+(W-pr-2)+'" y="'+(yr-3)+'" fill="#8b93a0" font-size="9" text-anchor="end">'+(M.refLab||(M.ref===0?"시장":"평소"))+'</text>'}
  g+='<text x="'+pl+'" y="'+(H-5)+'" fill="#6b7482" font-size="9.5">'+days[0]+'</text><text x="'+(W-pr)+'" y="'+(H-5)+'" fill="#6b7482" font-size="9.5" text-anchor="end">'+days[N-1]+'</text>';
  var ends=[];lines.forEach(function(l){var d="",pen=false;l.p.forEach(function(v,i){if(v==null){pen=false;return}d+=(pen?"L":"M")+Xp(i).toFixed(1)+" "+Yp(v).toFixed(1);pen=true});
   g+='<path d="'+d+'" fill="none" stroke="'+l.c+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
@@ -5667,24 +5702,33 @@ function svg(lines,M,N,days){if(!lines.length)return '<div class="mc-nd" style="
  return g+'<line class="mc-cur" x1="0" x2="0" y1="'+pt+'" y2="'+(H-pb)+'" stroke="#e8eaee" opacity="0"/></svg>'}
 var CUR=null;
 function rd(i){if(!CUR)return "";var L=CUR.lines,M=CUR.M;if(i==null)i=CUR.N-1;
- return '<b style="color:#c9ced6">'+CUR.days[i]+'</b> '+L.map(function(l){return '<span style="color:'+l.c+'">● '+esc(l.n)+' '+M.f(l.p[i])+'</span>'}).join(" ")}
+ /* 🔴 2026-10-21 HO «세로선 위치의 값 순서대로 — 동그라미 번호를 붙여 어디를 눌러도 1위부터» */
+ var CN="①②③④⑤⑥⑦⑧⑨⑩",o=L.slice().sort(function(a,b){var x=a.p[i],y=b.p[i];if(x==null)return 1;if(y==null)return -1;return y-x}),r=0;
+ return '<b style="color:#c9ced6">'+CUR.days[i]+'</b> '+o.map(function(l){var v=l.p[i],k=(v==null)?'·':CN.charAt(r++);
+  return '<span style="color:'+l.c+'">'+k+' '+esc(l.n)+' '+M.f(v)+'</span>'}).join(" ")}
 var RORD={in:0,mid:1,out:2,muni:3};
 function draw(){var root=document.getElementById("mcRoot");if(!root)return;
  /* 🔴 2026-10-20 HO «기본 5일 · 지수 대비» */
  var per=+J(PK,5),mi=+J(MK,0);if([5,20,60].indexOf(per)<0)per=5;if(!(mi>=0&&mi<MET.length))mi=0;var M=MET[mi];
  /* 🔴 2026-10-20 HO «어느 항목에서 체크하든 모든 항목에 똑같이» — 선택은 하나의 목록 */
- var my=mine(),S=J(SK,null),sel=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}).slice(0,MAX):[];if(!sel.length)sel=top3();SELNOW=sel;
+ var my=mine(),S=J(SK,null),sel=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}).slice(0,MAX):top3();SELNOW=sel;   /* 🔴 2026-10-21 HO «전체 해제하면 하나도 선택 안 되게» — 강한 3개는 처음(저장값 없음)만 */
  var p=P(),N=Math.min(per,p.days.length),days=p.days.slice(-N).map(function(d){return d.slice(4,6)+"/"+d.slice(6)}),ix=ixOf(N);
  [].forEach.call(document.querySelectorAll("#mcPer button"),function(b){b.className=(+b.getAttribute("data-p")===per)?"on":""});
  if(!my.length){document.getElementById("mcBody").innerHTML='<div class="mc-empty">«📋 내 종목» 탭에서 종목을 먼저 등록해 주세요</div>';return}
  /* 내 전체 종목 값 — 순위표와 그래프가 같은 계산을 쓴다 */
- var V={};my.forEach(function(n){var s=series(n,M.k,N),o={s:s,v:last(s)};if(M.k==="th"){var t=thPick(n,ix);if(t){o.t=t;o.role=role(n,t.t)}}V[n]=o});
+ var SC=(M.k==="mo"||M.k==="su")?scaleOf(M.k):"self";if(SC==="cap")M=MCAP[M.k];
+ var V={};my.forEach(function(n){var s=series(n,M.k,N,SC),o={s:s,v:last(s)};if(M.k==="th"){var t=thPick(n,ix);if(t){o.t=t;o.role=role(n,t.t)}}V[n]=o});
  var lines=[],miss=[];sel.forEach(function(n){var o=V[n];if(o.s&&o.s.some(function(v){return v!=null}))lines.push({n:n,c:col(n),p:o.s});else miss.push(n)});
  CUR={lines:lines,M:M,N:N,days:days};
  var h='<div class="mc-mt">'+MET.map(function(x,i){return '<button data-m="'+i+'" class="'+(i===mi?"on":"")+'">'+x.b+'</button>'}).join("")+'</div>';
+ if(M.k==="mo"||M.k==="su")h+='<div class="mc-scl"><button data-sc="self" class="'+(SC==="self"?"on":"")+'">자기 대비</button><button data-sc="cap" class="'+(SC==="cap"?"on":"")+'">시총 대비</button></div>';
  h+='<div class="mc-q">'+M.q+'</div>';
  if(M.k==="th"){var wn=my.filter(function(n){return V[n].role&&(V[n].role.r==="out"||V[n].role.r==="muni")});
-  h+=wn.length?'<div class="mc-warn">⚠️ <b>교체 검토</b> · '+wn.map(function(n){var R=ROLE[V[n].role.r];return esc(n)+' '+R[0]+' '+R[1]}).join(" · ")+'</div>'
+  /* 🔴 2026-10-21 HO «같은 말 반복 말고 한 번만» — 이유별로 묶는다 */
+  var gw={};wn.forEach(function(n){var r=V[n].role.r;(gw[r]=gw[r]||[]).push(esc(n))});
+  /* 🔴 2026-10-21 HO «"교체 검토할 종목은 없고 돈 빠지는 종목은 2개"로 읽힌다» → 종목을 앞에, 이유는 뒤에 */
+  h+=wn.length?'<div class="mc-warn">⚠️ <b>교체 검토 '+wn.length+'종목</b>'+["out","muni"].filter(function(r){return gw[r]}).map(function(r){var R=ROLE[r];
+   return '<br><b class="mc-wn">'+gw[r].join(" · ")+'</b> <span class="mc-why">— '+R[0]+' '+(r==="out"?"테마의 돈이 빠지는 중":"테마와 따로 움직임")+'</span>'}).join("")+'</div>'
    :'<div class="mc-ok">✅ 내 종목 중 테마의 돈이 빠지거나 테마와 따로 노는 종목은 없어요</div>'}
  h+=svg(lines,M,N,days)+'<div class="mc-rd" id="mcRd">'+rd()+'</div>';
  if(miss.length)h+='<div class="mc-nd">데이터 없음: '+miss.map(esc).join(", ")+(M.k==="su"?" (외국인+기관은 지금 시총 상위 약 230종목만 수집)":M.k==="th"?" (거래대금 기록이 있는 종목만 계산)":"")+'</div>';
@@ -5694,29 +5738,51 @@ function draw(){var root=document.getElementById("mcRoot");if(!root)return;
   if(A.v==null)return 1;if(B.v==null)return -1;return B.v-A.v});ORD=ord;
  var rk=0;var allOn=sel.length>0&&sel.length>=Math.min(my.length,MAX);
  /* 🔴 2026-10-20 HO «전체 선택·해제가 너무 크다 — 작게, 동그라미로 체크/해제» */
- h+='<div class="mc-rk"><div class="mc-rkh"><span>📋 내 종목 '+my.length+'개 순위</span>'+
+ /* 🔴 2026-10-21 HO «"현재 기간과 항목에 따른 순위"는 길다» → 지금 기간·항목 이름을 제목에 그대로 쓴다 */
+ h+='<div class="mc-rk"><div class="mc-rkh"><span>'+per+'일 · '+M.b+(SC==="cap"?' (시총 대비)':'')+' 순위 <small>'+my.length+'종목</small></span>'+
   '<span class="mc-allck'+(allOn?" on":"")+'" data-all="'+(allOn?"0":"1")+'"><i></i>전체 선택</span></div>'+
   '<div class="mc-rks">줄을 누르면 그래프에 넣고 빼요</div>';
  ord.forEach(function(n){var o=V[n],on=sel.indexOf(n)>=0,c=on?col(n):"#5b6472",has=(o.v!=null);if(has)rk++;
   var val=has?M.f(o.v):'<span class="mc-nd2">데이터 없음</span>',sub="";
-  if(M.k==="th"&&o.t){var ro=o.role,R=ROLE[ro.r];sub='<span class="mc-th" data-th="'+esc(n)+'">'+esc(o.t.t)+(o.t.tot>1?" ⇄":"")+'</span> <span class="mc-rl" style="color:'+R[2]+'">'+R[0]+' '+R[1]+'</span>'}
+  if(M.k==="th"&&o.t){var ro=o.role,R=ROLE[ro.r];sub='<span class="mc-th" data-th="'+esc(n)+'">'+esc(o.t.t)+(o.t.tot>1?" ⇄":"")+'</span> <span class="mc-rl" style="color:'+R[2]+'">'+R[0]+' '+R[1]+'</span> <span class="mc-peerb'+(PEER&&PEER.n===n?" on":"")+'" data-peer="'+esc(n)+'">👥 동료 비교</span>'}
   h+='<div class="mc-ri'+(on?" on":"")+'" data-n="'+esc(n)+'" style="--c:'+c+'"><span class="mc-rn">'+(has?rk:"–")+'</span><span class="mc-dt"></span>'+
-   '<span class="mc-rm"><b>'+esc(n)+'</b>'+(sub?'<span class="mc-rs">'+sub+'</span>':'')+'</span><span class="mc-rv">'+val+'</span></div>'});
+   '<span class="mc-rm"><b>'+esc(n)+'</b>'+(sub?'<span class="mc-rs">'+sub+'</span>':'')+'</span><span class="mc-rv">'+val+'</span></div>'+
+   /* 🔴 2026-10-21 HO «동료 비교는 테마명 바로 밑으로» — 그 종목 줄 바로 아래(줄 밖이라 눌러도 선택이 안 바뀐다) */
+   ((M.k==="th"&&PEER&&PEER.n===n)?peerHTML(N):'')});
  h+='</div><div class="mc-hint" id="mcHint">고른 종목은 <b>모든 항목에 똑같이</b> 적용돼요 (최대 '+MAX+'개) · 그래프를 누르거나 밀면 그날 값이 나와요</div>';
  document.getElementById("mcBody").innerHTML=h}
 /* 🔴 2026-10-20 HO «아무것도 선택 안 되어 있으면 5일 지수 대비 강한 순 3개» — 처음 열 때 · 전부 해제했을 때 */
+/* 🔴 2026-10-21 HO «테마 동료 비교» — 내 종목만이 아니라 그 테마의 전 종목과 나란히.
+   열: 기간 수익률 · 회전율(오늘 거래대금 ÷ 시총) · 외국인+기관(기간 누적 ÷ 시총) · 몫(테마 돈 중 내 몫, 평소 대비) */
+function peerHTML(per){var t=PEER.t,mm=X.th[t]||[],ix=ixOf(per),days=P().days,L=days.length,ld=days[L-1],my=mine();
+ var rows=mm.map(function(m){var c=cum(m,ix),cp=(X.cap||{})[m],mv=mAt(m,ld),f=(X.fl||{})[m],fs=null;
+  if(f&&cp){var a=0,hv=false;ix.forEach(function(i){if(f[i]!=null){a+=f[i];hv=true}});fs=hv?a/cp*100:null}
+  return {n:m,r:(P().ret[m]?(c-1)*100:null),to:(mv!=null&&cp)?mv/cp*100:null,fs:fs,sh:shareRatio(m,t,[L-1])[0],me:my.indexOf(m)>=0}});
+ rows.sort(function(a,b){var x=a[PS],y=b[PS];if(x==null)return 1;if(y==null)return -1;return y-x});
+ function c(v,d,sfx,sg){return v==null?'<td class="mc-pn">–</td>':'<td>'+(sg&&v>0?'+':'')+v.toFixed(d)+sfx+'</td>'}
+ var hd=[["r","수익률"],["to","회전율"],["fs","외+기"],["sh","몫"]].map(function(x){return '<th data-ps="'+x[0]+'" class="'+(PS===x[0]?"on":"")+'">'+x[1]+(PS===x[0]?' ▾':'')+'</th>'}).join("");
+ var k=0,body=rows.map(function(r){k++;return '<tr class="'+(r.me?"me":"")+'"><td class="mc-pk">'+k+'</td><td class="mc-pnm">'+(r.me?'◆ ':'')+esc(r.n)+'</td>'+
+  c(r.r,1,'%',1)+c(r.to,2,'%')+c(r.fs,2,'%',1)+c(r.sh,2,'배')+'</tr>'}).join("");
+ return '<div class="mc-peer"><div class="mc-ph">👥 <b>'+esc(t)+'</b> 동료 '+mm.length+'종목 · '+per+'일<span class="mc-px" data-pc="1">✕</span></div>'+
+  '<div class="mc-pq">◆ = 내 종목 · 회전율 = 오늘 거래대금 ÷ 시총 · 외+기 = 기간 순매수 ÷ 시총 · 몫 = 테마 돈 중 내 몫이 평소의 몇 배 · 머리글을 누르면 정렬</div>'+
+  '<div class="mc-pw"><table><thead><tr><th></th><th>종목</th>'+hd+'</tr></thead><tbody>'+body+'</tbody></table></div></div>'}
 function top3(){var my=mine(),a=[];my.forEach(function(n){var v=last(series(n,"ex",5));if(v!=null)a.push([n,v])});
  a.sort(function(x,y){return y[1]-x[1]});return a.slice(0,3).map(function(x){return x[0]})}
 window.mcDraw=draw;
-document.addEventListener("click",function(ev){var t=ev.target.closest?ev.target.closest("#mcRoot [data-all],#mcRoot [data-th],#mcRoot [data-n],#mcRoot [data-m],#mcRoot [data-p]"):null;if(!t)return;var v;
+document.addEventListener("click",function(ev){var t=ev.target.closest?ev.target.closest("#mcRoot [data-sc],#mcRoot [data-peer],#mcRoot [data-pc],#mcRoot [data-ps],#mcRoot [data-all],#mcRoot [data-th],#mcRoot [data-n],#mcRoot [data-m],#mcRoot [data-p]"):null;if(!t)return;var v;
+ if((v=t.getAttribute("data-sc"))!==null){var o2=J(SCK,{})||{};o2[(MET[+J(MK,0)]||MET[0]).k]=v;W(SCK,o2);draw();return}
+ if((v=t.getAttribute("data-peer"))!==null){if(PEER&&PEER.n===v)PEER=null;else{var tp=thPick(v,ixOf(+J(PK,5)||5));PEER=tp?{n:v,t:tp.t}:null}draw();
+  var pe=document.querySelector("#mcRoot .mc-peer");if(pe&&pe.scrollIntoView)pe.scrollIntoView({behavior:"smooth",block:"start"});return}
+ if(t.getAttribute("data-pc")!==null){PEER=null;draw();return}
+ if((v=t.getAttribute("data-ps"))!==null){PS=v;draw();return}
  /* 🔴 2026-10-20 HO «전체 선택·해제» — 전체 선택은 그래프 한도(MAX)까지 위에서부터 */
  if((v=t.getAttribute("data-all"))!==null){var hh=document.getElementById("mcHint");
   if(v==="1"){var my0=(ORD&&ORD.length)?ORD:mine();W(SK,my0.slice(0,MAX));   /* 전체 선택 = 지금 순위표 위에서부터 */if(my0.length>MAX&&hh){draw();hh=document.getElementById("mcHint");if(hh){hh.textContent="❗ 그래프에는 최대 "+MAX+"개까지라 위에서부터 "+MAX+"개만 켰어요.";hh.style.color="#ffb84d"}return}}
   else W(SK,[]);}
- else if((v=t.getAttribute("data-th"))!==null){TK[v]=(TK[v]||0)+1;ev.stopPropagation()}
+ else if((v=t.getAttribute("data-th"))!==null){TK[v]=(TK[v]||0)+1;ev.stopPropagation();if(PEER&&PEER.n===v){var tq=thPick(v,ixOf(+J(PK,5)||5));if(tq)PEER.t=tq.t}}
  else if((v=t.getAttribute("data-p"))!==null)W(PK,+v);
  else if((v=t.getAttribute("data-m"))!==null)W(MK,+v);
- else if((v=t.getAttribute("data-n"))!==null){var my=mine(),S=J(SK,null),s=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}):[];if(!s.length)s=top3();var i=s.indexOf(v);
+ else if((v=t.getAttribute("data-n"))!==null){var my=mine(),S=J(SK,null),s=Array.isArray(S)?S.filter(function(n){return my.indexOf(n)>=0}):top3();var i=s.indexOf(v);
   if(i>=0)s.splice(i,1);else{if(s.length>=MAX){var hh=document.getElementById("mcHint");if(hh){hh.textContent="❗ 그래프에는 최대 "+MAX+"개까지예요. 다른 종목을 먼저 빼 주세요.";hh.style.color="#ffb84d"}return}s.push(v)}
   W(SK,s)}
  draw()});
@@ -13308,10 +13374,11 @@ def build_core(핵심편, data, 해석):
              + build_theme_leaders(data))
     # 🔴 2026-10-20 HO «포착도 테마처럼 탭 둘 — 오늘의 대장주까지 무료, 그 밑은 🔒 유료»
     _종목유료 = (f'<p class="sec-label"><small>강세 레이더 상세</small>'
-               f'📡 오늘 전체 포착 종목</p>'
+               # 🔴 2026-10-21 HO «오늘 포착의 강세·매집 아이콘을 유료 탭에도 — 색·디자인 조금 다르게» → 금색 PRO판
+               f'<span class="cp-radar pro" aria-hidden="true"><i></i><b></b></span> 오늘 전체 포착 종목</p>'
              + build_radar(data.get("강세레이더"), data.get("설정"))
              + f'<p class="sec-label"><small>매집 레이더 상세</small>'
-               f'🧲 오늘 전체 매집 순위</p>'      # 🔴 2026-10-09 HO — 위 무료 카드(오늘 매집 종목)와 이름을 가른다
+               f'<span class="cp-mag pro" aria-hidden="true"><em>🧲</em><i></i><i></i><i></i></span> 오늘 전체 매집 순위</p>'      # 🔴 2026-10-09 HO — 위 무료 카드(오늘 매집 종목)와 이름을 가른다
              + build_accumulation(data.get("매집레이더"), data.get("설정"),
                                   ((data.get("계좌격자") or {}).get("종목사전")))
              + _acc_basis(data.get("매집레이더"), data.get("날짜"))
@@ -23576,6 +23643,8 @@ THEME_V17_CSS = """
 .sc-rk3{margin:4px 0 0;line-height:1.9}
 .tm-l3{margin:4px 0 0;line-height:1.9}
 .bd-3 .rk3{margin-right:2px}
+/* 🔴 2026-10-21 HO — 320px에서 섹터 카드(2칸)의 «일·5일·20일» 칩이 카드 밖으로 넘쳤다 → 좁으면 줄을 바꾼다 */
+@media (max-width:360px){.sc-rk3 .rk3,.lf-rk .rk3{display:flex;flex-wrap:wrap;width:fit-content;max-width:100%}.lf-rk{min-width:0}}
 .tf-dup{margin:8px 0 4px;padding:8px 11px;border:1px dashed #2a3646;border-radius:10px}
 .tf-dup summary{cursor:pointer;list-style:none;font-size:12px;font-weight:800;color:#9aa3b1}
 .tf-dup summary::-webkit-details-marker{display:none}
@@ -28902,6 +28971,18 @@ html{{scroll-behavior:smooth}}
 .cp-mag i:nth-of-type(3){{top:12px;animation-delay:1.2s}}
 @keyframes cpCoin{{0%{{opacity:0;transform:translateX(4px)}} 15%{{opacity:1}} 80%{{opacity:1;transform:translateX(-12px) scale(.9)}} 100%{{opacity:0;transform:translateX(-15px) scale(.5)}}}}
 @keyframes cpMagPulse{{0%,100%{{transform:rotate(-8deg) scale(1)}} 50%{{transform:rotate(-8deg) scale(1.08)}}}}
+/* 🔴 2026-10-21 HO — PRO판: 레이더는 금색 화면 + 반대로 도는 스윕 + 표적 2개, 자석은 금빛 후광 + 금괴(네모) 3개 */
+.cp-radar.pro{{background-color:#16120a;
+  background-image:repeating-radial-gradient(circle,transparent 0 4px,rgba(224,192,96,.4) 4.5px 5px),
+    linear-gradient(0deg,transparent 49%,rgba(224,192,96,.32) 50%,transparent 51%),
+    linear-gradient(90deg,transparent 49%,rgba(224,192,96,.32) 50%,transparent 51%);
+  border-color:rgba(224,192,96,.9);box-shadow:0 0 8px rgba(224,192,96,.5)}}
+.cp-radar.pro i{{background:conic-gradient(from 0deg,transparent 0 280deg,rgba(255,230,150,.15) 300deg,rgba(255,224,140,.95) 360deg);
+  animation:cpSweepR 2.4s linear infinite}}
+.cp-radar.pro b{{background:#fff4c8;box-shadow:0 0 5px 1px #e0c060,9px 8px 0 -0.5px #fff4c8}}
+@keyframes cpSweepR{{to{{transform:rotate(-360deg)}}}}
+.cp-mag.pro em{{filter:drop-shadow(0 0 4px rgba(224,192,96,.85))}}
+.cp-mag.pro i{{border-radius:1px;width:6px;height:4px;background:linear-gradient(135deg,#fff6c9,#e0c060 55%,#9c7412)}}
 @media (prefers-reduced-motion:reduce){{.cp-flame,.cp-turtle,.cp-radar i,.cp-radar b,.cp-mag em,.cp-mag i{{animation:none}}}}
 .hi-shield{{width:44px;height:44px;flex-shrink:0;display:flex;align-items:center;justify-content:center}}
 .hi-arrow{{font-size:38px;font-weight:900;flex-shrink:0;line-height:1;width:44px;text-align:center}}
