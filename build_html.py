@@ -13270,12 +13270,12 @@ def build_core(핵심편, data, 해석):
                     + _chapter_block(build_sector_theme(data) + _ax_sector(), "섹터테마", ("tm-sfoot", "tm-snote")))
              # ⑤ 다음은 어디
              # 🔴 2026-10-12 HO «다가오는 테마는 숨겨줘» — 순위판이 11~20위를 늘 보여줘서 가림. ⑤엔 물밑만 남는다.
+             # 🔴 2026-10-22 HO «돌아오는 옛 주도 · 조용히 꿈틀 — 내일 테마 전략 탭 «내일 무슨 테마» 밑으로» → 여기 ④는 비운다
              + (_q("④", "다음은 어디", "🛬 다가오는 테마", f"같은 {THEME_CUM_DAYS}일 누적 11~20위")
-                if "다가오는테마" not in HIDDEN_CHAPTERS else
-                _q("④", "다음은 어디", "🔦 다음 후보", "쉬던 옛 주도, 돈이 다시 붙나?"))
+                if "다가오는테마" not in HIDDEN_CHAPTERS else "")
              + hide("다가오는테마", _chapter_block(build_coming_themes(data), "다가오는", ("tm-foot",)))
              # 🔴 2026-10-07 HO «물밑도 흐름을 — B안 · 금액과 순위도» → 흐름판. 재료가 없으면 예전 표.
-             + _chapter_block((build_reverse_flow(data) or build_reverse_look(data)) + _ax_coming(), "거꾸로", ("rv2-f", "rv2-note"))
+             + (_FOLLOW_CACHE.__setitem__("RV_HTML", _chapter_block((build_reverse_flow(data) or build_reverse_look(data)), "거꾸로", ("rv2-f", "rv2-note"))) or "")   # 🔴 10/22 _ax_coming(다가오는 테마 해설)은 옮긴 자리와 맞지 않아 뺐다
              # ⑥ 이 규칙들, 맞았나
              # 🔴 2026-10-07 HO «규칙 성적표는 뭐야? 삭제해» → 가림(되살리려면 HIDDEN_CHAPTERS에서 키만 뺀다)
              + hide("규칙성적표", _q("⑥", "위 «👉 그래서»의 규칙들, 맞았나", "📊 규칙 성적표", "다음 날 · 이틀째")
@@ -13327,10 +13327,17 @@ def build_core(핵심편, data, 해석):
         print(f"   ⚠️ 오늘 테마 활용 전략 실패 — {type(e).__name__}: {e}")
         _전략 = ""
     _판단 = build_judge_tab(data)
+    # 🔴 2026-10-22 HO — «내일 무슨 테마» 밑에 🌊 돌아오는 옛 주도 · 🤫 조용히 꿈틀대는 테마
+    try:
+        _qw = _chapter_block(build_quiet_wiggle(data), "조용꿈틀")
+    except Exception as e:
+        print(f"   ⚠️ 조용히 꿈틀대는 테마 실패 — {type(e).__name__}: {e}")
+        _qw = ""
+    _돌아옴 = (_FOLLOW_CACHE.get("RV_HTML") or "") + _qw
     if _판단:
-        _판단 = _전략 + _판단
+        _판단 = _전략 + _돌아옴 + _판단
     else:
-        _테마 += _전략
+        _테마 += _전략 + _돌아옴
     # (2026-09-24 — 판단 탭 해설은 블록마다 붙는다. 탭 맨 위 통짜 해설은 없앴다)
     if _판단:
         _테마 = (
@@ -18081,6 +18088,12 @@ RV_TITLE = "🌊 돌아오는 옛 주도 테마"   # 🔴 2026-10-16 HO «'테�
 #     처음 보는 테마(지난 60일 10위 안 0회)  −1.26%p (38%)  → 뺀다
 #   ⚠️ 현재 테마 구성으로 1년 전을 잰 근사(생존 편향) — 12/16 재검증 때 실제 기록으로 다시 본다.
 RV_LEAD_LOOK, RV_LEAD_MIN = 60, 3
+# 🔴 2026-10-22 HO «돌아오는 옛 주도 · 조용히 꿈틀 — 비교하고 각자 개선» (bt2/bt12~14 · 1년 근사)
+#   [지금 규칙 다시 잼] 옛 주도 3회↑ · 5일 20위 밖 · 상승 · 돈 +30%↑ → 복귀 24% · 5일 −0.06 · 20일 +0.54(앞 +0.53 / 뒤 −0.50) — 약했다
+#     돈 3배↑ 20일 −2.48(32%) · 2~3배 −0.23 · 1.5~2배 +1.65 · 옛 주도 10회↑ 복귀 62% · 5일 +1.92 · 쉰 지 16일↑ 복귀 19%
+#   [개선] 옛 주도 8회↑ + 돈 평소 +30~100%(2배 미만) → 복귀 50% · 5일 +1.31(56%) · 20일 +3.02 · 앞/뒤 +1.96/+0.86
+RV_LEAD_MIN2 = 8        # 흐름판(돌아오는 옛 주도) 전용 — 레이더 재진입 알약은 RV_LEAD_MIN(3) 그대로
+RV_MONEY_CAP = 100      # 평소 대비 +100%(2배) 이상 = 돈 폭발 → 뺀다
 
 
 def _old_lead_count(nm):
@@ -20944,7 +20957,8 @@ def _chart_guide():
             '<p class="chcg-4">· <b>주도 테마</b> = 최근 20일 20위 안 + 그동안 하루 10위 안에 3번 이상 든 테마<br>'
             '· 한 테마엔 배지 하나만(위 칸일수록 먼저) · 배지별 실제 성적은 판단 탭 «⚖️ 테마 자리별 성적표»(접힌 보조 칸)에서 매일 채점해요</p>'
             '<p class="tg-h">🗺️ 챕터 순서</p>'
-            '<p class="chcg-4">🏆 오늘 뜬 테마(오늘 하루) → 📡 테마 레이더(최근 5일) → 📋 주도 테마 순위판(최근 20일) → 🔦 다음 후보(쉬던 옛 주도)</p></details>')
+            '<p class="chcg-4">🏆 오늘 뜬 테마(오늘 하루) → 📡 테마 레이더(최근 5일) → 📋 주도 테마 순위판(최근 20일)<br>'
+            '· 🌊 돌아오는 옛 주도 · 🤫 조용히 꿈틀대는 테마는 «🎯 내일 테마 전략» 탭으로 옮겼어요</p></details>')
 
 
 def _today_folded(data):
@@ -21861,7 +21875,7 @@ def build_reverse_flow(data=None, n=4):
     R0 = {k: i + 1 for i, (k, _s) in enumerate(rk.get(rd[-1]) or [])} if rd else {}
     R1 = {k: i + 1 for i, (k, _s) in enumerate(rk.get(rd[-2]) or [])} if len(rd) >= 2 else {}
     cand, cut = [], []
-    _rv_new, _rv_thin, _rv_down = [], [], []
+    _rv_new, _rv_thin, _rv_down, _rv_boom = [], [], [], []
     for nm in M[d]:
         r0 = R0.get(nm)
         if r0 is not None and r0 <= 20:
@@ -21881,8 +21895,11 @@ def build_reverse_flow(data=None, n=4):
             continue
         # 🔴 2026-10-14 HO 승인 — 옛 주도(지난 60일 일봉 10위 안 3회↑) + 오늘 테마 상승만
         _n10, _e = _old_lead_count(nm)
-        if _n10 < RV_LEAD_MIN:
+        if _n10 < RV_LEAD_MIN2:
             (_rv_new if _n10 == 0 else _rv_thin).append(nm)
+            continue
+        if pct >= RV_MONEY_CAP:
+            _rv_boom.append((nm, pct))
             continue
         if _e is None or _e <= 0:
             _rv_down.append(nm)
@@ -21894,8 +21911,10 @@ def build_reverse_flow(data=None, n=4):
     if not cand:
         return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>예전 주도 테마에 돈이 다시 붙는 곳</span></p>'
                 '<p class="rv2-wait">오늘은 <b>해당하는 테마가 없습니다.</b><br>'
-                f'조건 — 레이더 20위 밖 · <b>지난 {RV_LEAD_LOOK}거래일 일봉 10위 안 {RV_LEAD_MIN}회↑</b>(옛 주도) · 오늘 테마 상승 · '
-                '평소보다 30% 이상 많은 돈 · 평소 100억 이상 · 한 종목 쏠림 70% 미만</p>'
+                f'조건 — 레이더 20위 밖 · <b>지난 {RV_LEAD_LOOK}거래일 일봉 10위 안 {RV_LEAD_MIN2}회↑</b>(옛 주도) · 오늘 테마 상승 · '
+                '돈이 평소보다 30~100% 많음(2배 넘게 터진 날은 제외) · 평소 100억 이상 · 한 종목 쏠림 70% 미만</p>'
+                + (f'<p class="rv2-x">🚫 돈이 평소 2배 넘게 터진 테마 {len(_rv_boom)}개는 뺐어요 — 단발로 끝나기 쉬운 자리예요.</p>'
+                   if _rv_boom else '')
                 + (f'<p class="rv2-x">🚫 돈은 붙었지만 <b>처음 보는 테마</b> {len(_rv_new)}개는 뺐어요 — 과거 성적이 가장 나빴던 자리예요.</p>'
                    if _rv_new else '') + '</div>')
     COL = ["#ff5a4e", "#ff9a3d", "#ff7eb6", "#c99bff"]
@@ -21979,7 +21998,10 @@ def build_reverse_flow(data=None, n=4):
                  f'<span><small>평소보다</small><b style="color:{TM_HOT}">{c["pct"]:+.0f}%</b></span></div></div>{_span}')
     cutl = (f'<p class="rv2-x">🚫 <b>한 종목이 거래대금 {THEME_SHADOW_PCT}% 이상</b>인 테마는 뺐어요: '
             + " · ".join(f'{_lab_nm(nm)}({s:.0f}%)' for nm, s in sorted(cut, key=lambda t: -t[1])[:4]) + '</p>') if cut else ""
-    _newl = (f'<p class="rv2-x">🚫 돈은 붙었지만 <b>처음 보는 테마</b>(지난 {RV_LEAD_LOOK}일 10위 안 0회) '
+    _boom = (f'<p class="rv2-x">🚫 돈이 평소 <b>2배 넘게 터진</b> 테마는 뺐어요: '
+             + " · ".join(f'{_lab_nm(nm)}(+{p_:.0f}%)' for nm, p_ in sorted(_rv_boom, key=lambda t: -t[1])[:4])
+             + ' — 단발로 끝나기 쉬운 자리예요.</p>') if _rv_boom else ""
+    _newl = _boom + (f'<p class="rv2-x">🚫 돈은 붙었지만 <b>처음 보는 테마</b>(지난 {RV_LEAD_LOOK}일 10위 안 0회) '
              f'{len(_rv_new)}개는 뺐어요 — 과거 성적이 가장 나빴던 자리예요.</p>') if _rv_new else ""
     return (f'<div class="rv2"><p class="rv2-h">{RV_TITLE}<span>예전 주도 테마에 돈이 다시 붙는 곳 · 최근 11거래일</span></p>'
             + svg + rows + cutl + _newl + '</div>'
@@ -21989,10 +22011,118 @@ def build_reverse_flow(data=None, n=4):
               '· «오늘 하루 튐» = 오늘만 많았던 곳 — 내일도 이어지는지 확인<br>'
               '· 테마마다 가장 큰 한 종목과, 날마다 시장 전체가 늘고 준 만큼은 빼고 셌어요<br>'
               '· 순위 = 레이더와 같은 최근 5일 합산 순위 · 금액 = 가장 큰 한 종목을 뺀 테마 거래대금<br>'
-              f'· <b>옛 주도 N회</b> = 오늘을 뺀 지난 {RV_LEAD_LOOK}거래일 동안 일봉 10위 안에 든 횟수({RV_LEAD_MIN}회 이상만 보여요)<br>'
+              f'· <b>옛 주도 N회</b> = 오늘을 뺀 지난 {RV_LEAD_LOOK}거래일 동안 일봉 10위 안에 든 횟수({RV_LEAD_MIN2}회 이상만 보여요)<br>'
+              '· 돈이 평소 <b>2배 넘게</b> 터진 날은 빼요 — 지난 1년, 그런 날은 20일 뒤 성적이 가장 나빴어요<br>'
               '· 왜 옛 주도만? 1년치 근사로 재 보니 «순위 밖 + 돈 증가»만으로는 20일 뒤 성적이 테마 평균과 같았고, '
               '<b>예전 주도 + 오늘 상승</b>이면 평균보다 나았어요. 처음 보는 테마는 오히려 나빴어요(확정이 아니라 경향).</p>'
             + PAN_LEGEND + '</details>')
+
+
+# ══════════════════════════════════════════════════════════════
+# 🤫 조용히 꿈틀대는 테마 (2026-10-22 HO «돌아올 테마 — 원리를 백테스트해서 개선» · 내일 테마 전략 탭 «내일 무슨 테마» 밑)
+#   [원리] «며칠 주기»는 안 맞는다(주기 도달 22% = 아무 테마 22%). 복귀를 가르는 건 «단골도»(최근 40일 중 하루 10위 안 날수).
+#          «오래 쉼»·«돈 폭발»은 오히려 나빴다. 가장 좋은 건 «단골이 돈은 평소대로인데 순위만 올라온 날».
+#   [칸] 🔥 조용한 꿈틀 = 단골 6일↑ · 오늘 일봉 11~30위 · 5일 순위 40위 안 · 돈 평소 +50% 미만 · 오늘 테마 상승
+#        👀 지켜볼 꿈틀 = 반단골 3~5일 · 오늘 일봉 11~20위 · 돈 평소 +50% 미만 · 오늘 상승
+#        💤 쉬는 단골   = 단골 6일↑인데 오늘 신호 없음(접음)
+#   [근거] 1년 근사(bt2/bt10~14 · 5일 안 다시 하루 10위 안 = 복귀):
+#     🔥 복귀 62% · 5일 +2.21%p(55%) · 20일 +4.94%p(59%) · 앞/뒤 반년 +1.32/+2.72 · 203일 중 101일 · 그날 평균 1.5개
+#     👀 복귀 32% · 5일 +0.41 · 20일 +1.80 · 💤 복귀 47% · 5일 +0.26
+#     ✖ 단골 + 돈 1.5배↑ 꿈틀 5일 −0.71(뒤 반년 −1.97) · 쉰 지 11~20일 20일 −0.41 · 돈 2배↑ 20일 −1.18
+#   ⚠️ 라이브 기록이 8/31부터라 «최근 40일»이 아직 짧다 — 단골 6일↑가 적게 잡힌다(기록이 쌓이면 제자리).
+QW_TITLE = "🤫 조용히 꿈틀대는 테마"
+QW_LOOK, QW_REG, QW_SEMI = 40, 6, 3
+QW_P = {"A": 62, "C": 32, "B": 47}
+
+
+def build_quiet_wiggle(data=None):
+    try:
+        D, _f = _board_days()
+        days = sorted(D)
+        if len(days) < 10:
+            return ""
+        R = {dd: {n: i + 1 for i, (n, _s, _e) in enumerate(D[dd])} for dd in days}
+        E0 = {n: e for n, _s, e in D[days[-1]]}
+        i0 = len(days) - 1
+        lo = max(0, i0 - QW_LOOK)
+        rk = _theme_cum_rank(THEME_CUM_DAYS, 100000) or {}
+        rd = [x for x in sorted(rk) if x <= days[-1]]
+        R4 = {n: j + 1 for j, (n, _) in enumerate(rk.get(rd[-1]) or [])} if rd else {}
+        MO = _board_money() or {}
+    except Exception as e:
+        print(f"   ⚠️ 조용히 꿈틀대는 테마 실패 — {type(e).__name__}: {e}")
+        return ""
+    skip = set(_FOLLOW_CACHE.get("RV") or [])
+    try:
+        _bd = _board_badge_days()
+        BR = {n: v.get("r40") for n, v in (_bd[-1][1] if _bd else {}).items()}
+    except Exception:
+        BR = {}
+    rows = []
+    for t in {n for dd in days[lo:i0] for n, r in R[dd].items() if r <= 10}:
+        if not _theme_ok(t) or t in skip:
+            continue
+        ins = [(R[days[k]].get(t) or 999) <= 10 for k in range(lo, i0 + 1)]
+        if ins[-1]:
+            continue
+        dcnt = sum(ins[:-1])
+        if dcnt < QW_SEMI:
+            continue
+        last = max(k for k, v in enumerate(ins[:-1]) if v)
+        r1, r4 = R[days[-1]].get(t) or 999, R4.get(t) or 999
+        m = MO.get(t)
+        mp = m[0] if m else None
+        quiet = mp is None or mp < 50
+        ch = E0.get(t)
+        up = ch is not None and ch > 0
+        if dcnt >= QW_REG and r1 <= 30 and r4 <= 40 and quiet and up:
+            tier = "A"
+        elif QW_SEMI <= dcnt < QW_REG and r1 <= 20 and quiet and up:
+            tier = "C"
+        elif dcnt >= QW_REG:
+            tier = "B"
+        else:
+            continue
+        rows.append({"n": t, "d": dcnt, "rest": len(ins) - 1 - last, "r1": r1, "m": mp, "ch": ch, "tier": tier,
+                     "h": [(R[days[k]].get(t) or 999) for k in range(lo, i0 + 1)]})
+    _FOLLOW_CACHE["QW"] = [x["n"] for x in rows if x["tier"] == "A"]
+
+    def _strip(h):
+        return ('<span class="qw-st">' + "".join(
+            f'<i class="{"on" if r <= 10 else "nr" if r <= 20 else ""}{" now" if k == len(h) - 1 else ""}"></i>'
+            for k, r in enumerate(h)) + '</span>')
+
+    def _row(x):
+        # 🔴 2026-10-22 HO «5일 안 복귀 %가 다 똑같아 의미가 없다» — 칸 평균(1년 근사)이라 줄마다 같았다 → 칸 머리에 한 번만.
+        #   줄 오른쪽엔 HO 질문 «순위판에 없는 테마인가?»에 답하는 «📋 순위판 N위 / 순위판 밖»을 둔다.
+        r1 = f'{x["r1"]}위' if x["r1"] < 999 else '100위 밖'
+        mo = (f' · 돈 평소 {x["m"]:+.0f}%' if x["m"] is not None else '')
+        chs = (f' · 오늘 {x["ch"]:+.1f}%' if x["ch"] is not None else '')
+        br = BR.get(x["n"])
+        tag = (f'<span class="qw-b in">📋 순위판<br><b>{br}위</b></span>' if br else '<span class="qw-b">순위판<br><b>밖</b></span>')
+        return (f'<div class="qw-r"><div class="qw-l"><b>{x["n"]}</b>{_strip(x["h"])}'
+                f'<small>단골 <em>{x["d"]}일</em> · 쉰 지 {x["rest"]}일 · 오늘 하루 {r1}{chs}{mo}</small></div>{tag}</div>')
+    A = sorted([x for x in rows if x["tier"] == "A"], key=lambda x: x["r1"])
+    C = sorted([x for x in rows if x["tier"] == "C"], key=lambda x: x["r1"])
+    B = sorted([x for x in rows if x["tier"] == "B"], key=lambda x: (-x["d"], x["r1"]))
+    nl = len(days[lo:i0])
+    body = (f'<p class="qw-g" style="color:#ff5a4e">🔥 조용한 꿈틀<i>5일 안 복귀 {QW_P["A"]}%</i><span>단골이 돈은 평소대로인데 순위만 11~30위로 올라온 날</span></p>'
+            + ("".join(_row(x) for x in A) or '<p class="qw-none">오늘은 없어요</p>')
+            + f'<p class="qw-g" style="color:#ffc94a">👀 지켜볼 꿈틀<i>5일 안 복귀 {QW_P["C"]}%</i><span>반단골(3~5일)이 조용히 11~20위로 올라온 날</span></p>'
+            + ("".join(_row(x) for x in C) or '<p class="qw-none">오늘은 없어요</p>')
+            + (f'<details class="qw-more"><summary>💤 쉬는 단골 {len(B)}개 <span>오늘 신호 없음 · 5일 안 복귀 {QW_P["B"]}% · 펼쳐 보기</span></summary>'
+               + "".join(_row(x) for x in B) + '</details>' if B else ''))
+    return (f'<div class="qw"><p class="rv2-h">{QW_TITLE}<span>자주 뜨던 단골이 조용히 다시 움직이는 곳</span></p>'
+            f'<div class="qw-lg"><span><i class="on"></i>하루 10위 안</span><span><i class="nr"></i>11~20위</span>'
+            f'<span><i class="now"></i>오늘</span><span>· 칸 = 최근 {nl}거래일</span></div>'
+            + body + '</div>'
+            '<details class="mb-fold"><summary>📖 읽는 법</summary><p class="mb-n">'
+            f'· <b>단골</b> = 최근 {nl}거래일 중 하루 10위 안에 든 날수 — 자주 왔던 테마일수록 잘 돌아와요<br>'
+            '· <b>조용한</b> = 그날 테마 거래대금이 평소(앞 5일 중앙값)보다 50% 넘게 늘지 않음 · 돈이 확 터진 날은 오히려 단발로 끝나기 쉬웠어요<br>'
+            '· <b>꿈틀</b> = 오늘 하루 순위가 11~30위로 올라오고 테마도 오름 · 오래 쉰 테마일수록 덜 돌아왔어요<br>'
+            '· <b>5일 안 복귀 %</b> = 그 칸 모양이 지난 1년에 나온 뒤 5거래일 안에 다시 하루 10위 안에 든 비율 — <b>칸 전체의 평균</b>이라 테마마다 따로 매긴 값은 아니에요(근사 · 방향만 참고)<br>'
+            '· <b>📋 순위판 N위</b> = 주도 테마 순위판(20일) 안에 있는 테마 · <b>순위판 밖</b> = 20일 순위 20위 밖으로 밀려 순위판엔 안 보이는 테마<br>'
+            '· «🌊 돌아오는 옛 주도 테마»에 이미 나온 테마는 여기서 빼요</p></details>')
 
 
 def _theme_overlap(a, b):
@@ -23752,6 +23882,19 @@ THEME_V17_CSS = """
 /* ══ 🔎 거꾸로 보기 ══ */
 .rv2{background:#0d141c;border:1px solid #1d2734;border-radius:11px;
   padding:11px 12px 10px;margin:10px 0 0}
+.qw{margin:14px 0 0}.qw-lg{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:10.5px;color:#8b95a3;margin:0 0 4px}
+.qw-lg i{display:inline-block;width:10px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px;background:#222c3a}
+.qw-lg i.on,.qw-st i.on{background:#ffc94a}.qw-lg i.nr,.qw-st i.nr{background:rgba(255,201,74,.35)}.qw-lg i.now,.qw-st i.now{outline:1.5px solid #e6ebf1}
+.qw-g{margin:12px 0 2px;font-size:12.5px;font-weight:900}.qw-g i{font-style:normal;margin-left:6px;font-size:10.5px;font-weight:800;border:1px solid currentColor;border-radius:99px;padding:0 6px;opacity:.9}
+.qw-b{flex:0 0 58px;text-align:center;font-size:9.5px;line-height:1.35;color:#6f7784;border:1px solid #1f2836;border-radius:8px;padding:4px 2px}
+.qw-b b{font-size:12.5px;color:#9aa3b2}.qw-b.in{color:#e0c060;border-color:rgba(224,192,96,.45)}.qw-b.in b{color:#ffd27a}.qw-g span{display:block;font-size:10.5px;font-weight:600;color:#8b95a3;margin-top:1px}
+.qw-none{margin:2px 0;font-size:11px;color:#6f7784;padding:7px;border:1px dashed #1f2836;border-radius:8px;text-align:center}
+.qw-r{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #1f2836}
+.qw-l{flex:1;min-width:0}.qw-l>b{display:block;font-size:13px;color:#e6ebf1}.qw-l small{display:block;font-size:10.5px;color:#8b95a3;margin-top:3px;line-height:1.5}
+.qw-l em{font-style:normal;color:#ffc94a;font-weight:800}
+.qw-st{display:flex;gap:1.5px;margin-top:4px}.qw-st i{flex:1;height:8px;border-radius:2px;background:#222c3a}
+.qw-p{flex:0 0 66px;text-align:right;font-size:19px;font-weight:900;line-height:1}.qw-p small{display:block;font-size:9px;color:#8b95a3;font-weight:600;margin-top:3px}
+.qw-more{margin:10px 0 0}.qw-more summary{cursor:pointer;font-size:12px;font-weight:900;color:#8b95a3}.qw-more summary span{font-weight:600;font-size:10.5px;margin-left:4px}
 .rv2-h{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;flex-wrap:wrap;
   font-size:15.5px;font-weight:800;color:#e8ecf1;line-height:1.35}   /* 🔴 2026-10-06 HO «다른 챕터처럼 글자를 키워줘» */
 .rv2-h span{margin-left:auto;font-size:9px;font-weight:600;color:#6f7784}
@@ -23821,6 +23964,10 @@ THEME_V17_CSS = """
 /* 🔴 2026-10-20 HO «유료 탭도 화려하지 않지만 느낌 있게» — 금빛 실선·옅은 금빛 머리·챕터 제목 금색 막대 */
 .pp{margin-top:2px;padding:12px 10px 8px;border-radius:14px;border:1px solid rgba(224,192,96,.22);
   background:linear-gradient(180deg,rgba(224,192,96,.07),rgba(224,192,96,0) 180px)}
+/* 🔴 2026-10-22 HO «내일 테마 전략 탭이 모바일에서 좁다 — 오늘 테마 탭처럼 넓게» */
+#jdPane1.pp{margin-top:2px;padding:12px 10px 8px;border-radius:14px;border:1px solid rgba(224,192,96,.22);
+  background:linear-gradient(180deg,rgba(224,192,96,.07),rgba(224,192,96,0) 180px)}
+@media (max-width:480px){#jdPane1.pp{padding:10px 0 6px !important;border-left:0;border-right:0;border-radius:0}}
 .pp-hd{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 0 9px;border-bottom:1px solid rgba(224,192,96,.16)}
 .pp-bd{flex:none;font-size:9.5px;font-weight:900;letter-spacing:.16em;color:#e0c060;border:1px solid rgba(224,192,96,.55);border-radius:99px;padding:1px 8px}
 .pp-t{min-width:0}.pp-t p{margin:0}.pp-t1{font-size:12px;font-weight:800;color:#e6d6a6}.pp-t1 b{color:#e0c060}
