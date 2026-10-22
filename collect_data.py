@@ -3512,6 +3512,25 @@ _NOWPRICE = {}   # 종목명 → 현재가 (시총 API). 테마 종목 현재가
 def _fetch_day_ohlc_api(code):
     """종목별 trend API(매집이 쓰는 것)에서 오늘 시·고·저·종 + 전일 거래량.
     ⚠️ 거래량·시고저 키 이름은 실측 전이다. 후보를 훑고, 첫 호출 때 키를 찍는다."""
+    # 🔴 2026-10-22 — /detail/{코드}/trend 가 사라졌다(404). 강세 레이더 2차 필터가 «전일 거래량»을
+    #   못 받아 모든 후보가 탈락 → «신규 포착»이 10/20부터 매일 0건이었다.
+    #   [새 경로] 시·고·저·현재가 = /api/domestic/detail/{코드}/price (살아 있음, 실측)
+    #            전일 거래량   = 새 투자자 동향 API(_trend_rows_v2)에서 «오늘(DATE)보다 앞선 첫 거래일»
+    #   ⚠️ 줄 순서 대신 날짜로 «어제»를 고른다 — 발행 시각에 따라 맨 앞 줄이 오늘일 수도 직전일일 수도 있다.
+    try:
+        _p = requests.get(f"https://stock.naver.com/api/domestic/detail/{code}/price",
+                          headers=THEME_API_HEADERS, timeout=10)
+        if _p.status_code == 200:
+            _j = _p.json() or {}
+            _rows = _trend_rows_v2(code, 5) or []
+            _전 = next((r_ for r_ in _rows if str(r_.get("bizdate")) < str(DATE)), None)
+            _out = {"시가": to_num(_j.get("openPrice")), "고가": to_num(_j.get("highPrice")),
+                    "저가": to_num(_j.get("lowPrice")), "종가": to_num(_j.get("nowPrice")),
+                    "전일거래량": to_num(_전.get("tradingVolume")) if _전 else None}
+            if _out["전일거래량"]:
+                return _out
+    except Exception:
+        pass
     try:
         r = requests.get(TREND_API.format(code=code), headers=THEME_API_HEADERS,
                          timeout=10, params={"tradeType": "KRX", "startIdx": 0,
@@ -3814,11 +3833,49 @@ TREND_API = "https://stock.naver.com/api/domestic/detail/{code}/trend"
 _TREND_KEY_LOGGED = {"done": False}
 
 
+TREND_API_V2 = "https://stock.naver.com/api/stockSecurity/investor-trend/v2/domestic/{code}"
+
+
+def _trend_rows_v2(code, days):
+    """새 종목별 투자자 동향 API → 옛 키 이름({bizdate, closePrice, foreignerPureBuyQuant,
+    organPureBuyQuant, tradingVolume})으로 번역한 줄 목록. 실패하면 None(옛 경로로 넘어간다)."""
+    try:
+        r = requests.get(TREND_API_V2.format(code=code), headers=THEME_API_HEADERS, timeout=10,
+                         params={"exchangeType": "krx", "size": str(min(100, max(int(days), ACC_DAYS)))})
+        if r.status_code != 200:
+            return None
+        items = (r.json() or {}).get("items") or []
+    except Exception:
+        return None
+    out = []
+    for it in items:
+        k = (it or {}).get("krx") or {}
+        d = str(it.get("localTradedAt") or "").replace("-", "")
+        종가 = to_num(k.get("closingPrice"))
+        if not d or 종가 is None:      # 휴장·미확정 줄은 건너뛴다
+            continue
+        out.append({"bizdate": d, "closePrice": 종가,
+                    "foreignerPureBuyQuant": to_num(k.get("foreignNetVolume")),
+                    "organPureBuyQuant": to_num(k.get("organizationNetVolume")),
+                    "tradingVolume": to_num(k.get("tradingVolume"))})
+    return out or None
+
+
 def _fetch_investor_flow_api(code, days):
     """새 API로 종목별 외국인·기관 일별 순매매를 받는다.
     반환: {"외국인": [억원...], "기관": [...], "종가": 최근종가} 또는 None"""
-    rows = []
-    페이지 = max(1, -(-int(days) // 50))
+    # 🔴 2026-10-22 HO «오늘 전체 매집 순위 없는게 맞아?» — 아니었다. 10/21부터 «0종목».
+    #   [원인] 네이버가 /api/domestic/detail/{코드}/trend 를 없앴다(404 «Route not found»).
+    #     그 경로가 죽자 아래 옛 HTML(frgn.naver)도 이미 죽어 있어 종목별 수급이 전부 None →
+    #     스캔 0종목 → 매집(5일·20일·60일) 전부 «조건 만족 종목 없음», stock_flow_history도 빈 날.
+    #   [새 주소 · 실측 2026-10-22] /api/stockSecurity/investor-trend/v2/domestic/{코드}?exchangeType=krx&size=N
+    #     · size=100까지 한 번에 온다(60일도 1회 요청). 줄: {localTradedAt, krx:{foreignNetVolume,
+    #       organizationNetVolume, closingPrice, tradingVolume ...}} — 수량은 «주» 단위 문자열.
+    #   👉 새 응답을 «옛 키 이름»으로 번역해 아래 기존 계산을 그대로 쓴다(계산 로직은 건드리지 않는다).
+    rows = _trend_rows_v2(code, days)
+    if rows is None:
+        rows = []
+    페이지 = 0 if rows else max(1, -(-int(days) // 50))
     for _pg in range(페이지):
         try:
             r = requests.get(TREND_API.format(code=code), headers=THEME_API_HEADERS,
