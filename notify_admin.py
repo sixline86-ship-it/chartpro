@@ -123,6 +123,13 @@ CHAT_ID = ADMIN_ID or FALLBACK
         "✅ 조치: Claude에게 «내년 KRX 휴장일 목록 추가»를 요청하세요.\n"
         "   (collect_data.py · inherit_report.py · watchdog.py 3곳)"
     ),
+    # 🩺 2026-10-22 — 수집 건강검진(health_check.py). 발행은 막지 않는다 → 문구도 «발행됨»을 전제로 한다.
+    "health": (
+        "🩺 수집 이상 감지 — 일부 코너가 비었을 수 있어요",
+        "발행은 계속 진행됐지만, 위 항목이 평소보다 비어 있습니다.\n\n"
+        "✅ 확인: 네이버 등 외부 주소가 바뀌었는지(404·빈 응답) 로그를 보세요.\n"
+        "   'Actions → 시장 데이터 수집' 로그에서 해당 항목 이름으로 검색하면 됩니다."
+    ),
     "collect_fail": (
         "🔴 데이터 수집이 실패했습니다",
         "collect_data.py 가 정상 종료하지 못했습니다.\n\n"
@@ -167,7 +174,10 @@ def main():
         줄.append(f"<b>감지 내용</b>\n{상세}\n")
     줄.append(본문)
     줄.append("")
-    줄.append(f"<i>구독자에게는 아무것도 발송되지 않았습니다.</i>")
+    if 사유 == "health":
+        줄.append("<i>리포트는 정상 발행 흐름을 탔습니다 — 위 항목은 비어 있거나 낡았을 수 있어요.</i>")
+    else:
+        줄.append(f"<i>구독자에게는 아무것도 발송되지 않았습니다.</i>")
     줄.append(f"{SITE_URL}  [{SCRIPT_VERSION}]")
 
     if not ADMIN_ID and FALLBACK:
