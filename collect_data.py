@@ -2786,6 +2786,41 @@ def collect_macro():
     return 결과
 
 
+# 🆕 2026-10-23 HO «종합 탭이니 오늘의 핵심 원인을 다양하게 — 미국시장, 수급, 기타».
+#   [왜] 해석글이 받던 해외 숫자는 환율·유가·미국채·금 4개뿐이라, «어젯밤 미국이 원인»인 날도
+#     뉴스 제목에 기대서만 말할 수 있었다(10/22 밤 필라델피아 반도체 −6.72%도 숫자로는 몰랐다).
+#   [무엇] 나스닥·S&P500·필라델피아 반도체의 «직전 미국 정규장 마감». 18시(KST) 발행 때는 한국 시각
+#     오늘 새벽에 끝난 장이다. 화면 카드에는 쓰지 않고 해석글(핵심 원인 판단) 재료로만 넘긴다.
+US_TICKERS = {"나스닥": "^IXIC", "S&P500": "^GSPC", "필라델피아반도체": "^SOX"}
+
+
+def collect_us_markets():
+    try:
+        from zoneinfo import ZoneInfo
+        ny = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        ny = None
+    out = {}
+    for 이름, 심볼 in US_TICKERS.items():
+        try:
+            h = yf.Ticker(심볼).history(period="10d")
+            h = h.dropna(subset=["Close"])
+            # 미국 장중에 돌면(정상 발행 시각은 아님) 진행 중인 봉을 뺀다
+            if ny is not None and len(h) and h.index[-1].date() == ny.date() and ny.hour < 16:
+                h = h.iloc[:-1]
+            if len(h) < 2:
+                print(f"⚠️ 미국 증시 {이름}: 데이터 부족")
+                continue
+            c1, c0 = float(h["Close"].iloc[-1]), float(h["Close"].iloc[-2])
+            out[이름] = {"값": round(c1, 2), "등락률": round((c1 - c0) / c0 * 100, 2),
+                       "기준일": str(h.index[-1].date()).replace("-", ""),
+                       "설명": "미국 현지 정규장 마감(한국 시각 오늘 새벽)"}
+        except Exception as e:
+            print(f"⚠️ 미국 증시 {이름} 수집 실패: {type(e).__name__}: {str(e)[:100]}")
+    print(f"✅ 미국 증시 {len(out)}/{len(US_TICKERS)}건 수집")
+    return out or None
+
+
 def naver_get(url, referer=None):
     """네이버 페이지를 가져오되 **인코딩을 자동 판별**한다.
 
@@ -7931,6 +7966,11 @@ if __name__ == "__main__":
     게이지 = compute_gauge(지수수급, 테마결과.get("확산도_시장평균"))
     뉴스원본 = collect_news()
     매크로 = collect_macro()
+    try:
+        미국증시 = collect_us_markets()      # 🆕 2026-10-23 — 해석글 «핵심 원인» 판단 재료(화면 카드 아님)
+    except Exception as e:
+        print(f"⚠️ 미국 증시 수집 실패 — 무시하고 진행: {type(e).__name__}")
+        미국증시 = None
     파생 = collect_program_and_futures()
     update_flow_history(지수수급, 파생)
     등락수 = collect_updown_counts()
@@ -8112,6 +8152,7 @@ if __name__ == "__main__":
         "뉴스원본": 뉴스원본,
         "신용잔고": collect_credit_balance(),
         "매크로": 매크로,
+        "미국증시": 미국증시,
         "파생": 파생,
         "강세레이더": 강세레이더,
         "매집레이더": 매집레이더,
