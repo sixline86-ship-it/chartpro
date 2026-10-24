@@ -188,7 +188,7 @@ jobs:
       - name: 오늘 이미 발행했는지 확인
         id: guard
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           # 🆕 2026-08-31 — 🚨 3중 과금 사고 수정.
           #    예전엔 "workflow_dispatch면 무조건 재발행"이었다. 그런데
           #    cron-job.org도 workflow_dispatch로 들어와서, 하루 3번 다
@@ -244,10 +244,35 @@ jobs:
               echo "run=yes" >> $GITHUB_OUTPUT
               echo "🚑 거래일 18시 이후 · 정식 발행 없음 — 비상 발행으로 진행합니다."
               echo "   (구독자 발송은 '텔레그램 = 보냄'을 직접 골랐을 때만 나갑니다)"
+            elif [ "$TRADING" = "no" ]; then
+              # 🆕 2026-10-24 HO «주말에 고친 디자인도 반영되게» — ③-휴장: 직전 거래일 리포트를 새 화면으로 다시 만든다.
+              #   재수집·해석글(과금) 없음. 뒤 단계는 모두 CP_DATE(직전 거래일)를 «오늘»로 쓴다.
+              #   텔레그램은 '보냄'을 직접 골랐을 때만 나간다(아래 발송 조건 그대로).
+              LD=""
+              for f in $(ls archive/report_2*.json 2>/dev/null | sort -r); do
+                d=$(basename "$f" .json); d=${d#report_}
+                if ! grep -q '"승계원본"' "$f" 2>/dev/null && [ -f "archive/data_${d}.json" ] \
+                   && ! grep -q '"완전": false' "archive/data_${d}.json" 2>/dev/null; then
+                  LD=$d; break
+                fi
+              done
+              if [ -n "$LD" ]; then
+                echo "run=yes" >> $GITHUB_OUTPUT
+                echo "gen=no" >> $GITHUB_OUTPUT
+                echo "collect=no" >> $GITHUB_OUTPUT
+                echo "wk=yes" >> $GITHUB_OUTPUT
+                echo "CP_DATE=${LD}" >> $GITHUB_ENV
+                echo "🧊 휴장일 수동 실행 — 직전 거래일(${LD}) 리포트를 새 화면으로 다시 만듭니다(재수집·과금 없음)."
+              else
+                echo "run=no" >> $GITHUB_OUTPUT
+                echo "blocked=yes" >> $GITHUB_OUTPUT
+                echo "🛑 휴장일인데 다시 만들 직전 거래일 리포트를 못 찾았습니다 — 아무것도 바꾸지 않았습니다."
+              fi
             else
-              # ③ 장중·휴장·주말·자정 이후 → 아무것도 안 함
+              # ③ 거래일 장중·자정 이후 아침 → 아무것도 안 함 (🆕 2026-10-24 운영자 알림)
               echo "run=no" >> $GITHUB_OUTPUT
-              echo "::warning title=수동 실행 차단::지금(${HM}, 거래일=${TRADING})은 정식 발행 전이라 수동 실행을 막았습니다. 수집·기록·사이트·발송 모두 그대로입니다. 화면 확인은 Claude 대화창 미리보기로 하세요. (허용: 발행 완료 후 자정 전 / 거래일 18시 이후 비상 발행)"
+              echo "blocked=yes" >> $GITHUB_OUTPUT
+              echo "::warning title=수동 실행 차단::지금(${HM}, 거래일=${TRADING})은 정식 발행 전이라 수동 실행을 막았습니다. 수집·기록·사이트·발송 모두 그대로입니다. 화면 확인은 Claude 대화창 미리보기로 하세요. (허용: 발행 완료 후 자정 전 / 거래일 18시 이후 비상 발행 / 휴장일 = 직전 거래일 다시 만들기)"
               echo "🛑 수동 실행 차단 — 아무것도 바꾸지 않았습니다."
             fi
           elif [ -f "archive/report_${TODAY}.json" ]; then
@@ -285,6 +310,18 @@ jobs:
             echo "run=yes" >> $GITHUB_OUTPUT
             echo "▶️ 오늘 아직 정상 발행 전입니다 — 이번 시도를 진행합니다(재시도 포함)."
           fi
+
+      # 🆕 2026-10-24 HO «수동 실행이 차단될 때 나한테만 텔레그램으로 알려줘»
+      - name: 수동 실행 차단 알림 (운영자 전용)
+        if: steps.guard.outputs.blocked == 'yes'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: |
+          pip install -q requests >/dev/null 2>&1 || true
+          python3 notify_admin.py manual_blocked "실행 시각 $(date +%H:%M) · 오늘 정식 발행 전"
 
       - name: 파이썬 준비
         if: steps.guard.outputs.run == 'yes'
@@ -335,7 +372,7 @@ jobs:
         id: time_check
         if: steps.guard.outputs.run == 'yes'
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           if grep -q '"정상시각": false' "archive/data_${TODAY}.json" 2>/dev/null; then
             echo "normal=no" >> "$GITHUB_OUTPUT"
             echo "🔴 실행 시각이 비정상입니다 — 뒤 텔레그램 단계를 건너뜁니다."
@@ -464,7 +501,7 @@ jobs:
       #      진짜 해석글로 덮어쓰도록 다시 돌린다.
       - name: 해석글 승계 (없으면 전날 글)
         id: inherit
-        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes' && steps.guard.outputs.wk != 'yes'
         continue-on-error: true
         run: python inherit_report.py | tee /tmp/inherit.log
       - name: 승계 여부 판정
@@ -482,7 +519,7 @@ jobs:
       - name: 해석글 없음 경고
         if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           if [ ! -f "archive/report_${TODAY}.json" ]; then
             echo "::warning title=핵심편 없음::오늘 해석글(archive/report_${TODAY}.json)이 없습니다. 이대로 발행하면 ⏱️핵심편이 통째로 빠집니다. 'Claude 해석글 = 새로 생성'으로 다시 실행하세요."
           else
@@ -492,7 +529,7 @@ jobs:
       - name: 리포트 HTML 생성
         if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           python build_html.py
           # ⚠️ 해석글(핵심편)이 없으면 index.html을 건드리지 않는다 (2026-08-19).
           #    재사용 모드로 돌렸을 때 라이브 첫 화면이 '핵심편 없는 버전'으로
@@ -514,7 +551,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           if grep -q '"완전": false' "archive/data_${TODAY}.json" 2>/dev/null; then
             REASON=$(cat INCOMPLETE_FLAG 2>/dev/null || echo "사유 미상")
             python notify_admin.py incomplete "$REASON"
@@ -538,7 +575,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           N=$(python -c "import json;d=json.load(open('archive/data_${TODAY}.json',encoding='utf-8'));print(len(d.get('주도섹터') or []))" 2>/dev/null || echo "-1")
           if [ "$N" = "0" ]; then
             LAST=$(python -c "import json;h=json.load(open('theme_history.json',encoding='utf-8'));ds=sorted((h.get('일별') or {}).keys());print(ds[-1] if ds else '기록없음')" 2>/dev/null || echo "읽기실패")
@@ -556,7 +593,7 @@ jobs:
       #  [무엇] data_오늘.json 의 모든 항목을 최근 7일 평소와 비교해, 평소엔 있던 게 0이거나 크게 줄면
       #   운영자에게만 알린다. 읽고 알리기만 한다 — 발행은 막지 않는다(continue-on-error).
       - name: 수집 건강검진 (운영자 전용)
-        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
+        if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes' && steps.guard.outputs.wk != 'yes'
         continue-on-error: true
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -576,7 +613,7 @@ jobs:
         id: interp_check
         if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           if [ -f "archive/report_${TODAY}.json" ]; then
             echo "ok=yes" >> "$GITHUB_OUTPUT"
             echo "✅ 해석글 확인됨 — 텔레그램 정상 발송"
@@ -680,7 +717,7 @@ jobs:
             #   장마감 후 실행에서만 생기므로 조건부 루프에 둔다. 빠지면 매일 초기화되고 일봉 채우기가 매일 다시 돈다.
             git add "$f" 2>/dev/null || true
           done
-          git commit -m "자동 발행: $(date +%Y-%m-%d)" || echo "변경사항 없음"
+          git commit -m "자동 발행: $(date +%Y-%m-%d)${CP_DATE:+ (휴장일 화면 갱신 · ${CP_DATE})}" || echo "변경사항 없음"
           # 🔴 2026-08-28 — 몰아 모으기(enrich.yml)가 같은 저장소에 push하다가
           #   실패하는 사고를 겪었다. 이제 cron-job.org 3개(18:07·18:27·18:47)가
           #   짧은 간격으로 걸려 있어, 앞 회차가 늦게 끝나면 뒤 회차와 겹칠 수
@@ -731,7 +768,7 @@ jobs:
         id: publish_check
         if: steps.guard.outputs.run == 'yes' && steps.holiday.outputs.closed != 'yes'
         run: |
-          TODAY=$(date +%Y%m%d)
+          TODAY=${CP_DATE:-$(date +%Y%m%d)}
           git fetch origin main --quiet
           MISS=""
           for f in "report_${TODAY}.html" "index.html" "archive/data_${TODAY}.json"; do
@@ -762,6 +799,15 @@ jobs:
       #   git push 직후 바로 텔레그램을 보내면, GitHub Pages가 아직 새 페이지를
       #   배포 중일 수 있다(수십 초 소요). 그 틈에 텔레그램이 링크를 미리 크롤링하면
       #   옛 버전이나 "썸네일 없음" 상태를 그대로 캐시해버려 나중에도 안 바뀐다.
+      - name: 휴장일 화면 갱신 알림 (운영자 전용)
+        if: steps.guard.outputs.wk == 'yes' && steps.publish_check.outputs.ok == 'yes'
+        continue-on-error: true
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_ADMIN_CHAT_ID: ${{ secrets.TELEGRAM_ADMIN_CHAT_ID }}
+        run: python notify_admin.py holiday_rebuild "${CP_DATE} 리포트 · 텔레그램 ${{ inputs.telegram }}"
+
       - name: Pages 배포 대기
         if: >-
           steps.guard.outputs.run == 'yes' &&
