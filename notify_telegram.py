@@ -14,7 +14,7 @@ import requests
 from datetime import datetime
 
 SCRIPT_VERSION = "v2026.08.30-a1"   # ⬅ 다른 4개 파일과 항상 같아야 한다.
-DATE = datetime.now().strftime("%Y%m%d")
+DATE = (os.environ.get("CP_DATE") or "").strip() or datetime.now().strftime("%Y%m%d")  # 🔴 2026-10-24 — 휴장일 수동 실행은 daily.yml이 CP_DATE(직전 거래일)를 넘긴다
 REPORT_PATH = (os.path.join("archive", f"report_{DATE}.json")
                if os.path.exists(os.path.join("archive", f"report_{DATE}.json"))
                else f"report_{DATE}.json")
