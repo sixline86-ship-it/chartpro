@@ -20,7 +20,7 @@ from datetime import datetime
 
 SCRIPT_VERSION = "v2026.09.17-v19"   # ⬅ 다른 파일과 항상 같아야 한다.
 
-DATE = datetime.now().strftime("%Y%m%d")
+DATE = (os.environ.get("CP_DATE") or "").strip() or datetime.now().strftime("%Y%m%d")  # 🔴 2026-10-24 — 휴장일 수동 실행은 daily.yml이 CP_DATE(직전 거래일)를 넘긴다
 SITE_URL = "https://sixline86-ship-it.github.io/chartpro/"
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -130,6 +130,21 @@ CHAT_ID = ADMIN_ID or FALLBACK
         "✅ 확인: 네이버 등 외부 주소가 바뀌었는지(404·빈 응답) 로그를 보세요.\n"
         "   'Actions → 시장 데이터 수집' 로그에서 해당 항목 이름으로 검색하면 됩니다."
     ),
+    # 🆕 2026-10-24 HO «수동 실행이 차단될 때 나한테만 알려줘» — 왜 아무 일도 안 일어났는지 바로 알게
+    "manual_blocked": (
+        "🛑 수동 실행을 막았습니다 (아무것도 바뀌지 않음)",
+        "거래일인데 아직 저녁 정식 발행 전이라, 장중 숫자로 사이트·기록이 덮이지 않게 막았습니다.\n\n"
+        "✅ 허용되는 때\n"
+        " · 그날 정식 발행이 끝난 뒤(자정 전) — 화면만 다시 만들기\n"
+        " · 거래일 18시 이후인데 발행이 없을 때 — 비상 발행\n"
+        " · 주말·휴장일 — 직전 거래일 리포트를 새 화면으로 다시 만들기\n\n"
+        "화면 확인은 Claude 대화창 미리보기로 하세요."
+    ),
+    "holiday_rebuild": (
+        "🧊 휴장일 수동 실행 — 직전 거래일 화면만 다시 만들었습니다",
+        "재수집·해석글 생성(과금)은 하지 않았고, 확정 데이터와 해석글 그대로 새 디자인만 입혔습니다.\n"
+        "텔레그램은 '보냄'을 골랐을 때만 구독자에게 나갑니다."
+    ),
     "collect_fail": (
         "🔴 데이터 수집이 실패했습니다",
         "collect_data.py 가 정상 종료하지 못했습니다.\n\n"
@@ -176,6 +191,8 @@ def main():
     줄.append("")
     if 사유 == "health":
         줄.append("<i>리포트는 정상 발행 흐름을 탔습니다 — 위 항목은 비어 있거나 낡았을 수 있어요.</i>")
+    elif 사유 == "holiday_rebuild":
+        줄.append("<i>사이트 화면만 바뀌었습니다.</i>")
     else:
         줄.append(f"<i>구독자에게는 아무것도 발송되지 않았습니다.</i>")
     줄.append(f"{SITE_URL}  [{SCRIPT_VERSION}]")
