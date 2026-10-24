@@ -199,7 +199,7 @@ def trading_day_context(today):
 # ⚙️ 개발용 조건 표시 — 배포 시 False로 바꾸면 모든 조건 설명이 사라진다
 SHOW_CRITERIA = False   # 🔴 2026-10-19 HO «매집·포착 적용조건 없애줘» — 내용은 적용조건.txt로 전달
 
-DATE = datetime.now().strftime("%Y%m%d")
+DATE = (os.environ.get("CP_DATE") or "").strip() or datetime.now().strftime("%Y%m%d")  # 🔴 2026-10-24 — 휴장일 수동 실행은 daily.yml이 CP_DATE(직전 거래일)를 넘긴다
 # 🔴🔴 2026-09-02 **같은 사고 재발** — 어제(9/1) 고쳤는데 오늘 또 이 줄이
 #    "20260901"로 하드코딩된 채 올라가 발행이 멈췄다. 어제와 똑같은
 #    경로: 미리보기 만들 때 사본(/home/claude/preview*)에서 날짜를
@@ -13400,10 +13400,10 @@ def build_core(핵심편, data, 해석):
             return ""
         return (f'<section class="tabsec tab-{키}" data-tab="{키}" id="tab-{키}"'
                 f'{"" if 활성 else " hidden"}>'
-                f'<div class="tabsec-hd"><span class="tabsec-name">{이름}</span>'
+                f'<div class="tabsec-hd{" pc1" if 키 == "포착" else ""}"><span class="tabsec-name">{이름}</span>'
                 f'<span class="tabsec-sub">{부제}</span>'
-                # 🔴 2026-10-19 HO «'⚠️ 해당 종목들은 추천이 아닙니다.' — 맨 위 포착 옆 작은 글씨»
-                f'{"<span class=tabsec-warn>⚠️ 해당 종목들은 추천이 아닙니다.</span>" if 키 == "포착" else ""}'
+                # 🔴 2026-10-24 HO «'해당 종목들은 추천이 아님' 이렇게만 — 두 줄로 나와서» + «부제는 넣어줘야지» → 부제 + 짧은 경고, 한 줄(pc1)
+                f'{"<span class=tabsec-warn>⚠️ 해당 종목들은 추천이 아님</span>" if 키 == "포착" else ""}'
                 f'</div>'
                 f'{내용}</section>')
 
@@ -20645,14 +20645,17 @@ def _ax(lines, rec=""):
 HOW_UNIFY = ("tm-trd2", "bd-fold", "ts-how", "mb-fold", "cn-how")
 
 
-def _unify_how(html):
+HOW_INNER = {"cn-how": "cn-hb", "fv-learnd": "fv-learn"}   # 안쪽 상자가 이미 있는 접기 — 그 상자에 how-b만 더한다
+
+
+def _unify_how(html, classes=HOW_UNIFY):
     """🔴 2026-10-24 HO «포착 탭 '어떤 조건으로 뽑았나요?'처럼 테마 탭 '그림 읽는 법'·'순위판 읽는 법' 등 디자인을 똑같이 — 통일».
     [전] 테마 탭 읽는 법 = 펼치면 제목 줄까지 한 상자. 포착 탭 = 제목 줄은 그대로, 내용만 밑에 상자.
     [후] 위 class의 <details>에 how-fold를 더하고 내용(summary 뒤 ~ 짝 </details> 앞)을 <div class="how-b">로 감싼다.
          cn-how는 안쪽 상자(cn-hb)가 이미 있어 how-b만 더한다. 안에 다른 details가 있어도 짝을 세어 찾는다."""
     import re as _re
     out, i = [], 0
-    pat = _re.compile(r'<details class="(' + "|".join(HOW_UNIFY) + r')"([^>]*)>')
+    pat = _re.compile(r'<details class="(' + "|".join(classes) + r')"([^>]*)>')
     while True:
         m = pat.search(html, i)
         if not m:
@@ -20682,8 +20685,9 @@ def _unify_how(html):
         body = html[se:j - 10]
         out.append(html[i:m.start()])
         out.append(f'<details class="how-fold {cls}"{m.group(2)}>' + html[m.end():se])
-        if cls == "cn-how" and body.lstrip().startswith('<div class="cn-hb"'):
-            out.append(body.replace('<div class="cn-hb"', '<div class="cn-hb how-b"', 1))
+        _in = HOW_INNER.get(cls)
+        if _in and body.lstrip().startswith(f'<div class="{_in}"'):
+            out.append(body.replace(f'<div class="{_in}"', f'<div class="{_in} how-b"', 1))
         else:
             out.append(f'<div class="how-b">{body}</div>')
         out.append('</details>')
@@ -21873,13 +21877,19 @@ def _radar_fold0(h, g):
         return h[:k] + g + h[k:]
     n = h.count('class="tm-lg"', k, c)
     # 🔴 2026-10-23 HO «테마의 특징(4컷)으로 — 그리고 접어 줘» — 4컷이 있는 날은 접기 제목도 특징으로
+    # 🔴 2026-10-24 HO «⚫ 그림자 테마라 레이더에서 뺀 자리는 '레이더 테마 자세히 보기' 안에 넣어줘야지» — 접기 안 맨 끝으로 옮긴다
+    _sw = ""
+    _s0 = h.find('<div class="tm-shw"', c)
+    if _s0 >= 0:
+        _s1 = h.find('</div>', _s0) + len('</div>')
+        _sw, h = h[_s0:_s1], h[:_s0] + h[_s1:]
     if _week4_picks():
         return (h[:k] + g
                 + f'<details class="rd-fold"><summary>▾ 레이더 {n}개 테마 자세히 보기</summary>'   # 🔴 2026-10-24 HO
-                + h[k:c] + '</details>' + h[c:])
+                + h[k:c] + _sw + '</details>' + h[c:])
     return (h[:k] + g
             + f'<details class="rd-fold"><summary>▾ 레이더 {n}개 테마 자세히 보기</summary>'   # 🔴 2026-10-24 HO
-            + h[k:c] + '</details>' + h[c:])
+            + h[k:c] + _sw + '</details>' + h[c:])
 
 
 def _radar_reg_line(as_lines=False):
@@ -21991,7 +22001,9 @@ def _mini_chart(n, W0=None, H0=None):
     r40 = [R40[d].get(n) for d in days]
     if not any(r40):
         return ""
-    g = f'<line x1="0" x2="{W}" y1="{Y(10):.1f}" y2="{Y(10):.1f}" stroke="#2a3342" stroke-dasharray="2 2"/>'
+    # 🔴 2026-10-24 HO «타일 차트에 10위권을 분별할 수 있게 살짝 표시» — 위쪽(1~10위) 옅은 금빛 띠 + 10위 선을 금빛 점선으로
+    g = (f'<rect x="0" y="0" width="{W}" height="{Y(10):.1f}" fill="rgba(224,192,96,.07)"/>'
+         f'<line x1="0" x2="{W}" y1="{Y(10):.1f}" y2="{Y(10):.1f}" stroke="rgba(224,192,96,.35)" stroke-dasharray="2 2"/>')
     g += _pl([R4[d].get(n) for d in days], "#8d96a4", 1)
     g += _pl(r40, "#e0c060", 1.5)   # 🔴 10/14 HO «노란색이 진해 흰(회색)선이 안 보일 수 있다 — 아주 조금 얇게» 1.9→1.5
     t = R1[days[-1]].get(n)
@@ -23602,7 +23614,7 @@ def build_theme_radar(data):
     # 🔴 2026-10-13 HO «📏 한 줄은 테마 수명표지? 예전처럼 가로막대로 심플하게 몇 개만»
     _svd = [d for d in (2, 3, 4, 5, 7) if d in _SURV]
     # 🔴 2026-10-24 HO «테마 수명표도 접어줘»
-    _sv_html = ((f'<details class="tm-svf"><summary>📏 테마 수명표<span class="svf-s"> · 10위권 테마가 며칠 버티나</span></summary><div class="tm-sv1"><p class="svq-h">10위권에 든 테마가 N일째까지 남는 비율 <span>기록 {_sv.get("완결수")}건</span></p>'
+    _sv_html = ((f'<details class="tm-svf"><summary>📏 테마 수명표<span class="svf-s"> · 10위권 테마 절반이 {_sv.get("중앙값")}일째에 빠져요</span></summary><div class="tm-sv1"><p class="svq-h">10위권에 든 테마가 N일째까지 남는 비율 <span>기록 {_sv.get("완결수")}건</span></p>'
                  + "".join(f'<div class="svq-b{" md" if d == _sv.get("중앙값") else ""}"><span class="k">{d}일째</span>'
                            f'<span class="b"><i style="width:{max(2, _SURV[d])}%"></i></span><span class="v">{_SURV[d]}%</span></div>'
                            for d in _svd)
@@ -25105,6 +25117,11 @@ THEME_V17_CSS = """
 .ts-hl{font-size:18px;font-weight:900;line-height:1.35;margin:3px 0 5px;color:#f2f4f7;word-break:keep-all;text-wrap:balance}
 .ts-hs{font-size:12px;color:#cfc6ae;line-height:1.6;word-break:keep-all}.ts-hs b{color:#f2f4f7}.ts-hs b.up{color:#ff6b4a}
 .ts-p{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;padding:10px 0 9px;border-top:1px solid #1e2937}
+/* 🔴 2026-10-24 HO «오가노이드 밑 설명 글이 오른쪽으로 치우쳐 있다 — 꽉 차게 · 차트 눌렀을 때도 꽉 차게»
+   번호(①)는 제목 줄 왼쪽에만 두고(겹쳐 띄움), 나머지(이름표·나이·주의·불빛·종목·펼침)는 카드 전체 폭. */
+.ts .ts-p{display:block;position:relative}
+.ts .ts-p>.ts-k{position:absolute;left:0;top:11px}
+.ts .ts-p .ts-h{padding-left:30px;min-height:24px}
 .ts-top+.ts-p{border-top:0}
 .ts-k{width:22px;height:22px;border-radius:50%;background:#f0c65a;color:#1a1405;font-size:12px;display:flex;align-items:center;justify-content:center}
 .ts-in{min-width:0}
@@ -25139,7 +25156,7 @@ THEME_V17_CSS = """
 .ts-sub{opacity:.78}.ts-sub .ts-k{background:#2a3343;color:#9aa3b1}.ts-sub .ts-n{font-size:13px}.ts-sub .ts-why{margin:3px 0 0;font-size:11px;color:#9aa3b1}.ts-sub .ts-tg{margin:0 4px 0 0}
 .ts-pan{margin:8px 0 0 !important}
 /* 🔴 2026-10-24 HO «자세히 누르면 좌우 폭이 좁다 — 넓게 · 펼친 것만 얇은 테두리(기존 내용과 헷갈림)» */
-.ts .ts-pan{box-sizing:border-box;margin:8px 0 6px -30px !important;width:calc(100% + 30px);
+.ts .ts-pan{box-sizing:border-box;margin:8px 0 6px 0 !important;width:100%;
   padding:10px 10px 8px;border:1px solid #3a4658;border-radius:10px;background:#0c1118}
 .ts-lp.on.sh{border-color:#8b95a5;color:#e6ebf1;background:#1a1f27}
 .ts-shd{margin:5px 0 0;font-size:11px;line-height:1.55;color:#aab3bf;word-break:keep-all}
@@ -25503,10 +25520,14 @@ THEME_V17_CSS = """
 .tm-trd2>summary .k2a::before{content:" ▾";color:#6f7a87;margin-left:3px}
 .tm-trd2[open]>summary .k2a::before{content:" ▴"}
 /* 🔴 2026-10-24 HO — 테마 탭 읽는 법 접기 = 포착 탭 «💡 어떤 조건으로 뽑았나요?»와 같은 모양 */
-.tab-테마 details.how-fold,.tab-테마 details.how-fold[open]{padding:0!important;background:none!important;border:0!important;border-radius:0!important}
-.tab-테마 details.how-fold>summary{display:inline-block!important;font-size:11.5px!important;font-weight:700!important;color:#9fb0c2!important;padding:3px 0!important}
-.tab-테마 details.how-fold>.how-b{margin-top:5px;padding:9px 11px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)}
-.tab-테마 details.how-fold>.how-b :is(p,li){font-size:11.5px;line-height:1.75;color:#b9c0c9}
+.tabsec details.how-fold,.tabsec details.how-fold[open]{padding:0!important;background:none!important;border:0!important;border-radius:0!important;margin:10px 0 6px}
+.tabsec details.how-fold>summary{display:inline-block!important;font-size:11.5px!important;font-weight:700!important;color:#9fb0c2!important;padding:3px 0!important;list-style:none;cursor:pointer}
+.tabsec details.how-fold>summary::-webkit-details-marker{display:none}
+.tabsec details.how-fold>summary::before{content:none!important}
+.tabsec details.how-fold:not(.tm-trd2)>summary::after{content:" ▾";color:#6f7a87}
+.tabsec details.how-fold:not(.tm-trd2)[open]>summary::after{content:" ▴"}
+.tabsec details.how-fold>.how-b{margin-top:5px!important;padding:9px 11px!important;border-radius:9px!important;background:rgba(255,255,255,.04)!important;border:1px solid rgba(255,255,255,.06)!important}
+.tabsec details.how-fold>.how-b :is(p,li){font-size:11.5px;line-height:1.75;color:#b9c0c9}
 /* 🔴 2026-10-19 HO «테마 탭 '그림 읽는 법'·'배지·돈 표시 읽는 법' 등 글자 크기·디자인이 제각각 → 통일» */
 .tab-테마 :is(.tm-trd,.tm-trd2,.tm-svf,.bd-fold,.mb-fold,.cn-how,.ts-how){margin:8px 0 6px;padding:0;border:0}
 .tab-테마 :is(.tm-trd,.tm-trd2,.tm-svf,.bd-fold,.mb-fold,.cn-how,.ts-how)>summary{list-style:none;cursor:pointer;display:inline-flex;
@@ -29839,7 +29860,11 @@ html{{scroll-behavior:smooth}}
   letter-spacing:-.02em}}
 .tabsec-sub{{font-size:11px;color:#7d848f;font-weight:600}}
 .tabsec-hd{{flex-wrap:wrap;row-gap:3px}}
-.tabsec-warn{{font-size:10.5px;color:#9aa1ab;font-weight:600;margin-left:auto}}
+.tabsec-hd.pc1{{flex-wrap:nowrap;gap:6px}}.tabsec-hd.pc1 .tabsec-name{{flex:none;white-space:nowrap}}.tabsec-hd.pc1 .tabsec-sub{{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.3px}}
+.tabsec-hd.pc1 .tabsec-warn{{flex:none;letter-spacing:-.4px;margin-left:auto}}.tabsec-hd.pc1 .tabsec-sub{{flex:0 1 auto}}
+@media (max-width:400px){{.tabsec-hd.pc1 .tabsec-sub{{font-size:10px;letter-spacing:-.4px}}.tabsec-hd.pc1 .tabsec-warn{{font-size:9.5px}}.tabsec-hd.pc1{{gap:5px}}}}
+@media (max-width:350px){{.tabsec-hd.pc1 .tabsec-sub{{font-size:9px}}.tabsec-hd.pc1 .tabsec-warn{{font-size:9px}}.tabsec-hd.pc1{{gap:4px}}.tabsec-hd.pc1 .tabsec-name{{font-size:14px}}}}
+.tabsec-warn{{font-size:10.5px;color:#9aa1ab;font-weight:600;margin-left:auto;white-space:nowrap}}
 /* 🆕 2026-10-19 — 포착 탭 «어떤 원리로 뽑았나요» 접기 */
 .how-fold{{margin:0}}
 .how-wrap{{margin-top:10px;padding-top:6px;border-top:.5px solid rgba(255,255,255,.08);
@@ -32221,6 +32246,7 @@ if __name__ == "__main__":
     if "CP_ARCHLIVE" not in html:
         _bi = html.rfind("</body>")
         html = (html[:_bi] + _ARCHLIVE_JS + html[_bi:]) if _bi >= 0 else (html + _ARCHLIVE_JS)
+    html = _unify_how(html, ("fv-why", "fv-learnd"))   # 🔴 2026-10-24 HO Q1 — 수급 탭 보는 방법 접기도 포착·테마와 같은 모양
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"🎉 완료! → {OUT_PATH}  (build_html {SCRIPT_VERSION})")
