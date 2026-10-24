@@ -1440,6 +1440,10 @@ def collect_themes_and_gauge():
                 "종목없음": len(_leaders) == 0,
                 "종목부분": 0 < len(_leaders) < 4,  # 4개를 다 못 채웠다는 표시
             })
+            # 🔴 2026-10-24 — 10/15부터 상세가 늘 실패해 이 길로만 오는데, 여기서 _테마행을 안 채워
+            #   «쏠림»(그림자) 계산이 통째로 비었다(자전거 1위가 그림자인데 표시 없음). 대장후보로 채운다.
+            if _leaders:
+                _테마행[테마명] = _leaders
             if _leaders:
                 print(f"  ✅ [{테마명}] 목록만으로 종목 {len(_leaders)}개 확보 → "
                       f"{', '.join(x['종목명'] for x in _leaders)} (확산도 {확산도:.0f}%)")
@@ -1535,8 +1539,10 @@ def collect_themes_and_gauge():
     for a in 분석:
         _r = _테마행.get(a["테마명"]) or []
         _am = [x.get("거래대금") or 0 for x in _r]
-        _tot = sum(_am)
-        if _tot > 0 and len(_am) >= 2:
+        # 🔴 2026-10-24 — 목록 길은 종목이 최대 4개뿐이라 합이 테마 전체보다 작다 → 테마 거래대금합과 큰 쪽을 분모로.
+        #   (단위 같음: 둘 다 백만원 · 10/23 자전거 대장후보 합 vs 거래대금합 실측 확인)
+        _tot = max(sum(_am), float(a.get("거래대금합") or 0))
+        if _tot > 0 and len(_am) >= 1:
             _i = max(range(len(_am)), key=lambda k: _am[k])
             a["쏠림"] = round(_am[_i] / _tot * 100, 1)
             a["쏠림종목"] = _r[_i].get("종목명")
