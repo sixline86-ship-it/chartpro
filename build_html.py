@@ -2643,7 +2643,33 @@ def _jh_spark(s):
             f'<polyline fill="none" stroke="{col}" stroke-width="1.6" points="{" ".join(f"{a:.1f},{b:.1f}" for a, b in pts)}"/></svg>')
 
 
-def _jh_cards(S, keys, gid):
+def _jh_day(data, key, s):
+    """카드 안 작은 그림 = 오늘 움직임(2026-10-30 HO). ① 5분봉 선 ② 없으면 오늘 시가·고가·저가·종가 가로 캔들
+    ③ 그것도 없으면(미국 지수 옛 데이터) 최근 20일 선. 반환 (svg, 라벨)."""
+    c = s.get("chg") or 0
+    col = "#ff6b4a" if c > 0 else "#4c9bff" if c < 0 else "#8d97a6"
+    d = ((data.get("당일흐름") or {}).get(key) or {}).get("종가들") or []
+    v = [x for x in d if isinstance(x, (int, float))]
+    if len(v) >= 5:
+        mn, mx = min(v), max(v)
+        y = lambda q: 18 - ((q - mn) / ((mx - mn) or 1)) * 16
+        pts = " ".join(f"{i / (len(v) - 1) * 100:.1f},{y(q):.1f}" for i, q in enumerate(v))
+        return (f'<svg class="jh-sp" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">'
+                f'<line x1="0" x2="100" y1="{y(v[0]):.1f}" y2="{y(v[0]):.1f}" stroke="#3a4554" stroke-dasharray="2 2"/>'
+                f'<polyline fill="none" stroke="{col}" stroke-width="1.6" points="{pts}"/></svg>'), "오늘"
+    r = s["rows"][-1] if (s["ohlc"] and s["rows"]) else None
+    if r and str(r[0]) >= str(DATE if not s.get("us") else "0"):
+        o, h, l, cl = r[1], r[2], r[3], r[4]
+        if h > l:
+            x = lambda q: 4 + (q - l) / (h - l) * 92
+            cc = "#ff6b4a" if cl >= o else "#4c9bff"
+            return (f'<svg class="jh-sp" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">'
+                    f'<line x1="{x(l):.1f}" x2="{x(h):.1f}" y1="10" y2="10" stroke="{cc}" stroke-width="1.4"/>'
+                    f'<rect x="{min(x(o), x(cl)):.1f}" y="5" width="{max(1.5, abs(x(cl) - x(o))):.1f}" height="10" fill="{cc}" rx="1"/></svg>'), "오늘 범위"
+    return _jh_spark(s), "20일"
+
+
+def _jh_cards(S, keys, gid, data=None):
     cs = []
     for key in keys:
         s = S.get(key)
@@ -2651,6 +2677,7 @@ def _jh_cards(S, keys, gid):
             continue
         c = s["chg"]
         cl = "up" if (c or 0) > 0 else "dn" if (c or 0) < 0 else ""
+        _g, _lb = _jh_day(data or {}, key, s)
         if key == "ust":
             # 금리는 «%의 %»가 헷갈린다 → 오늘 값 − 어제 값(%p)
             ch = (f'{s["last"] - s["last"] / (1 + c / 100):+.2f}%p' if c is not None else '')
@@ -2658,7 +2685,7 @@ def _jh_cards(S, keys, gid):
             ch = f'{c:+.2f}%' if c is not None else ''
         cs.append(f'<button type="button" class="jh-c" data-k="{key}" data-g="{gid}" onclick="jhTap(this)">'
                   f'<small>{s["nm"]}</small><b>{_jh_fmt(s["last"], s["dg"])}<span>{s["unit"]}</span></b>'
-                  f'<i class="{cl}">{ch}</i>{_jh_spark(s)}<em>20일</em></button>')
+                  f'<i class="{cl}">{ch}</i>{_g}<em>{_lb}</em></button>')
     if not cs:
         return ""
     return (f'<div class="jh-row">{"".join(cs)}</div>'
@@ -2699,12 +2726,23 @@ JH_JS = r"""<script>
 </script>"""
 
 JH_CSS = """<style>
-.jh-tl{position:relative;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding-left:16px;margin:14px 0 6px}
-.jh-tl::before{content:"";position:absolute;left:5px;top:6px;bottom:6px;width:2px;background:linear-gradient(#2b4a72,#34405a 60%,#2f4a36)}
+.jh-tl{position:relative;display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding-left:30px;margin:14px 0 6px}
+.jh-tl::before{content:"";position:absolute;left:9px;top:10px;bottom:10px;width:2px;background:linear-gradient(#2b4a72,#34405a 60%,#2f4a36)}
 .jh-tp{position:relative;min-width:0}
-.jh-tp::before{content:"";position:absolute;left:-15px;top:4px;width:10px;height:10px;border-radius:50%;background:#0d131b;border:2px solid #a3c8ff}
+.jh-tp::before{content:"";position:absolute;left:-26px;top:4px;width:12px;height:12px;box-sizing:border-box;border-radius:50%;background:#0d131b;border:2px solid #a3c8ff}
 .jh-tp.kr::before{border-color:#4c9bff}.jh-tp.nx::before{border-color:#7fe0a0}
-.jh-th{margin:0 0 6px;font-size:11.5px;font-weight:800;color:#8d97a6}.jh-th b{font-size:14px;color:#f2f4f7;margin-right:6px}
+.jh-th{margin:0 0 6px;font-size:11.5px;font-weight:800;color:#8d97a6;line-height:20px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.jh-th b{font-size:14px;color:#f2f4f7;min-width:44px;font-variant-numeric:tabular-nums}
+.jh-ibox{background:#0f151d;border:1px solid #1f2a38;border-radius:12px;padding:6px 6px 2px}.jh-iday{display:block;width:100%;height:auto}
+.jh-ev{display:flex;gap:8px;align-items:flex-start;margin:0;font-size:12.5px;line-height:1.6;color:#c9d0d9;word-break:keep-all}.jh-ev b{color:#f2f4f7}
+.jh-ev b.up,.jh-ev .up{color:#ff6b4a}.jh-ev b.dn,.jh-ev .dn{color:#4c9bff}
+.jh-evt{min-width:0;flex:1}
+.jh-no{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid #e8c45a;color:#e8c45a;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-top:2px}
+.jh-dwl{display:grid;gap:6px;margin:8px 0 2px}
+.jh-dw{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;background:#121923;border:1px solid #1f2a38;border-radius:10px;padding:7px 9px}
+.jh-dw>em{font-style:normal;font-size:10.5px;font-weight:800;color:#e8c45a;white-space:nowrap;padding-top:2px}
+.jh-dw b{font-size:13px;color:#f2f4f7}.jh-dw p{margin:2px 0 0;font-size:12px;line-height:1.55;color:#c9d0d9;word-break:keep-all}
+.jh-dw p.jh-dw-k{color:#9fc3ff;font-size:11.5px}.jh-dw a{font-size:11px;color:#8d97a6}
 .jh-row{display:flex;gap:6px;overflow-x:auto;padding-bottom:3px;scrollbar-width:none}.jh-row::-webkit-scrollbar{display:none}
 .jh-c{flex:1 1 0;min-width:0;font:inherit;text-align:left;color:inherit;background:#121923;border:1px solid #1f2a38;border-radius:10px;padding:7px 8px 5px;cursor:pointer;position:relative;transition:border-color .15s,box-shadow .15s}
 .jh-c small{display:block;font-size:10.5px;color:#8d97a6;white-space:nowrap}
@@ -2744,9 +2782,9 @@ JH_CSS = """<style>
 .jh-dm p small{display:block;margin-top:2px;font-size:11px;color:#8d97a6}
 .jh-w{display:inline-block;font-size:10px;font-weight:800;border-radius:99px;padding:0 6px;margin-left:4px;line-height:1.7;border:1px solid;vertical-align:1px}
 .jh-w.t{color:#ff6b4a;border-color:#6b3a2a}.jh-w.h{color:#4c9bff;border-color:#26406b}
-.jh-sub{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:6px}
+.jh-sub{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
 .jh-sub div{background:#121923;border:1px solid #1f2a38;border-radius:9px;padding:5px 8px;font-size:11px;color:#8d97a6}
-.jh-sub b{display:block;font-size:13px;color:#f2f4f7;font-variant-numeric:tabular-nums}.jh-sub i{font-style:normal;font-size:11px}
+.jh-sub b{display:block;font-size:12.5px;letter-spacing:-.3px;white-space:nowrap;color:#f2f4f7;font-variant-numeric:tabular-nums}.jh-sub i{font-style:normal;font-size:11px}
 .jh-sub i.up{color:#ff6b4a}.jh-sub i.dn{color:#4c9bff}
 .jh-cdl{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center;background:#121923;border:1px solid #1f2a38;border-radius:12px;padding:8px 10px}
 .jh-cdl svg{width:44px;height:64px}
@@ -2758,6 +2796,11 @@ JH_CSS = """<style>
 .jh-st p{margin:0;font-size:12px;line-height:1.55;color:#c9d0d9;word-break:keep-all}.jh-st small{font-size:10.5px;color:#8d97a6}
 .jh-cc{border:1px dashed #33506e;border-radius:12px;padding:8px 10px;font-size:12.5px;line-height:1.6;color:#c9d0d9;word-break:keep-all}.jh-cc b{color:#f2f4f7}
 .jh-cc small{display:block;margin-top:4px;font-size:11.5px;color:#9aa3b1}
+.jh-shtl .jh-dom,.jh-shtl .jh-dm{margin:0}.jh-shtl .jh-dm::after{display:none}
+.jh-shtl .sh-box,.jh-shtl .sh-iss,.jh-shtl details.sh-pro{margin-top:6px}
+.jh-study{padding:0}.jh-study>summary{list-style:none;cursor:pointer;padding:9px 10px}.jh-study>summary::-webkit-details-marker{display:none}
+.jh-study>summary::after{content:" ▾";color:#8d97a6}.jh-study[open]>summary::after{content:" ▴"}
+.jh-study p{margin:0;padding:0 10px 8px;font-size:12.5px;line-height:1.6;color:#c9d0d9}.jh-study p em{font-style:normal;font-size:10.5px;font-weight:800;color:#a3c8ff;margin-right:6px}
 .jh-sh{margin:16px 0 6px;font-size:14px;font-weight:900;color:#f2f4f7}.jh-sh span{margin-left:6px;font-size:11px;font-weight:400;color:#8b95a3}
 </style>"""
 
@@ -2885,8 +2928,8 @@ def _jh_next(data, 해석):
 def build_jonghap_b(data, 해석):
     S = _jh_series(data)
     _FOLLOW_CACHE["JHD"] = S
-    새벽 = _jh_cards(S, ("ndx", "sox", "ust"), "jhg1")
-    오늘 = _jh_cards(S, ("kospi", "kosdaq", "krw"), "jhg2")
+    새벽 = _jh_cards(S, ("ndx", "sox", "ust"), "jhg1", data)
+    오늘 = _jh_cards(S, ("kospi", "kosdaq", "krw"), "jhg2", data)
     head = _sh_headline(data, 해석)
     act = build_today_action(data, 해석, data.get("관제지수"))
     vs = _jh_vs(data)
@@ -2913,13 +2956,14 @@ JH_WHY = {
 }
 
 
-def _jh_domino(data, 해석):
-    st = []
+def _jh_domino(data, 해석, as_dict=False):
+    st, kd = [], []
     u = data.get("미국증시") or {}
     n, s = (_jh_num((u.get(k) or {}).get("등락률")) for k in ("나스닥", "필라델피아반도체"))
     if n is not None or s is not None:
         up = (s or 0) >= 0.7 or (n or 0) >= 0.5
         dn = (s or 0) <= -0.7 or (n or 0) <= -0.5
+        kd.append("us")
         st.append(("🇺🇸", f'어젯밤 美 반도체(SOX) <b>{(s or 0):+.2f}%</b> · 나스닥 {(n or 0):+.2f}%',
                    "t" if up else "h" if dn else "", JH_WHY["us+"] if up else JH_WHY["us-"] if dn else ""))
     m = data.get("매크로") or {}
@@ -2935,12 +2979,14 @@ def _jh_domino(data, 해석):
             w, why = "t", JH_WHY["fx+"]
         if ut is not None and ut >= 1.0 and not why:
             w, why = "h", JH_WHY["rate-"]
+        kd.append("fx")
         st.append(("💱", (f'달러/원 <b>{fxv:,.1f}원</b>({fx:+.2f}%)' if fxv and fx is not None else '')
                    + (f' · 미국채 10년 {utv:.2f}%' if utv else ''), w, why))
     핵 = 해석.get("핵심편") or {}
     원인 = _plain(str(핵.get("핵심원인") or ""), 200).strip()
     k = _jh_num((((data.get("지수수급") or {}).get("지수") or {}).get("코스피") or {}).get("등락률"))
     if 원인:
+        kd.append("cause")
         st.append((_CAUSE_IC.get(str(핵.get("원인분야") or "").strip(), "🏭"), _ud_color(원인),
                    ("t" if (k or 0) > 0 else "h" if (k or 0) < 0 else ""), "오늘 시장을 움직인 가장 큰 재료예요."))
     수 = (data.get("지수수급") or {}).get("코스피_수급") or {}
@@ -2948,13 +2994,17 @@ def _jh_domino(data, 해석):
     if f is not None and g is not None:
         A = lambda v: _flow_amt(v)
         tot = f + g
+        kd.append("big")
         st.append(("💰", f'외국인 <b>{A(f)}</b> · 기관 <b>{A(g)}</b>' + (f' · 개인 {A(p)}' if p is not None else ''),
                    "t" if tot > 0 else "h" if tot < 0 else "", JH_WHY["big+"] if f > 0 and g > 0 else JH_WHY["big-"] if tot < 0 else
                    "외국인과 기관이 서로 다른 쪽에 섰어요 — 누가 더 컸는지가 방향을 정했어요."))
     th = [t for t in (data.get("주도섹터") or []) if t.get("테마명") and isinstance(t.get("테마등락"), (int, float))][:3]
     if th:
+        kd.append("flow")
         st.append(("🔄", '돈이 몰린 곳 · ' + ' · '.join(f'{_shn(t["테마명"])} <b class="{"up" if t["테마등락"] > 0 else "dn"}">{t["테마등락"]:+.1f}%</b>' for t in th),
                    "", "빠져나간 돈과 들어온 돈이 어디로 갔는지가 내일의 주도 후보예요."))
+    if as_dict:
+        return dict(zip(kd, st))
     if not st:
         return ""
     tag = {"t": '<span class="jh-w t">순풍</span>', "h": '<span class="jh-w h">역풍</span>', "": ""}
@@ -3038,36 +3088,228 @@ def _jh_concept(해석):
             + (f'<small>💡 {암}</small>' if 암 else '') + '</div>')
 
 
+def _jh_step(x):
+    if not x:
+        return ""
+    ic, t, w, y = x
+    tag = {"t": '<span class="jh-w t">순풍</span>', "h": '<span class="jh-w h">역풍</span>', "": ""}[w]
+    return f'<div class="jh-dm"><em>{ic}</em><p>{t}{tag}{f"<small>{y}</small>" if y else ""}</p></div>'
+
+
+def _jh_open(data):
+    """09:00 출발 — 시가가 어제 종가보다 얼마나 높게/낮게 열렸나(갭)."""
+    J = ((data.get("지수수급") or {}).get("지수") or {})
+    out = []
+    for nm in ("코스피", "코스닥"):
+        x = J.get(nm) or {}
+        o, c, ch = _jh_num(x.get("시가")), _jh_num(x.get("종가")), _jh_num(x.get("등락률"))
+        if None in (o, c, ch):
+            continue
+        prev = c / (1 + ch / 100)
+        g = (o / prev - 1) * 100
+        out.append(f'{nm} <b>{o:,.2f}</b>로 출발 <span class="{"up" if g > 0 else "dn" if g < 0 else ""}">({g:+.1f}%)</span>')
+    if not out:
+        return ""
+    return '<p class="jh-lc" style="margin-top:0">' + ' · '.join(out) + '</p>'
+
+
+def _jh_close(data):
+    x = (((data.get("지수수급") or {}).get("지수") or {}).get("코스피")) or {}
+    o, h, l, c = (_jh_num(x.get(z)) for z in ("시가", "고가", "저가", "종가"))
+    if None in (o, h, l, c) or h <= l:
+        return ""
+    pos = (c - l) / (h - l) * 100
+    return (f'<p class="jh-lc" style="margin-top:0">코스피 장중 고가 <b>{h:,.0f}</b> · 저가 <b>{l:,.0f}</b> → <b>{c:,.0f}</b>에 마감 '
+            f'— 하루 폭의 {"위쪽" if pos >= 60 else "아래쪽" if pos <= 40 else "가운데"}에서 끝났어요.</p>')
+
+
+def _jh_study(해석):
+    """📘 오늘의 경제공부 — 제목만 보이고 접혀 있다(2026-10-30 HO)."""
+    g = 해석.get("오늘의_공부")
+    if not isinstance(g, dict):
+        return ""
+    주 = str(g.get("주제") or "").strip()
+    개 = str(g.get("개념") or "").strip()
+    if not (주 and 개):
+        return ""
+    몸 = [("개념", 개), ("원리", g.get("원리")), ("오늘 연결", g.get("오늘연결")), ("한 줄 암기", g.get("한줄암기"))]
+    return (f'<details class="jh-cc jh-study"><summary>📘 <b>오늘의 경제공부</b> · {주}</summary>'
+            + "".join(f'<p><em>{k}</em>{str(v).strip()}</p>' for k, v in 몸 if str(v or "").strip())
+            + '</details>')
+
+
+def _jh_intraday(data):
+    """🆕 2026-10-30 (3차) HO «시간표가 효과를 내려면 시간대의 중요한 변화 — 장중 흐름을 분석해서 변화를 재밌고 쉽게».
+    코스피 5분봉(당일흐름.kospi)에서 사건을 뽑는다: 출발(갭) · 장중 최고/최저 · 어제 종가 위/아래 전환 · 1시간 급등락 · 마감(되돌림).
+    반환 (사건 [(i, 시각, 아이콘, 제목, 설명)], svg) — 5분봉이 없으면 ([], "")."""
+    k = (data.get("당일흐름") or {}).get("kospi") or {}
+    t, v = list(k.get("시각") or []), list(k.get("종가들") or [])
+    x = (((data.get("지수수급") or {}).get("지수") or {}).get("코스피")) or {}
+    o, c, ch = _jh_num(x.get("시가")), _jh_num(x.get("종가")), _jh_num(x.get("등락률"))
+    if len(v) < 12 or len(t) != len(v) or None in (c, ch) or str(k.get("기준일") or "") != str(DATE):
+        return [], ""
+    if o is not None:
+        v[0] = o
+    if t[-1] < "15:30":
+        t.append("15:30")
+        v.append(c)
+    else:
+        v[-1] = c
+    prev = c / (1 + ch / 100)
+    P = lambda q: (q / prev - 1) * 100
+    n = len(v)
+    hi = max(range(n), key=lambda i: v[i])
+    lo = min(range(n), key=lambda i: v[i])
+    ev = []
+
+    def add(i, ic, ti, de, pr):
+        ev.append([i, t[i], ic, ti, de, pr])
+    g = P(v[0])
+    add(0, "🔔", "출발", f'{v[0]:,.0f}로 시작 — 어제보다 <b class="{"up" if g > 0 else "dn" if g < 0 else ""}">{g:+.1f}%</b> '
+        + ("높게 열렸어요" if g >= 0.3 else "낮게 열렸어요" if g <= -0.3 else "어제와 비슷하게 열렸어요"), 9)
+    # 1시간(12봉) 안의 가장 큰 움직임
+    best = (0, 0, 0.0)
+    for i in range(n):
+        for j in range(i + 1, min(n, i + 13)):
+            d = P(v[j]) - P(v[i])
+            if abs(d) > abs(best[2]):
+                best = (i, j, d)
+    if 2 < hi < n - 2:
+        add(hi, "⛰️", "장중 최고", f'<b>{v[hi]:,.0f}</b> (<span class="{"up" if P(v[hi]) > 0 else "dn"}">{P(v[hi]):+.1f}%</span>) — 오늘 가장 높았던 자리예요', 6)
+    if 2 < lo < n - 2:
+        de = f'<b>{v[lo]:,.0f}</b> (<span class="{"up" if P(v[lo]) > 0 else "dn"}">{P(v[lo]):+.1f}%</span>) — 오늘 가장 낮았던 자리예요'
+        if hi < lo:
+            m = (lo - hi) * 5
+            de += (f' · {"출발" if hi <= 2 else "최고점"}에서 <b>{m // 60 and f"{m // 60}시간 " or ""}{m % 60 and f"{m % 60}분" or ""}</b> 동안 '
+                   f'<b class="dn">{P(v[lo]) - P(v[hi]):+.1f}%p</b> 더 밀렸어요')
+        add(lo, "🕳️", "장중 최저", de, 6)
+    i0, j0, d0 = best
+    if abs(d0) >= 0.8 and not (abs(i0 - hi) <= 3 and abs(j0 - lo) <= 3) and not (abs(i0 - lo) <= 3 and abs(j0 - hi) <= 3):
+        add(i0, "📉" if d0 < 0 else "📈", "급락 시작" if d0 < 0 else "급등 시작",
+            f'{t[i0]}~{t[j0]} <b>{(j0 - i0) * 5}분</b> 만에 <b class="{"dn" if d0 < 0 else "up"}">{d0:+.1f}%p</b> — 오늘 가장 빠르게 움직인 구간이에요', 7)
+    # 어제 종가 위/아래 전환(두 봉 이상 유지)
+    s0 = 1 if P(v[0]) > 0.05 else -1 if P(v[0]) < -0.05 else 0
+    for i in range(1, n - 1):
+        s1 = 1 if P(v[i]) > 0.05 else -1 if P(v[i]) < -0.05 else 0
+        s2 = 1 if P(v[i + 1]) > 0.05 else -1 if P(v[i + 1]) < -0.05 else 0
+        if s0 and s1 and s1 == s2 and s1 != s0:
+            add(i, "↘️" if s1 < 0 else "↗️", "마이너스 전환" if s1 < 0 else "플러스 전환",
+                ('오른 걸 다 내주고 <b>어제 종가 아래</b>로 내려갔어요' if s1 < 0 else '빠진 걸 다 되찾고 <b>어제 종가 위</b>로 올라섰어요'), 8)
+            break
+        if s1:
+            s0 = s1
+    de = f'<b>{c:,.0f}</b> (<span class="{"up" if ch > 0 else "dn" if ch < 0 else ""}">{ch:+.2f}%</span>)로 마감'
+    if lo < n - 1 and P(c) - P(v[lo]) >= 0.5:
+        de += f' — 최저점에서 <b class="up">{P(c) - P(v[lo]):+.1f}%p</b> 되돌렸어요'
+    elif hi < n - 1 and P(c) - P(v[hi]) <= -0.5:
+        de += f' — 최고점보다 <b class="dn">{P(c) - P(v[hi]):+.1f}%p</b> 아래에서 끝났어요'
+    if hi >= n - 2:
+        de += ' · <b>마감이 곧 오늘 최고</b>예요'
+    elif lo >= n - 2:
+        de += ' · <b>마감이 곧 오늘 최저</b>예요'
+    add(n - 1, "🏁", "마감", de, 9)
+    # 15분 안에 겹치면 중요한 것만
+    ev.sort(key=lambda e: e[0])
+    keep = []
+    for e in ev:
+        if keep and e[0] - keep[-1][0] < 3 and e[2] != "🏁":
+            if e[5] > keep[-1][5]:
+                keep[-1] = e
+            continue
+        keep.append(e)
+    # 그림 — 어제 종가 대비 %
+    W, H, pl, pr, pt, pb = 400, 130, 14, 52, 14, 20
+    ps = [P(q) for q in v]
+    a, b = min(ps + [0]), max(ps + [0])
+    pd = (b - a) * 0.12 or 0.5
+    a, b = a - pd, b + pd
+    X = lambda i: pl + i / (n - 1) * (W - pl - pr)
+    Y = lambda q: pt + (b - q) / (b - a) * (H - pt - pb)
+    col = "#ff6b4a" if ch >= 0 else "#4c9bff"
+    line = " ".join(f"{X(i):.1f},{Y(q):.1f}" for i, q in enumerate(ps))
+    mk = "".join(f'<circle cx="{X(e[0]):.1f}" cy="{Y(ps[e[0]]):.1f}" r="8" fill="#0d131b" stroke="#e8c45a" stroke-width="1.5"/>'
+                 f'<text x="{X(e[0]):.1f}" y="{Y(ps[e[0]]) + 3.5:.1f}" fill="#e8c45a" font-size="10" font-weight="700" text-anchor="middle">{k + 1}</text>'
+                 for k, e in enumerate(keep))
+    tk = "".join(f'<text x="{X(i):.1f}" y="{H - 5}" fill="#8d97a6" font-size="10" text-anchor="{an}">{t[i]}</text>'
+                 for i, an in ((0, "start"), (n // 2, "middle"), (n - 1, "end")))
+    svg = (f'<svg class="jh-iday" viewBox="0 0 {W} {H}" role="img" aria-label="오늘 코스피 장중 흐름">'
+           f'<line x1="{pl}" x2="{W - pr}" y1="{Y(0):.1f}" y2="{Y(0):.1f}" stroke="#3a4554" stroke-dasharray="3 3"/>'
+           f'<text x="{W - pr + 12}" y="{Y(0) + 3.5:.1f}" fill="#8d97a6" font-size="10">어제</text>'
+           f'<text x="{W - pr + 12}" y="{Y(ps[-1]) + 3.5:.1f}" fill="{col}" font-size="10" font-weight="700">{ch:+.1f}%</text>'
+           f'<polyline fill="none" stroke="{col}" stroke-width="2" points="{line}"/>{mk}{tk}</svg>')
+    return [(k + 1, e[1], e[2], e[3], e[4]) for k, e in enumerate(keep)], svg
+
+
+def _jh_dawn(해석):
+    """🌙 새벽 브리핑 — 해외 기사로 쓴 지표·발언·일정(해석글 «새벽브리핑»). 없으면 빈 문자열."""
+    it = [x for x in (해석.get("새벽브리핑") or []) if isinstance(x, dict) and str(x.get("무엇") or "").strip()][:3]
+    if not it:
+        return ""
+    def one(x):
+        링 = str(x.get("링크") or "").strip()
+        return (f'<div class="jh-dw"><em>{html.escape(str(x.get("구분") or "📰"))}</em><div><b>{html.escape(str(x["무엇"]))}</b>'
+                + (f'<p>{html.escape(str(x.get("내용") or ""))}</p>' if x.get("내용") else '')
+                + (f'<p class="jh-dw-k">🇰🇷 {html.escape(str(x.get("우리시장") or ""))}</p>' if x.get("우리시장") else '')
+                + (f'<a href="{esc_url(링)}" target="_blank" rel="noopener">원문 ↗</a>' if 링.startswith("http") else '')
+                + '</div></div>')
+    return '<div class="jh-dwl">' + "".join(one(x) for x in it) + '</div>'
+
+
 def build_sihwang_b(data, 해석):
-    S = _jh_series(data)
+    """🔴 2026-10-30 (2차) HO «시황은 시안처럼 시간표로» — 🌙 새벽 → 09:00 출발 → 장중 → 15:30 마감 → 📚 큰 줄거리 → 📘 경제공부(접힘).
+    캔들 읽기는 뺐다(HO). 도미노 칸은 시간표 자리마다 나눠 넣는다(순풍·역풍·왜? 한 줄은 그대로)."""
     u = data.get("미국증시") or {}
     m = data.get("매크로") or {}
+    D = _jh_domino(data, 해석, as_dict=True) or {}
     sub = []
     for nm, kk, src, unit in (("S&amp;P500 · 어젯밤", "S&P500", u, ""), ("WTI 유가", "WTI유가", m, "$"), ("국제 금", "국제금", m, "$")):
         x = src.get(kk) or {}
         v, c = _jh_num(x.get("값")), _jh_num(x.get("등락률"))
         if v is not None:
             sub.append(f'<div>{nm}<b>{unit}{v:,.2f}</b>' + (f'<i class="{"up" if c > 0 else "dn"}">{c:+.2f}%</i>' if c is not None else '') + '</div>')
+    재료 = D.get("cause")
+    stops = []
     us = _jh_us_line(data)
-    dom = _jh_domino(data, 해석)
-    cdl = _jh_candle_read(data)
-    story = _jh_story()
-    out = ""
-    if us or sub:
-        out += (f'<p class="jh-sh">🌙 어젯밤 미국 <span>한국 장의 첫 도미노</span></p>{us}'
-                + (f'<div class="jh-sub">{"".join(sub)}</div>' if sub else ''))
-    if dom:
-        out += f'<p class="jh-sh">🔗 오늘의 도미노 <span>원인 → 결과 · 순풍/역풍</span></p>{dom}'
-    if cdl:
-        out += f'<p class="jh-sh">🕯️ 오늘 코스피 캔들 읽기 <span>장중에 누가 이겼나</span></p>{cdl}'
-    out += _sh_issues(해석) + _sh_theme(해석)
-    if story:
-        out += f'<p class="jh-sh">📚 큰 줄거리 <span>며칠째 이어지는 이야기</span></p>{story}'
-    out += _sh_pro(해석)
-    cc = _jh_concept(해석)
-    if cc:
-        out += f'<p class="jh-sh">📘 오늘의 개념 <span>오늘 장에 나온 말 하나</span></p>{cc}'
-    return (JH_CSS if "JHD" not in _FOLLOW_CACHE else "") + out
+    if us or sub or D.get("us") or _jh_dawn(해석):
+        _u = D.get("us")
+        _ut = ""
+        if _u and (_u[2] or _u[3]):
+            _ut = (f'<p class="jh-lc" style="margin-top:4px">{ {"t": "<span class=\'jh-w t\'>순풍</span>", "h": "<span class=\'jh-w h\'>역풍</span>"}.get(_u[2], "") } '
+                   f'<span style="color:#8d97a6;font-size:11.5px">{_u[3]}</span></p>')
+        stops.append(('', '🌙 새벽', '어젯밤 미국 · 세계', us + _ut + _jh_dawn(해석) + (f'<div class="jh-sub">{"".join(sub)}</div>' if sub else '')))
+    EV, ISVG = _jh_intraday(data)
+    if EV:
+        # 장중 사건마다 시간표 한 칸 — 그림의 ①②③ 번호와 같다
+        stops.append(('kr', '☀️ 오늘', '코스피 장중 흐름 · 번호 = 아래 시간표',
+                      f'<div class="jh-ibox">{ISVG}</div>' + _jh_step(D.get("fx"))))
+        for no, tm, ic, ti, de in EV:
+            body = f'<p class="jh-ev"><span class="jh-no">{no}</span><span class="jh-evt">{de}</span></p>'
+            if ic == "🏁":
+                body += _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _sh_theme(해석)
+            stops.append(('kr', tm, f'{ic} {ti}', body))
+        mid = _jh_step(재료) + _sh_issues(해석)
+        if mid.strip():
+            # 시각을 모르는 재료는 마감 칸 «앞»에 «왜?»로 둔다(인과를 지어내지 않는다)
+            stops.insert(len(stops) - 1, ('kr', '❓ 왜', '이렇게 움직였을까', mid))
+    else:
+        op = _jh_open(data)
+        if op or D.get("fx"):
+            stops.append(('kr', '09:00', '출발 · 아침 분위기', op + _jh_step(D.get("fx"))))
+        mid = _jh_step(재료) + _sh_issues(해석)
+        if mid.strip():
+            stops.append(('kr', '장중', '무슨 일이 있었나', mid))
+        end = _jh_close(data) + _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _sh_theme(해석)
+        if end.strip():
+            stops.append(('kr', '15:30', '마감 · 돈은 어디로', end))
+    big = _jh_story() + _sh_pro(해석)
+    if big.strip():
+        stops.append(('', '📚', '큰 줄거리 · 며칠째 이어지는 이야기', big))
+    st = _jh_study(해석)
+    if not stops:
+        return build_sihwang(data, 해석)
+    tl = '<div class="jh-tl jh-shtl">' + "".join(
+        f'<div class="jh-tp {c}"><p class="jh-th"><b>{t}</b>{s}</p>{body}</div>' for c, t, s, body in stops) + '</div>'
+    return (JH_CSS if "JHD" not in _FOLLOW_CACHE else "") + tl + st
 
 
 def build_sihwang(data, 해석):
