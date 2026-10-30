@@ -2809,7 +2809,7 @@ def collect_us_markets():
     out = {}
     for 이름, 심볼 in US_TICKERS.items():
         try:
-            h = yf.Ticker(심볼).history(period="10d")
+            h = yf.Ticker(심볼).history(period="2mo")      # 🔴 2026-10-30 10d → 2mo: 종합 카드 20일 캔들(아래 «캔들»)
             h = h.dropna(subset=["Close"])
             # 미국 장중에 돌면(정상 발행 시각은 아님) 진행 중인 봉을 뺀다
             if ny is not None and len(h) and h.index[-1].date() == ny.date() and ny.hour < 16:
@@ -2821,6 +2821,13 @@ def collect_us_markets():
             out[이름] = {"값": round(c1, 2), "등락률": round((c1 - c0) / c0 * 100, 2),
                        "기준일": str(h.index[-1].date()).replace("-", ""),
                        "설명": "미국 현지 정규장 마감(한국 시각 오늘 새벽)"}
+            # 🆕 2026-10-30 HO «종합 지수 카드를 누르면 20일 캔들» — [날짜, 시가, 고가, 저가, 종가] 최근 22개
+            try:
+                out[이름]["캔들"] = [[str(ix.date()).replace("-", ""), round(float(r["Open"]), 2), round(float(r["High"]), 2),
+                                    round(float(r["Low"]), 2), round(float(r["Close"]), 2)]
+                                   for ix, r in h.tail(22).iterrows()]
+            except Exception as e2:
+                print(f"⚠️ 미국 증시 {이름} 캔들 정리 실패: {type(e2).__name__}")
         except Exception as e:
             print(f"⚠️ 미국 증시 {이름} 수집 실패: {type(e).__name__}: {str(e)[:100]}")
     print(f"✅ 미국 증시 {len(out)}/{len(US_TICKERS)}건 수집")
