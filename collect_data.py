@@ -2834,6 +2834,88 @@ def collect_us_markets():
     return out or None
 
 
+# 🆕 2026-10-30 HO «지수 카드의 20일 그래프 대신 당일 움직임으로» — 6개 지표의 그날 5분봉 종가 선.
+#   한국 지수·환율은 오늘 장, 미국 지수·미국채는 «어젯밤» 미국 정규장. 실패해도 화면은 하루 캔들로 대신 그린다.
+INTRADAY_TICKERS = {"kospi": "^KS11", "kosdaq": "^KQ11", "ndx": "^IXIC", "sox": "^SOX", "krw": "KRW=X", "ust": "^TNX"}
+
+
+def collect_intraday():
+    """🔴 2026-10-30 (2차) HO «시간표는 장중 변화를 잡아야» — 시각(한국 시각 HH:MM)도 같이 담는다.
+    5거래일을 받아 마지막 하루만 남긴다(장 마감 뒤 period=1d가 빈 값을 주는 날이 있어서)."""
+    out = {}
+    for k, sym in INTRADAY_TICKERS.items():
+        try:
+            h = yf.Ticker(sym).history(period="5d", interval="5m").dropna(subset=["Close"])
+            if len(h) < 5:
+                continue
+            try:
+                ix = h.index.tz_convert("Asia/Seoul")
+            except Exception:
+                ix = h.index
+            d0 = h.index[-1].date()             # 그 시장 현지 날짜 기준 마지막 하루
+            keep = [i for i, t in enumerate(h.index) if t.date() == d0]
+            if k in ("kospi", "kosdaq", "krw"):        # 환율은 24시간 — 한국 장 시간(09:00~15:30)만
+                keep = [i for i in keep if "09:00" <= ix[i].strftime("%H:%M") <= "15:30"]
+            if len(keep) >= 5:
+                out[k] = {"기준일": str(d0).replace("-", ""),
+                          "시각": [ix[i].strftime("%H:%M") for i in keep][-90:],
+                          "종가들": [round(float(h["Close"].iloc[i]), 4) for i in keep][-90:]}
+        except Exception as e:
+            print(f"⚠️ 당일 흐름 {k} 수집 실패: {type(e).__name__}: {str(e)[:80]}")
+    print(f"✅ 당일 흐름 {len(out)}/{len(INTRADAY_TICKERS)}건 수집")
+    return out or None
+
+
+# 🆕 2026-10-30 HO «새벽 코너에 지수만이 아니라 중요한 지표·인사 발언·일정(선거·금리 발표·CPI)을 전후로 — 해외 기사를 참고해서»
+#   해외 경제 기사 RSS(제목·요약·시각·링크)만 모은다. 해석은 generate_report.py의 «새벽브리핑»이 한다.
+GLOBAL_RSS = [
+    ("CNBC", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"),   # Top News
+    ("CNBC 경제", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"),  # Economy
+    ("CNBC 연준", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"),  # Finance
+    ("MarketWatch", "https://feeds.content.dowjones.io/public/rss/mw_topstories"),
+]
+
+
+def collect_global_news(최대=36, 시간=36):
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone
+    now = datetime.now(timezone.utc)
+    out, 본 = [], set()
+    for 출처, url in GLOBAL_RSS:
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=12)
+            if r.status_code != 200:
+                print(f"⚠️ 해외 기사 {출처}: HTTP {r.status_code}")
+                continue
+            root = ET.fromstring(r.content)
+            n = 0
+            for it in root.iter("item"):
+                제목 = (it.findtext("title") or "").strip()
+                if not 제목 or 제목.lower() in 본:
+                    continue
+                요약 = re.sub(r"<[^>]+>", " ", it.findtext("description") or "")
+                요약 = re.sub(r"\s+", " ", 요약).strip()[:220]
+                시각 = None
+                try:
+                    시각 = parsedate_to_datetime(it.findtext("pubDate") or "")
+                except Exception:
+                    pass
+                if 시각 is not None and (now - 시각).total_seconds() > 시간 * 3600:
+                    continue
+                본.add(제목.lower())
+                out.append({"출처": 출처, "제목": 제목, "요약": 요약, "링크": (it.findtext("link") or "").strip(),
+                            "시각": 시각.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if 시각 else ""})
+                n += 1
+                if n >= 12:
+                    break
+        except Exception as e:
+            print(f"⚠️ 해외 기사 {출처} 수집 실패: {type(e).__name__}: {str(e)[:80]}")
+    out.sort(key=lambda x: x.get("시각") or "", reverse=True)
+    print(f"✅ 해외 기사 {len(out[:최대])}건 수집")
+    return out[:최대] or None
+
+
 def naver_get(url, referer=None):
     """네이버 페이지를 가져오되 **인코딩을 자동 판별**한다.
 
@@ -7984,6 +8066,16 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"⚠️ 미국 증시 수집 실패 — 무시하고 진행: {type(e).__name__}")
         미국증시 = None
+    try:
+        해외뉴스 = collect_global_news()
+    except Exception as e:
+        print(f"⚠️ 해외 기사 수집 실패 — 무시하고 진행: {type(e).__name__}")
+        해외뉴스 = None
+    try:
+        당일흐름 = collect_intraday()
+    except Exception as e:
+        print(f"⚠️ 당일 흐름 수집 실패 — 무시하고 진행: {type(e).__name__}")
+        당일흐름 = None
     파생 = collect_program_and_futures()
     update_flow_history(지수수급, 파생)
     등락수 = collect_updown_counts()
@@ -8166,6 +8258,8 @@ if __name__ == "__main__":
         "신용잔고": collect_credit_balance(),
         "매크로": 매크로,
         "미국증시": 미국증시,
+        "당일흐름": 당일흐름,      # 🆕 2026-10-30 종합 지표 카드의 당일 움직임 · 시황 장중 시간표
+        "해외뉴스": 해외뉴스,      # 🆕 2026-10-30 시황 «새벽» 브리핑 재료(해석글)
         "파생": 파생,
         "강세레이더": 강세레이더,
         "매집레이더": 매집레이더,
