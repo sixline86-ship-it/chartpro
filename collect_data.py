@@ -2797,7 +2797,8 @@ def collect_macro():
 #     뉴스 제목에 기대서만 말할 수 있었다(10/22 밤 필라델피아 반도체 −6.72%도 숫자로는 몰랐다).
 #   [무엇] 나스닥·S&P500·필라델피아 반도체의 «직전 미국 정규장 마감». 18시(KST) 발행 때는 한국 시각
 #     오늘 새벽에 끝난 장이다. 화면 카드에는 쓰지 않고 해석글(핵심 원인 판단) 재료로만 넘긴다.
-US_TICKERS = {"나스닥": "^IXIC", "S&P500": "^GSPC", "필라델피아반도체": "^SOX"}
+US_TICKERS = {"나스닥": "^IXIC", "S&P500": "^GSPC", "필라델피아반도체": "^SOX",
+              "EWY": "EWY", "VIX": "^VIX"}      # 🆕 2026-10-31 HO — EWY(미국 상장 한국 ETF)·VIX(공포지수): 시황 새벽 카드
 
 
 def collect_us_markets():
@@ -2839,11 +2840,43 @@ def collect_us_markets():
 INTRADAY_TICKERS = {"kospi": "^KS11", "kosdaq": "^KQ11", "ndx": "^IXIC", "sox": "^SOX", "krw": "KRW=X", "ust": "^TNX"}
 
 
+def _naver_minute(sym):
+    """🔴 2026-10-31 — 한국 지수는 네이버 1분봉(09:00~15:30 마감 동시호가까지)을 5분으로 묶는다.
+    야후 ^KS11 5분봉은 14:55에서 끊겨 마지막 30분(종가)이 빠졌다(10/30 실측: 14:55 5,666 → 실제 종가 5,730.74)."""
+    r = requests.get(f"https://api.stock.naver.com/chart/domestic/index/{sym}/minute", headers=HEADERS, timeout=12)
+    j = r.json() if r.status_code == 200 else []
+    rows = [x for x in (j or []) if isinstance(x, dict) and x.get("localDateTime") and x.get("currentPrice") is not None]
+    if len(rows) < 30:
+        return None
+    d0 = rows[-1]["localDateTime"][:8]
+    rows = [x for x in rows if x["localDateTime"][:8] == d0]
+    t, v, last = [], [], None
+    for x in rows:
+        hm = x["localDateTime"][8:12]
+        b = f"{hm[:2]}:{int(hm[2:]) // 5 * 5:02d}"
+        if b != last:
+            t.append(b)
+            v.append(float(x["currentPrice"]))
+            last = b
+        else:
+            v[-1] = float(x["currentPrice"])
+    return {"기준일": d0, "시각": t, "종가들": [round(q, 2) for q in v]}
+
+
 def collect_intraday():
     """🔴 2026-10-30 (2차) HO «시간표는 장중 변화를 잡아야» — 시각(한국 시각 HH:MM)도 같이 담는다.
     5거래일을 받아 마지막 하루만 남긴다(장 마감 뒤 period=1d가 빈 값을 주는 날이 있어서)."""
     out = {}
+    for k, nsym in (("kospi", "KOSPI"), ("kosdaq", "KOSDAQ")):
+        try:
+            x = _naver_minute(nsym)
+            if x:
+                out[k] = x
+        except Exception as e:
+            print(f"⚠️ 당일 흐름 {k}(네이버) 실패: {type(e).__name__} — 야후로 대신")
     for k, sym in INTRADAY_TICKERS.items():
+        if k in out:
+            continue
         try:
             h = yf.Ticker(sym).history(period="5d", interval="5m").dropna(subset=["Close"])
             if len(h) < 5:
