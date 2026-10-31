@@ -2064,7 +2064,7 @@ def _sh_theme(해석):
         _sl = (_FOLLOW_CACHE.get("MBS") or [])[:2]
         팔 = ' · '.join(f'{_lab_nm(r["n"])} <b>{r["ret"]:+.1f}%</b>' for r in _sl)
         return (f'<div class="sh-box sh-theme"><p class="sh-h">💰 오늘 돈이 몰린 테마'
-                f'<span>평소보다 더 들어온 돈 · 오른 테마만</span></p>{줄}'
+                f'<span>평소보다 더 들어온 돈</span></p>{줄}'
                 # 🔴 2026-10-13 HO «🔻 화살표를 파랑으로» — 🔻 이모지는 빨강 고정이라 «하락=파랑» 관례와 어긋났다 → 파란 ▼ 글자로
                 + (f'<p class="sh-cm sh-mbo"><span style="color:#5b9bff">▼</span> 팔자가 몰린 곳(거래는 늘고 테마는 내림) — {팔}</p>' if 팔 else "")
                 + (f'<p class="sh-cm sh-mbo">💸 빠진 곳 — {빠}</p>' if 빠 else "")
@@ -2554,6 +2554,52 @@ JH_KR = (("kospi", "코스피", "kr", "코스피"), ("kosdaq", "코스닥", "kr"
          ("krw", "달러/원", "mac", "원달러환율"))
 
 
+_CHEON = {"일": 1, "이": 2, "삼": 3, "사": 4, "오": 5, "육": 6, "칠": 7, "팔": 8, "구": 9}
+
+
+def _fix_cheonpi(해석, data):
+    """해석글의 «N천피(붕괴/탈환/회복/돌파)»가 실제 코스피와 맞는지 보고, 틀리면 «5,700선» 같은 숫자 표현으로 바꾼다.
+    붕괴 = 어제 종가 ≥ N천 > 오늘 종가 · 탈환/회복/돌파 = 어제 < N천 ≤ 오늘 · 그냥 «N천피» = 오늘 종가가 N천대."""
+    try:
+        x = (((data.get("지수수급") or {}).get("지수") or {}).get("코스피")) or {}
+        c, ch = _jh_num(x.get("종가")), _jh_num(x.get("등락률"))
+        if c is None or ch is None:
+            return 해석
+        p0 = c / (1 + ch / 100)
+        lv = f'{int(c // 100 * 100):,}선'
+
+        def fix(m):
+            n = _CHEON.get(m.group(1))
+            w = m.group(2) or ""
+            if n is None:
+                return m.group(0)
+            N = n * 1000
+            if w.strip() == "붕괴":
+                ok = p0 >= N > c
+            elif w.strip() in ("탈환", "회복", "돌파"):
+                ok = p0 < N <= c
+            else:
+                ok = int(c // 1000) == n
+            if ok:
+                return m.group(0)
+            print(f"   🔧 «{m.group(0)}» → 코스피 {c:,.2f}와 안 맞아 «{lv}»로 고침")
+            return lv + (" 후퇴" if w.strip() == "붕괴" else " 회복" if w.strip() else "")
+        pat = re.compile(r"([일이삼사오육칠팔구])천피(\s?(?:붕괴|탈환|회복|돌파))?")
+
+        def walk(o):
+            if isinstance(o, str):
+                return pat.sub(fix, o) if "천피" in o else o
+            if isinstance(o, list):
+                return [walk(z) for z in o]
+            if isinstance(o, dict):
+                return {k: walk(v) for k, v in o.items()}
+            return o
+        return walk(해석)
+    except Exception as e:
+        print(f"   ⚠️ 천피 점검 실패 — {type(e).__name__}: {e}")
+        return 해석
+
+
 def _jh_num(v):
     try:
         return float(str(v).replace(",", "").replace("%", ""))
@@ -2651,11 +2697,18 @@ def _jh_day(data, key, s):
     d = ((data.get("당일흐름") or {}).get(key) or {}).get("종가들") or []
     v = [x for x in d if isinstance(x, (int, float))]
     if len(v) >= 5:
-        mn, mx = min(v), max(v)
+        # 🔴 2026-10-31 HO «당일 차트가 다른 것 같다» — 점선 = 어제 종가(시가가 아니라), 끝점 = 오늘 종가로 맞춘다
+        try:
+            base = s["last"] / (1 + (s.get("chg") or 0) / 100)
+        except Exception:
+            base = v[0]
+        if not s.get("us") and key in ("kospi", "kosdaq"):
+            v = v[:-1] + [s["last"]]
+        mn, mx = min(v + [base]), max(v + [base])
         y = lambda q: 18 - ((q - mn) / ((mx - mn) or 1)) * 16
         pts = " ".join(f"{i / (len(v) - 1) * 100:.1f},{y(q):.1f}" for i, q in enumerate(v))
         return (f'<svg class="jh-sp" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">'
-                f'<line x1="0" x2="100" y1="{y(v[0]):.1f}" y2="{y(v[0]):.1f}" stroke="#3a4554" stroke-dasharray="2 2"/>'
+                f'<line x1="0" x2="100" y1="{y(base):.1f}" y2="{y(base):.1f}" stroke="#3a4554" stroke-dasharray="2 2"/>'
                 f'<polyline fill="none" stroke="{col}" stroke-width="1.6" points="{pts}"/></svg>'), "오늘"
     r = s["rows"][-1] if (s["ohlc"] and s["rows"]) else None
     if r and str(r[0]) >= str(DATE if not s.get("us") else "0"):
@@ -2763,7 +2816,7 @@ JH_CSS = """<style>
 .jh-k1{margin:10px 0 5px;font-size:11px;font-weight:800;letter-spacing:.04em;color:#a3c8ff}
 .jh-vs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .jh-vs div{background:#121923;border:1px solid #1f2a38;border-radius:10px;padding:7px 9px}
-.jh-vs small{display:block;font-size:10.5px;color:#8d97a6}.jh-vs b{font-size:18px;font-variant-numeric:tabular-nums}
+.jh-vs small{display:block;font-size:10.5px;color:#8d97a6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.jh-vs b{font-size:18px;font-variant-numeric:tabular-nums}
 .jh-vs b.up{color:#ff6b4a}.jh-vs b.dn{color:#4c9bff}
 .jh-bar{height:7px;border-radius:99px;background:#1b2533;overflow:hidden;display:flex;margin:6px 0 2px}
 .jh-bar i{display:block;height:100%}.jh-bar .u{background:#ff6b4a}.jh-bar .z{background:#3a4554}.jh-bar .d{background:#4c9bff}
@@ -2773,7 +2826,7 @@ JH_CSS = """<style>
 .jh-nx div{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.55;color:#c9d0d9;background:#121a13;border:1px solid #284030;border-radius:10px;padding:7px 9px;word-break:keep-all}
 .jh-nx em{font-style:normal;font-size:10.5px;font-weight:800;color:#7fe0a0;white-space:nowrap;padding-top:2px}
 .jh-nx b{color:#f2f4f7}.jh-nx small{display:block;font-size:11px;color:#8d97a6}
-.jh-tp .sh-top{margin:0}.jh-tp .ta-box{margin:8px 0 0}
+.jh-tp .sh-top{margin:12px 0 0}.jh-tp .ta-box{margin:8px 0 0}
 .jh-dom{display:grid}
 .jh-dm{display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;position:relative;padding:4px 0}
 .jh-dm>em{font-style:normal;width:28px;height:28px;border-radius:8px;background:#121923;border:1px solid #1f2a38;display:flex;align-items:center;justify-content:center;font-size:14px}
@@ -2783,7 +2836,27 @@ JH_CSS = """<style>
 .jh-w{display:inline-block;font-size:10px;font-weight:800;border-radius:99px;padding:0 6px;margin-left:4px;line-height:1.7;border:1px solid;vertical-align:1px}
 .jh-w.t{color:#ff6b4a;border-color:#6b3a2a}.jh-w.h{color:#4c9bff;border-color:#26406b}
 .jh-sub{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
-.jh-sub div{background:#121923;border:1px solid #1f2a38;border-radius:9px;padding:5px 8px;font-size:11px;color:#8d97a6}
+.jh-sub div{background:#121923;border:1px solid #1f2a38;border-radius:9px;padding:7px 9px;font-size:11px;color:#8d97a6;min-width:0}
+.jh-sub small{display:block;font-size:10.5px;color:#8d97a6;margin:0 0 3px;white-space:nowrap}
+.jh-why{margin:5px 0 0 26px;font-size:12px;line-height:1.55;color:#ffd98a;background:#1a1810;border-radius:8px;padding:5px 8px;word-break:keep-all}
+.jb{background:#101720;border:1px solid #1e2937;border-radius:12px;padding:11px 12px 9px;margin:10px 0 0}
+.jb-h{display:flex;align-items:baseline;gap:8px;margin:0 0 4px;font-size:14px;font-weight:900;color:#f2f4f7;white-space:nowrap}
+.jb-h span{margin-left:auto;font-size:10px;font-weight:600;color:#6f7784;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.jb-hl{margin:0 0 8px;font-size:13px;line-height:1.55;color:#c9d0d9;word-break:keep-all}.jb-hl b{color:#f2f4f7}.jb-hl b.up{color:#ff6b4a}.jb-hl b.dn{color:#4c9bff}
+.jb-r{display:grid;grid-template-columns:84px minmax(0,1fr) 62px;gap:8px;align-items:center;padding:3px 0;font-size:12px}
+.jb-n{color:#e6ebf1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jb-b{height:10px;border-radius:3px;background:#1b2533;overflow:hidden}.jb-b i{display:block;height:100%;border-radius:3px}
+.jb-b i.d{background:#4c9bff;margin-left:auto}.jb-b i.u{background:#ff6b4a}
+.jb-r b{text-align:right;font-variant-numeric:tabular-nums;font-size:12px}.jb-r b.up{color:#ff6b4a}.jb-r b.dn{color:#4c9bff}
+.jb-sep{height:1px;background:#1f2a38;margin:5px 0}
+.jb-f{margin:7px 0 0;font-size:12px;line-height:1.55;color:#c9d0d9;word-break:keep-all}.jb-f b{color:#f2f4f7}.jb-f b.dn{color:#4c9bff}
+.jb-w{margin:4px 0 0;font-size:10.5px;color:#6f7784}
+.jo{background:#13151d;border:1px solid #2a2f45;border-radius:12px;padding:9px 10px;margin:8px 0}
+.jo-h{display:flex;align-items:baseline;gap:8px;margin:0 0 6px;font-size:13px;font-weight:900;color:#f2f4f7;white-space:nowrap}
+.jo-h span{margin-left:auto;font-size:10px;font-weight:600;color:#6f7784;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.jo-r{display:grid;grid-template-columns:26px minmax(0,1fr);gap:8px;padding:5px 0;border-top:1px solid #1d2232}
+.jo-r:first-of-type{border-top:0}.jo-r em{font-style:normal;font-size:17px;line-height:22px;text-align:center}
+.jo-r b{font-size:12.5px;color:#f2f4f7}.jo-r p{margin:1px 0 0;font-size:12px;line-height:1.55;color:#c9d0d9;word-break:keep-all}
 .jh-sub b{display:block;font-size:12.5px;letter-spacing:-.3px;white-space:nowrap;color:#f2f4f7;font-variant-numeric:tabular-nums}.jh-sub i{font-style:normal;font-size:11px}
 .jh-sub i.up{color:#ff6b4a}.jh-sub i.dn{color:#4c9bff}
 .jh-cdl{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;align-items:center;background:#121923;border:1px solid #1f2a38;border-radius:12px;padding:8px 10px}
@@ -2847,7 +2920,7 @@ def _jh_vs(data):
         msg = (f'지수와 보통 종목이 <b>같이 {"올랐어요" if k > 0 else "빠졌어요"}</b> — '
                + ('시장 전체가 고르게 오른 날이에요.' if k > 0 else '몇 종목이 아니라 시장 전체가 식은 날이에요.'))
     return (f'<div class="jh-vs"><div><small>코스피</small><b class="{cl(k)}">{k:+.2f}%</b></div>'
-            f'<div><small>보통 종목 (전 종목 가운데 값)</small><b class="{cl(med)}">{med:+.2f}%</b></div></div>'
+            f'<div><small class="jh-nw">보통 종목 · 가운데 값</small><b class="{cl(med)}">{med:+.2f}%</b></div></div>'
             f'{bar}<p class="jh-lc">{msg}</p>')
 
 
@@ -2925,13 +2998,202 @@ def _jh_next(data, 해석):
             f'<div class="jh-nx">{rows}</div></div>')
 
 
+def _jh_contrib(data):
+    """코스피 종목별 지수 기여(pt) — 종목사전(시가총액·등락률)로 «그 종목이 지수를 몇 포인트 움직였나»."""
+    x = (((data.get("지수수급") or {}).get("지수") or {}).get("코스피")) or {}
+    c, ch = _jh_num(x.get("종가")), _jh_num(x.get("등락률"))
+    g = ((data.get("계좌격자") or {}).get("종목사전")) or {}
+    if c is None or ch is None or not g:
+        return None
+    dk = c - c / (1 + ch / 100)
+    rows = []
+    for n, v in g.items():
+        try:
+            if v[4] != "코스피" or not isinstance(v[3], (int, float)) or not v[6] or _is_pref(n):
+                continue
+            cap, r = float(v[6]), float(v[3])
+            rows.append((n, r, cap - cap / (1 + r / 100)))
+        except Exception:
+            continue
+    tot = sum(z[2] for z in rows)
+    if not rows or not tot:
+        return None
+    pts = sorted(((n, r, dk * d / tot) for n, r, d in rows), key=lambda z: z[2])
+    return {"dk": dk, "ch": ch, "pts": pts}
+
+
+def _jh_sector_cap(data):
+    """섹터별 시가총액 변화(억) — 종목사전 첫 섹터 기준 · 우선주 제외."""
+    g = ((data.get("계좌격자") or {}).get("종목사전")) or {}
+    S = {}
+    for n, v in g.items():
+        try:
+            if _is_pref(n) or not isinstance(v[3], (int, float)) or not v[6]:
+                continue
+            sec = (v[0] or ["기타"])[0] or "기타"
+            cap, r = float(v[6]), float(v[3])
+            S[sec] = S.get(sec, 0) + (cap - cap / (1 + r / 100))
+        except Exception:
+            continue
+    return sorted(S.items(), key=lambda z: z[1])
+
+
+def _jh_amt(v):
+    a = abs(v)
+    return (f'{a / 10000:,.1f}조' if a >= 10000 else f'{a:,.0f}억')
+
+
+def build_jh_bar(data):
+    """🔴 2026-10-31 HO «A안(지수를 끈 종목)을 오늘의 대응 자리에 · 돈이 몰린 테마 · 하락장엔 돈이 가장 많이 빠진 섹터 — 상황 보고 하나를 막대로».
+    고르는 규칙(위에서부터):
+      ① 지수가 1% 넘게 움직였고, 위 두 종목의 몫이 지수 변화의 절반 이상 → 🏋️ 지수를 끈 종목
+      ② 보통 종목이 −1% 이하(하락장) → 💸 시가총액이 가장 많이 빠진 섹터
+      ③ 그 밖의 날 → 💰 평소보다 돈이 더 들어온 테마"""
+    k, med, _ud = _jh_breadth(data)
+    C = _jh_contrib(data)
+    mode, why = None, ""
+    if C and abs(C["ch"]) >= 1.0:
+        same = [z for z in (C["pts"] if C["dk"] < 0 else C["pts"][::-1])][:2]
+        share = sum(z[2] for z in same) / C["dk"] if C["dk"] else 0
+        if share >= 0.5:
+            mode, why = "idx", f'지수가 {C["ch"]:+.1f}% 움직였고 두 종목 몫이 {share * 100:.0f}%예요'
+    if not mode and med is not None and med <= -1.0:
+        mode, why = "sec", f'보통 종목이 {med:+.1f}% — 하락장이라 «어디서 돈이 빠졌나»를 봐요'
+    if not mode:
+        mode, why = "thm", "오늘 돈이 어디로 몰렸나를 봐요"
+
+    def bars(items, neg_first=True):
+        mx = max((abs(z[1]) for z in items), default=1) or 1
+        out = ""
+        for nm, v, lab in items:
+            w = max(3, abs(v) / mx * 100)
+            pos = v >= 0
+            out += (f'<div class="jb-r"><span class="jb-n">{html.escape(nm)}</span>'
+                    f'<span class="jb-b"><i class="{"u" if pos else "d"}" style="width:{w:.1f}%"></i></span>'
+                    f'<b class="{"up" if pos else "dn"}">{lab}</b></div>')
+        return out
+    try:
+        if mode == "idx":
+            P = C["pts"]
+            neg = C["dk"] < 0
+            top = (P[:5] if neg else P[::-1][:5])
+            rev = [z for z in (P[::-1][:2] if neg else P[:2]) if (z[2] > 0) == neg]
+            t2 = sum(z[2] for z in top[:2])
+            head = (f'코스피 <b class="{"dn" if neg else "up"}">{C["dk"]:+,.1f}pt</b> 중 '
+                    f'<b>{_shn(top[0][0])}·{_shn(top[1][0])}</b> 두 종목이 {t2:+,.0f}pt — {"하락" if neg else "상승"}의 {t2 / C["dk"] * 100:.0f}%')
+            body = bars([(_shn(n), p, f'{p:+.1f}') for n, r, p in top])
+            if rev:
+                body += '<div class="jb-sep"></div>' + bars([(_shn(n), p, f'{p:+.1f}') for n, r, p in rev])
+            ex = C["dk"] - t2
+            foot = (f'두 종목을 빼면 코스피는 <b>{ex / (C["dk"] / (C["ch"] / 100)) * 100 if C["ch"] else 0:+.1f}%</b>쯤이었어요.')
+            title = "🏋️ 오늘 지수를 끈 종목"
+            sub = "시가총액 × 등락률로 계산한 지수 몫(pt)"
+        elif mode == "sec":
+            S = _jh_sector_cap(data)
+            outs = [z for z in S if z[1] < 0][:5]
+            ins = [z for z in S[::-1] if z[1] > 0][:2]
+            if not outs:
+                raise ValueError("섹터 자료 없음")
+            tot = sum(z[1] for z in S if z[1] < 0)
+            head = (f'<b>{outs[0][0]}</b>에서만 시가총액 <b class="dn">{_jh_amt(outs[0][1])}</b>이 줄었어요 — 오늘 줄어든 돈의 '
+                    f'{outs[0][1] / tot * 100:.0f}%')
+            body = bars([(n, v, "−" + _jh_amt(v)) for n, v in outs])
+            if ins:
+                body += '<div class="jb-sep"></div>' + bars([(n, v, "+" + _jh_amt(v)) for n, v in ins])
+            foot = f'오늘 전체 시가총액 <b class="dn">{_jh_amt(sum(z[1] for z in S))}</b> 변화 · 아래 칸은 그래도 늘어난 섹터예요.'
+            title = "💸 오늘 돈이 가장 많이 빠진 섹터"
+            sub = "섹터별 시가총액 변화"
+        else:
+            try:
+                build_money_bars()
+            except Exception:
+                pass
+            mb = _FOLLOW_CACHE.get("MBR") or ([], [])
+            ins = (mb[0] or [])[:5]
+            if not ins:
+                return build_today_action(data, {}, data.get("관제지수"))
+            head = f'<b>{_lab_nm(ins[0]["n"])}</b>{_jo2(_lab_nm(ins[0]["n"]), "으로", "로")} 평소보다 <b class="up">+{ins[0]["chg"]:,.0f}억</b> 더 들어왔어요'
+            body = bars([(_lab_nm(r["n"]), r["chg"], f'+{r["chg"]:,.0f}억') for r in ins])
+            outs = (mb[1] or [])[:2]
+            if outs:
+                body += '<div class="jb-sep"></div>' + bars([(_lab_nm(r["n"]), r["chg"], f'−{abs(r["chg"]):,.0f}억') for r in outs])
+            foot = '평소(직전 5일) 대비 더 들어온 돈 · 아래 칸은 빠진 테마예요.'
+            title = "💰 오늘 돈이 몰린 테마"
+            sub = "평소보다 더 들어온 돈"
+    except Exception as e:
+        print(f"   ⚠️ 종합 막대 실패({mode}) — {type(e).__name__}: {e}")
+        return build_today_action(data, {}, data.get("관제지수"))
+    return (f'<div class="jb"><p class="jb-h">{title}<span>{sub}</span></p>'
+            f'<p class="jb-hl">{head}</p>{body}<p class="jb-f">{foot}</p>'
+            f'<p class="jb-w">왜 이 막대? {why}</p></div>')
+
+
+def _jh_odd(data):
+    """⚡ 평소와 달랐던 것 — 최근 기록과 비교해 튄 숫자만(최대 3). 시황 15:30 마감 칸에 붙는다(2026-10-31 HO)."""
+    it = []
+    k = _jh_num((((data.get("지수수급") or {}).get("지수") or {}).get("코스피") or {}).get("등락률"))
+    rows = sorted(_load_market_history(), key=lambda r: str(r.get("날짜")))
+    td = [r for r in rows if str(r.get("날짜", "")).replace("-", "") == str(DATE)]
+    try:
+        if td:
+            i = rows.index(td[0])
+            prev = rows[max(0, i - 20):i]
+            tv = (td[0].get("거래대금_코스피") or 0) + (td[0].get("거래대금_코스닥") or 0)
+            pv = [(r.get("거래대금_코스피") or 0) + (r.get("거래대금_코스닥") or 0) for r in prev]
+            pv = [z for z in pv if z]
+            if len(pv) >= 10 and tv:
+                rr = tv / (sum(pv) / len(pv))
+                if rr >= 1.4:
+                    it.append(("🔥", f"거래대금 평소의 {rr:.1f}배", f"{tv / 10000:,.1f}조 — 다들 움직인 날이에요. 큰 움직임엔 이런 «참여»가 같이 붙어요."))
+                elif rr <= 0.75:
+                    it.append(("🧊", f"거래대금 평소의 {rr:.1f}배", f"{tv / 10000:,.1f}조 — 다들 지켜본 날이에요. 거래 없는 움직임은 하루 만에 되돌려지기도 해요."))
+                elif k is not None and abs(k) >= 2:
+                    it.append(("🧯", f"{k:+.1f}%인데 거래는 평소 수준", f"거래대금이 20일 평균의 {rr:.2f}배예요 — 크게 움직였지만 다 같이 던지거나 쫓아 산 «쏠림»까지는 아니었어요."))
+            mj = td[0].get("시장조치")
+            if mj:
+                it.insert(0, ("🚨", "시장 조치 발동", html.escape(str(mj))))
+    except Exception:
+        pass
+    try:
+        fs = ((data.get("파생") or {}).get("선물수급") or {})
+        H = fs.get("이력") or {}
+        ks = sorted(z for z in H if z <= str(DATE))[-20:]
+        v = H.get(str(DATE))
+        if v is not None and len(ks) >= 8 and abs(v) >= 3000:
+            w = [H[z] for z in ks]
+            hi = v >= max(w)
+            lo = v <= min(w)
+            if hi or lo:
+                sp = _jh_num(((data.get("지수수급") or {}).get("코스피_수급") or {}).get("외국인"))
+                ex = ""
+                if sp is not None and abs(sp) >= 3000 and (sp > 0) != (v > 0):
+                    ex = f" 현물은 {_jh_amt(sp)} {'순매수' if sp > 0 else '순매도'} — 서로 반대로 걸었어요."
+                it.append(("🔀", f"외국인 선물 {'+' if v > 0 else '−'}{_jh_amt(v)}",
+                           f"최근 {len(ks)}거래일 중 가장 큰 {'매수' if v > 0 else '매도'}예요.{ex}"))
+    except Exception:
+        pass
+    try:
+        pg = ((data.get("파생") or {}).get("프로그램매매") or {})
+        p = _jh_num(pg.get("전체_순매수"))
+        if p is not None and k is not None and abs(p) >= 3000 and abs(k) >= 1 and (p > 0) != (k > 0):
+            it.append(("🤖", f"프로그램은 거꾸로 {'+' if p > 0 else '−'}{_jh_amt(p)}",
+                       f"지수가 {k:+.1f}%인 날 바구니 매매는 반대로 {'샀어요 — 지수를 받쳐준' if p > 0 else '팔았어요 — 지수를 더 누른'} 쪽이에요."))
+    except Exception:
+        pass
+    if not it:
+        return ""
+    return ('<div class="jo"><p class="jo-h">⚡ 평소와 달랐던 것<span>최근 기록에서 튄 숫자만</span></p>'
+            + "".join(f'<div class="jo-r"><em>{a}</em><div><b>{b}</b><p>{c}</p></div></div>' for a, b, c in it[:3])
+            + '</div>')
+
+
 def build_jonghap_b(data, 해석):
     S = _jh_series(data)
     _FOLLOW_CACHE["JHD"] = S
     새벽 = _jh_cards(S, ("ndx", "sox", "ust"), "jhg1", data)
     오늘 = _jh_cards(S, ("kospi", "kosdaq", "krw"), "jhg2", data)
     head = _sh_headline(data, 해석)
-    act = build_today_action(data, 해석, data.get("관제지수"))
+    act = build_jh_bar(data)        # 🔴 2026-10-31 HO — «오늘의 대응» 자리에 상황별 막대 하나(build_today_action은 남겨 둠)
     vs = _jh_vs(data)
     tl = ('<div class="jh-tl">'
           + (f'<div class="jh-tp"><p class="jh-th"><b>🌙 새벽</b>어젯밤 미국</p>{새벽}{_jh_us_line(data)}</div>' if 새벽 else '')
@@ -3107,7 +3369,7 @@ def _jh_open(data):
             continue
         prev = c / (1 + ch / 100)
         g = (o / prev - 1) * 100
-        out.append(f'{nm} <b>{o:,.2f}</b>로 출발 <span class="{"up" if g > 0 else "dn" if g < 0 else ""}">({g:+.1f}%)</span>')
+        out.append(f'{nm} <b>{o:,.2f}</b>에서 출발 <span class="{"up" if g > 0 else "dn" if g < 0 else ""}">({g:+.1f}%)</span>')
     if not out:
         return ""
     return '<p class="jh-lc" style="margin-top:0">' + ' · '.join(out) + '</p>'
@@ -3165,7 +3427,7 @@ def _jh_intraday(data):
     def add(i, ic, ti, de, pr):
         ev.append([i, t[i], ic, ti, de, pr])
     g = P(v[0])
-    add(0, "🔔", "출발", f'{v[0]:,.0f}로 시작 — 어제보다 <b class="{"up" if g > 0 else "dn" if g < 0 else ""}">{g:+.1f}%</b> '
+    add(0, "🔔", "출발", f'{v[0]:,.0f}에서 시작 — 어제보다 <b class="{"up" if g > 0 else "dn" if g < 0 else ""}">{g:+.1f}%</b> '
         + ("높게 열렸어요" if g >= 0.3 else "낮게 열렸어요" if g <= -0.3 else "어제와 비슷하게 열렸어요"), 9)
     # 1시간(12봉) 안의 가장 큰 움직임
     best = (0, 0, 0.0)
@@ -3262,11 +3524,17 @@ def build_sihwang_b(data, 해석):
     m = data.get("매크로") or {}
     D = _jh_domino(data, 해석, as_dict=True) or {}
     sub = []
-    for nm, kk, src, unit in (("S&amp;P500 · 어젯밤", "S&P500", u, ""), ("WTI 유가", "WTI유가", m, "$"), ("국제 금", "국제금", m, "$")):
+    # 🔴 2026-10-31 HO «EWY·SOX 같은 지수도 · 중요한 순 카드 3개» — SOX는 종합 새벽 카드·위 문장에 있어 빼고,
+    #   ① EWY(미국에 상장된 한국 주식 ETF = 밤사이 외국인이 매긴 한국값) ② VIX(공포지수) ③ WTI. 없으면 S&P500·금으로 채운다.
+    _cand = (("EWY · 한국 ETF", "EWY", u, "$", 2), ("VIX · 공포지수", "VIX", u, "", 1), ("WTI 유가", "WTI유가", m, "$", 0),
+             ("S&amp;P500", "S&P500", u, "", 0), ("국제 금", "국제금", m, "$", 0))
+    for nm, kk, src, unit, dg in _cand:
+        if len(sub) >= 3:
+            break
         x = src.get(kk) or {}
         v, c = _jh_num(x.get("값")), _jh_num(x.get("등락률"))
         if v is not None:
-            sub.append(f'<div>{nm}<b>{unit}{v:,.2f}</b>' + (f'<i class="{"up" if c > 0 else "dn"}">{c:+.2f}%</i>' if c is not None else '') + '</div>')
+            sub.append(f'<div><small>{nm}</small><b>{unit}{v:,.{dg}f}</b>' + (f'<i class="{"up" if c > 0 else "dn"}">{c:+.2f}%</i>' if c is not None else '') + '</div>')
     재료 = D.get("cause")
     stops = []
     us = _jh_us_line(data)
@@ -3282,10 +3550,22 @@ def build_sihwang_b(data, 해석):
         # 장중 사건마다 시간표 한 칸 — 그림의 ①②③ 번호와 같다
         stops.append(('kr', '☀️ 오늘', '코스피 장중 흐름 · 번호 = 아래 시간표',
                       f'<div class="jh-ibox">{ISVG}</div>' + _jh_step(D.get("fx"))))
+        _why = [x for x in (해석.get("장중이유") or []) if isinstance(x, dict) and x.get("시각") and str(x.get("이유") or "").strip()]
+
+        def _mins(s):
+            try:
+                return int(s[:2]) * 60 + int(s[3:5])
+            except Exception:
+                return -999
         for no, tm, ic, ti, de in EV:
             body = f'<p class="jh-ev"><span class="jh-no">{no}</span><span class="jh-evt">{de}</span></p>'
+            # 🔴 2026-10-31 HO «급변동 부분에 이유까지 · 없으면 넘어가고» — 해석글 «장중이유»(기사로 확인된 것만)를 20분 안의 사건에 붙인다
+            _w = next((x for x in _why if abs(_mins(str(x["시각"])) - _mins(tm)) <= 20 and ic != "🔔"), None)
+            if _w:
+                body += f'<p class="jh-why">💡 {html.escape(str(_w["이유"]).strip())}</p>'
+                _why.remove(_w)
             if ic == "🏁":
-                body += _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _sh_theme(해석)
+                body += _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _jh_odd(data) + _sh_theme(해석)
             stops.append(('kr', tm, f'{ic} {ti}', body))
         mid = _jh_step(재료) + _sh_issues(해석)
         if mid.strip():
@@ -3298,7 +3578,7 @@ def build_sihwang_b(data, 해석):
         mid = _jh_step(재료) + _sh_issues(해석)
         if mid.strip():
             stops.append(('kr', '장중', '무슨 일이 있었나', mid))
-        end = _jh_close(data) + _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _sh_theme(해석)
+        end = _jh_close(data) + _jh_step(D.get("big")) + _jh_step(D.get("flow")) + _jh_odd(data) + _sh_theme(해석)
         if end.strip():
             stops.append(('kr', '15:30', '마감 · 돈은 어디로', end))
     big = _jh_story() + _sh_pro(해석)
@@ -5454,7 +5734,8 @@ def _mood_pills():
         build_money_bars()
         mb = _FOLLOW_CACHE.get("MBR")
         if mb and mb[0]:
-            out.append(("🎯", f"돈은 {_lab_nm(mb[0][0]['n'])}로", UP))
+            _ln = _lab_nm(mb[0][0]['n'])
+            out.append(("🎯", f"돈은 {_ln}{_jo2(_ln, '으로', '로')}", UP))      # 🔴 2026-10-31 HO «돈은 해운로 → 해운으로» 조사
     except Exception:
         pass
     if len(out) < 2:
@@ -10642,7 +10923,7 @@ def _route_features(rows):
                          #    방향은 말로만 쓰고 숫자는 크기만 보여준다.
                          "설명": f"외국인·기관 합이 "
                                  f"{'순매수' if 오늘실>=0 else '순매도'} "
-                                 f"{_flow_amt(abs(오늘실)).lstrip('+')}로 "
+                                 f"{_flow_amt(abs(오늘실)).lstrip('+')}{_jo2(_flow_amt(abs(오늘실)).lstrip('+'), '으로', '로')} "
                                  f"최근 평균보다 훨씬 큽니다", "사례": []})
 
     # ── ⑤ 사이드카·서킷 (2026-08-25부터 적재) ──
@@ -14658,8 +14939,7 @@ def build_core(핵심편, data, 해석):
     _mny속 = (hide("수급타일", f'<div class="mny-tiles">{타일HTML}</div>')
              + 변속기블록
              + hide("수급특징", f'<div class="mny-feat">{특징}</div>'))
-    _수급 = ((f'<div class="idx-grid" id="score">{_kospi_card}{build_score_card("KOSDAQ", _닥, _닥수)}</div>' if JH_MODE == "B" else '')
-             + (f'<div class="mny">{_mny속}</div>' if _mny속.strip() else '')
+    _수급 = ((f'<div class="mny">{_mny속}</div>' if _mny속.strip() else '')
              + 격자블록
              # 🔴 2026-09-22 — 수급 탭 5단(build_flow_v2). 옛 관제신호는 맨 아래 접어 둔다.
              + build_flow_v2(data, 해석)
@@ -22380,7 +22660,7 @@ def _shadow_note(rk, last):
         return ""
     sh = lambda n: n.split("(")[0].strip() if len(n.split("(")[0].strip()) > 4 else n
     rows = "".join(f'<p class="tm-shr"><b>{sh(n)}</b> <span>{i}위</span> — 거래대금 <b>{sm[n][0]:.0f}%</b>가 '
-                   f'<b>{sm[n][1]}</b> 한 종목 → 테마 말고 <b class="g">{sm[n][1]}</b>를 보세요</p>' for i, n in cut)
+                   f'<b>{sm[n][1]}</b> 한 종목 → 테마 말고 <b class="g">{sm[n][1]}</b>{_jo2(sm[n][1], "을", "를")} 보세요</p>' for i, n in cut)
     fc = "".join(f'<p class="tm-shf">🎭 <b>{k}</b> 한 종목이 테마 <b>{len(v)}개</b>의 얼굴 — '
                  + " · ".join(sh(x) for x in v) + '</p>' for k, v in face.items())
     return (f'<div class="tm-shw">'
@@ -22824,7 +23104,12 @@ def build_money_bars():
         if len(w) >= 2:
             w = w[:-1]                       # 가장 큰 한 종목 빼고(돈 막대와 같은 셈)
         tw = sum(a for a, _ in w)
-        up = (sum(1 for m in mem if _dic[m][3] > 0) / len(mem) * 100) if mem else None
+        # 🔴 2026-10-31 HO «오늘 돈이 몰린 테마가 해운? 보안주 아니야?» — 보안주(정보)는 +9.5%·돈 +2,351억인데
+        #   «오른 종목 개수 36%»에 걸려 빠졌다(돈 많은 안랩·라온시큐어·지니언스는 올랐고 작은 종목이 많이 내림).
+        #   → 개수가 아니라 «돈으로 따진 오른 쪽 비율»(가장 큰 한 종목은 빼고)로 본다. 한 종목만 튄 테마는 여전히 걸러진다.
+        _wt = sum(a for a, _ in w)
+        up = ((sum(a for a, m in w if _dic[m][3] > 0) / _wt * 100) if _wt > 0 else
+              ((sum(1 for m in mem if _dic[m][3] > 0) / len(mem) * 100) if mem else None))
         return ((sum(a * _dic[m][3] for a, m in w) / tw) if tw > 0 else None), up
     for r in rows:
         r["ret"], r["up"] = _tret(r["n"])
@@ -23280,8 +23565,8 @@ MC_SHOW = 6
 
 
 def _money_clusters(data):
-    if "MC" in _FOLLOW_CACHE:
-        return _FOLLOW_CACHE["MC"]
+    if "MCL" in _FOLLOW_CACHE:
+        return _FOLLOW_CACHE["MCL"]
     out = None
     try:
         D, _f = _board_days()
@@ -23352,7 +23637,7 @@ def _money_clusters(data):
     except Exception as e:
         print(f"   ⚠️ 돈 덩어리 계산 실패 — {type(e).__name__}: {e}")
         out = None
-    _FOLLOW_CACHE["MC"] = out
+    _FOLLOW_CACHE["MCL"] = out
     return out
 
 
@@ -23385,7 +23670,7 @@ def build_money_clusters(data):
     md = f'{int(str(M["d"])[4:6])}/{int(str(M["d"])[6:])}'
     lead_txt = (f'오늘 시장 돈의 <b>{c0["share"]:.0f}%</b>가 <b>{html.escape(_shn(c0["themes"][0]))}</b> 덩어리에 있었어요'
                 + (f' — 나머지 덩어리를 다 합쳐도 {others:.0f}%예요.' if c0["share"] and c0["share"] > others else '.'))
-    return (f'<div class="mc2"><div class="mc2-hd"><b>💰 오늘의 돈 덩어리</b><small>{md} · 테마 {M["n_themes"]}개 → {len(cl)}덩어리</small></div>'
+    return (f'<div class="mc2"><div class="mc2-hd"><b>💰 오늘 돈의 움직임</b><small>{md} · 테마 {M["n_themes"]}개 → {len(cl)}덩어리</small></div>'
             f'<p class="mc2-l">{lead_txt}</p>{rows}'
             + (f'<p class="mc2-r">그 밖에 · ' + " · ".join(f'{html.escape(_shn(c["themes"][0]))} {jo(c["money"])}' for c in rest) + '</p>' if rest else '')
             + '<details class="mc2-how"><summary>📖 어떻게 묶었나</summary><p>오늘 일봉 상위 30개 테마를, 거래대금 상위 종목이 겹치면 한 덩어리로 묶었어요'
@@ -23787,7 +24072,7 @@ def _week4_picks():
                 _t1 = _top[0]
                 _sk = [n for n in T[i][:T[i].index(_t1)]]
                 P["top"] = [(_t1, (f'5일 순위 <b>1위</b>' if not _sk else
-                                   f'그림자 빼고 1위 · 5일 순위 <b>{R[i][_t1]}위</b>')
+                                   f'5일 순위 <b>{R[i][_t1]}위</b> — 위의 {"·".join(_shn(z) for z in _sk)}{_jo2(_shn(_sk[-1]), "은", "는")} 한 종목 테마라 빼고 맨 앞')
                              + f' · 10위 안 {age(_t1)}일째')]
                 used.add(_t1)
             cool = [(n, R[i - 1][n], R[i].get(n)) for n in T[i - 1][:5]
@@ -25481,13 +25766,14 @@ def build_theme_radar(data):
         if not a or not b:
             return ""          # ⚠️ 없는 날은 «0%»가 아니라 침묵이다
         ch = (b / a - 1) * 100
-        if ch >= 15:
+        # 🔴 2026-10-31 HO «레이더 해석 오류 점검» — «돈은 비슷 −14%»처럼 말과 숫자가 어긋났다 → 문턱 ±10%, 사이는 «거의 그대로»
+        if ch >= 10:
             return (f'<span class="tm-mn up">💰 돈도 늘었어요 '
                     f'+{ch:.0f}%</span>')
-        if ch <= -15:
+        if ch <= -10:
             return (f'<span class="tm-mn dn">⚠️ 순위만 올랐어요 '
                     f'(돈 {ch:.0f}%)</span>')
-        return f'<span class="tm-mn fl">돈은 비슷 {ch:+.0f}%</span>'
+        return f'<span class="tm-mn fl">돈은 거의 그대로 {ch:+.0f}%</span>'
 
     for r in rows:
         c = r.get("_c") or _MC[r["st"]]      # 🔴 10/14 — 레이더 점과 같은 색(A안)
@@ -25594,7 +25880,7 @@ def build_theme_radar(data):
             _si = _story_of.get(r["n"])
             _sn = _stories[_si]["themes"] if _si is not None else [r["n"]]
             _tg = _theme_tags(r["n"], _det, _sn)
-            if _si is not None and len(_sn) == 1:
+            if _si is not None and len(_sn) == 1 and (_stories[_si].get("n") or 0) > 0:      # 🔴 10/31 «0종목 중 0%» 막기
                 _s1 = _stories[_si]          # 기사는 이제 테마명 밑(_what)에 — 여기서 또 내지 않는다
                 _tg = (f'<span class="tm-tg own">돈 몫 {_s1["share"]:.0f}% · {_s1["n"]}종목 중 {_s1["up"]:.0f}% 상승</span>'
                        + _tg)
@@ -30961,7 +31247,8 @@ def build_flow_v2(data, 해석):
     except Exception as e:
         print(f"   ⚠️ 코스피 거래대금 칸 실패 — {type(e).__name__}: {e}")
         _tv = ""
-    return (_tv + _fv_clock(이력) + _fv_who(data) + tl
+    # 🔴 2026-10-31 HO «코스피 거래대금이 맨 위에 — 위치가 어디가 적당할까» → «누가 사고 팔았나» 다음(수급 탭의 첫 질문은 «누가»)
+    return (_fv_clock(이력) + _fv_who(data) + _tv + tl
             + (_fv_diary(해석) or _fv_trust(해석, data, 이력)))
 
 
@@ -31578,6 +31865,7 @@ def build_html(data, report):
     except Exception:
         _NEXT = "내일"
     해석 = (report or {}).get("해석글", {})
+    해석 = _fix_cheonpi(해석, data)       # 🔴 2026-10-31 HO «칠천피라고 잘못» — 코스피 숫자와 안 맞는 «N천피»를 고친다
 
     # 🆕 2026-08-26 — inherit_report.py가 전날 해석글을 승계했으면 그 사실을 밝힌다.
     #  [WHY] 해석글이 없다고 발행을 멈추면 하루가 통째로 빈다. 숫자·표는 전부
@@ -33751,9 +34039,9 @@ section.tabsec [id]{{scroll-margin-top:58px}}
 .sh-n b{{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}}
 .sh-box{{background:#101720;border:1px solid #1e2937;border-radius:12px;
   padding:12px 13px 10px;margin:0 0 12px}}
-.sh-h{{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:14px;
+.sh-h{{display:flex;align-items:baseline;gap:6px;margin:0 0 8px;font-size:14px;white-space:nowrap;
   font-weight:800;color:#e2e7ee;list-style:none;cursor:default}}
-.sh-h span{{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784}}
+.sh-h span{{margin-left:auto;font-size:9.5px;font-weight:600;color:#6f7784;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}}
 .sh-c{{padding:10px 0;border-top:1px solid #172130}}
 .sh-c:first-of-type{{border-top:0;padding-top:2px}}
 .sh-tag{{display:inline-block;font-size:10.5px;font-weight:800;color:#8fd0e8;
@@ -33831,7 +34119,7 @@ section.tabsec [id]{{scroll-margin-top:58px}}
 .pk-bar i{{height:9px;border-radius:3px}}
 .pk-al{{margin:4px 0 0;display:flex;gap:10px;font-size:10px}}
 .pk-go{{margin:4px 0 0;font-size:11px;font-weight:700;color:#e0c060;cursor:pointer;text-align:right}}
-.sh-d summary{{cursor:pointer;font-size:11px;font-weight:800;color:#e0c060;list-style:none}}   /* 🔴 10/7 (2차) HO — 테두리 원래대로 */
+.sh-d summary{{cursor:pointer;font-size:11px;font-weight:800;color:#9cc3ff;list-style:none}}   /* 🔴 2026-10-31 HO «📍 줄과 같은 노랑» → 하늘색 */   /* 🔴 10/7 (2차) HO — 테두리 원래대로 */
 .sh-mb{{display:grid;grid-template-columns:minmax(72px,auto) 1fr auto;gap:8px;align-items:center;margin:6px 0;font-size:13px}}
 .sh-mbn{{font-weight:800;color:#e6ebf1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .sh-mbb{{height:10px;background:#141b26;border-radius:5px;overflow:hidden}}
